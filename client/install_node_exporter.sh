@@ -11,7 +11,7 @@ chmod +x run_cpu_temp.sh
 ENTRY="@reboot screen -dmS cpu_temp.sh /usr/local/bin/run_cpu_temp.sh"
 # Get the current crontab, append your entry to it, and write it back out
 (crontab -l; echo "$ENTRY" ) | crontab -
-# run the cpu temp updater
+# Run the CPU temp updater
 screen -dmS cpu_temp.sh sleep 60; /usr/local/bin/run_cpu_temp.sh
 
 # Variables
@@ -53,6 +53,6 @@ sudo systemctl enable node_exporter
 sudo systemctl start node_exporter
 
 # Print the status of Node Exporter
-#sudo systemctl status node_exporter
+# sudo systemctl status node_exporter
 
 

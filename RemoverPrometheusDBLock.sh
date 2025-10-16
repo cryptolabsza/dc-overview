@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Location of the lock file
-LOCKFILE=/var/lib/docker/volumes/prometheuse_prometheus-data/_data/data/lock #update to the location of the lock file
+LOCKFILE=/var/lib/docker/volumes/prometheus_prometheus-data/_data/data/lock #update to the location of the lock file
 
 # If the lock file exists, remove it
 if [ -f "$LOCKFILE" ]; then
