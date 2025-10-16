@@ -1,21 +1,21 @@
 # DCMonitoring
-Welcome to DCMonitoring, your comprehensive solution for operational development and system performance tracking. This robust Prometheus Grafana Nvidia GPU monitoring system is designed for clients seeking advanced insights into their operational infrastructures.
+Welcome to DCMonitoring, your comprehensive solution for operational development and system performance tracking. This robust Prometheus, Grafana, NVIDIA GPU monitoring system is designed for clients seeking advanced insights into their operational infrastructures.
 
 # Key Features
-* GPU RAMS Temps panel.
-* GPU HOTSPOT Temps panel.
+* GPU VRAM Temps panel.
+* GPU Hotspot Temps panel.
 * Thermal Throttle.
 * Machine GPU Occupancy
-* Now, support systems with NVLINK are installed.
-* Reports PCIE AER errors in logs per device. 
-* Detailed GPU and systems usage historical charts.
+* Now, supports systems with NVLink installed.
+* Reports PCIe AER errors in logs per device. 
+* Detailed GPU and system usage historical charts.
 * Telegram Alerts for events such as low disk space or over temperature. 
 
 What is DCMonitoring?
 DCMonitoring is a state-of-the-art tool that integrates seamlessly with platforms like Vast, RunPod, and others are planned, offering continuous support and deployment assistance. As a testament to our commitment to the community and quality, DCMonitoring is entirely free for use, modification, and distribution. It is provided 'as is' with no guarantee, serving not only as a reliable monitoring tool but also as an indicator of our expertise and dedication to operational excellence.
 
 Features:
-* Comprehensive Monitoring: Track your system's health, performance, and reliability with detailed insights into GPU matrices, system statistics, container performance, and more.
+* Comprehensive Monitoring: Track your system's health, performance, and reliability with detailed insights into GPU metrics, system statistics, container performance, and more.
 * Customizable and Extendable: Adapt and extend the functionality according to your needs and preferences. The tool's open nature allows for modifications and enhancements.
 * Community Supported: Connect with me on Discord (Etherion#0700) for support and updates.
 * Donation Supported: While the tool is entirely free, we welcome donations to support ongoing development and improvement. Donations can be made via various cryptocurrencies or PayPal.
@@ -47,7 +47,7 @@ Overview Dashboard
 
 Node exporter for system monitoring
 ![image](https://github.com/jjziets/DCMontoring/assets/19214485/95bcbabd-09da-4174-a985-3635e09aba41)
-Nvidia-dcgm-exporter for GPU matrix 
+NVIDIA DCGM exporter for GPU metrics 
 ![image](https://github.com/jjziets/DCMontoring/assets/19214485/fd415556-2b51-4d98-9795-bff4ab890432)
 
 Cadvisor exporter for container monitoring
@@ -64,7 +64,7 @@ Alerting with telegram alarms
 
 # Client install
 
-for vastai following the following steps
+For VastAI follow the steps below
 ```
 sudo su
 apt remove docker-compose
@@ -85,9 +85,9 @@ sed "s/__HOST_HOSTNAME__/$(hostname)/g" docker-compose.yml | docker-compose -f -
 If you prefer to run these as services so that it can not interfere with docker then use below. For example: Run the following commands as root 
 
 
-**Vast host don't need to do this step as all the monitoring tools will be in docker containers. **
+**Vast hosts don't need to do this step as all the monitoring tools will be in Docker containers.**
 
-exporter to get the GPU staff on port 9500. 
+exporter to get the GPU stats on port 9500. 
 ```
 
 bash -c "\
@@ -137,8 +137,8 @@ wget https://raw.githubusercontent.com/jjziets/DCMontoring/main/server/docker-co
 ```
 
 also, for vast make a prometheus.yml that looks like this https://github.com/jjziets/DCMontoring/blob/main/server/prometheus.yml 
-and for Runpod use https://github.com/jjziets/DCMontoring/blob/main/server/prometheus.yml.runpod as they is already running node-exporter on port 9097 and caviser on 9095  
-change the job(Machine) names and IP's for the machine you want to scrape. The server that runs grafana/prometheuse needs to be able to access the host ips. I use tailscale and run a VPS but if its on your local host you can use the local IP's
+and for Runpod use https://github.com/jjziets/DCMontoring/blob/main/server/prometheus.yml.runpod as they are already running node-exporter on port 9097 and cAdvisor on 9095  
+change the job(Machine) names and IP's for the machine you want to scrape. The server that runs Grafana/Prometheus needs to be able to access the host IPs. I use Tailscale and run a VPS but if it's on your local host you can use the local IPs
 
 you should edit the docker-compose.yml to add your vast api key under vastai-exporter: look for the section and replace the vastkey with the key for your account
 ```
@@ -162,11 +162,11 @@ Home
 Administration
 Data sources
 Prometheus
-. I found using the local ip works for example http://100.126.9.42:9090 not http://localhost:9090 You can us the local ip address also. 
+. I found using the local IP works for example http://100.126.9.42:9090 not http://localhost:9090 You can use the local IP address also. 
 ![image](https://github.com/jjziets/DCMontoring/assets/19214485/3b57733c-c8ca-47fb-8491-2f5afb0e4df8)
 
 # Dashboards
-Here are a few dashboards that I have made that work with the exporters. You can use them and modify them. To add one, go to new and import, then paste the Jason file content below. Or download them and have them updated.
+Here are a few dashboards that I have made that work with the exporters. You can use them and modify them. To add one, go to new and import, then paste the JSON file content below. Or download them and have them updated.
 
 ![image](https://github.com/jjziets/DCMontoring/assets/19214485/38538d77-4424-4d04-8c02-fee37211c484)
 
@@ -179,20 +179,20 @@ Node Exporter Full-1684242153326.json https://github.com/jjziets/DCMontoring/blo
 
 NVIDIA DCGM Exporter-1684242180498.json https://github.com/jjziets/DCMontoring/blob/main/NVIDIA%20DCGM%20Exporter-1684242180498.json
 
-Vast-dasboard https://raw.githubusercontent.com/jjziets/DCMontoring/main/Vast%20Dashboard-1692692563948.json
+Vast-dashboard https://raw.githubusercontent.com/jjziets/DCMontoring/main/Vast%20Dashboard-1692692563948.json
 
 
 
 # DB Locked issues
-if your Prometheuse db gets locked you can try to remove the lock on reboot with this script
+if your Prometheus DB gets locked you can try to remove the lock on reboot with this script
 https://github.com/jjziets/DCMontoring/blob/main/RemoverPrometheusDBLock.sh
 
 update the crontab to run the script on reboot. change the user 
-@reboot /home/user/prometheuse/RemoverPrometheusDBLock.sh 
+@reboot /home/user/prometheus/RemoverPrometheusDBLock.sh 
 
 # Telegram alerts 
-you can set alerts for grafana to send to telegram 
-first setup a contact point telegram
+you can set alerts for Grafana to send to Telegram 
+first set up a Telegram contact point
 ![image](https://github.com/jjziets/DCMontoring/assets/19214485/1f70ed1e-8e1d-4079-a173-2722e2abff5a)
 
 Contact point 
@@ -243,7 +243,7 @@ The response will look like this (some details are removed for simplicity):
     ]
 }
 ```
-after this set the templet telegram.message using this https://github.com/jjziets/DCMontoring/blob/main/telegram.message
+after this set the template telegram.message using this https://github.com/jjziets/DCMontoring/blob/main/telegram.message
 
 ## creating a rule
 There are two ways to do this the easy way is to go to the dashboard and panel and set the rule on there
@@ -253,23 +253,23 @@ There are two ways to do this the easy way is to go to the dashboard and panel a
 or under the alert rule. 
 ![image](https://github.com/jjziets/DCMontoring/assets/19214485/81f74ca2-ef67-48f5-9deb-0db0c1c6c701)
 
-in bot cases, you will start at the create rule page
+in both cases, you will start at the create rule page
 ![image](https://github.com/jjziets/DCMontoring/assets/19214485/cd4747d7-8cde-4932-9f4e-d015cf0213cf)
 ![image](https://github.com/jjziets/DCMontoring/assets/19214485/57302e7c-a244-4cbd-8cc2-7f78ba72dfcb)
 
-The above is to fire when their GPU temps are above B threshold > 80c
+The above is to fire when their GPU temps are above B threshold > 80C
 
 For RootFS usage
 ```
-2) A Matric quary: round((100 - ((node_filesystem_avail_bytes{mountpoint="/",fstype!="rootfs"} * 100) / node_filesystem_size_bytes{mountpoint="/",fstype!="rootfs"})))
-C: threashold B  above 90
-4) Summery {{ $labels.job }} - {{ $values.B }} %
+2) A Metric query: round((100 - ((node_filesystem_avail_bytes{mountpoint="/",fstype!="rootfs"} * 100) / node_filesystem_size_bytes{mountpoint="/",fstype!="rootfs"})))
+C: threshold B  above 90
+4) Summary {{ $labels.job }} - {{ $values.B }} %
 ```
 For High CPU Temperature
 ```
-2 A Matrix qyary node_cpu_temperature{}
-C B above  threashold B  above 90
-4) Summery: - {{ $labels.job }} CPU {{$labels.package}} {{ $values.B }}C
+2 A Matrix query node_cpu_temperature{}
+C B above  threshold B  above 90
+4) Summary: - {{ $labels.job }} CPU {{$labels.package}} {{ $values.B }}C
 ```
 
 ## Update Procedure

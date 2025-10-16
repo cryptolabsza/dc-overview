@@ -5940,7 +5940,7 @@
         }
       ],
       "timeFrom": "30s",
-      "title": "Machine GPU AER_ RRORS",
+      "title": "Machine GPU AER Errors",
       "transformations": [
         {
           "id": "joinByField",
@@ -6861,7 +6861,7 @@
   "refresh": "5s",
   "schemaVersion": 39,
   "tags": [
-    "Prometheuse"
+    "Prometheus"
   ],
   "templating": {
     "list": [

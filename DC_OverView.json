@@ -2455,7 +2455,7 @@
         }
       ],
       "timeFrom": "30s",
-      "title": "Machine GPU AER_ RRORS",
+      "title": "Machine GPU AER Errors",
       "transformations": [
         {
           "id": "joinByField",
@@ -3533,8 +3533,8 @@
   "refresh": "",
   "schemaVersion": 39,
   "tags": [
-    "Prometheuse",
-    "Nvidia",
+    "Prometheus",
+    "NVIDIA",
     "Linux"
   ],
   "templating": {
@@ -3546,7 +3546,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "DC OverView",
+  "title": "DC Overview",
   "uid": "b7573857-fb4d-4389-8159-edbad8b65e5b",
   "version": 28,
   "weekStart": ""
