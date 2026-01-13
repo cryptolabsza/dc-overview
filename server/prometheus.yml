@@ -1,75 +1,43 @@
-# DC Overview - Prometheus Configuration
-# 
-# Edit this file to add your GPU servers.
-# Each server should have exporters running on these ports:
-#   - 9100: node_exporter (CPU, RAM, disk, network)
-#   - 9400: dcgm-exporter (GPU metrics from NVIDIA DCGM)
-#   - 9200: dc-exporter (VRAM temps, hotspot temps, fan speed)
-#   - 8080: cAdvisor (container metrics) - optional
-#
-# After editing, restart Prometheus:
-#   docker compose restart prometheus
-
 global:
   scrape_interval: 15s
-  evaluation_interval: 15s
 
 scrape_configs:
-  # ===========================================
-  # MONITORING SERVER (where Prometheus runs)
-  # ===========================================
-  - job_name: 'monitoring-server'
+  # Master/Monitoring server
+  - job_name: 'master'
     static_configs:
-      - targets: 
-          - '127.0.0.1:9090'
-          - '127.0.0.1:9100'
-          - '127.0.0.1:8080'
+      - targets: ['<MASTER_IP>:9090', '<MASTER_IP>:9100', '<MASTER_IP>:8080']
         labels:
-          instance: 'monitoring-server'
+          instance: 'master'
 
-  # ===========================================
-  # GPU SERVERS - Edit these with your IPs
-  # ===========================================
-  
-  # Example GPU Server 1
-  - job_name: 'gpu-server-01'
+  # IPMI Monitor (SEL events, BMC status)
+  - job_name: 'ipmi-monitor'
+    scrape_interval: 60s
     static_configs:
-      - targets: 
-          - '192.168.1.101:9100'
-          - '192.168.1.101:9400'
-          - '192.168.1.101:9200'
+      - targets: ['<MASTER_IP>:5000']
         labels:
-          instance: 'gpu-01'
+          instance: 'ipmi-monitor'
 
-  # Example GPU Server 2
-  - job_name: 'gpu-server-02'
+  # Vast.ai exporter (optional - if using Vast.ai)
+  - job_name: 'vastai'
+    scrape_interval: 60s
     static_configs:
-      - targets: 
-          - '192.168.1.102:9100'
-          - '192.168.1.102:9400'
-          - '192.168.1.102:9200'
+      - targets: ['vastai-exporter:8622']
         labels:
-          instance: 'gpu-02'
+          instance: 'vastai'
 
-  # Example GPU Server 3
-  - job_name: 'gpu-server-03'
+  # GPU Worker 1
+  # Ports: 9100 (node), 9400 (dcgm), 9500 (dc-exporter)
+  - job_name: 'gpu-worker-01'
     static_configs:
-      - targets: 
-          - '192.168.1.103:9100'
-          - '192.168.1.103:9400'
-          - '192.168.1.103:9200'
+      - targets: ['<WORKER1_IP>:9100', '<WORKER1_IP>:9400', '<WORKER1_IP>:9500']
         labels:
-          instance: 'gpu-03'
+          instance: 'gpu-worker-01'
 
-  # ===========================================
-  # ADD MORE SERVERS BELOW
-  # ===========================================
-  # Copy template:
-  # - job_name: 'gpu-server-XX'
-  #   static_configs:
-  #     - targets: 
-  #         - '192.168.1.XXX:9100'
-  #         - '192.168.1.XXX:9400'
-  #         - '192.168.1.XXX:9200'
-  #       labels:
-  #         instance: 'gpu-XX'
+  # GPU Worker 2
+  - job_name: 'gpu-worker-02'
+    static_configs:
+      - targets: ['<WORKER2_IP>:9100', '<WORKER2_IP>:9400', '<WORKER2_IP>:9500']
+        labels:
+          instance: 'gpu-worker-02'
+
+  # Add more workers as needed...

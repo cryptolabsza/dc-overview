@@ -1,118 +1,357 @@
-# DC Overview
+# CryptoLabs DC Monitoring Suite
 
-[![Docker Build](https://github.com/cryptolabsza/dc-overview/actions/workflows/docker-build.yml/badge.svg)](https://github.com/cryptolabsza/dc-overview/actions/workflows/docker-build.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+Complete monitoring solution for GPU datacenters with AI-powered insights.
 
-**Comprehensive Prometheus & Grafana monitoring for GPU datacenters.** Pre-configured dashboards for NVIDIA GPUs, system metrics, and container monitoring.
+## Product Architecture
 
-Part of the [CryptoLabs DC Monitoring Suite](https://cryptolabs.co.za).
-
-![Dashboard Overview](https://github.com/jjziets/DCMontoring/assets/19214485/114c2d00-cdce-4eac-9f7f-1777b9856377)
-
-## ✨ Features
-
-- 🎮 **GPU VRAM & Hotspot Temps** - Metrics not available in standard DCGM
-- 📊 **Thermal Throttle Detection** - Know when GPUs are throttling
-- 🖥️ **Machine GPU Occupancy** - Track utilization across your fleet
-- 🔗 **NVLink Support** - Monitor NVLink-connected systems
-- ⚠️ **PCIe AER Errors** - Track hardware errors per device
-- 📈 **Historical Charts** - Detailed GPU and system usage over time
-- 📱 **Telegram Alerts** - Get notified of issues instantly
-
-## 📸 Screenshots
-
-| Vast Dashboard | Overview | Node Exporter |
-|----------------|----------|---------------|
-| ![Vast](https://github.com/jjziets/DCMontoring/assets/19214485/3e200951-8ecc-404e-8267-babfbb3856eb) | ![Overview](https://github.com/jjziets/DCMontoring/assets/19214485/114c2d00-cdce-4eac-9f7f-1777b9856377) | ![Node](https://github.com/jjziets/DCMontoring/assets/19214485/95bcbabd-09da-4174-a985-3635e09aba41) |
-
-| NVIDIA DCGM | cAdvisor | Alerts |
-|-------------|----------|--------|
-| ![DCGM](https://github.com/jjziets/DCMontoring/assets/19214485/fd415556-2b51-4d98-9795-bff4ab890432) | ![cAdvisor](https://github.com/jjziets/DCMontoring/assets/19214485/676b465c-23bf-4b56-930d-8abfc86da7ce) | ![Alerts](https://github.com/jjziets/DCMontoring/assets/19214485/99633c52-7b15-44be-b601-b52539a2fe6e) |
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              PRODUCT OVERVIEW                                    │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  IN-DC STACK (runs in customer datacenter)                                      │
+│  ══════════════════════════════════════════                                     │
+│                                                                                  │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                 │
+│  │   dc-overview   │  │  ipmi-monitor   │  │   dc-exporter   │                 │
+│  │   (Grafana +    │  │  (IPMI/Redfish  │  │  (VRAM temps    │                 │
+│  │   Prometheus)   │  │   dashboard)    │  │   exporter)     │                 │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘                 │
+│         │                     │                     │                           │
+│         └─────────────────────┴─────────────────────┘                           │
+│                               │                                                  │
+│                    Deployed ON monitoring server                                │
+│                    inside the datacenter                                        │
+│                                                                                  │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  EXTERNAL MONITORING (runs OUTSIDE datacenter)                                  │
+│  ═════════════════════════════════════════════                                  │
+│                                                                                  │
+│  ┌─────────────────────────────────────────────────────────────────────────┐   │
+│  │                          dc-watchdog                                     │   │
+│  │                                                                          │   │
+│  │   ┌──────────────────┐           ┌──────────────────────────────────┐  │   │
+│  │   │  OFFSITE SERVER  │◄──────────│  AGENTS (on DC servers)          │  │   │
+│  │   │  (VPS/Cloud VM)  │  "phone   │  • Ping every 30s                │  │   │
+│  │   │                  │   home"   │  • MTR traceroute data           │  │   │
+│  │   │  • Flask server  │           │  • Lightweight bash script       │  │   │
+│  │   │  • Telegram bot  │           │                                  │  │   │
+│  │   │  • Admin UI      │           │  Installed on: GPU servers,      │  │   │
+│  │   │  • RCA analysis  │           │  routers, BMCs, anything with    │  │   │
+│  │   │                  │           │  network access                  │  │   │
+│  │   └──────────────────┘           └──────────────────────────────────┘  │   │
+│  │                                                                          │   │
+│  │   Purpose: Detect when DC goes offline from external perspective        │   │
+│  │   Value: Know BEFORE customers complain, with network hop analysis      │   │
+│  └─────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                  │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  AI SERVICE (CryptoLabs Cloud)                                                  │
+│  ═════════════════════════════                                                  │
+│                                                                                  │
+│  ┌─────────────────┐                                                            │
+│  │ ipmi-monitor-ai │  ← Receives telemetry from ipmi-monitor                   │
+│  │                 │  ← Provides AI summaries, predictions, RCA                │
+│  └─────────────────┘  ← Requires paid subscription                             │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
-### Server Installation (Monitoring Server)
+### Option 1: Self-Hosted (In-DC Monitoring)
+
+Deploy the full monitoring stack on a server inside your datacenter.
 
 ```bash
-# Install Docker (if not installed)
-curl -fsSL https://get.docker.com | sh
-
 # Clone and deploy
 git clone https://github.com/cryptolabsza/dc-overview.git
-cd dc-overview/server
-
-# Edit prometheus.yml with your server IPs
-nano prometheus.yml
-
-# Start the stack
+cd dc-overview
+cp .env.example .env
+# Edit .env with your API keys and passwords
+nano .env
 docker compose up -d
 ```
 
-### Client Installation (GPU Servers)
+### Environment Variables (.env)
 
-**Option 1: Docker Compose (Recommended for Vast.ai)**
+Create a `.env` file (gitignored) with your secrets:
 
 ```bash
-sudo su
-apt-get update && apt-get install -y gettext-base
+# .env.example - Copy to .env and fill in your values
 
-# Download client compose file
-wget -O docker-compose.yml https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/client/docker-compose.yml-vast
+# Grafana
+GRAFANA_ADMIN_PASS=your_secure_password
 
-# Start exporters
-docker compose pull
-sed "s/__HOST_HOSTNAME__/$(hostname)/g" docker-compose.yml | docker compose -f - up -d
+# Vast.ai (optional - for vastai-exporter)
+VAST_API_KEY=your_vast_api_key
+
+# dc-watchdog (optional - for uptime monitoring)
+TELEGRAM_TOKEN=your_telegram_bot_token
+TELEGRAM_CHAT_ID=your_chat_id
+WATCHDOG_API_KEY=your_secret_api_key
+ADMIN_PASS=your_admin_password
+
+# IPMI Monitor (optional)
+IPMI_USER=admin
+IPMI_PASS=your_ipmi_password
 ```
 
-**Option 2: Systemd Services**
+> ⚠️ **IMPORTANT:** Never commit `.env` to git! It contains secrets.
 
+### Docker Compose (Full Stack)
+
+```yaml
+# docker-compose.yml
+services:
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASS:-admin}
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-piechart-panel
+    restart: always
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    # Internal only - NOT exposed publicly
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+    restart: always
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    volumes:
+      - "/:/host:ro,rslave"
+    command: ["--path.rootfs=/host"]
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.1
+    container_name: cadvisor
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - "/:/rootfs:ro"
+      - "/var/run:/var/run:ro"
+      - "/sys:/sys:ro"
+      - "/var/lib/docker/:/var/lib/docker:ro"
+      - "/dev/disk/:/dev/disk:ro"
+    privileged: true
+    devices:
+      - "/dev/kmsg:/dev/kmsg"
+
+  vastai-exporter:
+    image: jjziets/vastai-exporter:latest
+    container_name: vastai-exporter
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8622:8622"
+    command: ["-api-key", "${VAST_API_KEY}"]
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=86400
+    command: --label-enable
+
+volumes:
+  grafana-data:
+  prometheus-data:
+```
+
+### Grafana Datasource Configuration
+
+Grafana is pre-configured to connect to Prometheus via **Docker network DNS**:
+
+```
+Prometheus URL: http://prometheus:9090
+```
+
+> ⚠️ **Why `http://prometheus:9090` instead of `localhost`?**  
+> Grafana runs inside a Docker container. Using `localhost:9090` would look for Prometheus inside Grafana's own container.  
+> The Docker network DNS name `prometheus` resolves to the Prometheus container.
+
+### Grafana Datasource Provisioning
+
+Create `grafana/datasources/prometheus.yml`:
+
+```yaml
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+```
+
+### Prometheus Configuration
+
+Create `prometheus.yml` to scrape all exporters:
+
+```yaml
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  # Master server
+  - job_name: 'master'
+    static_configs:
+      - targets: ['<MASTER_IP>:9090', '<MASTER_IP>:9100', '<MASTER_IP>:8080']
+        labels:
+          instance: 'master'
+
+  # IPMI Monitor (SEL events, BMC status)
+  - job_name: 'ipmi-monitor'
+    scrape_interval: 60s
+    static_configs:
+      - targets: ['<MASTER_IP>:5000']
+        labels:
+          instance: 'ipmi-monitor'
+
+  # Vast.ai exporter (if using Vast.ai)
+  - job_name: 'vastai'
+    scrape_interval: 60s
+    static_configs:
+      - targets: ['vastai-exporter:8622']
+        labels:
+          instance: 'vastai'
+
+  # GPU Worker 1
+  - job_name: 'gpu-worker-01'
+    static_configs:
+      - targets: ['<WORKER1_IP>:9100', '<WORKER1_IP>:9400', '<WORKER1_IP>:9500']
+        labels:
+          instance: 'gpu-worker-01'
+
+  # GPU Worker 2
+  - job_name: 'gpu-worker-02'
+    static_configs:
+      - targets: ['<WORKER2_IP>:9100', '<WORKER2_IP>:9400', '<WORKER2_IP>:9500']
+        labels:
+          instance: 'gpu-worker-02'
+```
+
+**Exporter ports:**
+- `9090` - Prometheus self-monitoring
+- `9100` - node_exporter (CPU, RAM, disk)
+- `8080` - cAdvisor (containers)
+- `5000` - ipmi-monitor (IPMI/SEL)
+- `9400` - dcgm-exporter (NVIDIA GPU)
+- `9500` - dc-exporter (VRAM temps)
+- `8622` - vastai-exporter (Vast.ai)
+
+---
+
+### Option 2: External Uptime Monitoring (dc-watchdog)
+
+Deploy the server on a VPS outside your DC, agents on your DC servers.
+
+**On your VPS (offsite):**
 ```bash
-# Install VRAM temperature exporter (dc-exporter)
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/cryptolabsza/dc-exporter/main/install.sh)"
+git clone https://github.com/cryptolabsza/dc-watchdog.git
+cd dc-watchdog
+cp .env.example .env
+# Edit .env with your Telegram bot token and secrets
+nano .env
+docker compose up -d
+```
 
-# Install Node Exporter
-wget https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/client/install_node_exporter.sh
-chmod +x install_node_exporter.sh && ./install_node_exporter.sh
+**dc-watchdog .env:**
+```bash
+TELEGRAM_TOKEN=your_telegram_bot_token
+CHAT_ID=your_chat_id
+API_KEY=your_secret_api_key
+ADMIN_PASS=your_admin_password
+```
 
-# Install NVIDIA DCGM Exporter
-wget https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/client/install_NvidiaDCGM_Exporter.sh
-chmod +x install_NvidiaDCGM_Exporter.sh && ./install_NvidiaDCGM_Exporter.sh
+**On each DC server (agents):**
+```bash
+curl -sSL https://raw.githubusercontent.com/cryptolabsza/dc-watchdog/main/install-agent.sh | bash
 ```
 
 ---
 
-## 🌐 Nginx Reverse Proxy with SSL
+## Nginx Reverse Proxy with SSL
 
-For production deployments, use Nginx with Let's Encrypt SSL.
+For production, use Nginx as a reverse proxy with Let's Encrypt SSL certificates.
 
 ### DNS Configuration
 
-Create A records pointing to your monitoring server:
+Create A records pointing to your servers:
 
-| Subdomain | Service | Notes |
-|-----------|---------|-------|
-| `grafana.yourdomain.com` | Grafana dashboards | Public OK (has built-in auth) |
+| Subdomain | Points To | Service | Notes |
+|-----------|-----------|---------|-------|
+| `grafana.yourdomain.com` | `<monitoring-server-ip>` | Grafana dashboards | Public OK (has auth) |
+| `ipmi.yourdomain.com` | `<monitoring-server-ip>` | IPMI Monitor | Public OK (has auth) |
+| `watchdog.yourdomain.com` | `<offsite-vps-ip>` | dc-watchdog server | Public (agents call home) |
 
-> ⚠️ **IMPORTANT: Prometheus should NOT be exposed publicly!**
-> 
-> Prometheus has no authentication by default and exposes sensitive infrastructure data.
+> ⚠️ **IMPORTANT:** Prometheus should **NOT** be exposed publicly!
+> It has no authentication by default and exposes sensitive infrastructure data.
 > Access Prometheus only via:
 > - `localhost:9090` on the monitoring server
 > - Internal network (e.g., `192.168.1.100:9090`)
-> - SSH tunnel: `ssh -L 9090:localhost:9090 user@server`
 > - VPN (Tailscale, WireGuard)
 
-### Nginx Setup
+**Example DNS entries:**
+```
+# For in-DC monitoring server (public IP or behind NAT with port forwarding)
+grafana.cryptolabs.co.za     A    203.0.113.10
+ipmi.cryptolabs.co.za        A    203.0.113.10
+
+# For external watchdog server (MUST be offsite/different location)
+watchdog.cryptolabs.co.za    A    198.51.100.20
+
+# Prometheus - NO PUBLIC DNS! Access internally only:
+# http://192.168.1.100:9090 (internal network)
+# http://localhost:9090 (on monitoring server)
+```
+
+### Nginx Installation
 
 ```bash
 # Install Nginx and Certbot
 apt update && apt install -y nginx certbot python3-certbot-nginx
 
-# Create Nginx config (Grafana only - Prometheus stays internal!)
-cat > /etc/nginx/sites-available/dc-monitoring << 'EOF'
-# Grafana - OK to expose (has authentication)
+# Create Nginx config directory
+mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+```
+
+### Nginx Configuration
+
+Create `/etc/nginx/sites-available/dc-monitoring`:
+
+```nginx
+# Grafana
 server {
     listen 80;
     server_name grafana.yourdomain.com;
@@ -124,145 +363,300 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         
-        # WebSocket support
+        # WebSocket support for Grafana Live
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
     }
 }
 
-# NOTE: Prometheus (port 9090) is NOT exposed publicly!
-# Access via internal network or SSH tunnel only.
-EOF
+# IPMI Monitor
+server {
+    listen 80;
+    server_name ipmi.yourdomain.com;
 
-# Enable site
-ln -s /etc/nginx/sites-available/dc-monitoring /etc/nginx/sites-enabled/
-nginx -t && systemctl reload nginx
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
 
-# Get SSL certificate for Grafana only
-certbot --nginx -d grafana.yourdomain.com
+# NOTE: Prometheus is NOT exposed publicly!
+# Access via internal network: http://192.168.1.100:9090
+# Or via SSH tunnel: ssh -L 9090:localhost:9090 user@monitoring-server
 ```
 
----
+For the **dc-watchdog server** (on offsite VPS), create `/etc/nginx/sites-available/dc-watchdog`:
 
-## 📊 Dashboards
+```nginx
+# dc-watchdog
+server {
+    listen 80;
+    server_name watchdog.yourdomain.com;
 
-Import these dashboards into Grafana:
-
-| Dashboard | Description |
-|-----------|-------------|
-| [DC Overview](DC_OverView.json) | Fleet-wide GPU and system overview |
-| [Node Exporter Full](Node%20Exporter%20Full-1684242153326.json) | Detailed system metrics |
-| [NVIDIA DCGM](NVIDIA%20DCGM%20Exporter-1684242180498.json) | GPU metrics from DCGM |
-| [Vast Dashboard](Vast%20Dashboard-1692692563948.json) | Vast.ai specific metrics |
-| [cAdvisor](Cadvisor%20exporter-1684242167975.json) | Container metrics |
-
-**To import:** Grafana → Dashboards → Import → Paste JSON
-
----
-
-## ⚙️ Prometheus Configuration
-
-Edit `prometheus.yml` with your server IPs:
-
-```yaml
-global:
-  scrape_interval: 15s
-
-scrape_configs:
-  - job_name: 'gpu-server-01'
-    static_configs:
-      - targets: ['192.168.1.101:9100', '192.168.1.101:9400', '192.168.1.101:9200']
-        labels:
-          instance: 'gpu-01'
-
-  - job_name: 'gpu-server-02'
-    static_configs:
-      - targets: ['192.168.1.102:9100', '192.168.1.102:9400', '192.168.1.102:9200']
-        labels:
-          instance: 'gpu-02'
+    location / {
+        proxy_pass http://127.0.0.1:5001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
 ```
 
-### Exporter Ports
-
-| Port | Exporter | Metrics |
-|------|----------|---------|
-| 9100 | node_exporter | CPU, RAM, disk, network |
-| 9400 | dcgm-exporter | GPU core temp, power, memory |
-| 9200 | dc-exporter | VRAM temp, hotspot temp, fan speed |
-| 8080 | cAdvisor | Container metrics |
-
----
-
-## 📱 Telegram Alerts
-
-### Setup
-
-1. Create a bot via [@BotFather](https://t.me/BotFather)
-2. Get your Chat ID from `https://api.telegram.org/bot<TOKEN>/getUpdates`
-3. Configure in Grafana: **Alerting → Contact Points → Add Telegram**
-
-### Example Alert Rules
-
-**GPU Temperature:**
-```
-A: DCGM_FI_DEV_GPU_TEMP
-C: threshold > 80
-Summary: {{ $labels.job }} GPU {{ $labels.gpu }} at {{ $values.B }}°C
-```
-
-**Disk Space:**
-```
-A: round((100 - ((node_filesystem_avail_bytes{mountpoint="/"} * 100) / node_filesystem_size_bytes{mountpoint="/"})))
-C: threshold > 90
-Summary: {{ $labels.job }} disk at {{ $values.B }}%
-```
-
----
-
-## 🔗 Related Projects
-
-| Project | Description |
-|---------|-------------|
-| [ipmi-monitor](https://github.com/cryptolabsza/ipmi-monitor) | IPMI/Redfish SEL monitoring |
-| [dc-exporter](https://github.com/cryptolabsza/dc-exporter) | VRAM temperature exporter |
-| [dc-watchdog](https://github.com/cryptolabsza/dc-watchdog) | External uptime monitoring |
-
----
-
-## 🆘 Troubleshooting
-
-### Prometheus DB Locked
+### Enable Sites and SSL
 
 ```bash
-# Run on reboot
-wget https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/RemoverPrometheusDBLock.sh
-chmod +x RemoverPrometheusDBLock.sh
-# Add to crontab: @reboot /path/to/RemoverPrometheusDBLock.sh
+# Enable the sites
+ln -s /etc/nginx/sites-available/dc-monitoring /etc/nginx/sites-enabled/
+ln -s /etc/nginx/sites-available/dc-watchdog /etc/nginx/sites-enabled/
+
+# Test configuration
+nginx -t
+
+# Reload Nginx
+systemctl reload nginx
+
+# Get SSL certificates for public-facing services only
+certbot --nginx -d grafana.yourdomain.com
+certbot --nginx -d ipmi.yourdomain.com
+# Note: watchdog.yourdomain.com runs on a DIFFERENT server (offsite VPS)
+
+# Auto-renewal (already set up by certbot, but verify)
+certbot renew --dry-run
 ```
 
-### Grafana Can't Connect to Prometheus
+### All-in-One Docker Compose with Traefik (Auto-SSL)
 
-Use the container's internal IP or `http://prometheus:9090` if on same Docker network.
+For a complete stack with automatic SSL certificates:
+
+```yaml
+# docker-compose.yml with Traefik
+services:
+  traefik:
+    image: traefik:v2.10
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/acme.json:/acme.json
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/acme.json"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASS}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`${GRAFANA_DOMAIN}`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+
+  ipmi-monitor:
+    image: ghcr.io/cryptolabsza/ipmi-monitor:latest
+    container_name: ipmi-monitor
+    restart: unless-stopped
+    volumes:
+      - ipmi-data:/app/data
+    environment:
+      - IPMI_USER=${IPMI_USER}
+      - IPMI_PASS=${IPMI_PASS}
+      - ADMIN_PASS=${ADMIN_PASS}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ipmi.rule=Host(`${IPMI_DOMAIN}`)"
+      - "traefik.http.routers.ipmi.entrypoints=websecure"
+      - "traefik.http.routers.ipmi.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ipmi.loadbalancer.server.port=5000"
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    # NOT exposed via Traefik - internal only!
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+
+  vastai-exporter:
+    image: jjziets/vastai-exporter:latest
+    container_name: vastai-exporter
+    restart: unless-stopped
+    command: ["-api-key", "${VAST_API_KEY}"]
+    # Internal only - Prometheus scrapes via Docker network
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    volumes:
+      - "/:/host:ro,rslave"
+    command: ["--path.rootfs=/host"]
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.1
+    container_name: cadvisor
+    restart: unless-stopped
+    volumes:
+      - "/:/rootfs:ro"
+      - "/var/run:/var/run:ro"
+      - "/sys:/sys:ro"
+      - "/var/lib/docker/:/var/lib/docker:ro"
+    privileged: true
+
+volumes:
+  grafana-data:
+  prometheus-data:
+  ipmi-data:
+```
+
+**.env for Traefik setup:**
+```bash
+# Domains
+GRAFANA_DOMAIN=grafana.yourdomain.com
+IPMI_DOMAIN=ipmi.yourdomain.com
+ACME_EMAIL=admin@yourdomain.com
+
+# Credentials (NEVER commit these!)
+GRAFANA_ADMIN_PASS=your_secure_password
+IPMI_USER=admin
+IPMI_PASS=your_ipmi_password
+ADMIN_PASS=your_admin_password
+VAST_API_KEY=your_vast_api_key
+```
+
+> ⚠️ **Security Note:** All secrets are loaded from `.env` which must be gitignored.
+> Prometheus is NOT exposed publicly - access via internal network or SSH tunnel only.
 
 ---
 
-## 📜 License
+## Port Reference
 
-MIT License - see [LICENSE](LICENSE) for details.
+### In-DC Monitoring Server
+
+| Port | Service | Access | Notes |
+|------|---------|--------|-------|
+| 80/443 | Nginx/Traefik | Public | SSL termination |
+| 3000 | Grafana | Internal | Proxied via Nginx |
+| 5000 | IPMI Monitor | Internal | Proxied via Nginx |
+| 9090 | Prometheus | **Internal only** | ⚠️ Never expose publicly! |
+| 8080 | cAdvisor | Internal | Container metrics |
+
+### GPU Servers (Exporters)
+
+| Port | Service | Scraped By |
+|------|---------|------------|
+| 9100 | node_exporter | Prometheus |
+| 9400 | dcgm-exporter | Prometheus |
+| 9500 | dc-exporter (VRAM temps) | Prometheus |
+
+### Master Server (Additional Exporters)
+
+| Port | Service | Description |
+|------|---------|-------------|
+| 5000 | ipmi-monitor | IPMI/Redfish metrics (SEL events, power status, BMC reachability) |
+| 8622 | vastai-exporter | Vast.ai metrics (earnings, reliability, etc.) |
+| 8080 | cAdvisor | Container metrics |
+
+### IPMI Monitor Metrics
+
+The ipmi-monitor exposes Prometheus metrics at `/metrics`:
+
+| Metric | Description |
+|--------|-------------|
+| `ipmi_server_reachable` | BMC reachability (1=up, 0=down) |
+| `ipmi_server_power_on` | Server power status |
+| `ipmi_events_total` | Total IPMI/SEL events collected |
+| `ipmi_events_critical_24h` | Critical events in last 24 hours |
+| `ipmi_events_warning_24h` | Warning events in last 24 hours |
+| `ipmi_total_servers` | Total monitored servers |
+| `ipmi_reachable_servers` | Number of reachable servers |
+
+### dc-watchdog (Offsite VPS)
+
+| Port | Service | Access |
+|------|---------|--------|
+| 80/443 | Nginx | Public |
+| 5001 | dc-watchdog | Internal (proxied) |
 
 ---
 
-## 🤝 Contributing
+## Firewall Configuration
 
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing`)
-5. Open a Pull Request
+### In-DC Monitoring Server
+
+```bash
+# Allow HTTP/HTTPS
+ufw allow 80/tcp
+ufw allow 443/tcp
+
+# Allow Prometheus scraping from internal network only
+ufw allow from 192.168.1.0/24 to any port 9090
+ufw allow from 192.168.1.0/24 to any port 9100
+
+# Deny direct access to internal services
+ufw deny 3000/tcp
+ufw deny 5000/tcp
+```
+
+### dc-watchdog Offsite Server
+
+```bash
+# Allow HTTP/HTTPS for web UI
+ufw allow 80/tcp
+ufw allow 443/tcp
+
+# Allow agent pings from anywhere (or restrict to DC IPs)
+# Agents call home via HTTP(S)
+```
 
 ---
 
-<p align="center">
-  Made with ❤️ by <a href="https://cryptolabs.co.za">CryptoLabs</a>
-</p>
+## Repository Links
+
+| Repo | Description | Visibility |
+|------|-------------|------------|
+| [dc-overview](https://github.com/cryptolabsza/dc-overview) | Prometheus/Grafana dashboards | Public |
+| [dc-exporter](https://github.com/cryptolabsza/dc-exporter) | VRAM temperature exporter | Private (public releases) |
+| [dc-watchdog](https://github.com/cryptolabsza/dc-watchdog) | External uptime monitoring | Private (public releases) |
+| [ipmi-monitor](https://github.com/cryptolabsza/ipmi-monitor) | IPMI/Redfish dashboard | Public |
+| [ipmi-monitor-ai](https://github.com/cryptolabsza/ipmi-monitor-ai) | AI processing service | Private |
+
+---
+
+## Support
+
+- **Documentation**: [docs.cryptolabs.co.za](https://docs.cryptolabs.co.za)
+- **Discord**: [Join our community](https://discord.gg/cryptolabs)
+- **Email**: support@cryptolabs.co.za
+
+---
+
+*Made with ❤️ by [CryptoLabs](https://cryptolabs.co.za)*
