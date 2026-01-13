@@ -91,10 +91,18 @@ For production deployments, use Nginx with Let's Encrypt SSL.
 
 Create A records pointing to your monitoring server:
 
-| Subdomain | Service |
-|-----------|---------|
-| `grafana.yourdomain.com` | Grafana dashboards |
-| `prometheus.yourdomain.com` | Prometheus (optional) |
+| Subdomain | Service | Notes |
+|-----------|---------|-------|
+| `grafana.yourdomain.com` | Grafana dashboards | Public OK (has built-in auth) |
+
+> ⚠️ **IMPORTANT: Prometheus should NOT be exposed publicly!**
+> 
+> Prometheus has no authentication by default and exposes sensitive infrastructure data.
+> Access Prometheus only via:
+> - `localhost:9090` on the monitoring server
+> - Internal network (e.g., `192.168.1.100:9090`)
+> - SSH tunnel: `ssh -L 9090:localhost:9090 user@server`
+> - VPN (Tailscale, WireGuard)
 
 ### Nginx Setup
 
@@ -102,9 +110,9 @@ Create A records pointing to your monitoring server:
 # Install Nginx and Certbot
 apt update && apt install -y nginx certbot python3-certbot-nginx
 
-# Create Nginx config
+# Create Nginx config (Grafana only - Prometheus stays internal!)
 cat > /etc/nginx/sites-available/dc-monitoring << 'EOF'
-# Grafana
+# Grafana - OK to expose (has authentication)
 server {
     listen 80;
     server_name grafana.yourdomain.com;
@@ -123,28 +131,16 @@ server {
     }
 }
 
-# Prometheus (with basic auth)
-server {
-    listen 80;
-    server_name prometheus.yourdomain.com;
-
-    auth_basic "Prometheus";
-    auth_basic_user_file /etc/nginx/.htpasswd;
-
-    location / {
-        proxy_pass http://127.0.0.1:9090;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
+# NOTE: Prometheus (port 9090) is NOT exposed publicly!
+# Access via internal network or SSH tunnel only.
 EOF
 
 # Enable site
 ln -s /etc/nginx/sites-available/dc-monitoring /etc/nginx/sites-enabled/
 nginx -t && systemctl reload nginx
 
-# Get SSL certificates
-certbot --nginx -d grafana.yourdomain.com -d prometheus.yourdomain.com
+# Get SSL certificate for Grafana only
+certbot --nginx -d grafana.yourdomain.com
 ```
 
 ---
