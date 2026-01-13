@@ -1,24 +1,75 @@
+# DC Overview - Prometheus Configuration
+# 
+# Edit this file to add your GPU servers.
+# Each server should have exporters running on these ports:
+#   - 9100: node_exporter (CPU, RAM, disk, network)
+#   - 9400: dcgm-exporter (GPU metrics from NVIDIA DCGM)
+#   - 9200: dc-exporter (VRAM temps, hotspot temps, fan speed)
+#   - 8080: cAdvisor (container metrics) - optional
+#
+# After editing, restart Prometheus:
+#   docker compose restart prometheus
+
 global:
   scrape_interval: 15s
+  evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: 'prometheus'
+  # ===========================================
+  # MONITORING SERVER (where Prometheus runs)
+  # ===========================================
+  - job_name: 'monitoring-server'
     static_configs:
-      - targets: ['100.126.9.42:9090', '100.126.9.42:9100', '100.126.9.42:8080', '100.126.9.42:8622']
+      - targets: 
+          - '127.0.0.1:9090'
+          - '127.0.0.1:9100'
+          - '127.0.0.1:8080'
+        labels:
+          instance: 'monitoring-server'
 
-  - job_name: 'WK00'
+  # ===========================================
+  # GPU SERVERS - Edit these with your IPs
+  # ===========================================
+  
+  # Example GPU Server 1
+  - job_name: 'gpu-server-01'
     static_configs:
-      - targets: ['100.82.195.81:9100', '100.82.195.81:9400', '100.82.195.81:8080', '100.82.195.81:9500']
+      - targets: 
+          - '192.168.1.101:9100'
+          - '192.168.1.101:9400'
+          - '192.168.1.101:9200'
+        labels:
+          instance: 'gpu-01'
 
-  - job_name: 'WK01'
+  # Example GPU Server 2
+  - job_name: 'gpu-server-02'
     static_configs:
-      - targets: ['100.105.79.51:9100', '100.105.79.51:9400', '100.105.79.51:8080', '100.105.79.51:9500']
+      - targets: 
+          - '192.168.1.102:9100'
+          - '192.168.1.102:9400'
+          - '192.168.1.102:9200'
+        labels:
+          instance: 'gpu-02'
 
-  - job_name: 'WK02'
+  # Example GPU Server 3
+  - job_name: 'gpu-server-03'
     static_configs:
-      - targets: ['100.114.215.31:9100', '100.114.215.31:9400', '100.114.215.31:8080', '100.114.215.31:9500']
+      - targets: 
+          - '192.168.1.103:9100'
+          - '192.168.1.103:9400'
+          - '192.168.1.103:9200'
+        labels:
+          instance: 'gpu-03'
 
-  - job_name: 'WK03'
-    static_configs:
-      - targets: ['100.122.167.64:9100', '100.122.167.64:9400', '100.122.167.64:8080', '100.122.167.64:9500']
-
+  # ===========================================
+  # ADD MORE SERVERS BELOW
+  # ===========================================
+  # Copy template:
+  # - job_name: 'gpu-server-XX'
+  #   static_configs:
+  #     - targets: 
+  #         - '192.168.1.XXX:9100'
+  #         - '192.168.1.XXX:9400'
+  #         - '192.168.1.XXX:9200'
+  #       labels:
+  #         instance: 'gpu-XX'
