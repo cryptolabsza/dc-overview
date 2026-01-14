@@ -577,6 +577,120 @@ VAST_API_KEY=your_vast_api_key
 | 9400 | dcgm-exporter | Prometheus |
 | 9500 | dc-exporter (VRAM temps) | Prometheus |
 
+---
+
+## DC Exporter (GPU Server Agent)
+
+Install dc-exporter on each GPU server to expose VRAM temperatures and additional metrics.
+
+### Quick Install
+
+```bash
+# Download the latest release
+wget https://github.com/cryptolabsza/dc-exporter/releases/latest/download/dc-exporter-collector
+wget https://github.com/cryptolabsza/dc-exporter/releases/latest/download/dc-exporter-server
+wget https://github.com/cryptolabsza/dc-exporter/releases/latest/download/config.ini
+
+# Install binaries
+chmod +x dc-exporter-collector dc-exporter-server
+sudo mv dc-exporter-collector dc-exporter-server /usr/local/bin/
+sudo mkdir -p /etc/dc-exporter
+sudo mv config.ini /etc/dc-exporter/
+
+# Create systemd service
+sudo tee /etc/systemd/system/dc-exporter.service > /dev/null << 'EOF'
+[Unit]
+Description=DC Exporter - GPU and System Metrics
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/etc/dc-exporter
+ExecStart=/bin/bash -c "/usr/local/bin/dc-exporter-collector --no-console & /usr/local/bin/dc-exporter-server"
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable and start
+sudo systemctl daemon-reload
+sudo systemctl enable dc-exporter
+sudo systemctl start dc-exporter
+
+# Verify
+curl http://localhost:9500/metrics | grep dc_exporter
+```
+
+### Check Version
+
+```bash
+# Command line
+dc-exporter-collector -v
+# Output: dc-exporter version 1.0.0 (built Jan 14 2026)
+
+# Via Prometheus metrics
+curl -s http://localhost:9500/metrics | grep dc_exporter_build_info
+# Output: dc_exporter_build_info{version="1.0.0",build_date="Jan 14 2026"} 1
+```
+
+### Supported GPUs
+
+| GPU Type | VRAM Temp | Hotspot Temp | Fan Speed | Method |
+|----------|-----------|--------------|-----------|--------|
+| A100/H100 (Datacenter) | ✅ | ✅ | N/A* | NVML API |
+| RTX 4090/4080/4070 | ✅ | ✅ | ✅ | PCIe BAR |
+| RTX 3090/3080/3070 | ✅ | ✅ | ✅ | PCIe BAR |
+| RTX A6000/A5000 | ✅ | ✅ | ✅ | NVML API |
+
+\* A100-SXM4 and H100 use chassis cooling, no per-GPU fan.
+
+### Configuration
+
+Edit `/etc/dc-exporter/config.ini` to enable/disable metrics:
+
+```ini
+[agent]
+machine_id=auto
+interval=5
+
+[gpu]
+enabled=1
+DCGM_FI_DEV_VRAM_TEMP
+DCGM_FI_DEV_HOT_SPOT_TEMP
+DCGM_FI_DEV_FAN_SPEED
+DCGM_FI_DEV_CLOCKS_THROTTLE_REASON
+GPU_AER_TOTAL_ERRORS
+GPU_AER_ERROR_STATE
+# Uncomment if not using dcgm-exporter:
+#DCGM_FI_DEV_GPU_TEMP
+#DCGM_FI_DEV_POWER_USAGE
+
+[system]
+enabled=1
+SYS_LOAD_AVG
+SYS_CPU_USAGE
+SYS_MEM_USED
+
+[ipmi]
+enabled=1
+IPMI_INLET_TEMP
+IPMI_EXHAUST_TEMP
+```
+
+### Exposed Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `dc_exporter_build_info` | Version and build date |
+| `dc_exporter_gpu_available` | 1 if GPUs available, 0 if VM passthrough |
+| `dc_exporter_gpu_count` | Number of GPUs detected |
+| `DCGM_FI_DEV_VRAM_TEMP` | VRAM/HBM temperature |
+| `DCGM_FI_DEV_HOT_SPOT_TEMP` | GPU hotspot temperature |
+| `DCGM_FI_DEV_FAN_SPEED` | Fan speed percentage |
+| `GPU_AER_TOTAL_ERRORS` | PCIe AER error count |
+
 ### Master Server (Additional Exporters)
 
 | Port | Service | Description |
@@ -641,11 +755,11 @@ ufw allow 443/tcp
 
 ## Repository Links
 
-| Repo | Description | Visibility |
-|------|-------------|------------|
+| Repo | Description | Releases |
+|------|-------------|----------|
 | [dc-overview](https://github.com/cryptolabsza/dc-overview) | Prometheus/Grafana dashboards | Public |
-| [dc-exporter](https://github.com/cryptolabsza/dc-exporter) | VRAM temperature exporter | Private (public releases) |
-| [dc-watchdog](https://github.com/cryptolabsza/dc-watchdog) | External uptime monitoring | Private (public releases) |
+| [dc-exporter](https://github.com/cryptolabsza/dc-exporter/releases) | GPU VRAM temp exporter | [v1.0.0](https://github.com/cryptolabsza/dc-exporter/releases/tag/v1.0.0) |
+| [dc-watchdog](https://github.com/cryptolabsza/dc-watchdog) | External uptime monitoring | Private |
 | [ipmi-monitor](https://github.com/cryptolabsza/ipmi-monitor) | IPMI/Redfish dashboard | Public |
 | [ipmi-monitor-ai](https://github.com/cryptolabsza/ipmi-monitor-ai) | AI processing service | Private |
 
