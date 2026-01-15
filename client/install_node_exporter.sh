@@ -5,7 +5,7 @@ apt install jq -y
 apt install xz-utils -y
 mkdir -p /var/lib/node_exporter/textfile_collector
 cd /usr/local/bin/
-wget https://raw.githubusercontent.com/jjziets/DCMontoring/main/client/run_cpu_temp.sh 
+wget https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/client/run_cpu_temp.sh 
 chmod +x run_cpu_temp.sh
 
 ENTRY="@reboot screen -dmS cpu_temp.sh /usr/local/bin/run_cpu_temp.sh"

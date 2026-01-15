@@ -109,7 +109,7 @@ sudo make install
 # Configure DCGM Exporter
 echo "Configuring DCGM Exporter..."
 sudo mkdir -p /etc/dcgm-exporter/
-sudo wget -O /etc/dcgm-exporter/default-counters.csv https://raw.githubusercontent.com/jjziets/DCMontoring/main/client/dcgm-exporter/custom-collectors.csv
+sudo wget -O /etc/dcgm-exporter/default-counters.csv https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/client/custom-collectors.csv
 
 # Setup DCGM Exporter service
 echo "Setting up DCGM Exporter service..."

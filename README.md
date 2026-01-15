@@ -2,6 +2,9 @@
 
 Complete monitoring solution for GPU datacenters with AI-powered insights.
 
+![DC-Overview Dashboard](docs/images/grafana-overview.png)
+*Real-time monitoring of your GPU fleet - earnings, reliability, temperatures, and more*
+
 ## Product Architecture
 
 ```
@@ -103,16 +106,18 @@ IPMI_PASS=your_ipmi_password
 
 > ⚠️ **IMPORTANT:** Never commit `.env` to git! It contains secrets.
 
-### Docker Compose (Full Stack)
+### Docker Compose (Master Server Only)
+
+This docker-compose runs on the **master/monitoring server only**. GPU workers should use native systemd services (see [GPU Worker Setup](#gpu-worker-setup)).
 
 ```yaml
-# docker-compose.yml
+# docker-compose.yml - Run on master server only
 services:
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"  # Internal only - Nginx handles external access
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
@@ -146,21 +151,22 @@ services:
       - "/:/host:ro,rslave"
     command: ["--path.rootfs=/host"]
 
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.47.1
-    container_name: cadvisor
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:8080:8080"
-    volumes:
-      - "/:/rootfs:ro"
-      - "/var/run:/var/run:ro"
-      - "/sys:/sys:ro"
-      - "/var/lib/docker/:/var/lib/docker:ro"
-      - "/dev/disk/:/dev/disk:ro"
-    privileged: true
-    devices:
-      - "/dev/kmsg:/dev/kmsg"
+  # OPTIONAL: cAdvisor for container metrics (uncomment if needed)
+  # cadvisor:
+  #   image: gcr.io/cadvisor/cadvisor:v0.47.1
+  #   container_name: cadvisor
+  #   restart: unless-stopped
+  #   ports:
+  #     - "127.0.0.1:8080:8080"
+  #   volumes:
+  #     - "/:/rootfs:ro"
+  #     - "/var/run:/var/run:ro"
+  #     - "/sys:/sys:ro"
+  #     - "/var/lib/docker/:/var/lib/docker:ro"
+  #     - "/dev/disk/:/dev/disk:ro"
+  #   privileged: true
+  #   devices:
+  #     - "/dev/kmsg:/dev/kmsg"
 
   vastai-exporter:
     image: jjziets/vastai-exporter:latest
@@ -185,6 +191,106 @@ volumes:
   grafana-data:
   prometheus-data:
 ```
+
+### Nginx + SSL Setup (Required)
+
+> ⚠️ **IMPORTANT:** Always use HTTPS for secure communication. Grafana and other services should never be exposed over plain HTTP.
+
+#### Quick Setup with Self-Signed Certificate
+
+For internal/testing deployments, use a self-signed certificate:
+
+```bash
+# Install Nginx
+apt update && apt install -y nginx openssl
+
+# Generate self-signed certificate (valid for 1 year)
+sudo mkdir -p /etc/nginx/ssl
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /etc/nginx/ssl/selfsigned.key \
+  -out /etc/nginx/ssl/selfsigned.crt \
+  -subj "/C=US/ST=State/L=City/O=Organization/CN=$(hostname -I | awk '{print $1}')"
+
+# Generate Diffie-Hellman parameters (improves security)
+sudo openssl dhparam -out /etc/nginx/ssl/dhparam.pem 2048
+```
+
+Create `/etc/nginx/sites-available/dc-monitoring`:
+
+```nginx
+# Redirect HTTP to HTTPS
+server {
+    listen 80 default_server;
+    server_name _;
+    return 301 https://$host$request_uri;
+}
+
+# Grafana (HTTPS)
+server {
+    listen 443 ssl;
+    server_name _;
+
+    ssl_certificate /etc/nginx/ssl/selfsigned.crt;
+    ssl_certificate_key /etc/nginx/ssl/selfsigned.key;
+    ssl_dhparam /etc/nginx/ssl/dhparam.pem;
+
+    # SSL settings
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # WebSocket support for Grafana Live
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    # IPMI Monitor at /ipmi path
+    location /ipmi/ {
+        proxy_pass http://127.0.0.1:5000/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Enable the site and start Nginx:
+
+```bash
+# Remove default site
+rm -f /etc/nginx/sites-enabled/default
+
+# Enable dc-monitoring site
+ln -sf /etc/nginx/sites-available/dc-monitoring /etc/nginx/sites-enabled/
+
+# Test and reload
+nginx -t && systemctl reload nginx
+
+# Allow HTTPS through firewall
+ufw allow 443/tcp
+ufw allow 80/tcp  # For redirect to HTTPS
+```
+
+**Access your services:**
+- Grafana: `https://<your-server-ip>/`
+- IPMI Monitor: `https://<your-server-ip>/ipmi/`
+
+> **Note:** Your browser will show a security warning for self-signed certificates. This is expected - click "Advanced" and proceed. The connection is still encrypted.
+
+#### Production Setup with Let's Encrypt (Recommended)
+
+For production with valid SSL certificates, see the [Nginx Reverse Proxy with SSL](#nginx-reverse-proxy-with-ssl) section below.
+
+---
 
 ### Grafana Datasource Configuration
 
@@ -226,9 +332,16 @@ scrape_configs:
   # Master server
   - job_name: 'master'
     static_configs:
-      - targets: ['<MASTER_IP>:9090', '<MASTER_IP>:9100', '<MASTER_IP>:8080']
+      - targets: ['<MASTER_IP>:9090', '<MASTER_IP>:9100']
         labels:
           instance: 'master'
+
+  # OPTIONAL: cAdvisor for container metrics (uncomment if using cAdvisor)
+  # - job_name: 'cadvisor'
+  #   static_configs:
+  #     - targets: ['<MASTER_IP>:8080']
+  #       labels:
+  #         instance: 'master'
 
   # IPMI Monitor (SEL events, BMC status)
   - job_name: 'ipmi-monitor'
@@ -261,14 +374,22 @@ scrape_configs:
           instance: 'gpu-worker-02'
 ```
 
+> **Why use `<MASTER_IP>` instead of `localhost`?**
+>
+> Prometheus runs inside a Docker container. When you use `localhost` in the config, it refers to the container's own network namespace, not the host machine. This means Prometheus cannot reach services running on the host (like node_exporter on port 9100).
+>
+> **Always use the host's actual IP address** (e.g., `192.168.1.100`) for targets running on the same machine as Prometheus.
+>
+> The only exception is services running in the same Docker network (like `vastai-exporter:8622`), which can use their container name as the hostname.
+
 **Exporter ports:**
 - `9090` - Prometheus self-monitoring
 - `9100` - node_exporter (CPU, RAM, disk)
-- `8080` - cAdvisor (containers)
 - `5000` - ipmi-monitor (IPMI/SEL)
 - `9400` - dcgm-exporter (NVIDIA GPU)
 - `9500` - dc-exporter (VRAM temps)
 - `8622` - vastai-exporter (Vast.ai)
+- `8080` - cAdvisor (containers) - *optional*
 
 ---
 
@@ -301,9 +422,17 @@ curl -sSL https://raw.githubusercontent.com/cryptolabsza/dc-watchdog/main/instal
 
 ---
 
-## Nginx Reverse Proxy with SSL
+## Nginx Reverse Proxy with SSL (Production)
 
-For production, use Nginx as a reverse proxy with Let's Encrypt SSL certificates.
+For production deployments with a domain name, use Let's Encrypt for free, auto-renewing SSL certificates via Certbot.
+
+> **Already set up self-signed SSL?** This section shows how to upgrade to proper certificates with your own domain.
+
+### Prerequisites
+
+- A registered domain name (e.g., `yourdomain.com`)
+- DNS A records pointing to your server's public IP
+- Ports 80 and 443 accessible from the internet
 
 ### DNS Configuration
 
@@ -336,15 +465,20 @@ watchdog.cryptolabs.co.za    A    198.51.100.20
 # http://localhost:9090 (on monitoring server)
 ```
 
-### Nginx Installation
+### Install Nginx and Certbot
 
 ```bash
-# Install Nginx and Certbot
+# Install Nginx and Certbot for Let's Encrypt
 apt update && apt install -y nginx certbot python3-certbot-nginx
 
-# Create Nginx config directory
+# Create Nginx config directory (if not exists)
 mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
 ```
+
+> **Note:** If you already installed Nginx for self-signed certs, just install Certbot:
+> ```bash
+> apt install -y certbot python3-certbot-nginx
+> ```
 
 ### Nginx Configuration
 
@@ -520,16 +654,17 @@ services:
       - "/:/host:ro,rslave"
     command: ["--path.rootfs=/host"]
 
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.47.1
-    container_name: cadvisor
-    restart: unless-stopped
-    volumes:
-      - "/:/rootfs:ro"
-      - "/var/run:/var/run:ro"
-      - "/sys:/sys:ro"
-      - "/var/lib/docker/:/var/lib/docker:ro"
-    privileged: true
+  # OPTIONAL: cAdvisor for container metrics (uncomment if needed)
+  # cadvisor:
+  #   image: gcr.io/cadvisor/cadvisor:v0.47.1
+  #   container_name: cadvisor
+  #   restart: unless-stopped
+  #   volumes:
+  #     - "/:/rootfs:ro"
+  #     - "/var/run:/var/run:ro"
+  #     - "/sys:/sys:ro"
+  #     - "/var/lib/docker/:/var/lib/docker:ro"
+  #   privileged: true
 
 volumes:
   grafana-data:
@@ -567,7 +702,7 @@ VAST_API_KEY=your_vast_api_key
 | 3000 | Grafana | Internal | Proxied via Nginx |
 | 5000 | IPMI Monitor | Internal | Proxied via Nginx |
 | 9090 | Prometheus | **Internal only** | ⚠️ Never expose publicly! |
-| 8080 | cAdvisor | Internal | Container metrics |
+| 8080 | cAdvisor *(optional)* | Internal | Container metrics |
 
 ### GPU Servers (Exporters)
 
@@ -579,9 +714,119 @@ VAST_API_KEY=your_vast_api_key
 
 ---
 
+## GPU Worker Setup
+
+> ⚠️ **IMPORTANT: Do NOT use Docker containers for exporters on GPU workers!**
+>
+> - **RunPod/Vast.ai** do not allow nested containers
+> - Containers may interfere with client GPU workloads
+> - Native systemd services are lighter and more reliable
+>
+> Only the **master server** should run containers (Prometheus, Grafana, etc.).
+
+Install these three exporters on each GPU worker as **native systemd services**:
+
+### 1. Node Exporter (System Metrics)
+
+Exposes CPU, RAM, disk, and network metrics on port **9100**.
+
+```bash
+# Download and install node_exporter
+cd /tmp
+curl -LO https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz
+tar xzf node_exporter-1.7.0.linux-amd64.tar.gz
+sudo mv node_exporter-1.7.0.linux-amd64/node_exporter /usr/local/bin/
+rm -rf node_exporter-1.7.0.linux-amd64*
+
+# Create systemd service
+sudo tee /etc/systemd/system/node_exporter.service > /dev/null << 'EOF'
+[Unit]
+Description=Node Exporter
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/node_exporter
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable and start
+sudo systemctl daemon-reload
+sudo systemctl enable node_exporter
+sudo systemctl start node_exporter
+
+# Verify
+curl -s http://localhost:9100/metrics | head -5
+```
+
+### 2. DCGM Exporter (GPU Metrics)
+
+Exposes GPU utilization, temperature, memory, and power metrics on port **9400**.
+
+```bash
+# Install NVIDIA datacenter GPU manager (includes dcgmi)
+# For Ubuntu 22.04:
+distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+curl -s -L https://nvidia.github.io/libnvidia-container/gpgkey | sudo apt-key add -
+curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | \
+  sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+sudo apt update
+sudo apt install -y datacenter-gpu-manager
+
+# Enable DCGM service
+sudo systemctl enable nvidia-dcgm
+sudo systemctl start nvidia-dcgm
+
+# Download and install dcgm-exporter
+cd /tmp
+curl -LO https://github.com/NVIDIA/dcgm-exporter/releases/download/v3.3.5-3.4.1/dcgm-exporter-3.3.5-3.4.1-ubuntu22.04-x86_64.tar.gz
+tar xzf dcgm-exporter-*.tar.gz
+sudo mv dcgm-exporter /usr/local/bin/
+rm -f dcgm-exporter-*.tar.gz
+
+# Create systemd service
+sudo tee /etc/systemd/system/dcgm-exporter.service > /dev/null << 'EOF'
+[Unit]
+Description=DCGM Exporter
+After=network.target nvidia-dcgm.service
+Requires=nvidia-dcgm.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/dcgm-exporter -a :9400
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable and start
+sudo systemctl daemon-reload
+sudo systemctl enable dcgm-exporter
+sudo systemctl start dcgm-exporter
+
+# Verify
+curl -s http://localhost:9400/metrics | grep DCGM | head -5
+```
+
+> **Alternative:** If DCGM is not available for your system, you can use `nvidia-smi` based exporters or skip dcgm-exporter and rely on dc-exporter for GPU metrics.
+
+### 3. DC Exporter (VRAM Temps)
+
+Exposes VRAM temperature, hotspot temperature, and fan speed on port **9500**.
+
+See the [DC Exporter](#dc-exporter-gpu-server-agent) section below for installation.
+
+---
+
 ## DC Exporter (GPU Server Agent)
 
-Install dc-exporter on each GPU server to expose VRAM temperatures and additional metrics.
+Install dc-exporter on each GPU server to expose VRAM temperatures and additional metrics not available via DCGM.
 
 ### Quick Install
 
@@ -697,7 +942,7 @@ IPMI_EXHAUST_TEMP
 |------|---------|-------------|
 | 5000 | ipmi-monitor | IPMI/Redfish metrics (SEL events, power status, BMC reachability) |
 | 8622 | vastai-exporter | Vast.ai metrics (earnings, reliability, etc.) |
-| 8080 | cAdvisor | Container metrics |
+| 8080 | cAdvisor *(optional)* | Container metrics - only needed if monitoring Docker containers |
 
 ### IPMI Monitor Metrics
 
@@ -762,6 +1007,86 @@ ufw allow 443/tcp
 | [dc-watchdog](https://github.com/cryptolabsza/dc-watchdog) | External uptime monitoring | Private |
 | [ipmi-monitor](https://github.com/cryptolabsza/ipmi-monitor) | IPMI/Redfish dashboard | Public |
 | [ipmi-monitor-ai](https://github.com/cryptolabsza/ipmi-monitor-ai) | AI processing service | Private |
+
+---
+
+## Troubleshooting
+
+### Prometheus targets showing "down" for services on the same host
+
+**Symptom:** Prometheus shows targets like `localhost:9100` as "down" even though the service is running.
+
+**Cause:** Prometheus runs inside a Docker container. When you use `localhost` in `prometheus.yml`, it refers to the Prometheus container itself, not the host machine.
+
+**Solution:** Use the host's actual IP address instead of `localhost`:
+
+```yaml
+# Wrong - won't work from inside Docker
+- targets: ['localhost:9100', 'localhost:8080']
+
+# Correct - use the host's IP address
+- targets: ['192.168.1.100:9100', '192.168.1.100:8080']
+```
+
+**How to find your host IP:**
+```bash
+# On Linux
+hostname -I | awk '{print $1}'
+
+# Or check your network interface
+ip addr show | grep "inet " | grep -v 127.0.0.1
+```
+
+### Docker container names vs IP addresses
+
+| Scenario | What to use | Example |
+|----------|-------------|---------|
+| Container → Container (same Docker network) | Container name | `prometheus:9090` |
+| Container → Host service | Host IP address | `192.168.1.100:9100` |
+| Container → Other machine | Machine's IP | `192.168.1.101:9400` |
+
+### Verifying Prometheus can reach targets
+
+```bash
+# Check from inside the Prometheus container
+docker exec prometheus wget -q -O- http://192.168.1.100:9100/metrics | head -5
+
+# Check Prometheus targets API
+curl -s http://localhost:9090/api/v1/targets | jq '.data.activeTargets[] | {job: .labels.job, health: .health, lastError: .lastError}'
+```
+
+### Common port conflicts
+
+If a service won't start, check for port conflicts:
+
+```bash
+# Check what's using a port
+sudo lsof -i :9100
+# or
+sudo ss -tlnp | grep 9100
+```
+
+---
+
+## Dashboard Gallery
+
+### GPU Temperature Monitoring
+
+Monitor VRAM temperatures, hotspot temps, fan speeds, and thermal throttling across your entire GPU fleet.
+
+![GPU Temperatures Dashboard](docs/images/grafana-gpu-temps.png)
+
+### Vast.ai Provider Dashboard
+
+Track earnings, machine reliability, utilization, and income metrics for Vast.ai providers.
+
+![Vast.ai Dashboard](docs/images/grafana-vast-dashboard.png)
+
+### System Metrics (Node Exporter)
+
+Comprehensive system monitoring - CPU, memory, disk I/O, and network throughput.
+
+![Node Exporter Dashboard](docs/images/grafana-node-exporter.png)
 
 ---
 
