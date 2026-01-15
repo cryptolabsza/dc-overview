@@ -6,56 +6,56 @@ Complete monitoring solution for GPU datacenters with AI-powered insights.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              PRODUCT OVERVIEW                                    │
+│                              PRODUCT OVERVIEW                                   │
 ├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
+│                                                                                 │
 │  IN-DC STACK (runs in customer datacenter)                                      │
 │  ══════════════════════════════════════════                                     │
-│                                                                                  │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                 │
-│  │   dc-overview   │  │  ipmi-monitor   │  │   dc-exporter   │                 │
-│  │   (Grafana +    │  │  (IPMI/Redfish  │  │  (VRAM temps    │                 │
-│  │   Prometheus)   │  │   dashboard)    │  │   exporter)     │                 │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘                 │
+│                                                                                 │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                  │
+│  │   dc-overview   │  │  ipmi-monitor   │  │   dc-exporter   │                  │
+│  │   (Grafana +    │  │  (IPMI/Redfish  │  │  (VRAM temps    │                  │
+│  │   Prometheus)   │  │   dashboard)    │  │   exporter)     │                  │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘                  │
 │         │                     │                     │                           │
 │         └─────────────────────┴─────────────────────┘                           │
-│                               │                                                  │
+│                               │                                                 │
 │                    Deployed ON monitoring server                                │
 │                    inside the datacenter                                        │
-│                                                                                  │
+│                                                                                 │
 ├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
+│                                                                                 │
 │  EXTERNAL MONITORING (runs OUTSIDE datacenter)                                  │
 │  ═════════════════════════════════════════════                                  │
-│                                                                                  │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │                          dc-watchdog                                     │   │
-│  │                                                                          │   │
-│  │   ┌──────────────────┐           ┌──────────────────────────────────┐  │   │
-│  │   │  OFFSITE SERVER  │◄──────────│  AGENTS (on DC servers)          │  │   │
-│  │   │  (VPS/Cloud VM)  │  "phone   │  • Ping every 30s                │  │   │
-│  │   │                  │   home"   │  • MTR traceroute data           │  │   │
-│  │   │  • Flask server  │           │  • Lightweight bash script       │  │   │
-│  │   │  • Telegram bot  │           │                                  │  │   │
-│  │   │  • Admin UI      │           │  Installed on: GPU servers,      │  │   │
-│  │   │  • RCA analysis  │           │  routers, BMCs, anything with    │  │   │
-│  │   │                  │           │  network access                  │  │   │
-│  │   └──────────────────┘           └──────────────────────────────────┘  │   │
-│  │                                                                          │   │
-│  │   Purpose: Detect when DC goes offline from external perspective        │   │
-│  │   Value: Know BEFORE customers complain, with network hop analysis      │   │
-│  └─────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                  │
+│                                                                                 │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                          dc-watchdog                                    │    │
+│  │                                                                         │    │
+│  │   ┌──────────────────┐           ┌──────────────────────────────────┐   │    │
+│  │   │  OFFSITE SERVER  │◄──────────│  AGENTS (on DC servers)          │   │    │
+│  │   │  (VPS/Cloud VM)  │  "phone   │  • Ping every 30s                │   │    │
+│  │   │                  │   home"   │  • MTR traceroute data           │   │    │
+│  │   │  • Flask server  │           │  • Lightweight bash script       │   │    │
+│  │   │  • Telegram bot  │           │                                  │   │    │
+│  │   │  • Admin UI      │           │  Installed on: GPU servers,      │   │    │
+│  │   │  • RCA analysis  │           │  routers, BMCs, anything with    │   │    │
+│  │   │                  │           │  network access                  │   │    │
+│  │   └──────────────────┘           └──────────────────────────────────┘   │    │
+│  │                                                                         │    │
+│  │   Purpose: Detect when DC goes offline from external perspective        │    │
+│  │   Value: Know BEFORE customers complain, with network hop analysis      │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                                                                 │
 ├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
+│                                                                                 │
 │  AI SERVICE (CryptoLabs Cloud)                                                  │
 │  ═════════════════════════════                                                  │
-│                                                                                  │
+│                                                                                 │
 │  ┌─────────────────┐                                                            │
-│  │ ipmi-monitor-ai │  ← Receives telemetry from ipmi-monitor                   │
-│  │                 │  ← Provides AI summaries, predictions, RCA                │
-│  └─────────────────┘  ← Requires paid subscription                             │
-│                                                                                  │
+│  │ ipmi-monitor-ai │  ← Receives telemetry from ipmi-monitor                    │
+│  │                 │  ← Provides AI summaries, predictions, RCA                 │
+│  └─────────────────┘  ← Requires paid subscription                              │
+│                                                                                 │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
