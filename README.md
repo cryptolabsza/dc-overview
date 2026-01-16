@@ -19,47 +19,82 @@ pip install dc-overview
 sudo dc-overview quickstart
 ```
 
-**That's it!** Answer a few questions:
+**That's it!** The wizard guides you through everything:
 
 ```
 ╭──────────────────────────────────────────────────╮
 │           DC Overview - Quick Setup              │
 ╰──────────────────────────────────────────────────╯
 
-Detected: gpu-server (192.168.1.100) with 4 GPUs
+Detected: monitoring-server (192.168.1.100) with 0 GPUs
 
 Step 1: What is this machine?
-  ● GPU Worker (has GPUs to monitor)
-  ○ Master Server (monitors other machines)
+  ○ GPU Worker (has GPUs to monitor)
+  ● Master Server (monitors other machines)
   ○ Both (has GPUs + monitors others)
 
-Step 2: Installing GPU Monitoring
-  ✓ node_exporter installed (port 9100)
-  ✓ dc-exporter installed (port 9500)
+Step 2: Setting up Monitoring Dashboard
+  Set Grafana admin password: ******
+  ✓ Prometheus running on port 9090
+  ✓ Grafana running on port 3000
 
-Step 3: Vast.ai Integration (Optional)
+Step 3: Add Machines to Monitor
+  ╭────────────────────────────────────────────────╮
+  │ You'll need:                                   │
+  │   • SSH access to your worker machines         │
+  │   • The IP addresses of workers to monitor     │
+  ╰────────────────────────────────────────────────╯
+
+  SSH username: root
+  Authentication method: Password
+  SSH password: ******
+  SSH port: 22
+
+  Enter IP addresses (blank line to finish):
+    Worker 1: 192.168.1.101
+    Worker 2: 192.168.1.102
+    Worker 3: 192.168.1.103
+    Worker 4: 
+
+  Installing exporters on 192.168.1.101...
+  ✓ gpu-01 (192.168.1.101) - exporters installed
+  ✓ gpu-02 (192.168.1.102) - exporters installed
+  ✓ gpu-03 (192.168.1.103) - exporters installed
+  ✓ Added 3 workers to Prometheus
+
+Step 4: Vast.ai Integration (Optional)
   Are you a Vast.ai provider? [y/N]: 
 
 ✓ Setup Complete!
+  Grafana: http://192.168.1.100:3000
+  Prometheus: http://192.168.1.100:9090
 ```
 
-### What It Does Automatically
+### What You Need
+
+| For... | You'll need... |
+|--------|----------------|
+| **Master setup** | Just run `quickstart` |
+| **Adding workers** | SSH user/password OR SSH key that works on all workers |
+| **Vast.ai tracking** | Your Vast.ai API key from cloud.vast.ai/account |
+
+### What Gets Installed
 
 | Your Answer | What Gets Installed |
 |-------------|---------------------|
-| **GPU Worker** | node_exporter, dcgm-exporter, dc-exporter |
-| **Master Server** | Prometheus, Grafana + asks to add workers |
+| **GPU Worker** | node_exporter, dcgm-exporter, dc-exporter (as systemd services) |
+| **Master Server** | Prometheus + Grafana (Docker containers) |
 | **Both** | All of the above |
-| **Vast.ai provider** | vastai-exporter for earnings tracking |
+| **Vast.ai provider** | vastai-exporter container |
 
 ### After Setup
 
 ```bash
-# Add more machines to monitor
-dc-overview add-machine 192.168.1.101 --name gpu-worker-01
+# Check status
+dc-overview status
 
-# Add machine and install exporters via SSH
-dc-overview add-machine 192.168.1.102 --ssh-pass mypassword
+# Add more machines later
+dc-overview add-machine 192.168.1.104 --ssh-pass mypassword
 ```
 
 **What the setup wizard does:**

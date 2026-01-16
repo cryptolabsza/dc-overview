@@ -445,64 +445,119 @@ def setup_master_native():
 
 def add_machines_wizard():
     """Wizard to add other machines to monitor."""
-    console.print("[dim]Add the IP addresses of GPU machines you want to monitor.[/dim]")
-    console.print("[dim]You can add more later with: dc-overview add-machine[/dim]\n")
+    console.print(Panel(
+        "[bold]Adding GPU Workers[/bold]\n\n"
+        "You'll need:\n"
+        "  • SSH access to your worker machines (password OR key)\n"
+        "  • The IP addresses of workers to monitor\n\n"
+        "[dim]The same credentials will be used for all workers.[/dim]",
+        border_style="cyan"
+    ))
+    console.print()
+    
+    # Get SSH credentials (one set for all workers)
+    console.print("[bold]SSH Credentials[/bold] (used for all workers)\n")
+    
+    ssh_user = questionary.text(
+        "SSH username:",
+        default="root",
+        style=custom_style
+    ).ask()
+    
+    auth_method = questionary.select(
+        "Authentication method:",
+        choices=[
+            questionary.Choice("Password", value="password"),
+            questionary.Choice("SSH Key", value="key"),
+        ],
+        style=custom_style
+    ).ask()
+    
+    ssh_password = None
+    ssh_key = None
+    
+    if auth_method == "password":
+        ssh_password = questionary.password(
+            "SSH password:",
+            style=custom_style
+        ).ask()
+    else:
+        ssh_key = questionary.text(
+            "SSH key path:",
+            default="~/.ssh/id_rsa",
+            style=custom_style
+        ).ask()
+        ssh_key = os.path.expanduser(ssh_key)
+    
+    ssh_port = questionary.text(
+        "SSH port:",
+        default="22",
+        style=custom_style
+    ).ask()
+    
+    # Get list of worker IPs
+    console.print("\n[bold]Worker IP Addresses[/bold]")
+    console.print("[dim]Enter one IP per line. Press Enter twice when done.[/dim]\n")
+    
+    ips = []
+    console.print("[dim]Enter IP addresses (blank line to finish):[/dim]")
+    
+    while True:
+        ip = questionary.text(
+            f"  Worker {len(ips)+1}:",
+            style=custom_style
+        ).ask()
+        
+        if not ip or ip.strip() == "":
+            break
+        
+        # Handle comma-separated input
+        for single_ip in ip.replace(",", " ").split():
+            single_ip = single_ip.strip()
+            if single_ip:
+                ips.append(single_ip)
+    
+    if not ips:
+        console.print("[yellow]No workers added.[/yellow]")
+        return
+    
+    console.print(f"\n[dim]Adding {len(ips)} workers...[/dim]\n")
     
     machines = []
     config_dir = Path("/etc/dc-overview")
     
-    while True:
-        add_more = questionary.confirm(
-            "Add a machine to monitor?" if not machines else "Add another machine?",
-            default=len(machines) == 0,
-            style=custom_style
-        ).ask()
+    for i, ip in enumerate(ips):
+        name = f"gpu-{i+1:02d}"
         
-        if not add_more:
-            break
-        
-        ip = questionary.text(
-            "Machine IP address:",
-            validate=lambda x: len(x) > 0,
-            style=custom_style
-        ).ask()
-        
-        if not ip:
-            break
-        
-        name = questionary.text(
-            "Name for this machine:",
-            default=f"gpu-{len(machines)+1:02d}",
-            style=custom_style
-        ).ask()
-        
-        # Test connection
-        console.print(f"[dim]Testing connection to {ip}...[/dim]")
-        
-        reachable = test_machine_connection(ip)
-        
-        if reachable:
-            console.print(f"[green]✓[/green] {name} ({ip}) - reachable")
+        # Test if exporters already running
+        if test_machine_connection(ip):
+            console.print(f"[green]✓[/green] {name} ({ip}) - exporters already running")
             machines.append({"name": name, "ip": ip})
+            continue
+        
+        # Try to install exporters remotely
+        console.print(f"[dim]Installing exporters on {ip}...[/dim]")
+        
+        success = install_exporters_remote(
+            ip=ip,
+            user=ssh_user,
+            password=ssh_password,
+            key_path=ssh_key,
+            port=int(ssh_port)
+        )
+        
+        if success:
+            console.print(f"[green]✓[/green] {name} ({ip}) - exporters installed")
         else:
-            console.print(f"[yellow]⚠[/yellow] {name} ({ip}) - not reachable (adding anyway)")
-            
-            # Ask if they want to set up SSH access
-            setup_ssh = questionary.confirm(
-                "Set up SSH access to install exporters remotely?",
-                default=True,
-                style=custom_style
-            ).ask()
-            
-            if setup_ssh:
-                setup_remote_machine(ip, name)
-            
-            machines.append({"name": name, "ip": ip})
+            console.print(f"[yellow]⚠[/yellow] {name} ({ip}) - manual install needed")
+            console.print(f"    [dim]SSH to {ip} and run: pip install dc-overview && sudo dc-overview quickstart[/dim]")
+        
+        machines.append({"name": name, "ip": ip})
     
     # Update prometheus.yml with new machines
     if machines:
         update_prometheus_targets(machines)
-        console.print(f"\n[green]✓[/green] Added {len(machines)} machines to monitoring")
+        console.print(f"\n[green]✓[/green] Added {len(machines)} workers to Prometheus")
 
 
 def test_machine_connection(ip: str, port: int = 9100) -> bool:
@@ -518,8 +573,45 @@ def test_machine_connection(ip: str, port: int = 9100) -> bool:
         return False
 
 
+def install_exporters_remote(ip: str, user: str, password: str = None, key_path: str = None, port: int = 22) -> bool:
+    """Install exporters on a remote machine via SSH."""
+    try:
+        import paramiko
+        
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        
+        # Connect
+        if password:
+            client.connect(ip, port=port, username=user, password=password, timeout=10)
+        else:
+            key = paramiko.RSAKey.from_private_key_file(key_path)
+            client.connect(ip, port=port, username=user, pkey=key, timeout=10)
+        
+        # Install pip if needed, then dc-overview
+        commands = [
+            "which pip3 || apt-get update -qq && apt-get install -y -qq python3-pip",
+            "pip3 install dc-overview --break-system-packages -q 2>/dev/null || pip3 install dc-overview -q",
+            "dc-overview install-exporters",
+        ]
+        
+        for cmd in commands:
+            stdin, stdout, stderr = client.exec_command(cmd, timeout=120)
+            exit_code = stdout.channel.recv_exit_status()
+            if exit_code != 0 and "install-exporters" in cmd:
+                # Failed on the important command
+                client.close()
+                return False
+        
+        client.close()
+        return True
+        
+    except Exception as e:
+        return False
+
+
 def setup_remote_machine(ip: str, name: str):
-    """Set up a remote machine via SSH."""
+    """Set up a remote machine via SSH (legacy function)."""
     console.print(f"\n[bold]Setting up {name} ({ip})[/bold]")
     
     ssh_user = questionary.text(
@@ -543,25 +635,13 @@ def setup_remote_machine(ip: str, name: str):
         console.print("[dim]Skipping remote setup - no password provided[/dim]")
         return
     
-    # Install exporters remotely
-    with Progress(SpinnerColumn(), TextColumn(f"Installing exporters on {name}..."), console=console) as progress:
-        progress.add_task("", total=None)
-        
-        # Use sshpass to run commands
-        install_cmd = "pip3 install dc-overview --break-system-packages && dc-overview install-exporters"
-        
-        result = subprocess.run(
-            f"sshpass -p '{ssh_pass}' ssh -o StrictHostKeyChecking=no -p {ssh_port} {ssh_user}@{ip} '{install_cmd}'",
-            shell=True,
-            capture_output=True,
-            timeout=300
-        )
+    success = install_exporters_remote(ip, ssh_user, password=ssh_pass, port=int(ssh_port))
     
-    if result.returncode == 0:
+    if success:
         console.print(f"[green]✓[/green] Exporters installed on {name}")
     else:
         console.print(f"[yellow]⚠[/yellow] Could not install automatically. Install manually on {name}:")
-        console.print(f"  [cyan]pip install dc-overview && sudo dc-overview install-exporters[/cyan]")
+        console.print(f"  [cyan]pip install dc-overview && sudo dc-overview quickstart[/cyan]")
 
 
 def update_prometheus_targets(machines: List[Dict[str, str]]):
