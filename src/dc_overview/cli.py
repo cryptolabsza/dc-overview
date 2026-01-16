@@ -17,6 +17,7 @@ from .wizard import SetupWizard
 from .service import ServiceManager
 from .exporters import ExporterInstaller
 from .deploy import DeployManager, deploy_wizard
+from .quickstart import run_quickstart
 
 console = Console()
 
@@ -495,7 +496,67 @@ def deploy_vast(api_key: str, status: bool):
         manager.setup_vast_exporter(api_key)
 
 
+@click.command()
+def quickstart():
+    """
+    ⚡ One-command setup - does everything!
+    
+    Just answer a few questions and your monitoring will be set up.
+    
+    \b
+    WHAT IT DOES:
+        - Detects your GPUs
+        - Installs exporters (node, dcgm, dc-exporter)
+        - Sets up Prometheus & Grafana (if master)
+        - Configures everything automatically
+        - Optionally adds Vast.ai integration
+    
+    \b
+    EXAMPLE:
+        sudo dc-overview quickstart
+    """
+    run_quickstart()
+
+
+@click.command("add-machine")
+@click.argument("ip")
+@click.option("--name", "-n", help="Friendly name for this machine")
+@click.option("--ssh-user", default="root", help="SSH username")
+@click.option("--ssh-port", default=22, help="SSH port")
+@click.option("--ssh-pass", help="SSH password (for remote install)")
+def add_machine(ip: str, name: str, ssh_user: str, ssh_port: int, ssh_pass: str):
+    """
+    Add a machine to monitor.
+    
+    \b
+    EXAMPLES:
+        dc-overview add-machine 192.168.1.101
+        dc-overview add-machine 192.168.1.101 --name gpu-worker-01
+        dc-overview add-machine 192.168.1.101 --ssh-pass mypass  # Also installs exporters
+    """
+    from .quickstart import test_machine_connection, setup_remote_machine, update_prometheus_targets
+    
+    name = name or f"machine-{ip.split('.')[-1]}"
+    
+    # Test connection
+    if test_machine_connection(ip):
+        console.print(f"[green]✓[/green] {name} ({ip}) - exporters reachable")
+    else:
+        console.print(f"[yellow]⚠[/yellow] {name} ({ip}) - exporters not reachable")
+        
+        if ssh_pass:
+            setup_remote_machine(ip, name)
+        else:
+            console.print("[dim]To install exporters remotely, provide --ssh-pass[/dim]")
+    
+    # Add to Prometheus
+    update_prometheus_targets([{"name": name, "ip": ip}])
+    console.print(f"[green]✓[/green] Added {name} to Prometheus")
+
+
 # Register commands
+main.add_command(quickstart)
+main.add_command(add_machine)
 main.add_command(setup)
 main.add_command(install_exporters)
 main.add_command(status)

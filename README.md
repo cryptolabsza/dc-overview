@@ -12,33 +12,54 @@ Complete monitoring solution for GPU datacenters with Prometheus, Grafana, and A
 
 ## 🚀 Quick Start
 
-### Option 1: One-Command Deployment (Recommended)
-
-Deploy your entire GPU datacenter from the master server:
+### One Command Setup ⚡
 
 ```bash
-# On MASTER server - install and run deployment wizard
 pip install dc-overview
-dc-overview deploy wizard
+sudo dc-overview quickstart
 ```
 
-The wizard will:
-1. **Add workers** - Enter IPs one by one, bulk paste, import CSV, or scan network
-2. **Deploy SSH keys** - Generate keys and deploy to workers using password
-3. **Install exporters** - Remotely install node_exporter, dcgm-exporter, dc-exporter
-4. **Generate Prometheus config** - Auto-create prometheus.yml with all targets
+**That's it!** Answer a few questions:
 
-### Option 2: Manual Setup
+```
+╭──────────────────────────────────────────────────╮
+│           DC Overview - Quick Setup              │
+╰──────────────────────────────────────────────────╯
+
+Detected: gpu-server (192.168.1.100) with 4 GPUs
+
+Step 1: What is this machine?
+  ● GPU Worker (has GPUs to monitor)
+  ○ Master Server (monitors other machines)
+  ○ Both (has GPUs + monitors others)
+
+Step 2: Installing GPU Monitoring
+  ✓ node_exporter installed (port 9100)
+  ✓ dc-exporter installed (port 9500)
+
+Step 3: Vast.ai Integration (Optional)
+  Are you a Vast.ai provider? [y/N]: 
+
+✓ Setup Complete!
+```
+
+### What It Does Automatically
+
+| Your Answer | What Gets Installed |
+|-------------|---------------------|
+| **GPU Worker** | node_exporter, dcgm-exporter, dc-exporter |
+| **Master Server** | Prometheus, Grafana + asks to add workers |
+| **Both** | All of the above |
+| **Vast.ai provider** | vastai-exporter for earnings tracking |
+
+### After Setup
 
 ```bash
-# Install
-pip install dc-overview
+# Add more machines to monitor
+dc-overview add-machine 192.168.1.101 --name gpu-worker-01
 
-# For MASTER server (Prometheus + Grafana)
-dc-overview setup master --install-services
-
-# For GPU WORKER nodes (exporters only)
-dc-overview setup worker --install-services
+# Add machine and install exporters via SSH
+dc-overview add-machine 192.168.1.102 --ssh-pass mypassword
 ```
 
 **What the setup wizard does:**
