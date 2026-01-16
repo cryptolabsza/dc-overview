@@ -16,6 +16,7 @@ from . import __version__
 from .wizard import SetupWizard
 from .service import ServiceManager
 from .exporters import ExporterInstaller
+from .deploy import DeployManager, deploy_wizard
 
 console = Console()
 
@@ -322,6 +323,136 @@ def get_config_dir() -> Path:
     return Path(xdg_config) / "dc-overview"
 
 
+# ============ Deploy Commands ============
+
+@click.group()
+def deploy():
+    """
+    Deploy and manage workers remotely.
+    
+    \b
+    COMMANDS:
+        dc-overview deploy wizard     # Interactive deployment wizard
+        dc-overview deploy add        # Add workers interactively
+        dc-overview deploy bulk       # Bulk add workers
+        dc-overview deploy list       # List all workers
+        dc-overview deploy install    # Install exporters on workers
+        dc-overview deploy ssh-key    # Generate/deploy SSH keys
+    """
+    pass
+
+
+@deploy.command("wizard")
+def deploy_wizard_cmd():
+    """Run the interactive deployment wizard."""
+    deploy_wizard()
+
+
+@deploy.command("add")
+def deploy_add():
+    """Add a worker interactively."""
+    manager = DeployManager()
+    manager.add_worker_interactive()
+
+
+@deploy.command("bulk")
+@click.option("--csv", "csv_path", help="Import from CSV file")
+def deploy_bulk(csv_path: str):
+    """Bulk add workers (interactive or CSV import)."""
+    manager = DeployManager()
+    
+    if csv_path:
+        manager.import_workers_csv(csv_path)
+    else:
+        manager.bulk_add_workers()
+
+
+@deploy.command("list")
+def deploy_list():
+    """List all configured workers with status."""
+    manager = DeployManager()
+    manager.show_workers()
+
+
+@deploy.command("install")
+@click.option("--worker", "-w", help="Install on specific worker (name or IP)")
+@click.option("--password", "-p", help="SSH password for key deployment")
+def deploy_install(worker: str, password: str):
+    """Install exporters on workers remotely."""
+    manager = DeployManager()
+    
+    if not manager.workers:
+        console.print("[yellow]No workers configured.[/yellow]")
+        console.print("Add workers first: [cyan]dc-overview deploy add[/cyan]")
+        return
+    
+    if worker:
+        # Find specific worker
+        target = None
+        for w in manager.workers:
+            if w.name == worker or w.ip == worker:
+                target = w
+                break
+        
+        if not target:
+            console.print(f"[red]Worker not found:[/red] {worker}")
+            return
+        
+        if password:
+            manager.deploy_ssh_key_to_worker(target, password)
+        manager.install_exporters_remote(target)
+    else:
+        # Install on all
+        manager.deploy_to_all_workers(password)
+
+
+@deploy.command("ssh-key")
+@click.option("--generate", is_flag=True, help="Generate new SSH key")
+@click.option("--deploy", "deploy_to", help="Deploy to worker (name or IP)")
+@click.option("--password", "-p", help="SSH password for deployment")
+def deploy_ssh_key(generate: bool, deploy_to: str, password: str):
+    """Generate or deploy SSH keys."""
+    manager = DeployManager()
+    
+    if generate:
+        key_path, pub_key = manager.generate_ssh_key()
+        console.print(f"\n[bold]Public key:[/bold]")
+        console.print(f"[dim]{pub_key}[/dim]")
+    
+    if deploy_to:
+        if not password:
+            import questionary
+            password = questionary.password("SSH password:").ask()
+        
+        target = None
+        for w in manager.workers:
+            if w.name == deploy_to or w.ip == deploy_to:
+                target = w
+                break
+        
+        if target:
+            manager.deploy_ssh_key_to_worker(target, password)
+        else:
+            # Try as IP directly
+            from .deploy import Worker
+            target = Worker(name=deploy_to, ip=deploy_to)
+            manager.deploy_ssh_key_to_worker(target, password)
+
+
+@deploy.command("scan")
+@click.option("--subnet", default="192.168.1.0/24", help="Subnet to scan")
+def deploy_scan(subnet: str):
+    """Scan network for potential workers."""
+    manager = DeployManager()
+    found = manager.scan_network(subnet)
+    
+    if found:
+        console.print("\n[bold]Found potential workers:[/bold]")
+        for ip in found:
+            console.print(f"  • {ip}")
+        console.print(f"\nAdd with: [cyan]dc-overview deploy bulk[/cyan]")
+
+
 # Register commands
 main.add_command(setup)
 main.add_command(install_exporters)
@@ -330,6 +461,7 @@ main.add_command(logs)
 main.add_command(add_target)
 main.add_command(list_targets)
 main.add_command(generate_compose)
+main.add_command(deploy)
 
 
 if __name__ == "__main__":
