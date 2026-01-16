@@ -485,10 +485,11 @@ def configure_grafana(password: str):
     except Exception as e:
         console.print(f"[dim]Datasource may already exist[/dim]")
     
-    # Import dashboards from Grafana.com
+    # Import dashboards from Grafana.com and GitHub
     dashboards = [
         ("Node Exporter Full", "https://grafana.com/api/dashboards/1860/revisions/37/download"),
         ("NVIDIA DCGM", "https://grafana.com/api/dashboards/12239/revisions/2/download"),
+        ("Vast Dashboard", "https://raw.githubusercontent.com/jjziets/DCMontoring/main/Vast%20Dashboard-1692692563948.json"),
     ]
     
     for name, url in dashboards:
@@ -516,113 +517,7 @@ def configure_grafana(password: str):
             urllib.request.urlopen(req, timeout=30)
             console.print(f"[green]✓[/green] {name} dashboard imported")
         except Exception as e:
-            console.print(f"[yellow]⚠[/yellow] {name} dashboard: import manually from Grafana.com")
-    
-    # Import Vast.ai dashboard (bundled)
-    import_vastai_dashboard(grafana_url, auth_header)
-
-
-def import_vastai_dashboard(grafana_url: str, auth_header: str):
-    """Import the bundled Vast.ai Provider dashboard."""
-    import urllib.request
-    import json
-    
-    vastai_dashboard = {
-        "annotations": {"list": []},
-        "editable": True,
-        "panels": [
-            {
-                "datasource": {"type": "prometheus", "uid": ""},
-                "fieldConfig": {
-                    "defaults": {"unit": "currencyUSD", "thresholds": {"steps": [{"color": "red", "value": None}, {"color": "yellow", "value": 10}, {"color": "green", "value": 50}]}}
-                },
-                "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0},
-                "id": 1,
-                "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}},
-                "targets": [{"expr": "vastai_account_balance", "legendFormat": "Balance", "refId": "A"}],
-                "title": "💰 Account Balance",
-                "type": "stat"
-            },
-            {
-                "datasource": {"type": "prometheus", "uid": ""},
-                "fieldConfig": {
-                    "defaults": {"unit": "percentunit", "thresholds": {"steps": [{"color": "red", "value": None}, {"color": "yellow", "value": 0.9}, {"color": "green", "value": 0.95}]}}
-                },
-                "gridPos": {"h": 6, "w": 6, "x": 6, "y": 0},
-                "id": 2,
-                "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}},
-                "targets": [{"expr": "avg(vast_machine_Reliability)", "legendFormat": "Avg Reliability", "refId": "A"}],
-                "title": "⭐ Avg Reliability",
-                "type": "stat"
-            },
-            {
-                "datasource": {"type": "prometheus", "uid": ""},
-                "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color": "green", "value": None}]}}},
-                "gridPos": {"h": 6, "w": 6, "x": 12, "y": 0},
-                "id": 3,
-                "options": {"colorMode": "value", "graphMode": "none", "reduceOptions": {"calcs": ["lastNotNull"]}},
-                "targets": [{"expr": "sum(vast_machine_num_gpus)", "legendFormat": "Total GPUs", "refId": "A"}],
-                "title": "🎮 Total GPUs",
-                "type": "stat"
-            },
-            {
-                "datasource": {"type": "prometheus", "uid": ""},
-                "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color": "green", "value": None}]}}},
-                "gridPos": {"h": 6, "w": 6, "x": 18, "y": 0},
-                "id": 4,
-                "options": {"colorMode": "value", "graphMode": "none", "reduceOptions": {"calcs": ["lastNotNull"]}},
-                "targets": [{"expr": "count(vast_machine_id)", "legendFormat": "Machines", "refId": "A"}],
-                "title": "🖥️ Machines",
-                "type": "stat"
-            },
-            {
-                "datasource": {"type": "prometheus", "uid": ""},
-                "fieldConfig": {"defaults": {"unit": "currencyUSD"}},
-                "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
-                "id": 5,
-                "targets": [{"expr": "vastai_account_balance", "legendFormat": "Balance", "refId": "A"}],
-                "title": "💰 Balance Over Time",
-                "type": "timeseries"
-            },
-            {
-                "datasource": {"type": "prometheus", "uid": ""},
-                "fieldConfig": {"defaults": {"unit": "percentunit"}},
-                "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
-                "id": 6,
-                "targets": [{"expr": "vast_machine_Reliability", "legendFormat": "{{hostname}}", "refId": "A"}],
-                "title": "⭐ Reliability by Machine",
-                "type": "timeseries"
-            }
-        ],
-        "refresh": "30s",
-        "schemaVersion": 38,
-        "tags": ["vast.ai", "gpu", "hosting"],
-        "time": {"from": "now-6h", "to": "now"},
-        "title": "Vast.ai Provider Dashboard",
-        "uid": "vastai-provider"
-    }
-    
-    try:
-        import_data = json.dumps({
-            "dashboard": vastai_dashboard,
-            "overwrite": True,
-            "folderId": 0
-        }).encode('utf-8')
-        
-        req = urllib.request.Request(
-            f"{grafana_url}/api/dashboards/db",
-            data=import_data,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Basic {auth_header}"
-            },
-            method="POST"
-        )
-        
-        urllib.request.urlopen(req, timeout=30)
-        console.print(f"[green]✓[/green] Vast.ai Provider dashboard imported")
-    except Exception as e:
-        console.print(f"[dim]Vast.ai dashboard: will be available after vastai-exporter setup[/dim]")
+            console.print(f"[yellow]⚠[/yellow] {name} dashboard: import manually")
 
 
 def setup_master_native():
