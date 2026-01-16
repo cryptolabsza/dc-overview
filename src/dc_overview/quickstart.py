@@ -447,16 +447,148 @@ def add_machines_wizard():
     """Wizard to add other machines to monitor."""
     console.print(Panel(
         "[bold]Adding GPU Workers[/bold]\n\n"
-        "You'll need:\n"
-        "  • SSH access to your worker machines (password OR key)\n"
-        "  • The IP addresses of workers to monitor\n\n"
-        "[dim]The same credentials will be used for all workers.[/dim]",
+        "Choose how to add workers:\n"
+        "  • [cyan]Import file[/cyan] - Paste or load a simple text file\n"
+        "  • [cyan]Enter manually[/cyan] - Type IPs one by one",
         border_style="cyan"
     ))
     console.print()
     
-    # Get SSH credentials (one set for all workers)
-    console.print("[bold]SSH Credentials[/bold] (used for all workers)\n")
+    method = questionary.select(
+        "How do you want to add workers?",
+        choices=[
+            questionary.Choice("Import from file/paste (recommended for many servers)", value="import"),
+            questionary.Choice("Enter IPs manually", value="manual"),
+        ],
+        style=custom_style
+    ).ask()
+    
+    if method == "import":
+        machines = import_servers_from_text()
+    else:
+        machines = add_machines_manual()
+    
+    if not machines:
+        console.print("[yellow]No workers added.[/yellow]")
+        return
+    
+    # Update prometheus.yml with new machines
+    update_prometheus_targets(machines)
+    console.print(f"\n[green]✓[/green] Added {len(machines)} workers to Prometheus")
+
+
+def import_servers_from_text() -> List[Dict]:
+    """Import servers from a simple text format."""
+    console.print(Panel(
+        "[bold]Import Format[/bold]\n\n"
+        "[cyan]Option 1: Global credentials + IPs[/cyan]\n"
+        "  global:root,mypassword\n"
+        "  192.168.1.101\n"
+        "  192.168.1.102\n"
+        "  192.168.1.103\n\n"
+        "[cyan]Option 2: Per-server credentials[/cyan]\n"
+        "  192.168.1.101,root,pass1\n"
+        "  192.168.1.102,root,pass2\n"
+        "  192.168.1.103,ubuntu,pass3\n\n"
+        "[dim]Paste your list below, then press Enter twice.[/dim]",
+        border_style="cyan"
+    ))
+    
+    console.print("\n[bold]Paste your server list:[/bold]")
+    
+    lines = []
+    while True:
+        line = questionary.text("", style=custom_style).ask()
+        if not line or line.strip() == "":
+            break
+        lines.append(line.strip())
+    
+    if not lines:
+        return []
+    
+    return parse_server_list(lines)
+
+
+def parse_server_list(lines: List[str]) -> List[Dict]:
+    """Parse server list in various formats."""
+    machines = []
+    global_user = None
+    global_pass = None
+    global_key = None
+    
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        
+        # Check for global credentials
+        if line.lower().startswith("global:"):
+            parts = line[7:].split(",")
+            if len(parts) >= 2:
+                global_user = parts[0].strip()
+                global_pass = parts[1].strip()
+            elif len(parts) == 1 and parts[0].startswith("/"):
+                global_user = "root"
+                global_key = parts[0].strip()
+            continue
+        
+        # Parse server line
+        parts = [p.strip() for p in line.split(",")]
+        
+        if len(parts) == 1:
+            # Just IP - use global credentials
+            ip = parts[0]
+            user = global_user or "root"
+            password = global_pass
+            key_path = global_key
+        elif len(parts) == 2:
+            # IP, user - use global password
+            ip, user = parts[0], parts[1]
+            password = global_pass
+            key_path = global_key
+        elif len(parts) >= 3:
+            # IP, user, password
+            ip, user, password = parts[0], parts[1], parts[2]
+            key_path = None
+        else:
+            continue
+        
+        # Validate IP format (basic check)
+        if not ip or not any(c.isdigit() for c in ip):
+            continue
+        
+        name = f"gpu-{len(machines)+1:02d}"
+        
+        # Test if exporters already running
+        if test_machine_connection(ip):
+            console.print(f"[green]✓[/green] {name} ({ip}) - exporters already running")
+            machines.append({"name": name, "ip": ip})
+            continue
+        
+        # Try to install exporters remotely
+        console.print(f"[dim]Installing on {ip}...[/dim]", end=" ")
+        
+        success = install_exporters_remote(
+            ip=ip,
+            user=user,
+            password=password,
+            key_path=key_path,
+            port=22
+        )
+        
+        if success:
+            console.print(f"[green]✓[/green]")
+        else:
+            console.print(f"[yellow]⚠ manual install needed[/yellow]")
+        
+        machines.append({"name": name, "ip": ip})
+    
+    return machines
+
+
+def add_machines_manual() -> List[Dict]:
+    """Add machines by entering IPs manually with shared credentials."""
+    console.print("\n[bold]SSH Credentials[/bold] (used for all workers)\n")
     
     ssh_user = questionary.text(
         "SSH username:",
@@ -497,10 +629,9 @@ def add_machines_wizard():
     
     # Get list of worker IPs
     console.print("\n[bold]Worker IP Addresses[/bold]")
-    console.print("[dim]Enter one IP per line. Press Enter twice when done.[/dim]\n")
+    console.print("[dim]Enter one IP per line, or comma-separated. Blank line to finish.[/dim]\n")
     
     ips = []
-    console.print("[dim]Enter IP addresses (blank line to finish):[/dim]")
     
     while True:
         ip = questionary.text(
@@ -518,13 +649,11 @@ def add_machines_wizard():
                 ips.append(single_ip)
     
     if not ips:
-        console.print("[yellow]No workers added.[/yellow]")
-        return
+        return []
     
     console.print(f"\n[dim]Adding {len(ips)} workers...[/dim]\n")
     
     machines = []
-    config_dir = Path("/etc/dc-overview")
     
     for i, ip in enumerate(ips):
         name = f"gpu-{i+1:02d}"
@@ -536,7 +665,7 @@ def add_machines_wizard():
             continue
         
         # Try to install exporters remotely
-        console.print(f"[dim]Installing exporters on {ip}...[/dim]")
+        console.print(f"[dim]Installing on {ip}...[/dim]", end=" ")
         
         success = install_exporters_remote(
             ip=ip,
@@ -547,17 +676,13 @@ def add_machines_wizard():
         )
         
         if success:
-            console.print(f"[green]✓[/green] {name} ({ip}) - exporters installed")
+            console.print(f"[green]✓[/green]")
         else:
-            console.print(f"[yellow]⚠[/yellow] {name} ({ip}) - manual install needed")
-            console.print(f"    [dim]SSH to {ip} and run: pip install dc-overview && sudo dc-overview quickstart[/dim]")
+            console.print(f"[yellow]⚠ manual install needed[/yellow]")
         
         machines.append({"name": name, "ip": ip})
     
-    # Update prometheus.yml with new machines
-    if machines:
-        update_prometheus_targets(machines)
-        console.print(f"\n[green]✓[/green] Added {len(machines)} workers to Prometheus")
+    return machines
 
 
 def test_machine_connection(ip: str, port: int = 9100) -> bool:
