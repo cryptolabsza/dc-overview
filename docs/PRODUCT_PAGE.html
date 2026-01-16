@@ -1,0 +1,524 @@
+<!-- DC-Overview Product Page - WordPress Embed -->
+<!-- Copy everything between the style tags and the closing div -->
+
+<style>
+.dc-overview-page {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+    line-height: 1.6;
+    color: #333;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.dc-overview-page h1 {
+    font-size: 2.5em;
+    color: #1a1a2e;
+    margin-bottom: 0.5em;
+    text-align: center;
+}
+
+.dc-overview-page h2 {
+    font-size: 1.8em;
+    color: #16213e;
+    border-bottom: 2px solid #0f3460;
+    padding-bottom: 0.3em;
+    margin-top: 2em;
+}
+
+.dc-overview-page h3 {
+    font-size: 1.3em;
+    color: #0f3460;
+    margin-top: 1.5em;
+}
+
+.dc-overview-page .hero {
+    text-align: center;
+    padding: 40px 20px;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    color: white;
+    border-radius: 12px;
+    margin-bottom: 40px;
+}
+
+.dc-overview-page .hero h1 {
+    color: white;
+    font-size: 2.8em;
+    margin-bottom: 0.3em;
+}
+
+.dc-overview-page .hero .tagline {
+    font-size: 1.4em;
+    opacity: 0.9;
+    margin-bottom: 1.5em;
+}
+
+.dc-overview-page .hero .cta-buttons {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.dc-overview-page .btn {
+    display: inline-block;
+    padding: 12px 28px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.dc-overview-page .btn-primary {
+    background: #e94560;
+    color: white;
+}
+
+.dc-overview-page .btn-primary:hover {
+    background: #d63850;
+    transform: translateY(-2px);
+}
+
+.dc-overview-page .btn-secondary {
+    background: transparent;
+    color: white;
+    border: 2px solid white;
+}
+
+.dc-overview-page .btn-secondary:hover {
+    background: rgba(255,255,255,0.1);
+}
+
+.dc-overview-page .dashboard-img {
+    width: 100%;
+    max-width: 100%;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    margin: 20px 0;
+}
+
+.dc-overview-page .features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 25px;
+    margin: 30px 0;
+}
+
+.dc-overview-page .feature-card {
+    background: #f8f9fa;
+    padding: 25px;
+    border-radius: 10px;
+    border-left: 4px solid #0f3460;
+}
+
+.dc-overview-page .feature-card h3 {
+    margin-top: 0;
+    color: #0f3460;
+}
+
+.dc-overview-page .feature-card ul {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.dc-overview-page .feature-card li {
+    margin-bottom: 8px;
+}
+
+.dc-overview-page .gpu-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+}
+
+.dc-overview-page .gpu-table th,
+.dc-overview-page .gpu-table td {
+    padding: 12px 15px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+
+.dc-overview-page .gpu-table th {
+    background: #0f3460;
+    color: white;
+}
+
+.dc-overview-page .gpu-table tr:hover {
+    background: #f5f5f5;
+}
+
+.dc-overview-page .check {
+    color: #28a745;
+    font-weight: bold;
+}
+
+.dc-overview-page .pricing-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 30px;
+    margin: 30px 0;
+}
+
+.dc-overview-page .pricing-card {
+    background: white;
+    border: 2px solid #e0e0e0;
+    border-radius: 12px;
+    padding: 30px;
+    text-align: center;
+}
+
+.dc-overview-page .pricing-card.featured {
+    border-color: #0f3460;
+    box-shadow: 0 4px 20px rgba(15, 52, 96, 0.15);
+}
+
+.dc-overview-page .pricing-card h3 {
+    font-size: 1.5em;
+    margin-top: 0;
+}
+
+.dc-overview-page .pricing-card .price {
+    font-size: 2.5em;
+    color: #0f3460;
+    margin: 15px 0;
+}
+
+.dc-overview-page .pricing-card ul {
+    text-align: left;
+    padding-left: 20px;
+    margin: 20px 0;
+}
+
+.dc-overview-page .pricing-card li {
+    margin-bottom: 10px;
+}
+
+.dc-overview-page .code-block {
+    background: #1a1a2e;
+    color: #e0e0e0;
+    padding: 20px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.9em;
+    margin: 15px 0;
+}
+
+.dc-overview-page .related-products {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    margin: 30px 0;
+}
+
+.dc-overview-page .product-card {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 8px;
+    text-align: center;
+}
+
+.dc-overview-page .product-card h4 {
+    color: #0f3460;
+    margin-top: 0;
+}
+
+.dc-overview-page .architecture-diagram {
+    background: #1a1a2e;
+    color: #e0e0e0;
+    padding: 20px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.85em;
+    white-space: pre;
+    line-height: 1.4;
+}
+
+.dc-overview-page .highlight {
+    background: #fff3cd;
+    padding: 15px 20px;
+    border-radius: 6px;
+    border-left: 4px solid #ffc107;
+    margin: 20px 0;
+}
+
+.dc-overview-page .support-links {
+    display: flex;
+    gap: 30px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin: 30px 0;
+}
+
+.dc-overview-page .support-links a {
+    color: #0f3460;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.dc-overview-page .support-links a:hover {
+    text-decoration: underline;
+}
+</style>
+
+<div class="dc-overview-page">
+    <!-- Hero Section -->
+    <div class="hero">
+        <h1>DC-Overview</h1>
+        <p class="tagline">Complete GPU Datacenter Monitoring</p>
+        <p>See everything. Miss nothing. Keep your GPUs healthy and your revenue flowing.</p>
+        <div class="cta-buttons">
+            <a href="https://github.com/cryptolabsza/dc-overview" class="btn btn-primary">Get Started Free</a>
+            <a href="#documentation" class="btn btn-secondary">View Documentation</a>
+        </div>
+    </div>
+
+    <!-- Main Dashboard Image -->
+    <h2>Your GPU Datacenter, At a Glance</h2>
+    <img src="https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/docs/images/grafana-overview.png" alt="DC-Overview Dashboard" class="dashboard-img">
+    
+    <p>DC-Overview is the monitoring solution built specifically for GPU datacenters. Whether you're running 4 GPUs or 400, DC-Overview gives you the visibility you need to:</p>
+    
+    <ul>
+        <li><strong>Prevent failures</strong> before they cost you money</li>
+        <li><strong>Optimize performance</strong> with real-time metrics</li>
+        <li><strong>Maximize uptime</strong> with intelligent alerting</li>
+        <li><strong>Track revenue</strong> with Vast.ai/RunPod integration</li>
+    </ul>
+
+    <!-- Key Features -->
+    <h2>Key Features</h2>
+    
+    <div class="features-grid">
+        <div class="feature-card">
+            <h3>GPU Health Monitoring</h3>
+            <ul>
+                <li><strong>VRAM Temperature</strong> - The metric other tools miss</li>
+                <li><strong>GPU Hotspot Temperature</strong> - Catch thermal throttling early</li>
+                <li><strong>Fan Speeds</strong> - Ensure cooling is working</li>
+                <li><strong>Power Draw</strong> - Track actual consumption</li>
+                <li><strong>Thermal Throttle Events</strong> - Know when GPUs slow down</li>
+            </ul>
+        </div>
+        
+        <div class="feature-card">
+            <h3>System Metrics</h3>
+            <ul>
+                <li>CPU utilization and temperature</li>
+                <li>Memory usage</li>
+                <li>Disk I/O and capacity</li>
+                <li>Network throughput</li>
+                <li>Container metrics (optional)</li>
+            </ul>
+        </div>
+        
+        <div class="feature-card">
+            <h3>Vast.ai Integration</h3>
+            <ul>
+                <li><strong>Pending Payouts</strong> - Track your earnings</li>
+                <li><strong>Income per Hour/Day</strong> - Revenue metrics</li>
+                <li><strong>Machine Reliability</strong> - Performance scores</li>
+                <li><strong>Utilization Rates</strong> - Maximize ROI</li>
+            </ul>
+        </div>
+        
+        <div class="feature-card">
+            <h3>Enterprise Security</h3>
+            <ul>
+                <li><strong>HTTPS by default</strong> - Self-signed or Let's Encrypt</li>
+                <li><strong>Nginx reverse proxy</strong> - Secure access control</li>
+                <li><strong>Authentication</strong> - Grafana user management</li>
+                <li><strong>Internal-only services</strong> - Prometheus never exposed</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- GPU Temps Dashboard -->
+    <h3>GPU Temperature Dashboard</h3>
+    <img src="https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/docs/images/grafana-gpu-temps.png" alt="GPU Temperature Monitoring" class="dashboard-img">
+
+    <!-- Architecture -->
+    <h2>Architecture</h2>
+    <div class="architecture-diagram">┌─────────────────────────────────────────────────────────────┐
+│                     MASTER SERVER                           │
+│  ┌──────────┐  ┌────────────┐  ┌──────────────────────────┐ │
+│  │ Grafana  │  │ Prometheus │  │ Optional: ipmi-monitor,  │ │
+│  │ (UI)     │  │ (metrics)  │  │ vastai-exporter, etc.    │ │
+│  └──────────┘  └────────────┘  └──────────────────────────┘ │
+│       ↑              ↑                                      │
+│       └──────────────┼──────────────────────────────────────┤
+│                      │ scrapes metrics                      │
+└──────────────────────┼──────────────────────────────────────┘
+                       │
+        ┌──────────────┼──────────────┐
+        │              │              │
+        ▼              ▼              ▼
+┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+│ GPU Worker 1 │ │ GPU Worker 2 │ │ GPU Worker N │
+│ • node_exp   │ │ • node_exp   │ │ • node_exp   │
+│ • dcgm-exp   │ │ • dcgm-exp   │ │ • dcgm-exp   │
+│ • dc-exporter│ │ • dc-exporter│ │ • dc-exporter│
+│ Ports: 9100, │ │ Ports: 9100, │ │ Ports: 9100, │
+│ 9400, 9500   │ │ 9400, 9500   │ │ 9400, 9500   │
+└──────────────┘ └──────────────┘ └──────────────┘</div>
+    
+    <div class="highlight">
+        <strong>No containers on GPU workers</strong> - Native systemd services only. Works with RunPod, Vast.ai, and any environment.
+    </div>
+
+    <!-- Quick Installation -->
+    <h2>Quick Installation</h2>
+    
+    <h3>Master Server (5 minutes)</h3>
+    <div class="code-block">
+git clone https://github.com/cryptolabsza/dc-overview.git
+cd dc-overview/server
+cp .env.example .env && nano .env
+docker compose up -d
+    </div>
+    
+    <h3>GPU Workers (2 minutes each)</h3>
+    <div class="code-block">
+# Install node_exporter, dcgm-exporter, and dc-exporter
+# See full installation guide in documentation
+    </div>
+    
+    <p><strong>That's it.</strong> Your monitoring is live.</p>
+
+    <!-- Supported GPUs -->
+    <h2>Supported GPUs</h2>
+    <table class="gpu-table">
+        <thead>
+            <tr>
+                <th>GPU</th>
+                <th>VRAM Temp</th>
+                <th>Hotspot</th>
+                <th>Fan</th>
+                <th>Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>RTX 4090</td>
+                <td class="check">✓</td>
+                <td class="check">✓</td>
+                <td class="check">✓</td>
+                <td>Full support</td>
+            </tr>
+            <tr>
+                <td>RTX 4080/4070</td>
+                <td class="check">✓</td>
+                <td class="check">✓</td>
+                <td class="check">✓</td>
+                <td>Full support</td>
+            </tr>
+            <tr>
+                <td>RTX 3090/3080</td>
+                <td class="check">✓</td>
+                <td class="check">✓</td>
+                <td class="check">✓</td>
+                <td>Full support</td>
+            </tr>
+            <tr>
+                <td>RTX A6000</td>
+                <td class="check">✓</td>
+                <td class="check">✓</td>
+                <td class="check">✓</td>
+                <td>Workstation</td>
+            </tr>
+            <tr>
+                <td>A100</td>
+                <td class="check">✓</td>
+                <td class="check">✓</td>
+                <td>-</td>
+                <td>Datacenter (chassis cooling)</td>
+            </tr>
+            <tr>
+                <td>H100</td>
+                <td class="check">✓</td>
+                <td class="check">✓</td>
+                <td>-</td>
+                <td>Datacenter (chassis cooling)</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <!-- Pricing -->
+    <h2>Pricing</h2>
+    <div class="pricing-grid">
+        <div class="pricing-card featured">
+            <h3>Open Source</h3>
+            <div class="price">Free</div>
+            <ul>
+                <li>Full monitoring stack</li>
+                <li>All dashboards included</li>
+                <li>Community support</li>
+                <li>Self-hosted</li>
+                <li>MIT License</li>
+            </ul>
+            <a href="https://github.com/cryptolabsza/dc-overview" class="btn btn-primary">Download on GitHub</a>
+        </div>
+        
+        <div class="pricing-card">
+            <h3>Managed Service</h3>
+            <div class="price">Coming Soon</div>
+            <ul>
+                <li>Hosted Grafana</li>
+                <li>No infrastructure to maintain</li>
+                <li>Email/Telegram alerts</li>
+                <li>Priority support</li>
+                <li>SLA guarantee</li>
+            </ul>
+            <a href="mailto:sales@cryptolabs.co.za?subject=DC-Overview%20Managed%20Service%20Waitlist" class="btn btn-secondary" style="color: #0f3460; border-color: #0f3460;">Join Waitlist</a>
+        </div>
+    </div>
+
+    <!-- Documentation -->
+    <h2 id="documentation">Documentation</h2>
+    <ul>
+        <li><a href="https://github.com/cryptolabsza/dc-overview#readme">Full Setup Guide</a></li>
+        <li><a href="https://github.com/cryptolabsza/dc-overview#prometheus-configuration">Prometheus Configuration</a></li>
+        <li><a href="https://github.com/cryptolabsza/dc-overview#gpu-worker-setup">GPU Worker Setup</a></li>
+        <li><a href="https://github.com/cryptolabsza/dc-overview#nginx--ssl-setup-required">SSL/HTTPS Setup</a></li>
+        <li><a href="https://github.com/cryptolabsza/dc-overview#troubleshooting">Troubleshooting</a></li>
+    </ul>
+
+    <!-- Related Products -->
+    <h2>Related Products</h2>
+    <div class="related-products">
+        <div class="product-card">
+            <h4>dc-exporter</h4>
+            <p>VRAM temperature exporter for Prometheus. The secret sauce that makes DC-Overview see what others can't.</p>
+            <a href="https://github.com/cryptolabsza/dc-exporter" class="btn btn-secondary" style="color: #0f3460; border-color: #0f3460; padding: 8px 16px;">Learn More →</a>
+        </div>
+        
+        <div class="product-card">
+            <h4>ipmi-monitor</h4>
+            <p>Monitor server BMCs, power status, and hardware events. AI-powered insights for proactive maintenance.</p>
+            <a href="https://github.com/cryptolabsza/ipmi-monitor" class="btn btn-secondary" style="color: #0f3460; border-color: #0f3460; padding: 8px 16px;">Learn More →</a>
+        </div>
+        
+        <div class="product-card">
+            <h4>dc-watchdog</h4>
+            <p>External uptime monitoring. Know when your datacenter goes offline before your customers do.</p>
+            <a href="https://github.com/cryptolabsza/dc-watchdog" class="btn btn-secondary" style="color: #0f3460; border-color: #0f3460; padding: 8px 16px;">Learn More →</a>
+        </div>
+    </div>
+
+    <!-- Support -->
+    <h2 id="support">Support</h2>
+    <div class="support-links">
+        <a href="https://discord.gg/cryptolabs">Discord Community</a>
+        <a href="mailto:support@cryptolabs.co.za">Email Support</a>
+        <a href="https://github.com/cryptolabsza/dc-overview/issues">GitHub Issues</a>
+    </div>
+
+    <!-- About -->
+    <h2>About CryptoLabs</h2>
+    <p>CryptoLabs builds infrastructure tools for GPU datacenter operators. We run our own GPU clusters and build the tools we wish existed.</p>
+    <p><a href="https://cryptolabs.co.za">cryptolabs.co.za</a></p>
+    
+    <hr>
+    <p style="text-align: center; color: #666; font-size: 0.9em;"><em>DC-Overview is open source software released under the MIT license.</em></p>
+</div>

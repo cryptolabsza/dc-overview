@@ -4,13 +4,13 @@
 
 **See everything. Miss nothing. Keep your GPUs healthy and your revenue flowing.**
 
-[Get Started](https://github.com/cryptolabsza/dc-overview) | [Documentation](#documentation) | [Support](#support)
+[Get Started Free](https://github.com/cryptolabsza/dc-overview) | [Documentation](#documentation) | [Support](#support)
 
 ---
 
 ## Your GPU Datacenter, At a Glance
 
-![DC-Overview Dashboard](images/grafana-overview.png)
+![DC-Overview Dashboard](https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/docs/images/grafana-overview.png)
 
 DC-Overview is the monitoring solution built specifically for GPU datacenters. Whether you're running 4 GPUs or 400, DC-Overview gives you the visibility you need to:
 
@@ -25,7 +25,7 @@ DC-Overview is the monitoring solution built specifically for GPU datacenters. W
 
 ### GPU Health Monitoring
 
-![GPU Temperatures](images/grafana-gpu-temps.png)
+![GPU Temperatures](https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/docs/images/grafana-gpu-temps.png)
 
 Monitor what matters:
 - **VRAM Temperature** - The metric other tools miss

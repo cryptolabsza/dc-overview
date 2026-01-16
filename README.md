@@ -12,19 +12,33 @@ Complete monitoring solution for GPU datacenters with Prometheus, Grafana, and A
 
 ## 🚀 Quick Start
 
-### Option 1: pip install (Recommended)
+### Option 1: One-Command Deployment (Recommended)
 
-The easiest way - interactive setup wizard guides you through everything.
+Deploy your entire GPU datacenter from the master server:
+
+```bash
+# On MASTER server - install and run deployment wizard
+pip install dc-overview
+dc-overview deploy wizard
+```
+
+The wizard will:
+1. **Add workers** - Enter IPs one by one, bulk paste, import CSV, or scan network
+2. **Deploy SSH keys** - Generate keys and deploy to workers using password
+3. **Install exporters** - Remotely install node_exporter, dcgm-exporter, dc-exporter
+4. **Generate Prometheus config** - Auto-create prometheus.yml with all targets
+
+### Option 2: Manual Setup
 
 ```bash
 # Install
 pip install dc-overview
 
 # For MASTER server (Prometheus + Grafana)
-sudo dc-overview setup master --install-services
+dc-overview setup master --install-services
 
 # For GPU WORKER nodes (exporters only)
-sudo dc-overview setup worker --install-services
+dc-overview setup worker --install-services
 ```
 
 **What the setup wizard does:**
@@ -40,6 +54,51 @@ For faster deployment across many machines:
 
 ```bash
 mkdir -p ~/.config/dc-overview
+```
+
+### Bulk Add Workers
+
+```bash
+# Interactive bulk add - paste IPs one per line
+dc-overview deploy bulk
+```
+
+```
+╭──────────────── Bulk Add Workers ────────────────╮
+│ Enter workers one per line in format:            │
+│ ip,name,user,port (name, user, port optional)    │
+│                                                  │
+│ Examples:                                        │
+│   192.168.1.101                                  │
+│   192.168.1.102,gpu-worker-02                    │
+│   192.168.1.103,gpu-worker-03,root,22            │
+│                                                  │
+│ Enter empty line when done.                      │
+╰──────────────────────────────────────────────────╯
+Worker: 192.168.1.101
+  ✓ Added: worker-101 (192.168.1.101)
+Worker: 192.168.1.102,gpu-02
+  ✓ Added: gpu-02 (192.168.1.102)
+Worker: 
+
+Deploy SSH keys to these workers? [Y/n]: y
+Enter SSH password (same for all): ********
+Deploying SSH key to worker-101 (192.168.1.101)...
+✓ SSH key deployed to worker-101
+```
+
+### CSV Import
+
+```bash
+dc-overview deploy bulk --csv workers.csv
+```
+
+**workers.csv:**
+```csv
+name,ip,ssh_user,ssh_port,ssh_password
+gpu-worker-01,192.168.1.101,root,22,mypassword
+gpu-worker-02,192.168.1.102,root,22,mypassword
+gpu-worker-03,192.168.1.103,root,22,mypassword
 ```
 
 **~/.config/dc-overview/config.yaml:**
@@ -80,23 +139,31 @@ dc-overview setup worker --non-interactive --install-services
 ### CLI Commands
 
 ```bash
-# Setup
+# === DEPLOY (from master - manages entire fleet) ===
+dc-overview deploy wizard          # Interactive deployment wizard
+dc-overview deploy add             # Add a worker interactively
+dc-overview deploy bulk            # Bulk add workers (paste IPs or CSV)
+dc-overview deploy list            # List all workers with status
+dc-overview deploy install         # Install exporters on all workers
+dc-overview deploy install -w wk01 # Install on specific worker
+dc-overview deploy ssh-key --generate  # Generate new SSH key
+dc-overview deploy scan            # Scan network for workers
+
+# === SETUP (on individual machines) ===
 dc-overview setup master           # Interactive master setup
 dc-overview setup worker           # Interactive worker setup
 dc-overview setup --non-interactive  # Use config files
 
-# Exporters (workers)
+# === EXPORTERS (install locally) ===
 dc-overview install-exporters      # Install all exporters
 dc-overview install-exporters --no-dcgm-exporter  # Skip GPU exporter
 
-# Prometheus targets (master)
+# === PROMETHEUS (manage targets) ===
 dc-overview add-target 192.168.1.101 --name gpu-worker-01
 dc-overview list-targets
-
-# Docker compose (master)
 dc-overview generate-compose       # Generate docker-compose.yml
 
-# Status
+# === STATUS ===
 dc-overview status                 # Show service status
 dc-overview logs -f                # Follow logs
 ```
