@@ -367,6 +367,9 @@ def setup_master_docker():
         style=custom_style
     ).ask() or "admin"
     
+    # Save password for later use
+    (config_dir / ".grafana_pass").write_text(grafana_pass)
+    
     # Create docker-compose.yml
     compose = f"""version: '3.8'
 services:
@@ -432,8 +435,88 @@ scrape_configs:
         console.print("[green]✓[/green] Prometheus running on port 9090")
         console.print("[green]✓[/green] Grafana running on port 3000")
         console.print(f"[dim]  Login: admin / {grafana_pass}[/dim]")
+        
+        # Configure Grafana
+        configure_grafana(grafana_pass)
     else:
         console.print(f"[red]Error starting services:[/red] {result.stderr.decode()[:200]}")
+
+
+def configure_grafana(password: str):
+    """Configure Grafana with Prometheus datasource and dashboards."""
+    import time
+    import urllib.request
+    import json
+    
+    console.print("[dim]Configuring Grafana...[/dim]")
+    
+    # Wait for Grafana to start
+    time.sleep(5)
+    
+    grafana_url = "http://localhost:3000"
+    auth = f"admin:{password}"
+    auth_bytes = auth.encode('utf-8')
+    
+    import base64
+    auth_header = base64.b64encode(auth_bytes).decode('utf-8')
+    
+    # Add Prometheus datasource
+    try:
+        datasource_data = json.dumps({
+            "name": "Prometheus",
+            "type": "prometheus",
+            "url": "http://prometheus:9090",
+            "access": "proxy",
+            "isDefault": True
+        }).encode('utf-8')
+        
+        req = urllib.request.Request(
+            f"{grafana_url}/api/datasources",
+            data=datasource_data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Basic {auth_header}"
+            },
+            method="POST"
+        )
+        
+        urllib.request.urlopen(req, timeout=10)
+        console.print("[green]✓[/green] Prometheus datasource added")
+    except Exception as e:
+        console.print(f"[dim]Datasource may already exist[/dim]")
+    
+    # Import dashboards
+    dashboards = [
+        ("Node Exporter Full", "https://grafana.com/api/dashboards/1860/revisions/37/download"),
+        ("NVIDIA DCGM", "https://grafana.com/api/dashboards/12239/revisions/2/download"),
+    ]
+    
+    for name, url in dashboards:
+        try:
+            # Download dashboard JSON
+            dashboard_json = urllib.request.urlopen(url, timeout=30).read().decode('utf-8')
+            
+            # Import to Grafana
+            import_data = json.dumps({
+                "dashboard": json.loads(dashboard_json),
+                "overwrite": True,
+                "folderId": 0
+            }).encode('utf-8')
+            
+            req = urllib.request.Request(
+                f"{grafana_url}/api/dashboards/db",
+                data=import_data,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Basic {auth_header}"
+                },
+                method="POST"
+            )
+            
+            urllib.request.urlopen(req, timeout=30)
+            console.print(f"[green]✓[/green] {name} dashboard imported")
+        except Exception as e:
+            console.print(f"[yellow]⚠[/yellow] {name} dashboard: import manually from Grafana.com")
 
 
 def setup_master_native():
