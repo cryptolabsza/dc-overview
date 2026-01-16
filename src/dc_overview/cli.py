@@ -453,6 +453,48 @@ def deploy_scan(subnet: str):
         console.print(f"\nAdd with: [cyan]dc-overview deploy bulk[/cyan]")
 
 
+@deploy.command("vast")
+@click.option("--api-key", "-k", help="Vast.ai API key")
+@click.option("--status", is_flag=True, help="Check Vast.ai exporter status")
+def deploy_vast(api_key: str, status: bool):
+    """Set up Vast.ai exporter for earnings/reliability metrics.
+    
+    Get your API key from: https://cloud.vast.ai/account/
+    
+    \b
+    EXAMPLES:
+        dc-overview deploy vast                    # Interactive setup
+        dc-overview deploy vast --api-key KEY     # Direct setup
+        dc-overview deploy vast --status          # Check status
+    """
+    manager = DeployManager()
+    
+    if status:
+        vast_status = manager.check_vast_exporter_status()
+        
+        table = Table(title="Vast.ai Exporter Status")
+        table.add_column("Setting")
+        table.add_column("Value")
+        
+        table.add_row("Configured", "✓ Yes" if vast_status["configured"] else "✗ No")
+        table.add_row("API Key Set", "✓ Yes" if vast_status["api_key_set"] else "✗ No")
+        table.add_row("Container Running", "[green]✓ Running[/green]" if vast_status["running"] else "[red]✗ Stopped[/red]")
+        
+        if vast_status["running"]:
+            table.add_row("Metrics URL", "http://localhost:8622/metrics")
+        
+        console.print(table)
+        return
+    
+    if not api_key:
+        console.print("[dim]Get your API key from: https://cloud.vast.ai/account/[/dim]\n")
+        import questionary
+        api_key = questionary.password("Vast.ai API Key:").ask()
+    
+    if api_key:
+        manager.setup_vast_exporter(api_key)
+
+
 # Register commands
 main.add_command(setup)
 main.add_command(install_exporters)

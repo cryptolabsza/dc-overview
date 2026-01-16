@@ -50,6 +50,13 @@ class Worker:
     status: str = "unknown"
 
 
+@dataclass
+class VastConfig:
+    """Vast.ai exporter configuration."""
+    enabled: bool = False
+    api_key: Optional[str] = None
+
+
 class DeployManager:
     """Manages deployment of dc-overview components to workers."""
     
@@ -63,7 +70,9 @@ class DeployManager:
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.ssh_key_path = self.config_dir / "deploy_key"
         self.workers: List[Worker] = []
+        self.vast_config = VastConfig()
         self._load_workers()
+        self._load_vast_config()
     
     def _load_workers(self):
         """Load workers from config file."""
@@ -73,6 +82,34 @@ class DeployManager:
                 data = yaml.safe_load(f) or {}
                 for w in data.get("workers", []):
                     self.workers.append(Worker(**w))
+    
+    def _load_vast_config(self):
+        """Load Vast.ai configuration."""
+        config_file = self.config_dir / "config.yaml"
+        if config_file.exists():
+            with open(config_file) as f:
+                data = yaml.safe_load(f) or {}
+                if data.get("vast_api_key"):
+                    self.vast_config.enabled = True
+                    self.vast_config.api_key = data.get("vast_api_key")
+    
+    def _save_vast_config(self):
+        """Save Vast.ai configuration."""
+        config_file = self.config_dir / "config.yaml"
+        
+        # Load existing config
+        data = {}
+        if config_file.exists():
+            with open(config_file) as f:
+                data = yaml.safe_load(f) or {}
+        
+        # Update vast config
+        if self.vast_config.enabled and self.vast_config.api_key:
+            data["vast_api_key"] = self.vast_config.api_key
+        
+        with open(config_file, "w") as f:
+            yaml.dump(data, f, default_flow_style=False)
+        os.chmod(config_file, 0o600)
     
     def _save_workers(self):
         """Save workers to config file."""
@@ -342,6 +379,84 @@ class DeployManager:
         console.print(f"[green]✓[/green] Exporters installed on {worker.name}")
         return True
     
+    # ============ Vast.ai Exporter ============
+    
+    def setup_vast_exporter(self, api_key: Optional[str] = None) -> bool:
+        """Set up Vast.ai exporter on the master server."""
+        if api_key:
+            self.vast_config.api_key = api_key
+            self.vast_config.enabled = True
+            self._save_vast_config()
+        
+        if not self.vast_config.api_key:
+            console.print("[yellow]No Vast.ai API key configured.[/yellow]")
+            return False
+        
+        console.print("\n[bold cyan]Setting up Vast.ai Exporter[/bold cyan]")
+        console.print("[dim]This exposes your Vast.ai earnings, reliability, and machine metrics[/dim]\n")
+        
+        # Check if Docker is available
+        try:
+            result = subprocess.run(["docker", "--version"], capture_output=True, text=True)
+            if result.returncode != 0:
+                console.print("[red]Docker not installed.[/red] Install Docker first.")
+                return False
+        except FileNotFoundError:
+            console.print("[red]Docker not installed.[/red] Install Docker first.")
+            return False
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console
+        ) as progress:
+            task = progress.add_task("Starting Vast.ai exporter...", total=None)
+            
+            # Stop existing container if any
+            subprocess.run(
+                ["docker", "rm", "-f", "vastai-exporter"],
+                capture_output=True
+            )
+            
+            # Start new container
+            result = subprocess.run([
+                "docker", "run", "-d",
+                "--name", "vastai-exporter",
+                "--restart", "unless-stopped",
+                "-p", "127.0.0.1:8622:8622",
+                "jjziets/vastai-exporter:latest",
+                "-api-key", self.vast_config.api_key
+            ], capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                progress.update(task, description="[green]✓[/green] Vast.ai exporter started")
+                console.print(f"[green]✓[/green] Vast.ai exporter running on port 8622")
+                console.print("[dim]  Metrics at: http://localhost:8622/metrics[/dim]")
+                return True
+            else:
+                progress.update(task, description="[red]✗[/red] Failed to start")
+                console.print(f"[red]Error:[/red] {result.stderr[:200]}")
+                return False
+    
+    def check_vast_exporter_status(self) -> Dict[str, Any]:
+        """Check if Vast.ai exporter is running."""
+        status = {
+            "configured": self.vast_config.enabled,
+            "running": False,
+            "api_key_set": bool(self.vast_config.api_key),
+        }
+        
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", "vastai-exporter", "--format", "{{.State.Running}}"],
+                capture_output=True, text=True
+            )
+            status["running"] = result.returncode == 0 and "true" in result.stdout.lower()
+        except Exception:
+            pass
+        
+        return status
+    
     def check_worker_status(self, worker: Worker) -> Dict[str, Any]:
         """Check status of exporters on a worker."""
         status = {
@@ -589,8 +704,33 @@ def deploy_wizard():
     if manager.workers and Confirm.ask("\nDeploy exporters to all workers?", default=True):
         manager.deploy_to_all_workers()
     
-    # Step 3: Generate Prometheus config
-    console.print("\n[bold]Step 3: Prometheus Configuration[/bold]")
+    # Step 3: Vast.ai Exporter (optional)
+    console.print("\n[bold]Step 3: Vast.ai Integration (Optional)[/bold]")
+    console.print("[dim]If you're a Vast.ai provider, this shows earnings and reliability metrics[/dim]")
+    
+    vast_status = manager.check_vast_exporter_status()
+    
+    if vast_status["running"]:
+        console.print("[green]✓[/green] Vast.ai exporter already running")
+    else:
+        setup_vast = questionary.confirm(
+            "Set up Vast.ai exporter?",
+            default=False,
+            style=custom_style
+        ).ask()
+        
+        if setup_vast:
+            console.print("\n[dim]Get your API key from: https://cloud.vast.ai/account/[/dim]")
+            vast_key = questionary.password(
+                "Vast.ai API Key:",
+                style=custom_style
+            ).ask()
+            
+            if vast_key:
+                manager.setup_vast_exporter(vast_key)
+    
+    # Step 4: Generate Prometheus config
+    console.print("\n[bold]Step 4: Prometheus Configuration[/bold]")
     
     if manager.workers:
         from .config import PrometheusConfig
@@ -609,6 +749,11 @@ def deploy_wizard():
             
             if ports:
                 prom_config.add_target(worker.ip, worker.name, ports)
+        
+        # Add Vast.ai exporter if configured
+        vast_status = manager.check_vast_exporter_status()
+        if vast_status["running"]:
+            prom_config.add_target("localhost", "vastai-exporter", [8622])
         
         prom_config.save()
         console.print(f"[green]✓[/green] Prometheus config saved to {manager.config_dir}/prometheus.yml")
