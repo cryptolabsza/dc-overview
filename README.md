@@ -148,6 +148,8 @@ dc-overview deploy install         # Install exporters on all workers
 dc-overview deploy install -w wk01 # Install on specific worker
 dc-overview deploy ssh-key --generate  # Generate new SSH key
 dc-overview deploy scan            # Scan network for workers
+dc-overview deploy vast            # Set up Vast.ai exporter
+dc-overview deploy vast --status   # Check Vast.ai exporter status
 
 # === SETUP (on individual machines) ===
 dc-overview setup master           # Interactive master setup
@@ -344,6 +346,34 @@ docker exec prometheus kill -HUP 1
 
 - **Grafana**: http://localhost:3000 (default: admin / your-password)
 - **Prometheus**: http://localhost:9090 (internal only)
+
+---
+
+## 💰 Vast.ai Integration (For Providers)
+
+If you're a Vast.ai provider, add the Vast.ai exporter to monitor:
+- **Earnings** - Daily, weekly, monthly income
+- **Reliability score** - Uptime percentage
+- **Machine status** - Online/offline, utilization
+- **Rental history** - Current and past rentals
+
+```bash
+# Set up interactively
+dc-overview deploy vast
+
+# Or with API key directly
+dc-overview deploy vast --api-key YOUR_VAST_API_KEY
+
+# Check status
+dc-overview deploy vast --status
+```
+
+**Get your API key from:** https://cloud.vast.ai/account/
+
+The wizard will automatically:
+- Start the `vastai-exporter` Docker container
+- Add it to your Prometheus targets
+- Expose metrics on port 8622
 
 ---
 
