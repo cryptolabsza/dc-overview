@@ -8,6 +8,6 @@ A comprehensive monitoring solution for GPU datacenters with:
 - Vast.ai integration
 """
 
-__version__ = "1.0.4"
+__version__ = "1.0.8"
 __author__ = "CryptoLabs"
 __email__ = "info@cryptolabs.co.za"
