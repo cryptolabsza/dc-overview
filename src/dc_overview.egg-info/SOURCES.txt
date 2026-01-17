@@ -16,5 +16,10 @@ src/dc_overview.egg-info/dependency_links.txt
 src/dc_overview.egg-info/entry_points.txt
 src/dc_overview.egg-info/requires.txt
 src/dc_overview.egg-info/top_level.txt
+src/dc_overview/dashboards/DC OverView-1768678619438.json
+src/dc_overview/dashboards/IPMI Monitor-1768678710446.json
+src/dc_overview/dashboards/NVIDIA DCGM Exporter.json
+src/dc_overview/dashboards/Node Exporter Full.json
+src/dc_overview/dashboards/Vast Dashboard.json
 src/dc_overview/templates/landing.html.j2
 src/dc_overview/templates/nginx.conf.j2

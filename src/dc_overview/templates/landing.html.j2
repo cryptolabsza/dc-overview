@@ -559,19 +559,70 @@
             });
         }
         
-        // Fetch stats from Grafana/Prometheus API (optional)
+        // Try to fetch stats from Prometheus (through reverse proxy if enabled)
         async function fetchStats() {
-            try {
-                const resp = await fetch('/grafana/api/datasources/proxy/1/api/v1/query?query=count(nvidia_gpu_temperature_gpu)');
-                const data = await resp.json();
-                if (data.data?.result?.[0]?.value?.[1]) {
-                    document.getElementById('gpu-count').textContent = data.data.result[0].value[1];
-                }
-            } catch (e) {
-                // Stats unavailable
+            // Try multiple Prometheus URLs
+            const promUrls = ['/prometheus', 'http://localhost:9090'];
+            let promUrl = null;
+            
+            // Find working Prometheus endpoint
+            for (const url of promUrls) {
+                try {
+                    const test = await fetch(`${url}/api/v1/status/config`, { signal: AbortSignal.timeout(2000) });
+                    if (test.ok) { promUrl = url; break; }
+                } catch (e) {}
             }
+            
+            if (!promUrl) {
+                // Prometheus not accessible - show helpful message
+                document.getElementById('gpu-count').textContent = '?';
+                document.getElementById('server-count').textContent = '?';
+                document.getElementById('uptime').textContent = '?';
+                document.querySelector('.stats').title = 'Enable Prometheus in reverse proxy for live stats';
+                return;
+            }
+            
+            // Fetch GPU count (try DCGM first, then nvidia_smi)
+            for (const metric of ['DCGM_FI_DEV_GPU_TEMP', 'nvidia_smi_gpu_info', 'node_hwmon_temp_celsius']) {
+                try {
+                    const resp = await fetch(`${promUrl}/api/v1/query?query=count(${metric})`);
+                    const data = await resp.json();
+                    if (data.status === 'success' && data.data?.result?.[0]?.value?.[1]) {
+                        document.getElementById('gpu-count').textContent = data.data.result[0].value[1];
+                        break;
+                    }
+                } catch (e) {}
+            }
+            
+            // Fetch server count from targets
+            try {
+                const resp = await fetch(`${promUrl}/api/v1/targets`);
+                const data = await resp.json();
+                if (data.status === 'success' && data.data?.activeTargets) {
+                    const instances = new Set(data.data.activeTargets
+                        .filter(t => t.health === 'up')
+                        .map(t => t.labels?.instance?.split(':')[0]));
+                    document.getElementById('server-count').textContent = instances.size;
+                }
+            } catch (e) {}
+            
+            // Fetch Prometheus uptime
+            try {
+                const resp = await fetch(`${promUrl}/api/v1/query?query=process_start_time_seconds{job="prometheus"}`);
+                const data = await resp.json();
+                if (data.status === 'success' && data.data?.result?.[0]?.value?.[1]) {
+                    const startTime = parseFloat(data.data.result[0].value[1]);
+                    const uptime = Date.now() / 1000 - startTime;
+                    const days = Math.floor(uptime / 86400);
+                    const hours = Math.floor((uptime % 86400) / 3600);
+                    document.getElementById('uptime').textContent = days > 0 ? `${days}d ${hours}h` : `${hours}h`;
+                }
+            } catch (e) {}
         }
+        
+        // Fetch stats on page load and refresh every 60s
         fetchStats();
+        setInterval(fetchStats, 60000);
     </script>
 </body>
 </html>
