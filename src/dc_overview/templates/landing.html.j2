@@ -559,33 +559,15 @@
             });
         }
         
-        // Try to fetch stats from Prometheus (through reverse proxy if enabled)
+        // Fetch stats from Prometheus read-only API
         async function fetchStats() {
-            // Try multiple Prometheus URLs
-            const promUrls = ['/prometheus', 'http://localhost:9090'];
-            let promUrl = null;
-            
-            // Find working Prometheus endpoint
-            for (const url of promUrls) {
-                try {
-                    const test = await fetch(`${url}/api/v1/status/config`, { signal: AbortSignal.timeout(2000) });
-                    if (test.ok) { promUrl = url; break; }
-                } catch (e) {}
-            }
-            
-            if (!promUrl) {
-                // Prometheus not accessible - show helpful message
-                document.getElementById('gpu-count').textContent = '?';
-                document.getElementById('server-count').textContent = '?';
-                document.getElementById('uptime').textContent = '?';
-                document.querySelector('.stats').title = 'Enable Prometheus in reverse proxy for live stats';
-                return;
-            }
+            // The reverse proxy exposes /prometheus/api/v1/ for read-only queries
+            const promApi = '/prometheus/api/v1';
             
             // Fetch GPU count (try DCGM first, then nvidia_smi)
             for (const metric of ['DCGM_FI_DEV_GPU_TEMP', 'nvidia_smi_gpu_info', 'node_hwmon_temp_celsius']) {
                 try {
-                    const resp = await fetch(`${promUrl}/api/v1/query?query=count(${metric})`);
+                    const resp = await fetch(`${promApi}/query?query=count(${metric})`);
                     const data = await resp.json();
                     if (data.status === 'success' && data.data?.result?.[0]?.value?.[1]) {
                         document.getElementById('gpu-count').textContent = data.data.result[0].value[1];
@@ -596,7 +578,7 @@
             
             // Fetch server count from targets
             try {
-                const resp = await fetch(`${promUrl}/api/v1/targets`);
+                const resp = await fetch(`${promApi}/targets`);
                 const data = await resp.json();
                 if (data.status === 'success' && data.data?.activeTargets) {
                     const instances = new Set(data.data.activeTargets
@@ -608,7 +590,7 @@
             
             // Fetch Prometheus uptime
             try {
-                const resp = await fetch(`${promUrl}/api/v1/query?query=process_start_time_seconds{job="prometheus"}`);
+                const resp = await fetch(`${promApi}/query?query=process_start_time_seconds{job="prometheus"}`);
                 const data = await resp.json();
                 if (data.status === 'success' && data.data?.result?.[0]?.value?.[1]) {
                     const startTime = parseFloat(data.data.result[0].value[1]);
