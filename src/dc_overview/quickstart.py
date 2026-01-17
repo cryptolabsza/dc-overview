@@ -426,7 +426,7 @@ volumes:
 scrape_configs:
   - job_name: 'prometheus'
     static_configs:
-      - targets: ['localhost:9090']
+      - targets: ['prometheus:9090']  # Use Docker network name
 
   - job_name: 'local'
     static_configs:
