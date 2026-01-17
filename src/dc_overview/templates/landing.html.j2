@@ -231,6 +231,31 @@
             font-family: 'Monaco', 'Menlo', monospace;
             font-size: 0.75rem;
             color: var(--accent);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+        }
+        
+        .copy-btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.7rem;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+        
+        .copy-btn:hover {
+            background: var(--accent-hover);
+            transform: scale(1.05);
+        }
+        
+        .copy-btn.copied {
+            background: var(--success);
         }
         
         /* Marketplace cards - smaller */
@@ -351,8 +376,9 @@
                     <li>Remote power control (on/off/reset)</li>
                     <li>AI-powered health insights &amp; predictions</li>
                 </ul>
-                <div class="status promo-cta">
-                    <span>📥 pipx install ipmi-monitor</span>
+                <div class="status promo-cta" onclick="event.preventDefault(); event.stopPropagation();">
+                    <code>pipx install ipmi-monitor</code>
+                    <button class="copy-btn" onclick="copyCmd(this, 'pipx install ipmi-monitor')">Copy</button>
                 </div>
             </a>
 {% endif %}
@@ -363,8 +389,9 @@
                 <div class="service-icon">📊</div>
                 <h2>DC Overview</h2>
                 <p>Complete GPU monitoring! Grafana dashboards, Prometheus metrics, VRAM temps, power tracking.</p>
-                <div class="status promo-cta">
-                    <span>📥 pipx install dc-overview</span>
+                <div class="status promo-cta" onclick="event.preventDefault(); event.stopPropagation();">
+                    <code>pipx install dc-overview</code>
+                    <button class="copy-btn" onclick="copyCmd(this, 'pipx install dc-overview')">Copy</button>
                 </div>
             </a>
 {% endif %}
@@ -506,6 +533,32 @@
     </div>
     
     <script>
+        // Copy command to clipboard
+        function copyCmd(btn, cmd) {
+            navigator.clipboard.writeText(cmd).then(() => {
+                btn.textContent = '✓ Copied!';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = 'Copy';
+                    btn.classList.remove('copied');
+                }, 2000);
+            }).catch(() => {
+                // Fallback for older browsers
+                const ta = document.createElement('textarea');
+                ta.value = cmd;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                btn.textContent = '✓ Copied!';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = 'Copy';
+                    btn.classList.remove('copied');
+                }, 2000);
+            });
+        }
+        
         // Fetch stats from Grafana/Prometheus API (optional)
         async function fetchStats() {
             try {
