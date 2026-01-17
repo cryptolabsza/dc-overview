@@ -554,6 +554,79 @@ def add_machine(ip: str, name: str, ssh_user: str, ssh_port: int, ssh_pass: str)
     console.print(f"[green]✓[/green] Added {name} to Prometheus")
 
 
+# ============ Reverse Proxy Commands ============
+
+@click.command("setup-ssl")
+@click.option("--domain", "-d", help="Domain name (e.g., monitor.example.com)")
+@click.option("--email", "-e", help="Email for Let's Encrypt certificate")
+@click.option("--letsencrypt", is_flag=True, help="Use Let's Encrypt instead of self-signed")
+@click.option("--site-name", default="DC Overview", help="Name shown on landing page")
+@click.option("--ipmi/--no-ipmi", default=False, help="Include IPMI Monitor in reverse proxy")
+@click.option("--prometheus/--no-prometheus", default=False, help="Expose Prometheus UI (disabled by default - no auth)")
+def setup_ssl(domain: str, email: str, letsencrypt: bool, site_name: str, ipmi: bool, prometheus: bool):
+    """
+    Set up reverse proxy with SSL (nginx).
+    
+    Creates a branded landing page with links to all services.
+    Only exposes port 443 externally - backend services bind to localhost.
+    
+    \b
+    SECURITY:
+        - Grafana (3000), Prometheus (9090), IPMI (5000) bind to 127.0.0.1
+        - Only port 443 (HTTPS) is exposed to the network
+        - Prometheus is disabled by default (no authentication)
+    
+    \b
+    CERTIFICATE OPTIONS:
+    
+      Self-signed (default):
+        - Works immediately with any IP or domain
+        - Browser shows "Not Secure" warning (normal for internal networks)
+        - No external dependencies
+    
+      Let's Encrypt (--letsencrypt):
+        - Free trusted certificate (no browser warnings)
+        - REQUIRES: Port 80 AND 443 open to the internet
+        - REQUIRES: Valid domain with DNS pointing to this server
+        - Auto-renews every 90 days (ports must stay open!)
+    
+    \b
+    EXAMPLES:
+        sudo dc-overview setup-ssl                           # Self-signed (IP access)
+        sudo dc-overview setup-ssl -d monitor.example.com   # Self-signed (domain)
+        sudo dc-overview setup-ssl -d example.com --letsencrypt -e admin@example.com
+    
+    \b
+    DNS SETUP (for Let's Encrypt):
+        1. Add A record: monitor.example.com → <server-ip>
+        2. Open firewall ports 80 AND 443
+        3. Wait for DNS propagation (5-30 minutes)
+        4. Run setup-ssl with --letsencrypt
+    """
+    if os.geteuid() != 0:
+        console.print("[red]Error:[/red] Setting up SSL requires root. Run with sudo.")
+        sys.exit(1)
+    
+    if letsencrypt and not email:
+        console.print("[red]Error:[/red] Let's Encrypt requires --email")
+        sys.exit(1)
+    
+    if letsencrypt and not domain:
+        console.print("[red]Error:[/red] Let's Encrypt requires --domain")
+        sys.exit(1)
+    
+    from .reverse_proxy import setup_reverse_proxy
+    
+    setup_reverse_proxy(
+        domain=domain,
+        email=email,
+        site_name=site_name,
+        ipmi_enabled=ipmi,
+        prometheus_enabled=prometheus,
+        use_letsencrypt=letsencrypt,
+    )
+
+
 # Register commands
 main.add_command(quickstart)
 main.add_command(add_machine)
@@ -565,6 +638,7 @@ main.add_command(add_target)
 main.add_command(list_targets)
 main.add_command(generate_compose)
 main.add_command(deploy)
+main.add_command(setup_ssl)
 
 
 if __name__ == "__main__":

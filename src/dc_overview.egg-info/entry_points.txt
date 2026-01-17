@@ -1,0 +1,2 @@
+[console_scripts]
+dc-overview = dc_overview.cli:main

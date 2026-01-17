@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ site_name | default('DC Overview') }} - Server Fleet Management</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #12121a;
+            --bg-card: #1a1a24;
+            --accent: #6366f1;
+            --accent-hover: #818cf8;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --border: #2d2d3a;
+            --success: #22c55e;
+            --warning: #f59e0b;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 2rem;
+            background-image: 
+                radial-gradient(ellipse at top, rgba(99, 102, 241, 0.1) 0%, transparent 50%),
+                radial-gradient(ellipse at bottom, rgba(99, 102, 241, 0.05) 0%, transparent 50%);
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+        
+        .logo {
+            font-size: 3rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+        
+        .subtitle {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+        
+        .section-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin: 2.5rem 0 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .services {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .service-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 1.75rem;
+            text-decoration: none;
+            color: inherit;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .service-card:hover {
+            transform: translateY(-4px);
+            border-color: var(--accent);
+            box-shadow: 0 20px 40px rgba(99, 102, 241, 0.15);
+        }
+        
+        .service-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        
+        .service-card:hover::before {
+            opacity: 1;
+        }
+        
+        .service-icon {
+            font-size: 2rem;
+            margin-bottom: 0.75rem;
+        }
+        
+        .service-card h2 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+        
+        .service-card p {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            line-height: 1.5;
+        }
+        
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+            font-size: 0.8rem;
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .stat {
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--accent);
+        }
+        
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+        
+        footer {
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            margin-top: 3rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--border);
+        }
+        
+        footer a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+        
+        footer a:hover {
+            text-decoration: underline;
+        }
+        
+        /* Promotional cards for cross-selling */
+        .promo-card {
+            background: linear-gradient(135deg, var(--bg-card) 0%, rgba(99, 102, 241, 0.08) 100%);
+            border: 1px dashed var(--accent);
+            opacity: 0.9;
+        }
+        
+        .promo-card:hover {
+            opacity: 1;
+            border-style: solid;
+        }
+        
+        .promo-badge {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: linear-gradient(135deg, var(--success), #16a34a);
+            color: white;
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            letter-spacing: 0.5px;
+        }
+        
+        .promo-cta {
+            background: rgba(99, 102, 241, 0.1);
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.75rem;
+            color: var(--accent);
+        }
+        
+        /* Marketplace cards - smaller */
+        .marketplaces {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        
+        .marketplace-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.25rem;
+            text-decoration: none;
+            color: inherit;
+            transition: all 0.2s ease;
+        }
+        
+        .marketplace-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+        }
+        
+        .marketplace-card h3 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+        
+        .marketplace-card p {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            line-height: 1.4;
+        }
+        
+        .marketplace-category {
+            color: var(--accent);
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.5rem;
+        }
+        
+        @media (max-width: 600px) {
+            h1 { font-size: 1.75rem; }
+            .services { grid-template-columns: 1fr; }
+            .marketplaces { grid-template-columns: 1fr 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">🖥️</div>
+            <h1>{{ site_name | default('DC Overview') }}</h1>
+            <p class="subtitle">Server Fleet Management Dashboard</p>
+        </header>
+        
+        <div class="stats" id="stats">
+            <div class="stat">
+                <div class="stat-value" id="gpu-count">-</div>
+                <div class="stat-label">GPUs Monitored</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="server-count">-</div>
+                <div class="stat-label">Servers</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="uptime">-</div>
+                <div class="stat-label">Uptime</div>
+            </div>
+        </div>
+        
+        <div class="section-title">🔧 Local Services</div>
+        <div class="services">
+            <a href="/grafana/" class="service-card">
+                <div class="service-icon">📊</div>
+                <h2>Grafana</h2>
+                <p>Real-time dashboards for GPU metrics, temperatures, power consumption, and system health.</p>
+                <div class="status">
+                    <div class="status-dot"></div>
+                    <span>Authenticated access</span>
+                </div>
+            </a>
+            
+{% if prometheus_enabled %}
+            <a href="/prometheus/" class="service-card">
+                <div class="service-icon">🔥</div>
+                <h2>Prometheus</h2>
+                <p>Time-series database storing all metrics. Query and explore raw data.</p>
+                <div class="status">
+                    <div class="status-dot"></div>
+                    <span>⚠️ No authentication</span>
+                </div>
+            </a>
+{% endif %}
+            
+{% if ipmi_enabled %}
+            <a href="/ipmi/" class="service-card">
+                <div class="service-icon">🔧</div>
+                <h2>IPMI Monitor</h2>
+                <p>Server health monitoring via BMC/IPMI. SEL logs, ECC errors, and remote power control.</p>
+                <div class="status">
+                    <div class="status-dot"></div>
+                    <span>Running</span>
+                </div>
+            </a>
+{% else %}
+            <a href="https://www.cryptolabs.co.za/ipmi-monitor/" target="_blank" class="service-card promo-card">
+                <div class="promo-badge">FREE + AI</div>
+                <div class="service-icon">🔧</div>
+                <h2>IPMI Monitor</h2>
+                <p><strong>Out-of-band management</strong> &amp; <strong>agentless monitoring</strong>. No software on servers needed!</p>
+                <ul style="color: var(--text-secondary); font-size: 0.8rem; margin: 0.5rem 0; padding-left: 1.2rem;">
+                    <li>SEL logs, ECC errors, fan/temp alerts</li>
+                    <li>Remote power control (on/off/reset)</li>
+                    <li>AI-powered health insights &amp; predictions</li>
+                </ul>
+                <div class="status promo-cta">
+                    <span>📥 pipx install ipmi-monitor</span>
+                </div>
+            </a>
+{% endif %}
+
+{% if not grafana_enabled %}
+            <a href="https://www.cryptolabs.co.za/dc-overview/" target="_blank" class="service-card promo-card">
+                <div class="promo-badge">FREE</div>
+                <div class="service-icon">📊</div>
+                <h2>DC Overview</h2>
+                <p>Complete GPU monitoring! Grafana dashboards, Prometheus metrics, VRAM temps, power tracking.</p>
+                <div class="status promo-cta">
+                    <span>📥 pipx install dc-overview</span>
+                </div>
+            </a>
+{% endif %}
+        </div>
+        
+        <div class="section-title">📚 Documentation</div>
+        <div class="marketplaces">
+            <a href="https://www.cryptolabs.co.za/dc-overview/" target="_blank" class="marketplace-card">
+                <div class="marketplace-category">Documentation</div>
+                <h3>DC Overview Docs</h3>
+                <p>Setup guide, configuration, Grafana dashboards, and troubleshooting.</p>
+            </a>
+            
+            <a href="https://www.cryptolabs.co.za/ipmi-monitor/" target="_blank" class="marketplace-card">
+                <div class="marketplace-category">Documentation</div>
+                <h3>IPMI Monitor Docs</h3>
+                <p>BMC setup, AI features, alerting, and integration guides.</p>
+            </a>
+            
+            <a href="https://github.com/cryptolabsza/dc-overview" target="_blank" class="marketplace-card">
+                <div class="marketplace-category">Source Code</div>
+                <h3>DC Overview GitHub</h3>
+                <p>Source code, issues, and contributions welcome.</p>
+            </a>
+            
+            <a href="https://github.com/cryptolabsza/ipmi-monitor" target="_blank" class="marketplace-card">
+                <div class="marketplace-category">Source Code</div>
+                <h3>IPMI Monitor GitHub</h3>
+                <p>Source code, issues, and contributions welcome.</p>
+            </a>
+        </div>
+        
+        <div class="section-title">💰 GPU Marketplaces</div>
+        <div class="marketplaces">
+            <!-- P2P Marketplaces -->
+            <a href="https://vast.ai/" target="_blank" class="marketplace-card">
+                <div class="marketplace-category">P2P Marketplace</div>
+                <h3>Vast.ai</h3>
+                <p>Peer-to-peer GPU marketplace with competitive pricing for AI/ML workloads.</p>
+            </a>
+            
+            <a href="https://www.runpod.io/" target="_blank" class="marketplace-card">
+                <div class="marketplace-category">P2P Marketplace</div>
+                <h3>RunPod</h3>
+                <p>Cloud GPU platform for AI inference and training with serverless options.</p>
+            </a>
+            
+            <a href="https://www.tensordock.com/" target="_blank" class="marketplace-card">
+                <div class="marketplace-category">P2P Marketplace</div>
+                <h3>TensorDock</h3>
+                <p>30,000+ GPUs across 100+ data centers. Up to 60% lower costs than traditional clouds.</p>
+            </a>
+            
+            <a href="https://hydrahost.com/" target="_blank" class="marketplace-card">
+                <div class="marketplace-category">P2P Marketplace</div>
+                <h3>HydraHost</h3>
+                <p>Decentralized GPU hosting platform for AI and rendering workloads.</p>
+            </a>
+            
+            <!-- Decentralized Networks -->
+            <a href="https://io.net/" target="_blank" class="marketplace-card">
+                <div class="marketplace-category">Decentralized</div>
+                <h3>io.net</h3>
+                <p>Decentralized GPU clusters for high-capacity AI workloads with rapid deployment.</p>
+            </a>
+            
+            <a href="https://nosana.io/" target="_blank" class="marketplace-card">
+                <div class="marketplace-category">Decentralized</div>
+                <h3>Nosana</h3>
+                <p>Decentralized GPU network focused on AI inference-optimized workloads.</p>
+            </a>
+            
+            <a href="https://salad.com/" target="_blank" class="marketplace-card">
+                <div class="marketplace-category">Decentralized</div>
+                <h3>Salad Cloud</h3>
+                <p>Repurposes idle consumer gaming GPUs for AI tasks at very low cost.</p>
+            </a>
+            
+            <a href="https://rendertoken.com/" target="_blank" class="marketplace-card">
+                <div class="marketplace-category">Decentralized</div>
+                <h3>Render Network</h3>
+                <p>Decentralized GPU rendering for 3D artists using Octane Render and more.</p>
+            </a>
+            
+            <!-- Enterprise Clouds -->
+            <a href="https://www.cudocompute.com/" target="_blank" class="marketplace-card">
+                <div class="marketplace-category">Enterprise</div>
+                <h3>Cudo Compute</h3>
+                <p>Sustainable cloud with L40S, A100, H100 GPUs. Carbon-neutral infrastructure.</p>
+            </a>
+            
+            <a href="https://www.fluidstack.io/" target="_blank" class="marketplace-card">
+                <div class="marketplace-category">Enterprise</div>
+                <h3>Fluidstack</h3>
+                <p>Dedicated GPU clusters with rapid deployment of thousands of H100s for large-scale training.</p>
+            </a>
+            
+            <a href="https://www.coreweave.com/" target="_blank" class="marketplace-card">
+                <div class="marketplace-category">Enterprise</div>
+                <h3>CoreWeave</h3>
+                <p>Specialized AI cloud with massive H100/B200 clusters for production workloads.</p>
+            </a>
+            
+            <a href="https://lambdalabs.com/" target="_blank" class="marketplace-card">
+                <div class="marketplace-category">Enterprise</div>
+                <h3>Lambda Labs</h3>
+                <p>AI-focused cloud with pre-installed ML frameworks. A100s and H100s available.</p>
+            </a>
+            
+            <a href="https://nebius.ai/" target="_blank" class="marketplace-card">
+                <div class="marketplace-category">Enterprise</div>
+                <h3>Nebius AI</h3>
+                <p>European GPU cloud with H100/A100 clusters and strong InfiniBand networking.</p>
+            </a>
+            
+            <a href="https://www.hyperstack.cloud/" target="_blank" class="marketplace-card">
+                <div class="marketplace-category">Enterprise</div>
+                <h3>Hyperstack</h3>
+                <p>High-performance AI/HPC cloud with H100/A100/L40s and 100% renewable energy.</p>
+            </a>
+            
+            <a href="https://www.paperspace.com/" target="_blank" class="marketplace-card">
+                <div class="marketplace-category">Enterprise</div>
+                <h3>Paperspace</h3>
+                <p>GPU cloud by DigitalOcean with Gradient ML platform. RTX, A100, H100 available.</p>
+            </a>
+        </div>
+        
+        <footer>
+            <p>Powered by <a href="https://github.com/cryptolabsza/dc-overview" target="_blank">DC Overview</a></p>
+            <p style="margin-top: 0.5rem;">
+                <a href="https://cryptolabs.co.za" target="_blank">🌐 CryptoLabs</a>
+                <span style="margin: 0 0.75rem;">•</span>
+                <a href="https://discord.gg/7yeHdf5BuC" target="_blank">💬 Discord</a>
+                <span style="margin: 0 0.75rem;">•</span>
+                <a href="https://github.com/cryptolabsza" target="_blank">📦 GitHub</a>
+            </p>
+        </footer>
+    </div>
+    
+    <script>
+        // Fetch stats from Grafana/Prometheus API (optional)
+        async function fetchStats() {
+            try {
+                const resp = await fetch('/grafana/api/datasources/proxy/1/api/v1/query?query=count(nvidia_gpu_temperature_gpu)');
+                const data = await resp.json();
+                if (data.data?.result?.[0]?.value?.[1]) {
+                    document.getElementById('gpu-count').textContent = data.data.result[0].value[1];
+                }
+            } catch (e) {
+                // Stats unavailable
+            }
+        }
+        fetchStats();
+    </script>
+</body>
+</html>

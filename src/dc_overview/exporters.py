@@ -162,8 +162,13 @@ class ExporterInstaller:
             console.print(f"[red]✗[/red] Failed to install node_exporter: {e}")
             return False
     
-    def install_dcgm_exporter(self) -> bool:
-        """Install dcgm-exporter."""
+    def install_dcgm_exporter(self, vastai_mode: bool = None) -> bool:
+        """Install dcgm-exporter via Docker.
+        
+        Args:
+            vastai_mode: If True, use --runtime=nvidia instead of --gpus all.
+                        If None, auto-detect Vast.ai hosts.
+        """
         console.print("\n[bold]Installing dcgm-exporter...[/bold]")
         
         try:
@@ -180,41 +185,68 @@ class ExporterInstaller:
                     console.print("[yellow]⚠[/yellow] NVIDIA drivers not found. Skipping dcgm-exporter.")
                     return False
                 
-                # Check/install DCGM
-                progress.update(task, description="Checking DCGM...")
-                result = subprocess.run(["which", "dcgmi"], capture_output=True)
+                # Check for Docker
+                progress.update(task, description="Checking Docker...")
+                result = subprocess.run(["which", "docker"], capture_output=True)
+                if result.returncode != 0:
+                    console.print("[yellow]⚠[/yellow] Docker not found. Install Docker first.")
+                    return False
+                
+                # Auto-detect Vast.ai host if not specified
+                if vastai_mode is None:
+                    vastai_mode = os.path.exists("/var/lib/vastai_kaalia") or \
+                                  os.path.exists("/etc/systemd/system/vastai.service")
+                
+                # Check if already running
+                progress.update(task, description="Checking existing containers...")
+                result = subprocess.run(
+                    ["docker", "ps", "-q", "-f", "name=dcgm-exporter"],
+                    capture_output=True, text=True
+                )
+                if result.stdout.strip():
+                    console.print("[green]✓[/green] dcgm-exporter already running")
+                    return True
+                
+                # Remove old container if exists
+                subprocess.run(
+                    ["docker", "rm", "-f", "dcgm-exporter"],
+                    capture_output=True
+                )
+                
+                # Start dcgm-exporter container
+                progress.update(task, description="Starting dcgm-exporter container...")
+                
+                # Use --runtime=nvidia for Vast.ai hosts (required)
+                # Use --gpus all for standard Docker hosts
+                if vastai_mode:
+                    docker_cmd = [
+                        "docker", "run", "-d",
+                        "--name", "dcgm-exporter",
+                        "--runtime=nvidia",  # Required for Vast.ai hosts
+                        "-p", "9400:9400",
+                        "--restart", "unless-stopped",
+                        "nvidia/dcgm-exporter:3.3.5-3.4.1-ubuntu22.04"
+                    ]
+                    console.print("[dim]Using --runtime=nvidia (Vast.ai mode)[/dim]")
+                else:
+                    docker_cmd = [
+                        "docker", "run", "-d",
+                        "--name", "dcgm-exporter",
+                        "--gpus", "all",
+                        "-p", "9400:9400",
+                        "--restart", "unless-stopped",
+                        "nvidia/dcgm-exporter:3.3.5-3.4.1-ubuntu22.04"
+                    ]
+                    console.print("[dim]Using --gpus all (standard mode)[/dim]")
+                
+                result = subprocess.run(docker_cmd, capture_output=True, text=True)
                 
                 if result.returncode != 0:
-                    progress.update(task, description="Installing DCGM...")
-                    # Try to install datacenter-gpu-manager
-                    subprocess.run([
-                        "apt-get", "update"
-                    ], capture_output=True)
-                    
-                    result = subprocess.run([
-                        "apt-get", "install", "-y", "datacenter-gpu-manager"
-                    ], capture_output=True)
-                    
-                    if result.returncode != 0:
-                        console.print("[yellow]⚠[/yellow] Could not install DCGM. Install manually.")
-                        console.print("  See: https://docs.nvidia.com/datacenter/dcgm/latest/user-guide/getting-started.html")
-                        return False
-                
-                # Enable DCGM service
-                progress.update(task, description="Enabling DCGM service...")
-                subprocess.run(["systemctl", "enable", "nvidia-dcgm"], capture_output=True)
-                subprocess.run(["systemctl", "start", "nvidia-dcgm"], capture_output=True)
-                
-                # Download dcgm-exporter binary
-                progress.update(task, description="Downloading dcgm-exporter...")
-                
-                # Try to get from NVIDIA or build from source
-                # For now, we'll use the container approach but run natively
-                console.print("[yellow]⚠[/yellow] dcgm-exporter requires manual installation.")
-                console.print("  Run: [cyan]docker run -d --gpus all -p 9400:9400 nvidia/dcgm-exporter[/cyan]")
-                console.print("  Or download from: https://github.com/NVIDIA/dcgm-exporter/releases")
-                
-            return False
+                    console.print(f"[red]✗[/red] Failed to start dcgm-exporter: {result.stderr}")
+                    return False
+            
+            console.print("[green]✓[/green] dcgm-exporter installed (port 9400)")
+            return True
             
         except Exception as e:
             console.print(f"[red]✗[/red] Failed to install dcgm-exporter: {e}")
@@ -299,15 +331,38 @@ class ExporterInstaller:
         
         for name, port in services:
             try:
+                # First check systemd service
                 result = subprocess.run(
                     ["systemctl", "is-active", name],
                     capture_output=True,
                     text=True
                 )
+                if result.stdout.strip() == "active":
+                    status[name] = {
+                        "status": "active",
+                        "port": port,
+                        "running": True
+                    }
+                    continue
+                
+                # For dcgm-exporter, also check Docker container
+                if name == "dcgm-exporter":
+                    docker_result = subprocess.run(
+                        ["docker", "ps", "-q", "-f", "name=dcgm-exporter"],
+                        capture_output=True, text=True
+                    )
+                    if docker_result.returncode == 0 and docker_result.stdout.strip():
+                        status[name] = {
+                            "status": "active (docker)",
+                            "port": port,
+                            "running": True
+                        }
+                        continue
+                
                 status[name] = {
-                    "status": result.stdout.strip(),
+                    "status": result.stdout.strip() or "not installed",
                     "port": port,
-                    "running": result.stdout.strip() == "active"
+                    "running": False
                 }
             except Exception:
                 status[name] = {

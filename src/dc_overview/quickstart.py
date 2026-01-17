@@ -109,9 +109,9 @@ def run_quickstart():
     console.print("[bold]Step 1: What is this machine?[/bold]\n")
     
     if gpu_count > 0:
-        default_role = "GPU Worker (has GPUs to monitor)"
+        default_role = "worker"
     else:
-        default_role = "Master Server (monitors other machines)"
+        default_role = "master"
     
     role = questionary.select(
         "Select this machine's role:",
@@ -154,6 +154,21 @@ def run_quickstart():
     
     if setup_vast:
         setup_vastai_exporter()
+    
+    # ============ Step 6: SSL/Reverse Proxy (master only) ============
+    if role in ["master", "both"]:
+        console.print("\n[bold]Step 6: HTTPS Access (Recommended)[/bold]\n")
+        console.print("[dim]Set up a secure reverse proxy to access Grafana via HTTPS.[/dim]")
+        console.print("[dim]This ensures all traffic is encrypted and only port 443 is exposed.[/dim]\n")
+        
+        setup_ssl = questionary.confirm(
+            "Set up HTTPS reverse proxy?",
+            default=True,
+            style=custom_style
+        ).ask()
+        
+        if setup_ssl:
+            setup_reverse_proxy_wizard(local_ip)
     
     # ============ Done! ============
     show_summary(role, local_ip)
@@ -485,10 +500,12 @@ def configure_grafana(password: str):
     except Exception as e:
         console.print(f"[dim]Datasource may already exist[/dim]")
     
-    # Import dashboards from Grafana.com and GitHub
+    # Import dashboards from jjziets/DCMontoring GitHub repo
+    # These are the official GPU datacenter monitoring dashboards
     dashboards = [
-        ("Node Exporter Full", "https://grafana.com/api/dashboards/1860/revisions/37/download"),
-        ("NVIDIA DCGM", "https://grafana.com/api/dashboards/12239/revisions/2/download"),
+        ("DC Overview", "https://raw.githubusercontent.com/jjziets/DCMontoring/main/DC_OverView.json"),
+        ("Node Exporter Full", "https://raw.githubusercontent.com/jjziets/DCMontoring/main/Node%20Exporter%20Full-1684242153326.json"),
+        ("NVIDIA DCGM Exporter", "https://raw.githubusercontent.com/jjziets/DCMontoring/main/NVIDIA%20DCGM%20Exporter-1684242180498.json"),
         ("Vast Dashboard", "https://raw.githubusercontent.com/jjziets/DCMontoring/main/Vast%20Dashboard-1692692563948.json"),
     ]
     
@@ -496,16 +513,23 @@ def configure_grafana(password: str):
         try:
             # Download dashboard JSON
             dashboard_json = urllib.request.urlopen(url, timeout=30).read().decode('utf-8')
+            dashboard_obj = json.loads(dashboard_json)
             
-            # Import to Grafana
+            # Use import API with datasource input mapping
             import_data = json.dumps({
-                "dashboard": json.loads(dashboard_json),
+                "dashboard": dashboard_obj,
                 "overwrite": True,
+                "inputs": [{
+                    "name": "DS_PROMETHEUS",
+                    "type": "datasource",
+                    "pluginId": "prometheus",
+                    "value": "Prometheus"
+                }],
                 "folderId": 0
             }).encode('utf-8')
             
             req = urllib.request.Request(
-                f"{grafana_url}/api/dashboards/db",
+                f"{grafana_url}/api/dashboards/import",
                 data=import_data,
                 headers={
                     "Content-Type": "application/json",
@@ -517,7 +541,85 @@ def configure_grafana(password: str):
             urllib.request.urlopen(req, timeout=30)
             console.print(f"[green]✓[/green] {name} dashboard imported")
         except Exception as e:
-            console.print(f"[yellow]⚠[/yellow] {name} dashboard: import manually")
+            console.print(f"[yellow]⚠[/yellow] {name} dashboard: {str(e)[:50]}")
+    
+    # Auto-detect optional exporters
+    detect_and_configure_optional_exporters(grafana_url, auth_header)
+
+
+def detect_and_configure_optional_exporters(grafana_url: str, auth_header: str):
+    """Detect Vast exporter and IPMI Monitor and configure them if present."""
+    import urllib.request
+    import json
+    
+    config_path = Path("/etc/dc-overview/prometheus.yml")
+    if not config_path.exists():
+        return
+    
+    prometheus_config = config_path.read_text()
+    config_updated = False
+    
+    # Check for Vast.ai exporter (typically on port 8622)
+    vastai_exporter_running = test_machine_connection("localhost", 8622)
+    if vastai_exporter_running and "vastai" not in prometheus_config:
+        console.print("[green]✓[/green] Vast.ai exporter detected - adding to monitoring")
+        # Add to prometheus config
+        vastai_config = """
+  # Vast.ai Earnings Exporter (auto-detected)
+  - job_name: 'vastai'
+    static_configs:
+      - targets: ['localhost:8622']
+"""
+        prometheus_config = prometheus_config.rstrip() + vastai_config
+        config_path.write_text(prometheus_config)
+        config_updated = True
+    
+    # Check for IPMI Monitor exporter (typically on port 5000 or 9150)
+    ipmi_ports = [5000, 9150]
+    ipmi_running = any(test_machine_connection("localhost", p) for p in ipmi_ports)
+    if ipmi_running and "ipmi" not in prometheus_config.lower():
+        console.print("[green]✓[/green] IPMI Monitor detected - adding to monitoring")
+        # Find which port
+        ipmi_port = next((p for p in ipmi_ports if test_machine_connection("localhost", p)), 5000)
+        ipmi_config = f"""
+  # IPMI Monitor (auto-detected)
+  - job_name: 'ipmi-monitor'
+    static_configs:
+      - targets: ['localhost:{ipmi_port}']
+    metrics_path: '/metrics'
+"""
+        prometheus_config = prometheus_config.rstrip() + ipmi_config
+        config_path.write_text(prometheus_config)
+        config_updated = True
+        
+        # Try to import IPMI Monitor dashboard if available
+        try:
+            ipmi_dashboard_url = "https://raw.githubusercontent.com/cryptolabsza/ipmi-monitor/main/grafana/dashboards/ipmi-monitor.json"
+            dashboard_json = urllib.request.urlopen(ipmi_dashboard_url, timeout=10).read().decode('utf-8')
+            import_data = json.dumps({
+                "dashboard": json.loads(dashboard_json),
+                "overwrite": True,
+                "inputs": [{"name": "DS_PROMETHEUS", "type": "datasource", "pluginId": "prometheus", "value": "Prometheus"}],
+                "folderId": 0
+            }).encode('utf-8')
+            req = urllib.request.Request(
+                f"{grafana_url}/api/dashboards/import",
+                data=import_data,
+                headers={"Content-Type": "application/json", "Authorization": f"Basic {auth_header}"},
+                method="POST"
+            )
+            urllib.request.urlopen(req, timeout=30)
+            console.print("[green]✓[/green] IPMI Monitor dashboard imported")
+        except Exception:
+            console.print("[dim]IPMI Monitor dashboard: import manually if needed[/dim]")
+    
+    # Reload Prometheus if config changed
+    if config_updated:
+        try:
+            subprocess.run(["docker", "exec", "prometheus", "kill", "-HUP", "1"], capture_output=True)
+            console.print("[dim]Prometheus config reloaded[/dim]")
+        except Exception:
+            pass
 
 
 def setup_master_native():
@@ -950,6 +1052,104 @@ def setup_vastai_exporter():
         console.print(f"[red]Error:[/red] {result.stderr.decode()[:100]}")
 
 
+def setup_reverse_proxy_wizard(local_ip: str):
+    """Interactive setup for SSL reverse proxy."""
+    from .reverse_proxy import setup_reverse_proxy
+    
+    console.print()
+    
+    # Ask about domain
+    has_domain = questionary.confirm(
+        "Do you have a domain name pointing to this server?",
+        default=False,
+        style=custom_style
+    ).ask()
+    
+    domain = None
+    email = None
+    use_letsencrypt = False
+    
+    if has_domain:
+        domain = questionary.text(
+            "Enter your domain name:",
+            validate=lambda x: len(x) > 3 and '.' in x,
+            style=custom_style
+        ).ask()
+        
+        if domain:
+            console.print("\n[bold yellow]⚠️  Let's Encrypt Requirements:[/bold yellow]")
+            console.print("   • Port [cyan]80[/cyan] must be open (for certificate verification)")
+            console.print("   • Port [cyan]443[/cyan] must be open (for HTTPS)")
+            console.print("   • DNS must point to this server's IP")
+            console.print("   • Both ports must stay open for [bold]auto-renewal[/bold] (every 90 days)\n")
+            
+            use_letsencrypt = questionary.confirm(
+                "Use Let's Encrypt? (requires ports 80 + 443 open)",
+                default=False,  # Default to No since it has requirements
+                style=custom_style
+            ).ask()
+            
+            if use_letsencrypt:
+                email = questionary.text(
+                    "Email for certificate expiry notifications:",
+                    validate=lambda x: '@' in x,
+                    style=custom_style
+                ).ask()
+            else:
+                console.print("\n[dim]Using self-signed certificate instead.[/dim]")
+                console.print("[dim]You can switch to Let's Encrypt later with: dc-overview setup-ssl --letsencrypt[/dim]\n")
+    
+    if not domain:
+        console.print("\n[dim]Using self-signed certificate for IP-only access.[/dim]")
+        console.print("[dim]Browser will show a security warning - this is normal for internal networks.[/dim]\n")
+    
+    # Ask about site name
+    site_name = questionary.text(
+        "Site name for landing page:",
+        default="GPU Monitoring",
+        style=custom_style
+    ).ask() or "GPU Monitoring"
+    
+    # Check if IPMI Monitor is installed
+    ipmi_installed = Path("/usr/local/bin/ipmi-monitor").exists() or \
+                     subprocess.run(["which", "ipmi-monitor"], capture_output=True).returncode == 0
+    
+    ipmi_enabled = False
+    if ipmi_installed:
+        ipmi_enabled = questionary.confirm(
+            "Include IPMI Monitor in reverse proxy?",
+            default=True,
+            style=custom_style
+        ).ask()
+    
+    # Run setup
+    console.print()
+    with Progress(SpinnerColumn(), TextColumn("Setting up HTTPS..."), console=console) as progress:
+        progress.add_task("", total=None)
+        
+        try:
+            setup_reverse_proxy(
+                domain=domain,
+                email=email,
+                site_name=site_name,
+                ipmi_enabled=ipmi_enabled,
+                prometheus_enabled=False,  # Disabled by default (no auth)
+                use_letsencrypt=use_letsencrypt,
+            )
+        except Exception as e:
+            console.print(f"[red]Error setting up SSL:[/red] {e}")
+            return
+    
+    console.print("[green]✓[/green] HTTPS reverse proxy configured!")
+    
+    if domain:
+        console.print(f"  Access: [cyan]https://{domain}/[/cyan]")
+    else:
+        console.print(f"  Access: [cyan]https://{local_ip}/[/cyan]")
+    
+    console.print("  [dim]Accept the certificate warning if using self-signed[/dim]")
+
+
 def show_summary(role: str, local_ip: str):
     """Show setup summary."""
     console.print()
@@ -957,6 +1157,9 @@ def show_summary(role: str, local_ip: str):
         "[bold green]✓ Setup Complete![/bold green]",
         border_style="green"
     ))
+    
+    # Check if SSL is configured
+    ssl_configured = Path("/etc/nginx/sites-enabled/dc-overview").exists()
     
     table = Table(title="Your Monitoring Setup", show_header=False)
     table.add_column("", style="dim")
@@ -966,8 +1169,12 @@ def show_summary(role: str, local_ip: str):
     table.add_row("IP Address", local_ip)
     
     if role in ["master", "both"]:
-        table.add_row("Grafana", f"http://{local_ip}:3000")
-        table.add_row("Prometheus", f"http://{local_ip}:9090")
+        if ssl_configured:
+            table.add_row("Dashboard", f"https://{local_ip}/ (HTTPS)")
+            table.add_row("Grafana", f"https://{local_ip}/grafana/")
+        else:
+            table.add_row("Grafana", f"http://{local_ip}:3000")
+            table.add_row("Prometheus", f"http://{local_ip}:9090")
     
     if role in ["worker", "both"]:
         table.add_row("Node Exporter", f"http://{local_ip}:9100/metrics")
@@ -978,9 +1185,15 @@ def show_summary(role: str, local_ip: str):
     console.print("\n[bold]Next Steps:[/bold]")
     
     if role in ["master", "both"]:
-        console.print(f"  1. Open Grafana: [cyan]http://{local_ip}:3000[/cyan]")
-        console.print("  2. Import dashboards from Grafana.com (ID: 1860 for node, 12239 for DCGM)")
-        console.print("  3. Add more machines: [cyan]dc-overview add-machine[/cyan]")
+        if ssl_configured:
+            console.print(f"  1. Open Dashboard: [cyan]https://{local_ip}/[/cyan]")
+            console.print("     (Accept the certificate warning if using self-signed)")
+        else:
+            console.print(f"  1. Open Grafana: [cyan]http://{local_ip}:3000[/cyan]")
+        console.print("  2. Add more workers: [cyan]dc-overview add-machine[/cyan]")
+        if not ssl_configured:
+            console.print("  3. Set up HTTPS: [cyan]sudo dc-overview setup-ssl[/cyan]")
+        console.print("\n[dim]Dashboards auto-imported: DC Overview, Node Exporter, DCGM, Vast[/dim]")
     
     if role == "worker":
         console.print("  1. On your master server, add this machine:")

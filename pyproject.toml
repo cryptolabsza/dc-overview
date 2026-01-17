@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dc-overview"
-version = "1.0.0"
+version = "1.0.1"
 description = "GPU Datacenter Monitoring Suite - Prometheus, Grafana & Exporters"
 readme = "README.md"
 license = {text = "MIT"}
@@ -62,6 +62,9 @@ dc_overview = [
     "templates/*.yaml",
     "templates/*.json",
     "templates/*.service",
+    "templates/*.j2",
+    "templates/*.html",
+    "templates/*.conf",
 ]
 
 [tool.black]
