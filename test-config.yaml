@@ -1,0 +1,199 @@
+# DC Overview + IPMI Monitor - Test Configuration
+# Use this for consistent clean install testing
+# Last updated: 2026-01-17
+
+# =============================================================================
+# MASTER SERVER (runs Prometheus + Grafana)
+# =============================================================================
+master:
+  ssh: "vast@41.193.204.66 -p 100"
+  ssh_key: "~/.ssh/ubuntu_key"
+  ip: "192.168.1.100"
+  hostname: "master"
+  
+  grafana:
+    admin_user: "admin"
+    admin_password: "DcOverview2024!"  # Change this!
+    port: 3000
+    
+  prometheus:
+    port: 9090
+    scrape_interval: "15s"
+    
+  nginx:
+    https_port: 443
+    domain: null  # Set to your domain for Let's Encrypt, null for self-signed
+
+# =============================================================================
+# GPU WORKER NODES (run exporters only)
+# =============================================================================
+workers:
+  - name: "worker-01"
+    ssh: "vast@41.193.204.66 -p 101"
+    ssh_key: "~/.ssh/ubuntu_key"
+    ip: "192.168.1.101"
+    gpus: 4
+    exporters:
+      - node_exporter: 9100
+      - dcgm_exporter: 9400
+      - vast_exporter: 9200  # If Vast.ai host
+      
+  - name: "worker-03"  
+    ssh: "vast@41.193.204.66 -p 103"
+    ssh_key: "~/.ssh/ubuntu_key"
+    ip: "192.168.1.103"
+    gpus: 4
+    exporters:
+      - node_exporter: 9100
+      - dcgm_exporter: 9400
+      - vast_exporter: 9200  # If Vast.ai host
+
+# =============================================================================
+# BMC/IPMI SERVERS (for IPMI Monitor)
+# =============================================================================
+bmc_servers:
+  - name: "Server-83"
+    bmc_ip: "192.168.1.83"
+    ipmi_username: "root"
+    ipmi_password: "Romans8:28"  # Store securely in production!
+    protocol: "ipmi"
+    
+  - name: "Server-85"
+    bmc_ip: "192.168.1.85"
+    ipmi_username: "admin"
+    ipmi_password: "Romans8:28"
+    protocol: "ipmi"
+    
+  - name: "Server-88"
+    bmc_ip: "192.168.1.88"
+    ipmi_username: "admin"
+    ipmi_password: "Romans8:28"
+    protocol: "ipmi"
+
+# =============================================================================
+# DASHBOARDS TO IMPORT
+# =============================================================================
+dashboards:
+  # From dc-overview/dashboards/ folder
+  - name: "DC Overview"
+    file: "DC OverView-1768678619438.json"
+    folder: "DC Overview"
+    
+  - name: "Node Exporter Full"
+    file: "Node Exporter Full.json"
+    folder: "DC Overview"
+    source: "jjziets/DCMontoring"
+    
+  - name: "NVIDIA DCGM Exporter"
+    file: "NVIDIA DCGM Exporter.json"
+    folder: "DC Overview"
+    source: "jjziets/DCMontoring"
+    
+  - name: "Vast Dashboard"
+    file: "Vast Dashboard.json"
+    folder: "DC Overview"
+    source: "jjziets/DCMontoring"
+    requires: "vast_exporter"
+    
+  - name: "IPMI Monitor"
+    file: "IPMI Monitor-1768678710446.json"
+    folder: "IPMI Monitor"
+
+# =============================================================================
+# CLEANUP COMMANDS (run before fresh install)
+# =============================================================================
+cleanup_commands:
+  master: |
+    # Stop and remove dc-overview containers
+    cd ~/dc-overview && docker compose down 2>/dev/null || true
+    docker stop prometheus grafana 2>/dev/null || true
+    docker rm prometheus grafana 2>/dev/null || true
+    
+    # Remove exporters
+    sudo systemctl stop node_exporter 2>/dev/null || true
+    sudo systemctl disable node_exporter 2>/dev/null || true
+    sudo rm -f /usr/local/bin/node_exporter
+    
+    # Remove nginx config
+    sudo rm -f /etc/nginx/sites-enabled/dc-overview
+    sudo rm -f /etc/nginx/sites-available/dc-overview
+    sudo systemctl reload nginx 2>/dev/null || true
+    
+    # Remove data directories
+    sudo rm -rf /tmp/dc-overview
+    sudo rm -rf /var/lib/dc-overview
+    rm -rf ~/dc-overview
+    
+    # Remove pipx packages
+    pipx uninstall dc-overview 2>/dev/null || true
+    pipx uninstall ipmi-monitor 2>/dev/null || true
+
+  worker: |
+    # Stop and remove exporters
+    docker stop dcgm-exporter vast-exporter 2>/dev/null || true
+    docker rm dcgm-exporter vast-exporter 2>/dev/null || true
+    
+    sudo systemctl stop node_exporter 2>/dev/null || true
+    sudo systemctl disable node_exporter 2>/dev/null || true
+    sudo rm -f /usr/local/bin/node_exporter
+    
+    # Remove data directories
+    sudo rm -rf /var/lib/dc-overview
+    rm -rf ~/dc-overview
+
+# =============================================================================
+# INSTALL COMMANDS
+# =============================================================================
+install_commands:
+  # Step 1: Install on master
+  master: |
+    pip cache purge
+    pipx install --pip-args="--no-cache-dir" dc-overview
+    pipx ensurepath
+    source ~/.bashrc
+    sudo ~/.local/bin/dc-overview quickstart
+    
+  # Step 2: Install exporters on workers
+  worker: |
+    # Run from master via SSH, or install locally
+    sudo ~/.local/bin/dc-overview setup worker
+    
+  # Step 3: Install IPMI Monitor on master
+  ipmi_monitor: |
+    pipx install --pip-args="--no-cache-dir" ipmi-monitor
+    pipx ensurepath
+    sudo ~/.local/bin/ipmi-monitor setup
+
+# =============================================================================
+# VERIFICATION COMMANDS
+# =============================================================================
+verify_commands:
+  check_services: |
+    echo "=== Docker containers ===" 
+    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    
+    echo -e "\n=== Systemd services ==="
+    systemctl status node_exporter --no-pager -l 2>/dev/null | head -5
+    
+    echo -e "\n=== Prometheus targets ==="
+    curl -s http://localhost:9090/api/v1/targets | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for t in data.get('data', {}).get('activeTargets', []):
+    print(f\"{t['labels'].get('job', 'unknown'):20} {t['health']:10} {t['scrapeUrl']}\")
+"
+    
+  check_grafana: |
+    echo "=== Grafana datasources ==="
+    curl -s -u admin:DcOverview2024! http://localhost:3000/api/datasources | python3 -c "
+import sys, json
+for ds in json.load(sys.stdin):
+    print(f\"{ds['name']:20} {ds['type']:15} {ds['url']}\")
+"
+    
+    echo -e "\n=== Grafana dashboards ==="
+    curl -s -u admin:DcOverview2024! http://localhost:3000/api/search | python3 -c "
+import sys, json
+for d in json.load(sys.stdin):
+    print(f\"{d.get('title', 'Unknown'):30} {d.get('folderTitle', 'General')}\")
+"

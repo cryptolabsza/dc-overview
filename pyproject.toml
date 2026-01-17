@@ -65,6 +65,7 @@ dc_overview = [
     "templates/*.j2",
     "templates/*.html",
     "templates/*.conf",
+    "dashboards/*.json",
 ]
 
 [tool.black]

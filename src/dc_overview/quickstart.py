@@ -462,6 +462,7 @@ def configure_grafana(password: str):
     import time
     import urllib.request
     import json
+    import importlib.resources
     
     console.print("[dim]Configuring Grafana...[/dim]")
     
@@ -500,19 +501,76 @@ def configure_grafana(password: str):
     except Exception as e:
         console.print(f"[dim]Datasource may already exist[/dim]")
     
-    # Import dashboards from jjziets/DCMontoring GitHub repo
-    # These are the official GPU datacenter monitoring dashboards
+    # Dashboard definitions - local file first, then GitHub fallback
+    # Using packaged dashboards from dc_overview/dashboards/ folder
     dashboards = [
-        ("DC Overview", "https://raw.githubusercontent.com/jjziets/DCMontoring/main/DC_OverView.json"),
-        ("Node Exporter Full", "https://raw.githubusercontent.com/jjziets/DCMontoring/main/Node%20Exporter%20Full-1684242153326.json"),
-        ("NVIDIA DCGM Exporter", "https://raw.githubusercontent.com/jjziets/DCMontoring/main/NVIDIA%20DCGM%20Exporter-1684242180498.json"),
-        ("Vast Dashboard", "https://raw.githubusercontent.com/jjziets/DCMontoring/main/Vast%20Dashboard-1692692563948.json"),
+        {
+            "name": "DC Overview",
+            "local_file": "DC OverView-1768678619438.json",
+            "github_url": "https://raw.githubusercontent.com/jjziets/DCMontoring/main/DC_OverView.json",
+        },
+        {
+            "name": "Node Exporter Full",
+            "local_file": "Node Exporter Full.json",
+            "github_url": "https://raw.githubusercontent.com/jjziets/DCMontoring/main/Node%20Exporter%20Full-1684242153326.json",
+        },
+        {
+            "name": "NVIDIA DCGM Exporter",
+            "local_file": "NVIDIA DCGM Exporter.json",
+            "github_url": "https://raw.githubusercontent.com/jjziets/DCMontoring/main/NVIDIA%20DCGM%20Exporter-1684242180498.json",
+        },
+        {
+            "name": "Vast Dashboard",
+            "local_file": "Vast Dashboard.json",
+            "github_url": "https://raw.githubusercontent.com/jjziets/DCMontoring/main/Vast%20Dashboard-1692692563948.json",
+        },
+        {
+            "name": "IPMI Monitor",
+            "local_file": "IPMI Monitor-1768678710446.json",
+            "github_url": None,  # Only available locally
+        },
     ]
     
-    for name, url in dashboards:
+    # Try to get the dashboards directory from the package
+    dashboards_dir = None
+    try:
+        # Python 3.9+ compatible way to get package resources
+        import dc_overview
+        pkg_path = Path(dc_overview.__file__).parent / "dashboards"
+        if pkg_path.exists():
+            dashboards_dir = pkg_path
+    except Exception:
+        pass
+    
+    for dashboard in dashboards:
+        name = dashboard["name"]
+        local_file = dashboard["local_file"]
+        github_url = dashboard["github_url"]
+        
+        dashboard_json = None
+        source = None
+        
+        # Try local packaged file first
+        if dashboards_dir and (dashboards_dir / local_file).exists():
+            try:
+                dashboard_json = (dashboards_dir / local_file).read_text()
+                source = "package"
+            except Exception:
+                pass
+        
+        # Fall back to GitHub if no local file
+        if not dashboard_json and github_url:
+            try:
+                dashboard_json = urllib.request.urlopen(github_url, timeout=30).read().decode('utf-8')
+                source = "github"
+            except Exception:
+                pass
+        
+        if not dashboard_json:
+            console.print(f"[yellow]⚠[/yellow] {name} dashboard: not found")
+            continue
+        
         try:
-            # Download dashboard JSON
-            dashboard_json = urllib.request.urlopen(url, timeout=30).read().decode('utf-8')
             dashboard_obj = json.loads(dashboard_json)
             
             # Use import API with datasource input mapping
@@ -539,7 +597,7 @@ def configure_grafana(password: str):
             )
             
             urllib.request.urlopen(req, timeout=30)
-            console.print(f"[green]✓[/green] {name} dashboard imported")
+            console.print(f"[green]✓[/green] {name} dashboard imported ({source})")
         except Exception as e:
             console.print(f"[yellow]⚠[/yellow] {name} dashboard: {str(e)[:50]}")
     
