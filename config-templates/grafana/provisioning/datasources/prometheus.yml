@@ -1,5 +1,8 @@
 # Grafana Datasource Provisioning
 # This file auto-configures the Prometheus datasource on Grafana startup
+#
+# NOTE: URL must include /prometheus path because Prometheus is configured
+# with --web.external-url=/prometheus/
 
 apiVersion: 1
 
@@ -7,7 +10,7 @@ datasources:
   - name: Prometheus
     type: prometheus
     access: proxy
-    # Use Docker network DNS name if in same compose, otherwise use IP
+    # Include /prometheus path - matches Prometheus --web.external-url setting
     url: http://prometheus:9090/prometheus
     isDefault: true
     editable: true
