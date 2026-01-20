@@ -5,7 +5,7 @@
         "builtIn": 1,
         "datasource": {
           "type": "grafana",
-          "uid": "-- Grafana --"
+          "uid": ""
         },
         "enable": true,
         "hide": true,
@@ -18,13 +18,12 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 6,
   "links": [],
   "panels": [
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": ""
       },
       "description": "",
       "fieldConfig": {
@@ -147,7 +146,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:hotspot_temp:celsius{gpu=\"0\"}",
@@ -160,7 +159,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:hotspot_temp:celsius{gpu=\"1\"}",
@@ -173,7 +172,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:hotspot_temp:celsius{gpu=\"2\"}",
@@ -186,7 +185,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:hotspot_temp:celsius{gpu=\"3\"}",
@@ -199,7 +198,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:hotspot_temp:celsius{gpu=\"4\"}",
@@ -212,7 +211,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:hotspot_temp:celsius{gpu=\"5\"}",
@@ -225,7 +224,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:hotspot_temp:celsius{gpu=\"6\"}",
@@ -238,7 +237,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:hotspot_temp:celsius{gpu=\"7\"}",
@@ -450,7 +449,8 @@
               "source 5": true,
               "source 6": true,
               "source 7": true,
-              "source 8": true
+              "source 8": true,
+              "vm_name": true
             },
             "includeByName": {},
             "indexByName": {
@@ -503,7 +503,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": ""
       },
       "description": "",
       "fieldConfig": {
@@ -615,7 +615,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:fan_speed:percent{gpu=\"0\"}",
@@ -628,7 +628,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:fan_speed:percent{gpu=\"1\"}",
@@ -641,7 +641,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:fan_speed:percent{gpu=\"2\"}",
@@ -654,7 +654,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:fan_speed:percent{gpu=\"3\"}",
@@ -667,7 +667,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:fan_speed:percent{gpu=\"4\"}",
@@ -680,7 +680,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:fan_speed:percent{gpu=\"5\"}",
@@ -693,7 +693,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:fan_speed:percent{gpu=\"6\"}",
@@ -706,7 +706,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:fan_speed:percent{gpu=\"7\"}",
@@ -918,7 +918,8 @@
               "source 5": true,
               "source 6": true,
               "source 7": true,
-              "source 8": true
+              "source 8": true,
+              "vm_name": true
             },
             "includeByName": {},
             "indexByName": {
@@ -971,7 +972,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": ""
       },
       "description": "",
       "fieldConfig": {
@@ -1083,7 +1084,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:power_usage:watts{gpu=\"0\"}",
@@ -1096,7 +1097,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:power_usage:watts{gpu=\"1\"}",
@@ -1109,7 +1110,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:power_usage:watts{gpu=\"2\"}",
@@ -1122,7 +1123,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:power_usage:watts{gpu=\"3\"}",
@@ -1135,7 +1136,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:power_usage:watts{gpu=\"4\"}",
@@ -1148,7 +1149,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:power_usage:watts{gpu=\"5\"}",
@@ -1161,7 +1162,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:power_usage:watts{gpu=\"6\"}",
@@ -1174,7 +1175,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:power_usage:watts{gpu=\"7\"}",
@@ -1386,7 +1387,8 @@
               "source 5": true,
               "source 6": true,
               "source 7": true,
-              "source 8": true
+              "source 8": true,
+              "vm_name": true
             },
             "includeByName": {},
             "indexByName": {
@@ -1439,7 +1441,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": ""
       },
       "description": "",
       "fieldConfig": {
@@ -1551,7 +1553,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:core_temp:celsius{gpu=\"0\"}",
@@ -1564,7 +1566,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:core_temp:celsius{gpu=\"1\"}",
@@ -1577,7 +1579,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:core_temp:celsius{gpu=\"2\"}",
@@ -1590,7 +1592,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:core_temp:celsius{gpu=\"3\"}",
@@ -1603,7 +1605,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:core_temp:celsius{gpu=\"4\"}",
@@ -1616,7 +1618,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:core_temp:celsius{gpu=\"5\"}",
@@ -1629,7 +1631,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:core_temp:celsius{gpu=\"6\"}",
@@ -1642,7 +1644,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:core_temp:celsius{gpu=\"7\"}",
@@ -1854,7 +1856,8 @@
               "source 5": true,
               "source 6": true,
               "source 7": true,
-              "source 8": true
+              "source 8": true,
+              "vm_name": true
             },
             "includeByName": {},
             "indexByName": {
@@ -1907,7 +1910,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": ""
       },
       "description": "",
       "fieldConfig": {
@@ -2019,7 +2022,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:memory_temp:celsius{gpu=\"0\"}",
@@ -2032,7 +2035,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:memory_temp:celsius{gpu=\"1\"}",
@@ -2045,7 +2048,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:memory_temp:celsius{gpu=\"2\"}",
@@ -2058,7 +2061,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:memory_temp:celsius{gpu=\"3\"}",
@@ -2071,7 +2074,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:memory_temp:celsius{gpu=\"4\"}",
@@ -2084,7 +2087,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:memory_temp:celsius{gpu=\"5\"}",
@@ -2097,7 +2100,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:memory_temp:celsius{gpu=\"6\"}",
@@ -2110,7 +2113,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:memory_temp:celsius{gpu=\"7\"}",
@@ -2322,7 +2325,8 @@
               "source 5": true,
               "source 6": true,
               "source 7": true,
-              "source 8": true
+              "source 8": true,
+              "vm_name": true
             },
             "includeByName": {},
             "indexByName": {
@@ -2375,7 +2379,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": ""
       },
       "description": "",
       "fieldConfig": {
@@ -2465,7 +2469,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"0\"}",
@@ -2478,7 +2482,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"1\"}",
@@ -2491,7 +2495,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"2\"}",
@@ -2504,7 +2508,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"3\"}",
@@ -2517,7 +2521,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"4\"} ",
@@ -2530,7 +2534,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"5\"}",
@@ -2543,7 +2547,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"6\"}",
@@ -2556,7 +2560,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"7\"}",
@@ -2822,7 +2826,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": ""
       },
       "description": "Cont of AER in system logs per GPU:  Advanced Error Reporting by PCI Express devices",
       "fieldConfig": {
@@ -2934,7 +2938,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:aer_errors:total{gpu=\"0\"}",
@@ -2947,7 +2951,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:aer_errors:total{gpu=\"1\"}",
@@ -2960,7 +2964,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:aer_errors:total{gpu=\"2\"}",
@@ -2973,7 +2977,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:aer_errors:total{gpu=\"3\"}",
@@ -2986,7 +2990,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:aer_errors:total{gpu=\"4\"}",
@@ -2999,7 +3003,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:aer_errors:total{gpu=\"5\"}",
@@ -3012,7 +3016,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:aer_errors:total{gpu=\"6\"}",
@@ -3025,7 +3029,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:aer_errors:total{gpu=\"7\"}",
@@ -3289,7 +3293,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": ""
       },
       "description": "APT_UPGRADABLE_PACKAGES Updated once every 1h\n",
       "fieldConfig": {
@@ -3360,7 +3364,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "APT_UPGRADABLE_PACKAGES",
@@ -3405,7 +3409,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": ""
       },
       "description": "Current error state for GPU (2 for error, 1 for no error, 0 unknown state)",
       "fieldConfig": {
@@ -3533,7 +3537,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:error_state:status{gpu=\"0\"}",
@@ -3546,7 +3550,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:error_state:status{gpu=\"1\"}",
@@ -3559,7 +3563,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:error_state:status{gpu=\"2\"}",
@@ -3572,7 +3576,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:error_state:status{gpu=\"3\"}",
@@ -3585,7 +3589,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:error_state:status{gpu=\"4\"} ",
@@ -3598,7 +3602,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:error_state:status{gpu=\"5\"}",
@@ -3611,7 +3615,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:error_state:status{gpu=\"6\"}",
@@ -3624,7 +3628,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:error_state:status{gpu=\"7\"}",
@@ -3889,7 +3893,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": ""
       },
       "description": "GPU drivers\n",
       "fieldConfig": {
@@ -3984,7 +3988,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "count(gpu:memory_used:bytes / 1024 / 1024) by (Hostname)",
@@ -3996,7 +4000,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "gpu:sm_clock:mhz{Hostname=~\".+\"}",
@@ -4075,7 +4079,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": ""
       },
       "fieldConfig": {
         "defaults": {
@@ -4134,7 +4138,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "(sum by(instance) (irate(node_cpu_seconds_total{mode!=\"idle\"}[$__rate_interval])) / on(instance) group_left sum by (instance) (irate(node_cpu_seconds_total[$__rate_interval]))) * 100\r\n",
@@ -4146,7 +4150,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "node_uname_info",
@@ -4159,7 +4163,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "(sum by(instance) (node_memory_MemTotal_bytes{} - node_memory_MemFree_bytes{} - node_memory_Buffers_bytes{} - node_memory_Cached_bytes{})) / sum by(instance) (node_memory_MemTotal_bytes{}) * 100\r\n",
@@ -4172,7 +4176,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "(node_time_seconds - on(instance) node_boot_time_seconds ) / 60 /60",
@@ -4185,7 +4189,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "round(max by(instance)(rate(node_network_transmit_bytes_total[1m])*8/1000000), 0.1)\r\n\r\n\r\n\r\n",
@@ -4198,7 +4202,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "round(max by(instance)(rate(node_network_receive_bytes_total[1m])*8/1000000), 0.1)\r\n",
@@ -4211,7 +4215,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "(1 - avg by(instance)(node_filesystem_avail_bytes{mountpoint=\"/\"}/node_filesystem_size_bytes{mountpoint=\"/\"})) * 100\r\n",
@@ -4224,7 +4228,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "(1 - avg by(instance)(node_filesystem_avail_bytes{mountpoint=\"/var/lib/docker\"}/node_filesystem_size_bytes{mountpoint=\"/var/lib/docker\"})) * 100 \r\n",
@@ -4237,7 +4241,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "avg by(instance)(node_cpu_temperature{})\r\n",
@@ -4250,7 +4254,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "(1 - avg by(instance)(node_filesystem_avail_bytes{mountpoint=\"/var/lib/mfs\"}/node_filesystem_size_bytes{mountpoint=\"/var/lib/mfs\"})) * 100",
@@ -4263,7 +4267,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": ""
           },
           "editorMode": "code",
           "expr": "(1 - avg by(instance)(node_filesystem_avail_bytes{mountpoint=~\"/mnt/mfschunks1|/mnt/chunks4\"}/node_filesystem_size_bytes{mountpoint=~\"/mnt/mfschunks1|/mnt/chunks4\"})) * 100",
@@ -4413,6 +4417,7 @@
               "device 6": true,
               "device 7": true,
               "device 8": true,
+              "domainname": true,
               "gpu": true,
               "gpu 1": true,
               "gpu 2": true,
@@ -4477,17 +4482,16 @@
               "source 7": true,
               "source 8": true
             },
+            "includeByName": {},
             "indexByName": {
-              "GPU0": 1,
-              "GPU1": 2,
-              "GPU2": 3,
-              "GPU3": 4,
-              "GPU4": 5,
-              "GPU5": 6,
-              "GPU6": 7,
-              "GPU7": 8,
-              "Hostname": 0,
-              "Machine": 0,
+              "Time 1": 11,
+              "Time 2": 12,
+              "Time 3": 19,
+              "Time 4": 20,
+              "Time 5": 21,
+              "Time 6": 22,
+              "Time 7": 23,
+              "Time 8": 24,
               "Value #A": 1,
               "Value #B": 2,
               "Value #C": 3,
@@ -4495,7 +4499,16 @@
               "Value #E": 5,
               "Value #F": 6,
               "Value #G": 7,
-              "Value #H": 8
+              "Value #H": 8,
+              "__name__": 13,
+              "domainname": 14,
+              "instance": 10,
+              "job": 15,
+              "machine": 9,
+              "nodename": 0,
+              "release": 16,
+              "sysname": 17,
+              "version": 18
             },
             "renameByName": {
               "Hostname": "Machine",
@@ -4506,7 +4519,10 @@
               "Value #E": "GPU4",
               "Value #F": "GPU5",
               "Value #G": "GPU6",
-              "Value #H": "GPU7"
+              "Value #H": "GPU7",
+              "machine": "ARC",
+              "nodename": "Machine",
+              "version": "OS"
             }
           }
         },
@@ -4534,7 +4550,24 @@
     "Linux"
   ],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "baseFilters": [],
+        "datasource": {
+          "type": "prometheus",
+          "uid": ""
+        },
+        "filters": [
+          {
+            "key": "Hostname",
+            "operator": "!=",
+            "value": ""
+          }
+        ],
+        "name": "Filters",
+        "type": "adhoc"
+      }
+    ]
   },
   "time": {
     "from": "now-10s",
@@ -4544,6 +4577,5 @@
   "timezone": "",
   "title": "DC OverView",
   "uid": "dc-overview-main",
-  "version": 10,
   "weekStart": ""
 }
