@@ -1,119 +1,84 @@
 groups:
   - name: gpu_unified_metrics
     rules:
-      # Core GPU temperature
+      # Core GPU temperature (from DCGM metrics in dc-exporter)
       - record: gpu:core_temp:celsius
         expr: DCGM_FI_DEV_GPU_TEMP
-        labels:
-          source: "dcgm"
-      
-      # VRAM/Memory temperature (DCXP or DCGM)
-      - record: gpu:memory_temp:celsius
-        expr: (DCXP_FI_DEV_VRAM_TEMP > 0) or DCGM_FI_DEV_MEMORY_TEMP
-        labels:
-          source: "unified"
-      
-      # Hotspot temperature (DCXP or fallback to GPU temp)
+
+      # Hotspot temperature (direct from DCXP - 0 means not supported or VM)
       - record: gpu:hotspot_temp:celsius
-        expr: (DCXP_FI_DEV_HOT_SPOT_TEMP > 0) or DCGM_FI_DEV_GPU_TEMP
-        labels:
-          source: "unified"
-      
+        expr: DCXP_FI_DEV_HOT_SPOT_TEMP
+
+      # VRAM temperature (direct from DCXP - 0 means not supported or VM)
+      - record: gpu:memory_temp:celsius
+        expr: DCXP_FI_DEV_VRAM_TEMP
+
       # GPU Power usage
       - record: gpu:power_usage:watts
         expr: DCGM_FI_DEV_POWER_USAGE
-        labels:
-          source: "dcgm"
-      
+
       # GPU Utilization
       - record: gpu:utilization:percent
         expr: DCGM_FI_DEV_GPU_UTIL
-        labels:
-          source: "dcgm"
-      
+
       # Fan speed
       - record: gpu:fan_speed:percent
         expr: DCGM_FI_DEV_FAN_SPEED
-        labels:
-          source: "dcgm"
-      
+
       # SM Clock
       - record: gpu:sm_clock:mhz
         expr: DCGM_FI_DEV_SM_CLOCK
-        labels:
-          source: "dcgm"
-      
+
       # Memory Clock
       - record: gpu:mem_clock:mhz
         expr: DCGM_FI_DEV_MEM_CLOCK
-        labels:
-          source: "dcgm"
-      
-      # FB Used (GPU memory used)
-      - record: gpu:fb_used:bytes
-        expr: DCGM_FI_DEV_FB_USED * 1024 * 1024
-        labels:
-          source: "dcgm"
-      
-      # FB Free (GPU memory free)
-      - record: gpu:fb_free:bytes
-        expr: DCGM_FI_DEV_FB_FREE * 1024 * 1024
-        labels:
-          source: "dcgm"
-      
-      # Throttle reasons from DCXP
+
+      # FB Used (GPU memory used in MB)
+      - record: gpu:fb_used:mb
+        expr: DCGM_FI_DEV_FB_USED
+
+      # FB Free (GPU memory free in MB)
+      - record: gpu:fb_free:mb
+        expr: DCGM_FI_DEV_FB_FREE
+
+      # Throttle reasons
       - record: gpu:throttle_reason:bool
         expr: DCXP_FI_DEV_CLOCKS_THROTTLE_REASON
-        labels:
-          source: "dcxp"
-      
-      # AER errors from DC Exporter
+
+      # AER errors
       - record: gpu:aer_errors:total
         expr: DCXP_AER_TOTAL_ERRORS
-        labels:
-          source: "dcxp"
-      
-      # GPU error state from DC Exporter
+
+      # GPU error state
       - record: gpu:error_state:status
         expr: DCXP_ERROR_STATE
-        labels:
-          source: "dcxp"
-      
-      # Encoder utilization
-      - record: gpu:enc_util:percent
-        expr: DCGM_FI_DEV_ENC_UTIL
-        labels:
-          source: "dcgm"
-      
-      # Decoder utilization
-      - record: gpu:dec_util:percent
-        expr: DCGM_FI_DEV_DEC_UTIL
-        labels:
-          source: "dcgm"
+
+      # GPU state (0=OK, 3=VM)
+      - record: gpu:state:value
+        expr: DCXP_GPU_STATE
 
   - name: gpu_fleet_aggregates
     rules:
+      # GPUs available on host (NVML count)
       - record: fleet:gpu_count:total
         expr: count(DCGM_FI_DEV_GPU_TEMP)
-        labels:
-          aggregation: "fleet"
-      
+
+      # Total GPUs on PCIe bus (including VMs)
+      - record: fleet:gpu_count_pcie:total
+        expr: sum(DCXP_GPU_COUNT{type="pcie"})
+
+      # Total GPUs in VMs
+      - record: fleet:gpu_count_vm:total
+        expr: count(DCXP_GPU_STATE == 3)
+
       - record: fleet:memory_temp:avg_celsius
-        expr: avg(gpu:memory_temp:celsius)
-        labels:
-          aggregation: "fleet"
-      
+        expr: avg(DCXP_FI_DEV_VRAM_TEMP > 0) or vector(0)
+
       - record: fleet:hotspot_temp:max_celsius
-        expr: max(gpu:hotspot_temp:celsius)
-        labels:
-          aggregation: "fleet"
-      
+        expr: max(DCXP_FI_DEV_HOT_SPOT_TEMP > 0) or vector(0)
+
       - record: fleet:power_usage:total_watts
         expr: sum(gpu:power_usage:watts)
-        labels:
-          aggregation: "fleet"
-      
+
       - record: fleet:utilization:avg_percent
         expr: avg(gpu:utilization:percent)
-        labels:
-          aggregation: "fleet"

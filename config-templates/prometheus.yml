@@ -1,15 +1,3 @@
-# DC Overview - Prometheus Configuration Template
-#
-# This is a working configuration. Replace IP addresses for your deployment:
-#   - MASTER: 192.168.1.100
-#   - WORKERS: 192.168.1.101, 192.168.1.103
-#
-# Exporter Ports:
-#   - 9100: Node Exporter (system metrics)
-#   - 9400: DCGM Exporter (NVIDIA GPU metrics)
-#   - 9835: DC Exporter (VRAM/Hotspot temps, throttle reasons)
-#   - 8622: Vast.ai Exporter (optional)
-
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -28,28 +16,18 @@ scrape_configs:
       - targets: ["192.168.1.100:9100"]
         labels:
           group: "master"
-      - targets: ["192.168.1.100:9400"]
-        labels:
-          group: "master"
 
   - job_name: "wk01"
     static_configs:
-      - targets: ["192.168.1.101:9100", "192.168.1.101:9400"]
+      - targets: ["192.168.1.101:9100"]
         labels:
           group: "workers"
 
   - job_name: "wk03"
     static_configs:
-      - targets: ["192.168.1.103:9100", "192.168.1.103:9400"]
+      - targets: ["192.168.1.103:9100"]
         labels:
           group: "workers"
-
-  - job_name: "vastai-exporter"
-    scrape_interval: 60s
-    static_configs:
-      - targets: ["192.168.1.100:8622"]
-        labels:
-          group: "vast"
 
   - job_name: "dc-exporter"
     static_configs:
@@ -58,5 +36,9 @@ scrape_configs:
         - "192.168.1.101:9835"
         - "192.168.1.103:9835"
 
-# NOTE: IPMI Monitor does not expose /metrics endpoint
-# It has its own web dashboard at /ipmi/
+  - job_name: "vastai-exporter"
+    scrape_interval: 60s
+    static_configs:
+      - targets: ["192.168.1.100:8622"]
+        labels:
+          group: "vast"
