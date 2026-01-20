@@ -1,15 +1,15 @@
 groups:
   - name: gpu_unified_metrics
     rules:
-      # Core GPU temperature (from DCGM metrics in dc-exporter)
+      # Core GPU temperature
       - record: gpu:core_temp:celsius
         expr: DCGM_FI_DEV_GPU_TEMP
 
-      # Hotspot temperature (direct from DCXP - 0 means not supported or VM)
+      # Hotspot temperature
       - record: gpu:hotspot_temp:celsius
         expr: DCXP_FI_DEV_HOT_SPOT_TEMP
 
-      # VRAM temperature (direct from DCXP - 0 means not supported or VM)
+      # VRAM temperature
       - record: gpu:memory_temp:celsius
         expr: DCXP_FI_DEV_VRAM_TEMP
 
@@ -41,6 +41,14 @@ groups:
       - record: gpu:fb_free:mb
         expr: DCGM_FI_DEV_FB_FREE
 
+      # Memory used in bytes (for compatibility)
+      - record: gpu:memory_used:bytes
+        expr: DCGM_FI_DEV_FB_USED * 1024 * 1024
+
+      # Memory free in bytes (for compatibility)
+      - record: gpu:memory_free:bytes
+        expr: DCGM_FI_DEV_FB_FREE * 1024 * 1024
+
       # Throttle reasons
       - record: gpu:throttle_reason:bool
         expr: DCXP_FI_DEV_CLOCKS_THROTTLE_REASON
@@ -59,15 +67,15 @@ groups:
 
   - name: gpu_fleet_aggregates
     rules:
-      # GPUs available on host (NVML count)
+      # GPUs available on host
       - record: fleet:gpu_count:total
         expr: count(DCGM_FI_DEV_GPU_TEMP)
 
-      # Total GPUs on PCIe bus (including VMs)
+      # Total GPUs on PCIe bus
       - record: fleet:gpu_count_pcie:total
         expr: sum(DCXP_GPU_COUNT{type="pcie"})
 
-      # Total GPUs in VMs
+      # GPUs in VMs
       - record: fleet:gpu_count_vm:total
         expr: count(DCXP_GPU_STATE == 3)
 
