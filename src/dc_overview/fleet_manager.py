@@ -172,6 +172,10 @@ class FleetManager:
         prometheus_content = self._generate_prometheus_config()
         (compose_dir / "prometheus.yml").write_text(prometheus_content)
         
+        # Create recording_rules.yml for unified GPU metrics
+        recording_rules = self._generate_recording_rules()
+        (compose_dir / "recording_rules.yml").write_text(recording_rules)
+        
         # Create grafana provisioning directories
         grafana_dir = compose_dir / "grafana"
         (grafana_dir / "provisioning" / "datasources").mkdir(parents=True, exist_ok=True)
@@ -230,14 +234,17 @@ services:
     container_name: prometheus
     restart: unless-stopped
     ports:
-      - "127.0.0.1:9090:9090"
+      - "9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./recording_rules.yml:/etc/prometheus/recording_rules.yml:ro
       - prometheus-data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time={self.config.prometheus.retention_days}d"
       - "--web.enable-lifecycle"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - monitoring
 
@@ -246,15 +253,19 @@ services:
     container_name: grafana
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3000:3000"
+      - "3000:3000"
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     environment:
       - GF_SECURITY_ADMIN_PASSWORD={self.config.grafana.admin_password}
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-piechart-panel
+      - GF_USERS_ALLOW_SIGN_UP=false
       - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana/
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    depends_on:
+      - prometheus
     networks:
       - monitoring
 
@@ -275,18 +286,122 @@ networks:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+rule_files:
+  - "/etc/prometheus/recording_rules.yml"
+
 scrape_configs:
   - job_name: 'prometheus'
+    metrics_path: /metrics
     static_configs:
-      - targets: ['prometheus:9090']
+      - targets: ['localhost:9090']
 
   - job_name: 'master'
     static_configs:
-      - targets: ['{master_ip}:9100', '{master_ip}:9400', '{master_ip}:9500']
+      - targets: ['{master_ip}:9100', '{master_ip}:9835']
         labels:
           instance: 'master'
 """
         return config
+    
+    def _generate_recording_rules(self) -> str:
+        """Generate recording_rules.yml for unified GPU metrics."""
+        return '''groups:
+  - name: gpu_unified_metrics
+    rules:
+      # Core GPU temperature
+      - record: gpu:core_temp:celsius
+        expr: DCGM_FI_DEV_GPU_TEMP{UUID!="VM-PASSTHROUGH"}
+
+      # Hotspot temperature
+      - record: gpu:hotspot_temp:celsius
+        expr: DCXP_FI_DEV_HOT_SPOT_TEMP
+
+      # VRAM temperature
+      - record: gpu:memory_temp:celsius
+        expr: DCXP_FI_DEV_VRAM_TEMP
+
+      # GPU Power usage
+      - record: gpu:power_usage:watts
+        expr: DCGM_FI_DEV_POWER_USAGE{UUID!="VM-PASSTHROUGH"}
+
+      # GPU Utilization
+      - record: gpu:utilization:percent
+        expr: DCGM_FI_DEV_GPU_UTIL{UUID!="VM-PASSTHROUGH"}
+
+      # Fan speed
+      - record: gpu:fan_speed:percent
+        expr: DCGM_FI_DEV_FAN_SPEED{UUID!="VM-PASSTHROUGH"}
+
+      # SM Clock
+      - record: gpu:sm_clock:mhz
+        expr: DCGM_FI_DEV_SM_CLOCK{UUID!="VM-PASSTHROUGH"}
+
+      # Memory Clock
+      - record: gpu:mem_clock:mhz
+        expr: DCGM_FI_DEV_MEM_CLOCK{UUID!="VM-PASSTHROUGH"}
+
+      # FB Used (GPU memory used in MB)
+      - record: gpu:fb_used:mb
+        expr: DCGM_FI_DEV_FB_USED{UUID!="VM-PASSTHROUGH"}
+
+      # FB Free (GPU memory free in MB)
+      - record: gpu:fb_free:mb
+        expr: DCGM_FI_DEV_FB_FREE{UUID!="VM-PASSTHROUGH"}
+
+      # Memory used in bytes
+      - record: gpu:memory_used:bytes
+        expr: DCGM_FI_DEV_FB_USED{UUID!="VM-PASSTHROUGH"} * 1024 * 1024
+
+      # Memory free in bytes
+      - record: gpu:memory_free:bytes
+        expr: DCGM_FI_DEV_FB_FREE{UUID!="VM-PASSTHROUGH"} * 1024 * 1024
+
+      # Throttle reasons
+      - record: gpu:throttle_reason:bool
+        expr: DCXP_FI_DEV_CLOCKS_THROTTLE_REASON
+
+      # AER errors
+      - record: gpu:aer_errors:total
+        expr: DCXP_AER_TOTAL_ERRORS
+
+      # GPU error state
+      - record: gpu:error_state:status
+        expr: DCXP_ERROR_STATE
+
+      # GPU state (0=OK, 3=VM)
+      - record: gpu:state:value
+        expr: DCXP_GPU_STATE
+
+      # VM GPU count per host
+      - record: gpu:vm_count:total
+        expr: DCXP_VM_GPU_COUNT
+
+  - name: gpu_fleet_aggregates
+    rules:
+      # Total GPUs with real metrics
+      - record: fleet:gpu_count:total
+        expr: count(DCGM_FI_DEV_GPU_TEMP{UUID!="VM-PASSTHROUGH"})
+
+      # Total GPUs on PCIe bus
+      - record: fleet:gpu_count_pcie:total
+        expr: sum(DCXP_GPU_COUNT{type="pcie"})
+
+      # GPUs in VMs with real metrics
+      - record: fleet:gpu_count_vm:total
+        expr: count(DCGM_FI_DEV_GPU_TEMP{source="vm"})
+
+      - record: fleet:memory_temp:avg_celsius
+        expr: avg(DCXP_FI_DEV_VRAM_TEMP > 0) or vector(0)
+
+      - record: fleet:hotspot_temp:max_celsius
+        expr: max(DCXP_FI_DEV_HOT_SPOT_TEMP > 0) or vector(0)
+
+      - record: fleet:power_usage:total_watts
+        expr: sum(gpu:power_usage:watts)
+
+      - record: fleet:utilization:avg_percent
+        expr: avg(gpu:utilization:percent)
+'''
     
     # ============ Step 4: Deploy to Workers ============
     
@@ -381,7 +496,7 @@ scrape_configs:
             {
                 "job_name": "master",
                 "static_configs": [{
-                    "targets": [f"{master_ip}:9100", f"{master_ip}:9400", f"{master_ip}:9500"],
+                    "targets": [f"{master_ip}:9100", f"{master_ip}:9835"],
                     "labels": {"instance": "master"}
                 }]
             }
@@ -392,8 +507,7 @@ scrape_configs:
             if server.exporters_installed:
                 targets = [
                     f"{server.server_ip}:9100",  # node_exporter
-                    f"{server.server_ip}:9400",  # dcgm-exporter
-                    f"{server.server_ip}:9500",  # dc-exporter
+                    f"{server.server_ip}:9835",  # dc-exporter (includes DCGM metrics)
                 ]
                 scrape_configs.append({
                     "job_name": server.name,
@@ -687,33 +801,33 @@ scrape_configs:
             dashboards.extend([
                 {
                     "name": "DC Overview",
-                    "local_file": "DC OverView-1768678619438.json",
-                    "github_url": "https://raw.githubusercontent.com/jjziets/DCMontoring/main/DC_OverView.json",
+                    "local_file": "DC_Overview.json",
+                    "github_url": "https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/dashboards/DC_Overview.json",
                 },
                 {
                     "name": "Node Exporter Full",
-                    "local_file": "Node Exporter Full.json",
-                    "github_url": "https://raw.githubusercontent.com/jjziets/DCMontoring/main/Node%20Exporter%20Full-1684242153326.json",
+                    "local_file": "Node_Exporter_Full.json",
+                    "github_url": "https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/dashboards/Node_Exporter_Full.json",
                 },
                 {
                     "name": "NVIDIA DCGM Exporter",
-                    "local_file": "NVIDIA DCGM Exporter.json",
-                    "github_url": "https://raw.githubusercontent.com/jjziets/DCMontoring/main/NVIDIA%20DCGM%20Exporter-1684242180498.json",
+                    "local_file": "NVIDIA_DCGM_Exporter.json",
+                    "github_url": "https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/dashboards/NVIDIA_DCGM_Exporter.json",
                 },
             ])
         
         if self.config.components.vast_exporter:
             dashboards.append({
                 "name": "Vast Dashboard",
-                "local_file": "Vast Dashboard.json",
-                "github_url": "https://raw.githubusercontent.com/jjziets/DCMontoring/main/Vast%20Dashboard-1692692563948.json",
+                "local_file": "Vast_Dashboard.json",
+                "github_url": "https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/dashboards/Vast_Dashboard.json",
             })
         
         if self.config.components.ipmi_monitor:
             dashboards.append({
                 "name": "IPMI Monitor",
-                "local_file": "IPMI Monitor-1768678710446.json",
-                "github_url": "https://raw.githubusercontent.com/cryptolabsza/ipmi-monitor/main/grafana/dashboards/ipmi-monitor.json",
+                "local_file": "IPMI_Monitor.json",
+                "github_url": "https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/dashboards/IPMI_Monitor.json",
             })
         
         return dashboards

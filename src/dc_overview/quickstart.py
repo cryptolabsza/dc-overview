@@ -178,8 +178,7 @@ def install_exporters():
     """Install all monitoring exporters as systemd services."""
     exporters = [
         ("node_exporter", "CPU, RAM, disk metrics", 9100),
-        ("dcgm-exporter", "NVIDIA GPU metrics", 9400),
-        ("dc-exporter", "VRAM temperatures", 9500),
+        ("dc-exporter", "GPU metrics (VRAM, hotspot, power, util)", 9835),
     ]
     
     for name, desc, port in exporters:
@@ -198,8 +197,6 @@ def install_single_exporter(name: str) -> bool:
     """Install a single exporter."""
     if name == "node_exporter":
         return install_node_exporter()
-    elif name == "dcgm-exporter":
-        return install_dcgm_exporter()
     elif name == "dc-exporter":
         return install_dc_exporter()
     return False
@@ -298,48 +295,96 @@ def install_dcgm_exporter() -> bool:
 
 
 def install_dc_exporter() -> bool:
-    """Install dc-exporter for VRAM temps."""
+    """Install dc-exporter for VRAM/hotspot temps and GPU metrics."""
     try:
-        # Check if already running
+        # Check if already running on correct port
         result = subprocess.run(["systemctl", "is-active", "dc-exporter"], capture_output=True)
         if result.returncode == 0:
-            return True
+            # Verify it's serving on port 9835
+            try:
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                if sock.connect_ex(('127.0.0.1', 9835)) == 0:
+                    sock.close()
+                    return True
+                sock.close()
+            except Exception:
+                pass
         
         import urllib.request
         
-        # Download binaries
+        # Create installation directory
+        os.makedirs("/opt/dc-exporter", exist_ok=True)
+        
+        # Download the collector binary
         base_url = "https://github.com/cryptolabsza/dc-exporter/releases/latest/download"
+        urllib.request.urlretrieve(f"{base_url}/dc-exporter-collector", "/opt/dc-exporter/dc-exporter-c")
+        subprocess.run(["chmod", "+x", "/opt/dc-exporter/dc-exporter-c"], check=True)
         
-        urllib.request.urlretrieve(f"{base_url}/dc-exporter-collector", "/usr/local/bin/dc-exporter-collector")
-        urllib.request.urlretrieve(f"{base_url}/dc-exporter-server", "/usr/local/bin/dc-exporter-server")
-        
-        subprocess.run(["chmod", "+x", "/usr/local/bin/dc-exporter-collector"], check=True)
-        subprocess.run(["chmod", "+x", "/usr/local/bin/dc-exporter-server"], check=True)
-        
-        # Create config
-        os.makedirs("/etc/dc-exporter", exist_ok=True)
-        config = """[agent]
-machine_id=auto
-interval=5
+        # Create the run script (Python HTTP server on port 9835)
+        run_script = '''#!/bin/bash
+cd /opt/dc-exporter
 
-[gpu]
-enabled=1
-DCGM_FI_DEV_VRAM_TEMP
-DCGM_FI_DEV_HOT_SPOT_TEMP
-DCGM_FI_DEV_FAN_SPEED
-"""
-        Path("/etc/dc-exporter/config.ini").write_text(config)
+# Kill any existing process on port 9835
+fuser -k 9835/tcp 2>/dev/null || true
+sleep 1
+
+# Run the exporter in a loop to update metrics
+(
+    while true; do
+        ./dc-exporter-c >/dev/null 2>&1 || true
+        sleep 10
+    done
+) &
+
+# Serve the metrics file via HTTP with SO_REUSEADDR
+exec python3 -c "
+import http.server
+import socketserver
+import socket
+
+class ReuseAddrTCPServer(socketserver.TCPServer):
+    allow_reuse_address = True
+
+class MetricsHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == \\"/metrics\\" or self.path == \\"/\\":
+            self.send_response(200)
+            self.send_header(\\"Content-type\\", \\"text/plain\\")
+            self.end_headers()
+            try:
+                with open(\\"metrics.txt\\", \\"r\\") as f:
+                    self.wfile.write(f.read().encode())
+            except FileNotFoundError:
+                self.wfile.write(b\\"# No metrics yet\\\\n\\")
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def log_message(self, format, *args):
+        pass
+
+PORT = 9835
+with ReuseAddrTCPServer((\\"\\"\\", PORT), MetricsHandler) as httpd:
+    print(f\\"DC Exporter serving on port {PORT}\\")
+    httpd.serve_forever()
+"
+'''
+        Path("/opt/dc-exporter/run.sh").write_text(run_script)
+        subprocess.run(["chmod", "+x", "/opt/dc-exporter/run.sh"], check=True)
         
         # Create service
         service = """[Unit]
-Description=DC Exporter - GPU VRAM Temperature
+Description=DC Exporter - VRAM/Hotspot Temperature Metrics
 After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/etc/dc-exporter
-ExecStart=/bin/bash -c "/usr/local/bin/dc-exporter-collector --no-console & /usr/local/bin/dc-exporter-server"
+ExecStart=/opt/dc-exporter/run.sh
 Restart=always
+RestartSec=5
+WorkingDirectory=/opt/dc-exporter
 
 [Install]
 WantedBy=multi-user.target
@@ -348,7 +393,7 @@ WantedBy=multi-user.target
         
         subprocess.run(["systemctl", "daemon-reload"], check=True)
         subprocess.run(["systemctl", "enable", "dc-exporter"], check=True)
-        subprocess.run(["systemctl", "start", "dc-exporter"], check=True)
+        subprocess.run(["systemctl", "restart", "dc-exporter"], check=True)
         
         return True
     except Exception:
@@ -430,7 +475,7 @@ scrape_configs:
 
   - job_name: 'local'
     static_configs:
-      - targets: ['{local_ip}:9100', '{local_ip}:9400', '{local_ip}:9500']
+      - targets: ['{local_ip}:9100', '{local_ip}:9835']
         labels:
           instance: 'master'
 """
@@ -1041,8 +1086,7 @@ def update_prometheus_targets(machines: List[Dict[str, str]]):
             "static_configs": [{
                 "targets": [
                     f"{machine['ip']}:9100",
-                    f"{machine['ip']}:9400",
-                    f"{machine['ip']}:9500",
+                    f"{machine['ip']}:9835",
                 ],
                 "labels": {"instance": machine["name"]}
             }]
@@ -1245,7 +1289,7 @@ def show_summary(role: str, local_ip: str):
     
     if role in ["worker", "both"]:
         table.add_row("Node Exporter", f"http://{local_ip}:9100/metrics")
-        table.add_row("DC Exporter", f"http://{local_ip}:9500/metrics")
+        table.add_row("DC Exporter", f"http://{local_ip}:9835/metrics")
     
     console.print(table)
     

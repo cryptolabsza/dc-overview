@@ -93,7 +93,7 @@ class PrometheusConfig:
         for target in self.targets:
             job_name = target.get("name", target.get("ip", "unknown"))
             ip = target.get("ip")
-            ports = target.get("ports", [9100, 9400, 9500])
+            ports = target.get("ports", [9100, 9835])
             
             targets = [f"{ip}:{port}" for port in ports]
             

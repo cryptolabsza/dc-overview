@@ -14,8 +14,7 @@
 | **Prometheus** | Time-series database for metrics | 9090 |
 | **Grafana** | Beautiful dashboards and alerting | 3000 |
 | **node_exporter** | CPU, RAM, disk, network metrics | 9100 |
-| **dcgm-exporter** | NVIDIA GPU metrics (utilization, temp, power) | 9400 |
-| **dc-exporter** | VRAM temperature, hotspot, fan speed | 9500 |
+| **dc-exporter** | GPU metrics (VRAM temp, hotspot, power, util, fan) | 9835 |
 | **vastai-exporter** | Vast.ai earnings and reliability (optional) | 8622 |
 | **IPMI Monitor** | BMC/IPMI server health monitoring (optional) | 5000 |
 
@@ -418,7 +417,7 @@ sudo cp config-templates/systemd/dcgm-exporter.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now nvidia-dcgm dcgm-exporter
 
-# Verify: curl http://localhost:9400/metrics
+# Verify: curl http://localhost:9835/metrics
 ```
 
 #### Install DC Exporter (VRAM/Hotspot Temps)
@@ -448,11 +447,11 @@ Edit `/root/.config/dc-overview/prometheus.yml` with your server IPs:
 scrape_configs:
   - job_name: "master"
     static_configs:
-      - targets: ["192.168.1.100:9100", "192.168.1.100:9400"]
+      - targets: ["192.168.1.100:9100", "192.168.1.100:9835"]
 
   - job_name: "worker-01"
     static_configs:
-      - targets: ["192.168.1.101:9100", "192.168.1.101:9400"]
+      - targets: ["192.168.1.101:9100", "192.168.1.101:9835"]
 
   - job_name: "dc-exporter"
     static_configs:
@@ -482,7 +481,7 @@ Import these dashboards from `dashboards/` into Grafana:
 | Service | Port | Metrics |
 |---------|------|---------|
 | Node Exporter | 9100 | `node_*` (CPU, RAM, disk) |
-| DCGM Exporter | 9400 | `DCGM_*` (GPU temp, power, util) |
+| DC Exporter | 9835 | `DCGM_*`, `DCXP_*` (GPU temp, VRAM, power, util) |
 | DC Exporter | 9835 | `DCXP_*` (VRAM temp, hotspot, throttle) |
 | Vast.ai Exporter | 8622 | `vast_machine_*` (earnings, reliability) |
 | Prometheus | 9090 | Time-series DB |

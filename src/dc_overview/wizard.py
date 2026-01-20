@@ -248,7 +248,7 @@ class SetupWizard:
             choices=[
                 questionary.Choice("node_exporter (CPU, RAM, disk) - port 9100", value="node_exporter", checked=True),
                 questionary.Choice("dcgm-exporter (NVIDIA GPU) - port 9400", value="dcgm_exporter", checked=True),
-                questionary.Choice("dc-exporter (VRAM temps) - port 9500", value="dc_exporter", checked=True),
+                questionary.Choice("dc-exporter (GPU metrics: VRAM, hotspot, power, util) - port 9835", value="dc_exporter", checked=True),
             ],
             style=custom_style
         ).ask()
@@ -301,7 +301,7 @@ class SetupWizard:
                 choices=[
                     questionary.Choice("9100 (node_exporter)", value=9100, checked=True),
                     questionary.Choice("9400 (dcgm-exporter)", value=9400, checked=True),
-                    questionary.Choice("9500 (dc-exporter)", value=9500, checked=True),
+                    questionary.Choice("9835 (dc-exporter)", value=9835, checked=True),
                 ],
                 style=custom_style
             ).ask()

@@ -199,6 +199,48 @@ def install_nginx():
     return True
 
 
+def create_prometheus_htpasswd(username: str = "admin", password: str = None) -> str:
+    """
+    Create htpasswd file for Prometheus basic auth.
+    
+    Args:
+        username: Basic auth username
+        password: Password (if None, generates random)
+    
+    Returns:
+        The password used
+    """
+    import secrets
+    import hashlib
+    import base64
+    
+    htpasswd_file = Path("/etc/nginx/.htpasswd_prometheus")
+    
+    # Generate password if not provided
+    if password is None:
+        password = secrets.token_urlsafe(12)
+    
+    # Generate APR1-MD5 hash (htpasswd format)
+    # For simplicity, use openssl to generate the hash
+    result = subprocess.run(
+        ["openssl", "passwd", "-apr1", password],
+        capture_output=True,
+        text=True
+    )
+    
+    if result.returncode == 0:
+        password_hash = result.stdout.strip()
+        htpasswd_file.write_text(f"{username}:{password_hash}\n")
+        os.chmod(htpasswd_file, 0o644)
+        print(f"✓ Created Prometheus htpasswd ({htpasswd_file})")
+    else:
+        # Fallback: create empty file (will need manual setup)
+        htpasswd_file.write_text("")
+        print("⚠️  Could not generate htpasswd, manual setup required")
+    
+    return password
+
+
 def enable_nginx_site(config_path: str = "/etc/nginx/sites-available/dc-overview"):
     """Enable the nginx site and reload"""
     sites_enabled = Path("/etc/nginx/sites-enabled")
@@ -237,7 +279,8 @@ def setup_reverse_proxy(
     email: Optional[str] = None,
     site_name: str = "DC Overview",
     ipmi_enabled: bool = False,
-    prometheus_enabled: bool = False,
+    prometheus_enabled: bool = True,
+    prometheus_password: Optional[str] = None,
     use_letsencrypt: bool = False,
 ):
     """
@@ -248,18 +291,22 @@ def setup_reverse_proxy(
         email: Email for Let's Encrypt (required if use_letsencrypt=True)
         site_name: Name to display on landing page
         ipmi_enabled: Whether IPMI Monitor is installed
-        prometheus_enabled: Whether to expose Prometheus (disabled by default - no auth)
+        prometheus_enabled: Whether to expose Prometheus UI (protected by basic auth)
+        prometheus_password: Password for Prometheus basic auth (generated if None)
         use_letsencrypt: Use Let's Encrypt instead of self-signed
     
     SECURITY NOTE:
         - Only port 443 (HTTPS) is exposed externally
         - Grafana (3000), Prometheus (9090), IPMI (5000) bind to localhost only
-        - Prometheus is disabled by default as it has no authentication
+        - Prometheus UI is protected by basic authentication
     """
     print("\n━━━ Setting up Reverse Proxy ━━━\n")
     
     # Install nginx
     install_nginx()
+    
+    # Create Prometheus htpasswd for basic auth
+    prom_pass = create_prometheus_htpasswd(password=prometheus_password)
     
     # Generate SSL certificate
     if use_letsencrypt and domain and email:
@@ -297,8 +344,7 @@ def setup_reverse_proxy(
     if domain:
         print(f"Access your dashboard at: https://{domain}/")
         print(f"  • Grafana: https://{domain}/grafana/")
-        if prometheus_enabled:
-            print(f"  • Prometheus: https://{domain}/prometheus/")
+        print(f"  • Prometheus: https://{domain}/prometheus/ (user: admin)")
         if ipmi_enabled:
             print(f"  • IPMI Monitor: https://{domain}/ipmi/")
         print(f"\nSubdomains (if DNS configured):")
@@ -308,14 +354,13 @@ def setup_reverse_proxy(
     else:
         print("Access your dashboard at: https://<server-ip>/")
         print("  • Grafana: https://<server-ip>/grafana/")
-        if prometheus_enabled:
-            print("  • Prometheus: https://<server-ip>/prometheus/")
+        print("  • Prometheus: https://<server-ip>/prometheus/ (user: admin)")
         if ipmi_enabled:
             print("  • IPMI Monitor: https://<server-ip>/ipmi/")
     
-    if not prometheus_enabled:
-        print("\n📝 Prometheus UI disabled (no authentication)")
-        print("   Enable with: --prometheus flag")
+    print(f"\n📝 Prometheus UI credentials:")
+    print(f"   Username: admin")
+    print(f"   Password: {prom_pass}")
     
     if use_letsencrypt:
         print("\n🔒 Let's Encrypt certificate installed!")

@@ -111,9 +111,8 @@ def setup(mode: str, install_services: bool, config_dir: str, non_interactive: b
 
 @click.command("install-exporters")
 @click.option("--node-exporter/--no-node-exporter", default=True, help="Install node_exporter")
-@click.option("--dcgm-exporter/--no-dcgm-exporter", default=True, help="Install dcgm-exporter")
-@click.option("--dc-exporter/--no-dc-exporter", default=True, help="Install dc-exporter")
-def install_exporters(node_exporter: bool, dcgm_exporter: bool, dc_exporter: bool):
+@click.option("--dc-exporter/--no-dc-exporter", default=True, help="Install dc-exporter (includes GPU metrics)")
+def install_exporters(node_exporter: bool, dc_exporter: bool):
     """
     Install Prometheus exporters on current machine.
     
@@ -123,8 +122,7 @@ def install_exporters(node_exporter: bool, dcgm_exporter: bool, dc_exporter: boo
     \b
     EXPORTERS:
         node_exporter   - CPU, RAM, disk metrics (port 9100)
-        dcgm-exporter   - NVIDIA GPU metrics (port 9400)
-        dc-exporter     - VRAM temps, hotspot temps (port 9500)
+        dc-exporter     - GPU metrics: VRAM/hotspot temps, power, util (port 9835)
     
     \b
     EXAMPLE:
@@ -143,9 +141,6 @@ def install_exporters(node_exporter: bool, dcgm_exporter: bool, dc_exporter: boo
     
     if node_exporter:
         installer.install_node_exporter()
-    
-    if dcgm_exporter:
-        installer.install_dcgm_exporter()
     
     if dc_exporter:
         installer.install_dc_exporter()
@@ -180,8 +175,7 @@ def status():
     console.print("[bold]Exporter Status:[/bold]")
     exporters = [
         ("node_exporter", 9100),
-        ("dcgm-exporter", 9400),
-        ("dc-exporter", 9500),
+        ("dc-exporter", 9835),
     ]
     
     exp_table = Table()
@@ -246,7 +240,7 @@ def logs(follow: bool, lines: int, service: str):
 @click.command("add-target")
 @click.argument("ip")
 @click.option("--name", default=None, help="Friendly name for the target")
-@click.option("--ports", default="9100,9400,9500", help="Ports to scrape (comma-separated)")
+@click.option("--ports", default="9100,9835", help="Ports to scrape (comma-separated)")
 def add_target(ip: str, name: str, ports: str):
     """
     Add a new scrape target to Prometheus.

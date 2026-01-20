@@ -57,7 +57,7 @@ server {
     # Fallback to Grafana for SPA routing
     location @grafana {
         proxy_pass http://grafana;
-        proxy_set_header Host $host;
+        proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -68,51 +68,79 @@ server {
 
     # Grafana (has built-in authentication)
     location /grafana/ {
-        proxy_pass http://grafana/;
-        proxy_set_header Host $host;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         
-        # WebSocket support
+        # WebSocket support for live features
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+        
+        # Increase timeouts for WebSocket
+        proxy_read_timeout 86400;
+        proxy_send_timeout 86400;
     }
 
-    # Prometheus read-only API (for landing page stats)
-    # Safe: only allows api/v1/query, api/v1/targets - no admin actions
-    location /prometheus/api/v1/ {
-        proxy_pass http://127.0.0.1:9090/api/v1/;
-        proxy_set_header Host $host;
+    # Prometheus UI with basic auth
+    location /prometheus/ {
+        auth_basic "Prometheus";
+        auth_basic_user_file /etc/nginx/.htpasswd_prometheus;
+        
+        # Strip /prometheus prefix and proxy to Prometheus root
+        rewrite ^/prometheus(/.*)$ $1 break;
+        proxy_pass http://127.0.0.1:9090;
+        proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         
-        # Only allow read methods
+        # Fix redirects from Prometheus
+        proxy_redirect / https://$http_host/prometheus/;
+        
+        # Rewrite links in HTML responses  
+        sub_filter 'href="/"' 'href="/prometheus/"';
+        sub_filter 'src="/"' 'src="/prometheus/"';
+    }
+
+    # Prometheus read-only API (no auth - for landing page stats)
+    location /prometheus/api/v1/ {
+        rewrite ^/prometheus(/.*)$ $1 break;
+        proxy_pass http://127.0.0.1:9090;
+        proxy_set_header Host $http_host;
+        
         limit_except GET { deny all; }
     }
 
-{% if prometheus_enabled %}
-    # Full Prometheus UI (WARNING: No built-in authentication!)
-    # Only enable if you have network-level security or have configured auth
-    location /prometheus/ {
-        proxy_pass http://127.0.0.1:9090/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-{% endif %}
-
 {% if ipmi_enabled %}
-    # IPMI Monitor
-    location /ipmi/ {
-        proxy_pass http://ipmi/;
-        proxy_set_header Host $host;
+    # IPMI Monitor - Login redirect fix
+    location = /ipmi/login {
+        # If there is a next param pointing to root, fix it
+        if ($arg_next ~ "^https?://[^/]+:?[0-9]*/?$") {
+            return 302 https://$http_host/ipmi/login?next=/ipmi/;
+        }
+        
+        proxy_pass http://127.0.0.1:5000/login;
+        proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Script-Name /ipmi;
+    }
+
+    # IPMI Monitor - Main location
+    location /ipmi/ {
+        proxy_pass http://127.0.0.1:5000/;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Script-Name /ipmi;
+        
+        # Fix session cookie path
+        proxy_cookie_path / "/";
     }
 {% endif %}
 
@@ -135,13 +163,15 @@ server {
 
     location / {
         proxy_pass http://grafana;
-        proxy_set_header Host $host;
+        proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400;
+        proxy_send_timeout 86400;
     }
 }
 {% endif %}
@@ -158,10 +188,12 @@ server {
 
     location / {
         proxy_pass http://ipmi;
-        proxy_set_header Host $host;
+        proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Script-Name /ipmi;
+        proxy_cookie_path / "/";
     }
 }
 {% endif %}

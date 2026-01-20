@@ -1,60 +1,11 @@
 {
-  "__inputs": [
-    {
-      "name": "DS_PROMETHEUS",
-      "label": "prometheus",
-      "description": "",
-      "type": "datasource",
-      "pluginId": "prometheus",
-      "pluginName": "Prometheus"
-    }
-  ],
-  "__elements": {},
-  "__requires": [
-    {
-      "type": "panel",
-      "id": "gauge",
-      "name": "Gauge",
-      "version": ""
-    },
-    {
-      "type": "grafana",
-      "id": "grafana",
-      "name": "Grafana",
-      "version": "12.3.0"
-    },
-    {
-      "type": "datasource",
-      "id": "prometheus",
-      "name": "Prometheus",
-      "version": "1.0.0"
-    },
-    {
-      "type": "panel",
-      "id": "stat",
-      "name": "Stat",
-      "version": ""
-    },
-    {
-      "type": "panel",
-      "id": "table",
-      "name": "Table",
-      "version": ""
-    },
-    {
-      "type": "panel",
-      "id": "timeseries",
-      "name": "Time series",
-      "version": ""
-    }
-  ],
   "annotations": {
     "list": [
       {
         "builtIn": 1,
         "datasource": {
           "type": "grafana",
-          "uid": "-- Grafana --"
+          "uid": "ffamzhijdn1fke"
         },
         "enable": true,
         "hide": true,
@@ -85,7 +36,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -129,16 +80,16 @@
         "textMode": "value",
         "wideLayout": true
       },
-      "pluginVersion": "12.3.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
-          "expr": "ipmi_total_servers",
-          "legendFormat": "",
-          "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
-          }
+            "uid": "ffamzhijdn1fke"
+          },
+          "expr": "ipmi_total_servers",
+          "legendFormat": "",
+          "refId": "A"
         }
       ],
       "title": "Total Servers",
@@ -147,7 +98,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -191,16 +142,16 @@
         "textMode": "value",
         "wideLayout": true
       },
-      "pluginVersion": "12.3.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
-          "expr": "ipmi_reachable_servers",
-          "legendFormat": "",
-          "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
-          }
+            "uid": "ffamzhijdn1fke"
+          },
+          "expr": "ipmi_reachable_servers",
+          "legendFormat": "",
+          "refId": "A"
         }
       ],
       "title": "Online Servers",
@@ -209,7 +160,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -258,16 +209,16 @@
         "textMode": "value",
         "wideLayout": true
       },
-      "pluginVersion": "12.3.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
-          "expr": "ipmi_total_critical_events_24h",
-          "legendFormat": "",
-          "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
-          }
+            "uid": "ffamzhijdn1fke"
+          },
+          "expr": "ipmi_total_critical_events_24h",
+          "legendFormat": "",
+          "refId": "A"
         }
       ],
       "title": "Critical Events (24h)",
@@ -276,7 +227,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -324,16 +275,16 @@
         "textMode": "value",
         "wideLayout": true
       },
-      "pluginVersion": "12.3.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
-          "expr": "ipmi_total_warning_events_24h",
-          "legendFormat": "",
-          "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
-          }
+            "uid": "ffamzhijdn1fke"
+          },
+          "expr": "ipmi_total_warning_events_24h",
+          "legendFormat": "",
+          "refId": "A"
         }
       ],
       "title": "Warning Events (24h)",
@@ -342,7 +293,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -387,17 +338,17 @@
         "textMode": "value",
         "wideLayout": true
       },
-      "pluginVersion": "12.3.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ffamzhijdn1fke"
+          },
           "editorMode": "code",
           "expr": "time() - ipmi_last_collection_timestamp",
           "legendFormat": "",
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
+          "refId": "A"
         }
       ],
       "title": "Last Collection",
@@ -406,7 +357,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -451,18 +402,18 @@
         "textMode": "value",
         "wideLayout": true
       },
-      "pluginVersion": "12.3.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ffamzhijdn1fke"
+          },
           "expr": "sum(ipmi_power_watts)",
           "instant": true,
           "legendFormat": "",
           "range": false,
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
+          "refId": "A"
         }
       ],
       "title": "Total Power",
@@ -471,7 +422,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -526,12 +477,12 @@
                       "0": {
                         "color": "red",
                         "index": 1,
-                        "text": "🔴 Offline"
+                        "text": "\ud83d\udd34 Offline"
                       },
                       "1": {
                         "color": "green",
                         "index": 0,
-                        "text": "🟢 Online"
+                        "text": "\ud83d\udfe2 Online"
                       }
                     },
                     "type": "value"
@@ -631,7 +582,7 @@
                   "steps": [
                     {
                       "color": "green",
-                      "value": null
+                      "value": 0
                     },
                     {
                       "color": "blue",
@@ -683,7 +634,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "CPU Temp (°C)"
+              "options": "CPU Temp (\u00b0C)"
             },
             "properties": [
               {
@@ -697,7 +648,7 @@
                   "steps": [
                     {
                       "color": "green",
-                      "value": null
+                      "value": 0
                     },
                     {
                       "color": "yellow",
@@ -733,14 +684,6 @@
       "id": 6,
       "options": {
         "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
         "showHeader": true,
         "sortBy": [
           {
@@ -749,85 +692,85 @@
           }
         ]
       },
-      "pluginVersion": "12.3.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ffamzhijdn1fke"
+          },
           "editorMode": "code",
           "expr": "ipmi_server_reachable",
           "format": "table",
           "instant": true,
           "legendFormat": "",
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
+          "refId": "A"
         },
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ffamzhijdn1fke"
+          },
           "expr": "ipmi_events_critical_24h",
           "format": "table",
           "instant": true,
           "legendFormat": "",
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
+          "refId": "B"
         },
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ffamzhijdn1fke"
+          },
           "expr": "ipmi_events_warning_24h",
           "format": "table",
           "instant": true,
           "legendFormat": "",
-          "refId": "C",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
+          "refId": "C"
         },
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ffamzhijdn1fke"
+          },
           "expr": "ipmi_events_info_24h",
           "format": "table",
           "instant": true,
           "legendFormat": "",
-          "refId": "D",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
+          "refId": "D"
         },
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ffamzhijdn1fke"
+          },
           "expr": "ipmi_events_total",
           "format": "table",
           "instant": true,
           "legendFormat": "",
-          "refId": "G",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
+          "refId": "G"
         },
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ffamzhijdn1fke"
+          },
           "expr": "ipmi_power_watts",
           "format": "table",
           "instant": true,
           "legendFormat": "",
-          "refId": "E",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
+          "refId": "E"
         },
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ffamzhijdn1fke"
+          },
           "expr": "max by (server_name) (ipmi_temperature_celsius{sensor_name=~\".*CPU.*\"})",
           "format": "table",
           "instant": true,
           "legendFormat": "",
-          "refId": "F",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
+          "refId": "F"
         }
       ],
       "title": "Server Status",
@@ -899,7 +842,7 @@
               "Value #C": "Warning",
               "Value #D": "Info",
               "Value #E": "Power (W)",
-              "Value #F": "CPU Temp (°C)",
+              "Value #F": "CPU Temp (\u00b0C)",
               "Value #G": "Total Events",
               "server_name": "Server"
             }
@@ -911,7 +854,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -998,8 +941,8 @@
       },
       "gridPos": {
         "h": 9,
-        "w": 16,
-        "x": 8,
+        "w": 14,
+        "x": 10,
         "y": 5
       },
       "id": 8,
@@ -1016,25 +959,25 @@
           "sort": "desc"
         }
       },
-      "pluginVersion": "12.3.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ffamzhijdn1fke"
+          },
           "expr": "ipmi_reachable_servers",
           "legendFormat": "Reachable",
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
+          "refId": "A"
         },
         {
-          "expr": "ipmi_total_servers - ipmi_reachable_servers",
-          "legendFormat": "Unreachable",
-          "refId": "B",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
-          }
+            "uid": "ffamzhijdn1fke"
+          },
+          "expr": "ipmi_total_servers - ipmi_reachable_servers",
+          "legendFormat": "Unreachable",
+          "refId": "B"
         }
       ],
       "title": "Server Availability",
@@ -1043,7 +986,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -1130,8 +1073,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 16,
-        "x": 8,
+        "w": 14,
+        "x": 10,
         "y": 14
       },
       "id": 7,
@@ -1148,25 +1091,25 @@
           "sort": "desc"
         }
       },
-      "pluginVersion": "12.3.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ffamzhijdn1fke"
+          },
           "expr": "ipmi_total_critical_events_24h",
           "legendFormat": "Critical",
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
+          "refId": "A"
         },
         {
-          "expr": "ipmi_total_warning_events_24h",
-          "legendFormat": "Warning",
-          "refId": "B",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
-          }
+            "uid": "ffamzhijdn1fke"
+          },
+          "expr": "ipmi_total_warning_events_24h",
+          "legendFormat": "Warning",
+          "refId": "B"
         }
       ],
       "title": "Events Over Time",
@@ -1188,7 +1131,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -1274,16 +1217,16 @@
           "sort": "desc"
         }
       },
-      "pluginVersion": "12.3.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
-          "expr": "ipmi_temperature_celsius{sensor_name=~\".*CPU.*|.*Temp.*\"}",
-          "legendFormat": "{{server_name}} - {{sensor_name}}",
-          "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
-          }
+            "uid": "ffamzhijdn1fke"
+          },
+          "expr": "ipmi_temperature_celsius{sensor_name=~\".*CPU.*|.*Temp.*\"}",
+          "legendFormat": "{{server_name}} - {{sensor_name}}",
+          "refId": "A"
         }
       ],
       "title": "CPU Temperatures",
@@ -1292,7 +1235,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -1345,18 +1288,18 @@
         "showThresholdMarkers": true,
         "sizing": "auto"
       },
-      "pluginVersion": "12.3.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ffamzhijdn1fke"
+          },
           "expr": "ipmi_temperature_celsius{sensor_name=~\".*CPU.*\"}",
           "instant": true,
           "legendFormat": "{{server_name}}",
           "range": false,
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
+          "refId": "A"
         }
       ],
       "title": "Current CPU Temperatures",
@@ -1378,7 +1321,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -1456,16 +1399,16 @@
           "sort": "desc"
         }
       },
-      "pluginVersion": "12.3.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
-          "expr": "ipmi_fan_speed_rpm",
-          "legendFormat": "{{server_name}} - {{sensor_name}}",
-          "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
-          }
+            "uid": "ffamzhijdn1fke"
+          },
+          "expr": "ipmi_fan_speed_rpm",
+          "legendFormat": "{{server_name}} - {{sensor_name}}",
+          "refId": "A"
         }
       ],
       "title": "Fan Speeds",
@@ -1474,7 +1417,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -1527,18 +1470,18 @@
         "showThresholdMarkers": true,
         "sizing": "auto"
       },
-      "pluginVersion": "12.3.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ffamzhijdn1fke"
+          },
           "expr": "avg by (server_name) (ipmi_fan_speed_rpm)",
           "instant": true,
           "legendFormat": "{{server_name}}",
           "range": false,
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
+          "refId": "A"
         }
       ],
       "title": "Current Fan Speed by Server",
@@ -1560,7 +1503,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -1638,16 +1581,16 @@
           "sort": "desc"
         }
       },
-      "pluginVersion": "12.3.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
-          "expr": "ipmi_power_watts",
-          "legendFormat": "{{server_name}}",
-          "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
-          }
+            "uid": "ffamzhijdn1fke"
+          },
+          "expr": "ipmi_power_watts",
+          "legendFormat": "{{server_name}}",
+          "refId": "A"
         }
       ],
       "title": "Power Consumption (Stacked)",
@@ -1656,7 +1599,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -1731,16 +1674,16 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.3.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
-          "expr": "sum(ipmi_power_watts)",
-          "legendFormat": "Total Power",
-          "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
-          }
+            "uid": "ffamzhijdn1fke"
+          },
+          "expr": "sum(ipmi_power_watts)",
+          "legendFormat": "Total Power",
+          "refId": "A"
         }
       ],
       "title": "Total Power Over Time",
@@ -1762,7 +1705,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -1841,16 +1784,16 @@
           "sort": "desc"
         }
       },
-      "pluginVersion": "12.3.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
-          "expr": "ipmi_voltage_volts{sensor_name=~\".*12V.*|.*5V.*|.*3.3V.*\"}",
-          "legendFormat": "{{server_name}} - {{sensor_name}}",
-          "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
-          }
+            "uid": "ffamzhijdn1fke"
+          },
+          "expr": "ipmi_voltage_volts{sensor_name=~\".*12V.*|.*5V.*|.*3.3V.*\"}",
+          "legendFormat": "{{server_name}} - {{sensor_name}}",
+          "refId": "A"
         }
       ],
       "title": "Main Voltages (12V, 5V, 3.3V)",
@@ -1872,7 +1815,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${datasource}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -1918,16 +1861,16 @@
         "showThresholdMarkers": true,
         "sizing": "auto"
       },
-      "pluginVersion": "12.3.0",
+      "pluginVersion": "12.3.1",
       "targets": [
         {
-          "expr": "ipmi_server_reachable",
-          "legendFormat": "{{server_name}}",
-          "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
-          }
+            "uid": "ffamzhijdn1fke"
+          },
+          "expr": "ipmi_server_reachable",
+          "legendFormat": "{{server_name}}",
+          "refId": "A"
         }
       ],
       "title": "Server Reachability Grid",
@@ -1949,7 +1892,11 @@
   "templating": {
     "list": [
       {
-        "current": {},
+        "current": {
+          "selected": true,
+          "text": "Prometheus",
+          "value": "ffamzhijdn1fke"
+        },
         "includeAll": false,
         "label": "Data Source",
         "name": "datasource",
@@ -1968,8 +1915,5 @@
   "timepicker": {},
   "timezone": "",
   "title": "IPMI Monitor",
-  "uid": "ipmi-monitor-main",
-  "version": 6,
-  "weekStart": "",
-  "id": null
+  "uid": "ipmi-monitor-main"
 }

@@ -61,20 +61,68 @@ WantedBy=multi-user.target
 """
 
 DC_EXPORTER_SERVICE = """[Unit]
-Description=DC Exporter - GPU VRAM Temperature Exporter
-Documentation=https://github.com/cryptolabsza/dc-exporter
+Description=DC Exporter - VRAM/Hotspot Temperature Metrics
 After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/etc/dc-exporter
-ExecStart=/bin/bash -c "/usr/local/bin/dc-exporter-collector --no-console & /usr/local/bin/dc-exporter-server"
+ExecStart=/opt/dc-exporter/run.sh
 Restart=always
 RestartSec=5
+WorkingDirectory=/opt/dc-exporter
 
 [Install]
 WantedBy=multi-user.target
 """
+
+DC_EXPORTER_RUN_SCRIPT = '''#!/bin/bash
+cd /opt/dc-exporter
+
+# Kill any existing process on port 9835
+fuser -k 9835/tcp 2>/dev/null || true
+sleep 1
+
+# Run the exporter in a loop to update metrics
+(
+    while true; do
+        ./dc-exporter-c >/dev/null 2>&1 || true
+        sleep 10
+    done
+) &
+
+# Serve the metrics file via HTTP with SO_REUSEADDR
+exec python3 -c "
+import http.server
+import socketserver
+import socket
+
+class ReuseAddrTCPServer(socketserver.TCPServer):
+    allow_reuse_address = True
+
+class MetricsHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == \\"/metrics\\" or self.path == \\"/\\":
+            self.send_response(200)
+            self.send_header(\\"Content-type\\", \\"text/plain\\")
+            self.end_headers()
+            try:
+                with open(\\"metrics.txt\\", \\"r\\") as f:
+                    self.wfile.write(f.read().encode())
+            except FileNotFoundError:
+                self.wfile.write(b\\"# No metrics yet\\\\n\\")
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def log_message(self, format, *args):
+        pass
+
+PORT = 9835
+with ReuseAddrTCPServer((\\"\\"\\", PORT), MetricsHandler) as httpd:
+    print(f\\"DC Exporter serving on port {PORT}\\")
+    httpd.serve_forever()
+"
+'''
 
 DC_EXPORTER_CONFIG = """[agent]
 machine_id=auto
@@ -253,7 +301,7 @@ class ExporterInstaller:
             return False
     
     def install_dc_exporter(self) -> bool:
-        """Install dc-exporter for VRAM temperatures."""
+        """Install dc-exporter for VRAM/hotspot temperatures and GPU metrics."""
         console.print("\n[bold]Installing dc-exporter...[/bold]")
         
         try:
@@ -264,25 +312,21 @@ class ExporterInstaller:
             ) as progress:
                 task = progress.add_task("Downloading dc-exporter...", total=None)
                 
-                # Download binaries
+                # Create installation directory
+                os.makedirs("/opt/dc-exporter", exist_ok=True)
+                
+                # Download the collector binary
                 urllib.request.urlretrieve(
                     DC_EXPORTER_URL, 
-                    "/usr/local/bin/dc-exporter-collector"
+                    "/opt/dc-exporter/dc-exporter-c"
                 )
-                urllib.request.urlretrieve(
-                    DC_EXPORTER_SERVER_URL, 
-                    "/usr/local/bin/dc-exporter-server"
-                )
+                subprocess.run(["chmod", "+x", "/opt/dc-exporter/dc-exporter-c"], check=True)
                 
-                subprocess.run(["chmod", "+x", "/usr/local/bin/dc-exporter-collector"], check=True)
-                subprocess.run(["chmod", "+x", "/usr/local/bin/dc-exporter-server"], check=True)
-                
-                # Create config directory and file
-                progress.update(task, description="Creating configuration...")
-                os.makedirs("/etc/dc-exporter", exist_ok=True)
-                
-                with open("/etc/dc-exporter/config.ini", "w") as f:
-                    f.write(DC_EXPORTER_CONFIG)
+                # Create the run script (Python HTTP server on port 9835)
+                progress.update(task, description="Creating run script...")
+                with open("/opt/dc-exporter/run.sh", "w") as f:
+                    f.write(DC_EXPORTER_RUN_SCRIPT)
+                subprocess.run(["chmod", "+x", "/opt/dc-exporter/run.sh"], check=True)
                 
                 # Install service
                 progress.update(task, description="Installing systemd service...")
@@ -291,9 +335,9 @@ class ExporterInstaller:
                 
                 subprocess.run(["systemctl", "daemon-reload"], check=True)
                 subprocess.run(["systemctl", "enable", "dc-exporter"], check=True)
-                subprocess.run(["systemctl", "start", "dc-exporter"], check=True)
+                subprocess.run(["systemctl", "restart", "dc-exporter"], check=True)
             
-            console.print("[green]✓[/green] dc-exporter installed (port 9500)")
+            console.print("[green]✓[/green] dc-exporter installed (port 9835)")
             return True
             
         except Exception as e:
@@ -325,8 +369,7 @@ class ExporterInstaller:
         status = {}
         services = [
             ("node_exporter", 9100),
-            ("dcgm-exporter", 9400),
-            ("dc-exporter", 9500),
+            ("dc-exporter", 9835),
         ]
         
         for name, port in services:

@@ -745,7 +745,7 @@ def deploy_wizard():
             if status.get("dcgm_exporter"):
                 ports.append(9400)
             if status.get("dc_exporter"):
-                ports.append(9500)
+                ports.append(9835)
             
             if ports:
                 prom_config.add_target(worker.ip, worker.name, ports)
