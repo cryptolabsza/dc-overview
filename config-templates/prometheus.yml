@@ -1,15 +1,14 @@
 # DC Overview - Prometheus Configuration Template
 #
-# This is a template configuration. Replace placeholder values:
-#   - ${MASTER_IP} - IP of the master/monitoring server
-#   - ${WORKER_IPS} - List of worker server IPs
+# This is a working configuration. Replace IP addresses for your deployment:
+#   - MASTER: 192.168.1.100
+#   - WORKERS: 192.168.1.101, 192.168.1.103
 #
 # Exporter Ports:
 #   - 9100: Node Exporter (system metrics)
 #   - 9400: DCGM Exporter (NVIDIA GPU metrics)
 #   - 9835: DC Exporter (VRAM/Hotspot temps, throttle reasons)
 #   - 8622: Vast.ai Exporter (optional)
-#   - 5000: IPMI Monitor (optional)
 
 global:
   scrape_interval: 15s
@@ -19,65 +18,45 @@ rule_files:
   - "/etc/prometheus/recording_rules.yml"
 
 scrape_configs:
-  # Prometheus self-monitoring
   - job_name: "prometheus"
     metrics_path: /prometheus/metrics
     static_configs:
       - targets: ["localhost:9090"]
 
-  # Master server exporters
   - job_name: "master"
     static_configs:
-      # Node Exporter - system metrics
-      - targets: ["${MASTER_IP}:9100"]
+      - targets: ["192.168.1.100:9100"]
         labels:
           group: "master"
-          role: "master"
-      # DCGM Exporter - NVIDIA GPU metrics
-      - targets: ["${MASTER_IP}:9400"]
+      - targets: ["192.168.1.100:9400"]
         labels:
           group: "master"
-          role: "master"
 
-  # Worker servers (add more as needed)
-  # Example for worker 1
-  - job_name: "worker-01"
+  - job_name: "wk01"
     static_configs:
-      - targets: ["${WORKER_01_IP}:9100", "${WORKER_01_IP}:9400"]
+      - targets: ["192.168.1.101:9100", "192.168.1.101:9400"]
         labels:
           group: "workers"
-          role: "worker"
 
-  # Example for worker 2
-  - job_name: "worker-02"
+  - job_name: "wk03"
     static_configs:
-      - targets: ["${WORKER_02_IP}:9100", "${WORKER_02_IP}:9400"]
+      - targets: ["192.168.1.103:9100", "192.168.1.103:9400"]
         labels:
           group: "workers"
-          role: "worker"
 
-  # DC Exporter - VRAM temps, hotspot temps, throttle reasons
-  # Provides unique metrics not available in DCGM
+  - job_name: "vastai-exporter"
+    scrape_interval: 60s
+    static_configs:
+      - targets: ["192.168.1.100:8622"]
+        labels:
+          group: "vast"
+
   - job_name: "dc-exporter"
     static_configs:
       - targets:
-        - "${MASTER_IP}:9835"
-        - "${WORKER_01_IP}:9835"
-        - "${WORKER_02_IP}:9835"
+        - "192.168.1.100:9835"
+        - "192.168.1.101:9835"
+        - "192.168.1.103:9835"
 
-  # Vast.ai Exporter (optional - uncomment if using Vast.ai)
-  # - job_name: "vastai-exporter"
-  #   scrape_interval: 60s
-  #   static_configs:
-  #     - targets: ["${MASTER_IP}:8622"]
-  #       labels:
-  #         group: "vast"
-
-  # IPMI Monitor (optional - uncomment if using IPMI Monitor)
-  # Note: IPMI Monitor doesn't expose /metrics, this is for future use
-  # - job_name: "ipmi-monitor"
-  #   metrics_path: /metrics
-  #   static_configs:
-  #     - targets: ["${MASTER_IP}:5000"]
-  #       labels:
-  #         group: "ipmi"
+# NOTE: IPMI Monitor does not expose /metrics endpoint
+# It has its own web dashboard at /ipmi/
