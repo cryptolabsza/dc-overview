@@ -1,0 +1,18 @@
+# Grafana Datasource Provisioning
+# This file auto-configures the Prometheus datasource on Grafana startup
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # Use Docker network DNS name if in same compose, otherwise use IP
+    url: http://prometheus:9090/prometheus
+    isDefault: true
+    editable: true
+    jsonData:
+      httpMethod: POST
+      manageAlerts: true
+      prometheusType: Prometheus
+      prometheusVersion: "2.x.x"

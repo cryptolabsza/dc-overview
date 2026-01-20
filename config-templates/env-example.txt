@@ -1,0 +1,16 @@
+# DC Overview Environment Configuration
+# Copy to .env and customize for your deployment
+
+# Grafana Configuration
+GRAFANA_ADMIN_PASSWORD=DcOverview2024!
+GRAFANA_ROOT_URL=https://your-server.example.com:8443/grafana/
+
+# Vast.ai Integration (optional)
+# Get your API key from https://vast.ai/
+VASTAI_API_KEY=your_vast_api_key_here
+
+# Server IPs (used by install scripts)
+MASTER_IP=192.168.1.100
+WORKER_01_IP=192.168.1.101
+WORKER_02_IP=192.168.1.102
+WORKER_03_IP=192.168.1.103

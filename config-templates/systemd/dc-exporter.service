@@ -1,0 +1,14 @@
+[Unit]
+Description=DC Exporter - VRAM/Hotspot Temperature Metrics (DCXP_ prefix)
+Documentation=https://github.com/jjziets/dc-exporter
+After=network.target nvidia-persistenced.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/dc-exporter
+ExecStart=/opt/dc-exporter/run.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

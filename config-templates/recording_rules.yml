@@ -1,0 +1,189 @@
+# GPU Metrics Recording Rules
+# These create unified metric names regardless of which exporter provides the data
+# Optimized for large-scale deployments (100s of GPUs)
+
+groups:
+  - name: gpu_unified_metrics
+    interval: 15s
+    rules:
+      # ============================================================
+      # Temperature Metrics
+      # ============================================================
+      
+      # Unified VRAM/Memory Temperature
+      # Sources: DCXP (DC Exporter) or DCGM (NVIDIA DCGM Exporter)
+      - record: gpu:memory_temp:celsius
+        expr: DCXP_FI_DEV_VRAM_TEMP or DCGM_FI_DEV_MEMORY_TEMP
+        labels:
+          source: "unified"
+      
+      # Unified GPU Core/Hotspot Temperature
+      - record: gpu:hotspot_temp:celsius
+        expr: DCXP_FI_DEV_HOT_SPOT_TEMP or DCGM_FI_DEV_GPU_TEMP
+        labels:
+          source: "unified"
+      
+      # Standard GPU Temperature (always from DCGM or fallback)
+      - record: gpu:core_temp:celsius
+        expr: DCGM_FI_DEV_GPU_TEMP
+        labels:
+          source: "dcgm"
+
+      # ============================================================
+      # Power Metrics
+      # ============================================================
+      
+      - record: gpu:power_usage:watts
+        expr: DCGM_FI_DEV_POWER_USAGE
+        labels:
+          source: "dcgm"
+      
+      - record: gpu:power_limit:watts
+        expr: DCGM_FI_DEV_ENFORCED_POWER_LIMIT
+        labels:
+          source: "dcgm"
+
+      # ============================================================
+      # Utilization Metrics
+      # ============================================================
+      
+      - record: gpu:utilization:percent
+        expr: DCGM_FI_DEV_GPU_UTIL
+        labels:
+          source: "dcgm"
+      
+      - record: gpu:memory_util:percent
+        expr: DCGM_FI_DEV_MEM_COPY_UTIL
+        labels:
+          source: "dcgm"
+
+      # ============================================================
+      # Memory Metrics
+      # ============================================================
+      
+      - record: gpu:memory_used:bytes
+        expr: DCGM_FI_DEV_FB_USED * 1024 * 1024
+        labels:
+          source: "dcgm"
+      
+      - record: gpu:memory_free:bytes
+        expr: DCGM_FI_DEV_FB_FREE * 1024 * 1024
+        labels:
+          source: "dcgm"
+      
+      - record: gpu:memory_total:bytes
+        expr: (DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE) * 1024 * 1024
+        labels:
+          source: "dcgm"
+
+      # ============================================================
+      # Clock Metrics
+      # ============================================================
+      
+      - record: gpu:sm_clock:mhz
+        expr: DCGM_FI_DEV_SM_CLOCK
+        labels:
+          source: "dcgm"
+      
+      - record: gpu:memory_clock:mhz
+        expr: DCGM_FI_DEV_MEM_CLOCK
+        labels:
+          source: "dcgm"
+
+      # ============================================================
+      # Throttle & Error Metrics (from DC Exporter)
+      # ============================================================
+      
+      - record: gpu:throttle_reason:bool
+        expr: DCXP_FI_DEV_CLOCKS_THROTTLE_REASON
+        labels:
+          source: "dcxp"
+      
+      - record: gpu:aer_errors:total
+        expr: DCXP_AER_TOTAL_ERRORS
+        labels:
+          source: "dcxp"
+      
+      - record: gpu:error_state:status
+        expr: DCXP_ERROR_STATE
+        labels:
+          source: "dcxp"
+      
+      - record: gpu:supported:bool
+        expr: DCXP_GPU_SUPPORTED
+        labels:
+          source: "dcxp"
+
+      # ============================================================
+      # Fan Speed
+      # ============================================================
+      
+      - record: gpu:fan_speed:percent
+        expr: DCGM_FI_DEV_FAN_SPEED
+        labels:
+          source: "dcgm"
+
+  # ============================================================
+  # Aggregation Rules for Fleet Overview
+  # ============================================================
+  - name: gpu_fleet_aggregates
+    interval: 30s
+    rules:
+      # Total GPU count
+      - record: fleet:gpu_count:total
+        expr: count(gpu:core_temp:celsius)
+      
+      # Average temperatures across fleet
+      - record: fleet:memory_temp:avg
+        expr: avg(gpu:memory_temp:celsius)
+      
+      - record: fleet:hotspot_temp:avg
+        expr: avg(gpu:hotspot_temp:celsius)
+      
+      - record: fleet:core_temp:avg
+        expr: avg(gpu:core_temp:celsius)
+      
+      # Max temperatures (for alerts)
+      - record: fleet:memory_temp:max
+        expr: max(gpu:memory_temp:celsius)
+      
+      - record: fleet:hotspot_temp:max
+        expr: max(gpu:hotspot_temp:celsius)
+      
+      # Total power consumption
+      - record: fleet:power_usage:total_watts
+        expr: sum(gpu:power_usage:watts)
+      
+      # Average utilization
+      - record: fleet:utilization:avg
+        expr: avg(gpu:utilization:percent)
+      
+      # GPUs with thermal throttling
+      - record: fleet:thermal_throttle:count
+        expr: count(gpu:throttle_reason:bool{reason="HwThermalSlowdown"} == 1)
+      
+      # GPUs with errors
+      - record: fleet:errors:count
+        expr: count(gpu:error_state:status > 0)
+
+  # ============================================================
+  # Per-Host Aggregates
+  # ============================================================
+  - name: gpu_host_aggregates
+    interval: 30s
+    rules:
+      # GPU count per host
+      - record: host:gpu_count:total
+        expr: count by (Hostname, instance) (gpu:core_temp:celsius)
+      
+      # Total power per host
+      - record: host:power_usage:total_watts
+        expr: sum by (Hostname, instance) (gpu:power_usage:watts)
+      
+      # Max temp per host
+      - record: host:hotspot_temp:max
+        expr: max by (Hostname, instance) (gpu:hotspot_temp:celsius)
+      
+      # Average utilization per host
+      - record: host:utilization:avg
+        expr: avg by (Hostname, instance) (gpu:utilization:percent)

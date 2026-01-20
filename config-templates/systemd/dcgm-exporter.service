@@ -1,0 +1,17 @@
+[Unit]
+Description=DCGM Exporter - NVIDIA GPU metrics for Prometheus
+Documentation=https://github.com/NVIDIA/dcgm-exporter
+After=network-online.target nvidia-dcgm.service nvidia-persistenced.service
+Requires=nvidia-dcgm.service
+
+[Service]
+Type=simple
+Environment="DCGM_EXPORTER_LISTEN=:9400"
+Environment="DCGM_EXPORTER_NO_HOSTNAME=false"
+Environment="NVIDIA_VISIBLE_DEVICES=all"
+ExecStart=/usr/local/bin/dcgm-exporter
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
