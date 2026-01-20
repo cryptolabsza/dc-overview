@@ -1,9 +1,10 @@
 groups:
   - name: gpu_unified_metrics
     rules:
-      # Core GPU temperature
+      # Core GPU temperature - prefer VM metrics over host placeholder
+      # Excludes "VM-PASSTHROUGH" entries (0 values) when real VM data exists
       - record: gpu:core_temp:celsius
-        expr: DCGM_FI_DEV_GPU_TEMP
+        expr: DCGM_FI_DEV_GPU_TEMP{UUID!="VM-PASSTHROUGH"}
 
       # Hotspot temperature
       - record: gpu:hotspot_temp:celsius
@@ -13,41 +14,41 @@ groups:
       - record: gpu:memory_temp:celsius
         expr: DCXP_FI_DEV_VRAM_TEMP
 
-      # GPU Power usage
+      # GPU Power usage - exclude placeholder VM-PASSTHROUGH metrics
       - record: gpu:power_usage:watts
-        expr: DCGM_FI_DEV_POWER_USAGE
+        expr: DCGM_FI_DEV_POWER_USAGE{UUID!="VM-PASSTHROUGH"}
 
       # GPU Utilization
       - record: gpu:utilization:percent
-        expr: DCGM_FI_DEV_GPU_UTIL
+        expr: DCGM_FI_DEV_GPU_UTIL{UUID!="VM-PASSTHROUGH"}
 
       # Fan speed
       - record: gpu:fan_speed:percent
-        expr: DCGM_FI_DEV_FAN_SPEED
+        expr: DCGM_FI_DEV_FAN_SPEED{UUID!="VM-PASSTHROUGH"}
 
       # SM Clock
       - record: gpu:sm_clock:mhz
-        expr: DCGM_FI_DEV_SM_CLOCK
+        expr: DCGM_FI_DEV_SM_CLOCK{UUID!="VM-PASSTHROUGH"}
 
       # Memory Clock
       - record: gpu:mem_clock:mhz
-        expr: DCGM_FI_DEV_MEM_CLOCK
+        expr: DCGM_FI_DEV_MEM_CLOCK{UUID!="VM-PASSTHROUGH"}
 
       # FB Used (GPU memory used in MB)
       - record: gpu:fb_used:mb
-        expr: DCGM_FI_DEV_FB_USED
+        expr: DCGM_FI_DEV_FB_USED{UUID!="VM-PASSTHROUGH"}
 
       # FB Free (GPU memory free in MB)
       - record: gpu:fb_free:mb
-        expr: DCGM_FI_DEV_FB_FREE
+        expr: DCGM_FI_DEV_FB_FREE{UUID!="VM-PASSTHROUGH"}
 
       # Memory used in bytes (for compatibility)
       - record: gpu:memory_used:bytes
-        expr: DCGM_FI_DEV_FB_USED * 1024 * 1024
+        expr: DCGM_FI_DEV_FB_USED{UUID!="VM-PASSTHROUGH"} * 1024 * 1024
 
       # Memory free in bytes (for compatibility)
       - record: gpu:memory_free:bytes
-        expr: DCGM_FI_DEV_FB_FREE * 1024 * 1024
+        expr: DCGM_FI_DEV_FB_FREE{UUID!="VM-PASSTHROUGH"} * 1024 * 1024
 
       # Throttle reasons
       - record: gpu:throttle_reason:bool
@@ -65,19 +66,23 @@ groups:
       - record: gpu:state:value
         expr: DCXP_GPU_STATE
 
+      # VM GPU count per host
+      - record: gpu:vm_count:total
+        expr: DCXP_VM_GPU_COUNT
+
   - name: gpu_fleet_aggregates
     rules:
-      # GPUs available on host
+      # Total GPUs with real metrics (host + VM, excludes placeholders)
       - record: fleet:gpu_count:total
-        expr: count(DCGM_FI_DEV_GPU_TEMP)
+        expr: count(DCGM_FI_DEV_GPU_TEMP{UUID!="VM-PASSTHROUGH"})
 
       # Total GPUs on PCIe bus
       - record: fleet:gpu_count_pcie:total
         expr: sum(DCXP_GPU_COUNT{type="pcie"})
 
-      # GPUs in VMs
+      # GPUs in VMs with real metrics
       - record: fleet:gpu_count_vm:total
-        expr: count(DCXP_GPU_STATE == 3)
+        expr: count(DCGM_FI_DEV_GPU_TEMP{source="vm"})
 
       - record: fleet:memory_temp:avg_celsius
         expr: avg(DCXP_FI_DEV_VRAM_TEMP > 0) or vector(0)
