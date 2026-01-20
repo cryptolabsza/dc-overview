@@ -1,56 +1,56 @@
 {
+  "__elements": {},
   "__inputs": [
     {
-      "name": "DS_PROMETHEUS",
-      "label": "Prometheus",
       "description": "",
-      "type": "datasource",
+      "label": "Prometheus",
+      "name": "DS_PROMETHEUS",
       "pluginId": "prometheus",
-      "pluginName": "Prometheus"
+      "pluginName": "Prometheus",
+      "type": "datasource"
     }
   ],
-  "__elements": {},
   "__requires": [
     {
-      "type": "panel",
       "id": "gauge",
       "name": "Gauge",
+      "type": "panel",
       "version": ""
     },
     {
-      "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
+      "type": "grafana",
       "version": "11.1.3"
     },
     {
-      "type": "datasource",
       "id": "prometheus",
       "name": "Prometheus",
+      "type": "datasource",
       "version": "1.0.0"
     },
     {
-      "type": "panel",
       "id": "stat",
       "name": "Stat",
+      "type": "panel",
       "version": ""
     },
     {
-      "type": "panel",
       "id": "state-timeline",
       "name": "State timeline",
+      "type": "panel",
       "version": ""
     },
     {
-      "type": "panel",
       "id": "table",
       "name": "Table",
+      "type": "panel",
       "version": ""
     },
     {
-      "type": "panel",
       "id": "timeseries",
       "name": "Time series",
+      "type": "panel",
       "version": ""
     }
   ],
@@ -73,7 +73,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": null,
+  "id": 5,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -2936,6 +2936,7 @@
             "includeByName": {},
             "indexByName": {},
             "renameByName": {
+              "Hostname": "Machine",
               "Time 2": "",
               "Value #A": "GPU 0",
               "Value #B": "GPU 1",
@@ -2945,7 +2946,6 @@
               "Value #F": "GPU 5",
               "Value #G": "GPU 6",
               "Value #H": "GPU 7",
-              "Hostname": "Machine",
               "gpu 2": "",
               "gpu 5": "",
               "instance 6": ""
@@ -6930,6 +6930,6 @@
   "timezone": "",
   "title": "Vast Dashboard",
   "uid": "d1e22d5b-dcf4-4f54-8629-972173cb24eb",
-  "version": 139,
+  "version": 7,
   "weekStart": ""
 }

@@ -18,7 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 9,
+  "id": 3,
   "links": [],
   "panels": [
     {
@@ -478,12 +478,12 @@
                       "0": {
                         "color": "red",
                         "index": 1,
-                        "text": "🔴 Offline"
+                        "text": "\ud83d\udd34 Offline"
                       },
                       "1": {
                         "color": "green",
                         "index": 0,
-                        "text": "🟢 Online"
+                        "text": "\ud83d\udfe2 Online"
                       }
                     },
                     "type": "value"
@@ -635,7 +635,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "CPU Temp (°C)"
+              "options": "CPU Temp (\u00b0C)"
             },
             "properties": [
               {
@@ -843,7 +843,7 @@
               "Value #C": "Warning",
               "Value #D": "Info",
               "Value #E": "Power (W)",
-              "Value #F": "CPU Temp (°C)",
+              "Value #F": "CPU Temp (\u00b0C)",
               "Value #G": "Total Events",
               "server_name": "Server"
             }
@@ -1894,8 +1894,9 @@
     "list": [
       {
         "current": {
-          "text": "prometheus",
-          "value": "fdfcbypxyeps0d"
+          "selected": true,
+          "text": "Prometheus",
+          "value": "ffamzhijdn1fke"
         },
         "includeAll": false,
         "label": "Data Source",

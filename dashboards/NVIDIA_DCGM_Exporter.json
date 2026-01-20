@@ -1,32 +1,22 @@
 {
-  "__inputs": [
-    {
-      "name": "DS_PROMETHEUS",
-      "label": "Prometheus",
-      "description": "",
-      "type": "datasource",
-      "pluginId": "prometheus",
-      "pluginName": "Prometheus"
-    }
-  ],
   "__elements": {},
   "__requires": [
     {
-      "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
+      "type": "grafana",
       "version": "10.3.1"
     },
     {
-      "type": "datasource",
       "id": "prometheus",
       "name": "Prometheus",
+      "type": "datasource",
       "version": "1.0.0"
     },
     {
-      "type": "panel",
       "id": "timeseries",
       "name": "Time series",
+      "type": "panel",
       "version": ""
     }
   ],
@@ -58,14 +48,14 @@
   "fiscalYearStartMonth": 0,
   "gnetId": 15117,
   "graphTooltip": 0,
-  "id": null,
+  "id": 1,
   "links": [],
   "liveNow": false,
   "panels": [
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "",
       "fieldConfig": {
@@ -150,7 +140,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "exemplar": true,
@@ -167,7 +157,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -256,7 +246,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:hotspot_temp:celsius{job=\"$job\", gpu=~\"${gpu}\"}",
@@ -272,7 +262,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -361,7 +351,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "exemplar": true,
@@ -378,7 +368,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -467,7 +457,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:memory_temp:celsius{job=\"$job\", gpu=~\"${gpu}\"}",
@@ -483,7 +473,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -574,7 +564,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "exemplar": true,
@@ -591,7 +581,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -679,7 +669,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", job=\"$job\", gpu=~\"${gpu}\"}",
@@ -693,7 +683,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:throttle_reason:bool{reason=\"HwThermalSlowdown\", job=\"$job\", gpu=~\"${gpu}\"}",
@@ -708,7 +698,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:throttle_reason:bool{reason=\"HwPowerBrakeSlowdown\", job=\"$job\", gpu=~\"${gpu}\"}",
@@ -727,7 +717,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "",
       "fieldConfig": {
@@ -814,7 +804,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "exemplar": true,
@@ -833,7 +823,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -915,7 +905,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "exemplar": true,
@@ -932,7 +922,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "",
       "fieldConfig": {
@@ -1015,7 +1005,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "exemplar": true,
@@ -1032,7 +1022,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "",
       "fieldConfig": {
@@ -1117,7 +1107,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "exemplar": true,
@@ -1134,7 +1124,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "",
       "fieldConfig": {
@@ -1221,7 +1211,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "exemplar": true,
@@ -1240,7 +1230,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "",
       "fieldConfig": {
@@ -1326,7 +1316,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "exemplar": true,
@@ -1343,7 +1333,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "",
       "fieldConfig": {
@@ -1428,7 +1418,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "exemplar": true,
@@ -1445,7 +1435,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "",
       "fieldConfig": {
@@ -1531,7 +1521,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "exemplar": true,
@@ -1548,7 +1538,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "",
       "fieldConfig": {
@@ -1632,7 +1622,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "exemplar": true,
@@ -1649,7 +1639,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -1732,7 +1722,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "exemplar": true,
@@ -1749,7 +1739,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "",
       "fieldConfig": {
@@ -1834,7 +1824,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "exemplar": true,
@@ -1860,7 +1850,7 @@
         "current": {},
         "datasource": {
           "type": "prometheus",
-          "uid": "${DS_PROMETHEUS}"
+          "uid": "ffamzhijdn1fke"
         },
         "definition": "label_values(gpu)",
         "hide": 0,
@@ -1885,7 +1875,7 @@
         "current": {},
         "datasource": {
           "type": "prometheus",
-          "uid": "${DS_PROMETHEUS}"
+          "uid": "ffamzhijdn1fke"
         },
         "definition": "label_values(node_uname_info,job)",
         "hide": 0,
@@ -1927,6 +1917,6 @@
   "timezone": "",
   "title": "NVIDIA DCGM Exporter",
   "uid": "Oxed_c6Wz2",
-  "version": 18,
+  "version": 6,
   "weekStart": ""
 }

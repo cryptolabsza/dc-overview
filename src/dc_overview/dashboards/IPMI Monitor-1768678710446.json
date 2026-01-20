@@ -1949,11 +1949,7 @@
   "templating": {
     "list": [
       {
-        "current": {
-          "text": "",
-          "value": "${DS_PROMETHEUS}",
-          "selected": true
-        },
+        "current": {},
         "includeAll": false,
         "label": "Data Source",
         "name": "datasource",

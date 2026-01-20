@@ -30,3 +30,14 @@ scrape_configs:
       - targets: ["192.168.1.100:8622"]
         labels:
           group: "vast"
+
+  # IPMI Monitor metrics exporter
+  # Note: Use Docker gateway IP (172.18.0.1) when Prometheus runs in Docker
+  # and IPMI Monitor runs on the host. Use localhost:5000 if both run on host.
+  - job_name: "ipmi-monitor"
+    scrape_interval: 60s
+    scrape_timeout: 30s
+    static_configs:
+      - targets: ["172.18.0.1:5000"]
+        labels:
+          group: "ipmi"
