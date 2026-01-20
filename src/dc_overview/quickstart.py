@@ -574,15 +574,24 @@ def configure_grafana(password: str):
             dashboard_obj = json.loads(dashboard_json)
             
             # Use import API with datasource input mapping
+            # Include both common variable names used in dashboards
             import_data = json.dumps({
                 "dashboard": dashboard_obj,
                 "overwrite": True,
-                "inputs": [{
-                    "name": "DS_PROMETHEUS",
-                    "type": "datasource",
-                    "pluginId": "prometheus",
-                    "value": "Prometheus"
-                }],
+                "inputs": [
+                    {
+                        "name": "DS_PROMETHEUS",
+                        "type": "datasource",
+                        "pluginId": "prometheus",
+                        "value": "Prometheus"
+                    },
+                    {
+                        "name": "datasource",
+                        "type": "datasource", 
+                        "pluginId": "prometheus",
+                        "value": "Prometheus"
+                    }
+                ],
                 "folderId": 0
             }).encode('utf-8')
             

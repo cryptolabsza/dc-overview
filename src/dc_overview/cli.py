@@ -19,6 +19,11 @@ from .exporters import ExporterInstaller
 from .deploy import DeployManager, deploy_wizard
 from .quickstart import run_quickstart
 
+# New fleet management imports
+from .fleet_wizard import run_fleet_wizard
+from .fleet_manager import deploy_fleet
+from .fleet_config import FleetConfig
+
 console = Console()
 
 
@@ -497,25 +502,61 @@ def deploy_vast(api_key: str, status: bool):
 
 
 @click.command()
-def quickstart():
+@click.option("--legacy", is_flag=True, help="Use legacy quickstart (single machine)")
+def quickstart(legacy: bool):
     """
     ⚡ One-command setup - does everything!
     
-    Just answer a few questions and your monitoring will be set up.
+    Collects ALL information upfront, then deploys automatically.
     
     \b
     WHAT IT DOES:
-        - Detects your GPUs
-        - Installs exporters (node, dcgm, dc-exporter)
-        - Sets up Prometheus & Grafana (if master)
-        - Configures everything automatically
+        - Asks for all configuration ONCE at the start
+        - Installs Docker, exporters, Prometheus, Grafana
+        - Optionally installs IPMI Monitor
         - Optionally adds Vast.ai integration
+        - Deploys to all workers via SSH
+        - Sets up HTTPS reverse proxy
+    
+    \b
+    INFORMATION COLLECTED:
+        - Components to install (DC Overview, IPMI Monitor, Vast.ai)
+        - Grafana/IPMI passwords
+        - SSH credentials for worker deployment
+        - BMC/IPMI credentials (if IPMI enabled)
+        - Server list (IPs, names, BMC addresses)
+        - Domain + SSL configuration
     
     \b
     EXAMPLE:
         sudo dc-overview quickstart
     """
-    run_quickstart()
+    if legacy:
+        run_quickstart()
+    else:
+        run_fleet_quickstart()
+
+
+def run_fleet_quickstart():
+    """Run the new unified fleet quickstart."""
+    if os.geteuid() != 0:
+        console.print("[red]Error:[/red] This command requires root privileges.")
+        console.print("Run with: [cyan]sudo dc-overview quickstart[/cyan]")
+        sys.exit(1)
+    
+    try:
+        # Step 1: Collect all configuration upfront
+        config = run_fleet_wizard()
+        
+        # Step 2: Deploy everything using collected config
+        success = deploy_fleet(config)
+        
+        if not success:
+            sys.exit(1)
+            
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Setup cancelled.[/yellow]")
+        sys.exit(1)
 
 
 @click.command("add-machine")

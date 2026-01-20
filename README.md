@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/dc-overview.svg)](https://pypi.org/project/dc-overview/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Complete GPU datacenter monitoring suite.** Monitor your GPU servers with Prometheus, Grafana, and optional AI-powered insights.
+**Complete GPU datacenter monitoring suite.** Monitor your GPU servers with Prometheus, Grafana, and optional IPMI/BMC monitoring - all from a single command.
 
 ![Dashboard](docs/images/grafana-overview.png)
 
@@ -17,10 +17,119 @@
 | **dcgm-exporter** | NVIDIA GPU metrics (utilization, temp, power) | 9400 |
 | **dc-exporter** | VRAM temperature, hotspot, fan speed | 9500 |
 | **vastai-exporter** | Vast.ai earnings and reliability (optional) | 8622 |
+| **IPMI Monitor** | BMC/IPMI server health monitoring (optional) | 5000 |
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start (v1.1.0+)
+
+### One Command Setup - Collect Once, Deploy Everywhere
+
+The new unified quickstart **asks for all information upfront**, then handles everything automatically:
+
+```bash
+pip install dc-overview
+sudo dc-overview quickstart
+```
+
+```
+╭────────────────────────────────────────────────────────╮
+│           DC Overview - Fleet Setup Wizard             │
+│                                                        │
+│  This wizard will collect all the information needed   │
+│  to set up your datacenter monitoring.                 │
+│  We'll ask everything upfront, then handle the         │
+│  installation automatically.                           │
+╰────────────────────────────────────────────────────────╯
+
+STEP 1: Components to Install
+  [x] DC Overview (Prometheus + Grafana + GPU dashboards)
+  [ ] IPMI Monitor (BMC/IPMI server monitoring)
+  [ ] Vast.ai Integration (Earnings & reliability metrics)
+
+STEP 2: Credentials (asked once, used everywhere)
+  Site name: My GPU Farm
+  Grafana admin password: ******
+  SSH username: root
+  SSH authentication: Password / Key
+  SSH password: ******
+  
+  (If IPMI enabled)
+  BMC username: ADMIN
+  BMC password: ******
+  
+  (If Vast.ai enabled)
+  Vast.ai API Key: ******
+
+STEP 3: Servers to Monitor
+  How would you like to add servers?
+    ● Import from text (recommended for many servers)
+    ○ Enter servers manually
+    ○ Skip for now
+
+  Paste your server list:
+  gpu-01,192.168.1.101,192.168.1.83
+  gpu-02,192.168.1.102,192.168.1.85
+  gpu-03,192.168.1.103,192.168.1.88
+  
+  ✓ Added: gpu-01 (192.168.1.101)
+  ✓ Added: gpu-02 (192.168.1.102)
+  ✓ Added: gpu-03 (192.168.1.103)
+
+STEP 4: HTTPS Configuration
+  Do you have a domain name? [y/N]: n
+  Using self-signed certificate for IP access
+
+STEP 5: Review & Deploy
+  ✓ Configuration saved
+
+  ━━━ Deploying DC Overview Fleet ━━━
+  
+  Step 1: Installing Prerequisites
+    ✓ Docker installed and running
+    ✓ nginx installed
+    
+  Step 2: Setting up SSH Keys
+    ✓ SSH key generated
+    Deploying to gpu-01... ✓
+    Deploying to gpu-02... ✓
+    Deploying to gpu-03... ✓
+    
+  Step 3: Starting Prometheus & Grafana
+    ✓ Prometheus running on port 9090
+    ✓ Grafana running on port 3000
+    
+  Step 4: Installing Exporters on Workers
+    ✓ gpu-01 (192.168.1.101)
+    ✓ gpu-02 (192.168.1.102)
+    ✓ gpu-03 (192.168.1.103)
+    
+  Step 5: Configuring Prometheus Targets
+    ✓ Prometheus configured with 4 targets
+    
+  Step 6: Importing Dashboards
+    ✓ DC Overview
+    ✓ Node Exporter Full
+    ✓ NVIDIA DCGM Exporter
+    
+  Step 9: Setting up HTTPS Reverse Proxy
+    ✓ Self-signed certificate generated
+    ✓ nginx configured and running
+
+╭────────────────────────────────────────────────────────╮
+│              ✓ Deployment Complete!                    │
+╰────────────────────────────────────────────────────────╯
+
+Access Information:
+  Dashboard:  https://192.168.1.100/
+  Grafana:    https://192.168.1.100/grafana/
+    └─ Login: admin / ******
+
+Dashboards installed:
+  • DC Overview (main dashboard)
+  • Node Exporter Full (CPU/RAM/disk)
+  • NVIDIA DCGM Exporter (GPU metrics)
+```
 
 ### Prerequisites
 
@@ -28,7 +137,7 @@
 - **Python 3.9+** with pip
 - **Root/sudo access** for installing services
 
-### One Command Setup
+### Installation Options
 
 **Ubuntu 24.04+ / Python 3.12+** (uses pipx):
 ```bash
@@ -44,9 +153,9 @@ pip install dc-overview
 sudo dc-overview quickstart
 ```
 
-**Alternative** (if you get "externally-managed-environment" error):
+**With IPMI Monitor integration**:
 ```bash
-pip install dc-overview --break-system-packages
+pip install dc-overview[full]
 sudo dc-overview quickstart
 ```
 
@@ -55,77 +164,54 @@ sudo dc-overview quickstart
 > sudo bash -c 'echo "YOUR_USER ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/nopasswd && chmod 440 /etc/sudoers.d/nopasswd'
 > ```
 
-The wizard guides you through everything:
+### Legacy Quickstart
 
-```
-╭──────────────────────────────────────────────────╮
-│           DC Overview - Quick Setup              │
-╰──────────────────────────────────────────────────╯
-
-Step 1: What is this machine?
-  ○ GPU Worker (has GPUs to monitor)
-  ● Master Server (monitors other machines)
-  ○ Both (has GPUs + monitors others)
-
-Step 2: Setting up Monitoring Dashboard
-  Set Grafana admin password: ******
-  ✓ Prometheus running on port 9090
-  ✓ Grafana running on port 3000
-
-Step 3: Add Machines to Monitor
-  How do you want to add servers?
-    ● Import from file/paste (recommended)
-    ○ Enter manually
-
-  Paste your server list:
-  global:root,mypassword
-  192.168.1.101
-  192.168.1.102
-  192.168.1.103
-  [Enter]
-
-  Installing on 192.168.1.101... ✓
-  Installing on 192.168.1.102... ✓
-  Installing on 192.168.1.103... ✓
-  ✓ Added 3 workers to Prometheus
-
-Step 4: Vast.ai Integration (Optional)
-  Are you a Vast.ai provider? [y/N]: y
-  Vast.ai API Key: ******
-  ✓ vastai-exporter running (port 8622)
-
-✓ Setup Complete!
-  Grafana: http://192.168.1.100:3000
+For the previous single-machine workflow:
+```bash
+sudo dc-overview quickstart --legacy
 ```
 
 ---
 
 ## 📋 Import File Format
 
-Create a simple text file to add many servers at once:
+Create a simple text file to add many servers at once. Paste when prompted during quickstart.
 
-### Option 1: Global credentials (same for all)
+### Option 1: Just Server IPs (SSH only)
+```
+192.168.1.101
+192.168.1.102
+192.168.1.103
+```
+
+### Option 2: Server IP + BMC IP (for IPMI monitoring)
+```
+192.168.1.101,192.168.1.83
+192.168.1.102,192.168.1.85
+192.168.1.103,192.168.1.88
+```
+
+### Option 3: Name, Server IP, BMC IP (recommended)
+```
+gpu-01,192.168.1.101,192.168.1.83
+gpu-02,192.168.1.102,192.168.1.85
+gpu-03,192.168.1.103,192.168.1.88
+```
+
+### Legacy Format (for --legacy quickstart)
+
 ```
 global:root,mypassword
 192.168.1.101
 192.168.1.102
 192.168.1.103
-192.168.1.104
 ```
 
-### Option 2: Per-server credentials
+Or per-server credentials:
 ```
 192.168.1.101,root,password1
 192.168.1.102,ubuntu,password2
 192.168.1.103,admin,password3
-```
-
-### Option 3: Mixed (global default + overrides)
-```
-global:root,defaultpass
-192.168.1.101
-192.168.1.102,ubuntu,custompass
-192.168.1.103
 ```
 
 ---
@@ -155,10 +241,25 @@ Or from the master, provide SSH credentials and the wizard installs remotely.
 ## 📊 Available Commands
 
 ```bash
-dc-overview quickstart          # ⚡ One-command setup (recommended)
+# Main commands
+dc-overview quickstart          # ⚡ Unified setup wizard (asks once, deploys everywhere)
+dc-overview quickstart --legacy # Old single-machine workflow
 dc-overview status              # Check what's running
 dc-overview add-machine IP      # Add another machine to monitor
+
+# Exporter management
 dc-overview install-exporters   # Install exporters on current machine
+
+# Deployment commands
+dc-overview deploy wizard       # Interactive deployment wizard
+dc-overview deploy add          # Add workers interactively
+dc-overview deploy bulk         # Bulk add workers
+dc-overview deploy list         # List all workers with status
+dc-overview deploy install      # Install exporters on workers
+dc-overview deploy ssh-key      # Generate/deploy SSH keys
+dc-overview deploy vast         # Set up Vast.ai exporter
+
+# SSL/Reverse Proxy
 dc-overview setup-ssl           # Set up reverse proxy with SSL
 ```
 
