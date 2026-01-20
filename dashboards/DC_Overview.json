@@ -2237,6 +2237,8 @@
               "device 6": true,
               "device 7": true,
               "device 8": true,
+              "gpu 1": true,
+              "gpu 2": true,
               "instance": true,
               "instance 1": true,
               "instance 2": true,
@@ -3060,9 +3062,9 @@
               "options": {
                 "from": 0,
                 "result": {
-                  "color": "blue",
+                  "color": "green",
                   "index": 0,
-                  "text": "Unknow"
+                  "text": "OK"
                 },
                 "to": 0
               },
@@ -3072,9 +3074,9 @@
               "options": {
                 "from": 1,
                 "result": {
-                  "color": "green",
+                  "color": "yellow",
                   "index": 1,
-                  "text": "OK"
+                  "text": "Warning"
                 },
                 "to": 1
               },
@@ -3086,9 +3088,33 @@
                 "result": {
                   "color": "red",
                   "index": 2,
-                  "text": "ERROR"
+                  "text": "Error"
                 },
                 "to": 2
+              },
+              "type": "range"
+            },
+            {
+              "options": {
+                "from": 3,
+                "result": {
+                  "color": "blue",
+                  "index": 3,
+                  "text": "VM"
+                },
+                "to": 3
+              },
+              "type": "range"
+            },
+            {
+              "options": {
+                "from": 4,
+                "result": {
+                  "color": "gray",
+                  "index": 4,
+                  "text": "N/A"
+                },
+                "to": 4
               },
               "type": "range"
             }
@@ -3815,6 +3841,6 @@
   "timezone": "",
   "title": "DC OverView",
   "uid": "dc-overview-main",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }
