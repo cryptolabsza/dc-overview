@@ -222,26 +222,215 @@ https://grafana.monitor.example.com/  (if subdomain configured)
 
 ---
 
-## 🐳 Docker Alternative
+## 🛠️ Manual Installation (No pip/quickstart)
 
-If you prefer Docker Compose:
+If you prefer full control or can't use the automatic installer, use the configuration templates in `config-templates/`.
+
+### Directory Structure
+
+```
+config-templates/
+├── docker-compose.yml              # Prometheus + Grafana stack
+├── prometheus.yml                  # Scrape configuration (edit IPs)
+├── recording_rules.yml             # Unified metrics (gpu:*, fleet:*)
+├── nginx.conf                      # Reverse proxy with SSL
+├── env-example.txt                 # Environment variables
+├── grafana/provisioning/
+│   └── datasources/prometheus.yml  # Auto-configure datasource
+└── systemd/
+    ├── node-exporter.service       # System metrics
+    ├── dcgm-exporter.service       # NVIDIA GPU metrics
+    └── dc-exporter.service         # VRAM/Hotspot temps
+```
+
+### Step 1: Master Server Setup
+
+```bash
+# Create directories
+sudo mkdir -p /etc/dc-overview/ssl
+sudo mkdir -p /root/dc-overview/grafana/provisioning/datasources
+sudo mkdir -p /root/.config/dc-overview
+
+# Copy configuration files (from this repo)
+cp config-templates/docker-compose.yml /root/
+cp config-templates/prometheus.yml /root/.config/dc-overview/
+cp config-templates/recording_rules.yml /root/.config/dc-overview/
+cp config-templates/grafana/provisioning/datasources/prometheus.yml \
+   /root/dc-overview/grafana/provisioning/datasources/
+
+# Edit prometheus.yml - replace IPs with your servers
+nano /root/.config/dc-overview/prometheus.yml
+
+# Generate self-signed SSL certificate
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /etc/dc-overview/ssl/server.key \
+  -out /etc/dc-overview/ssl/server.crt \
+  -subj "/CN=dc-overview"
+
+# Set up Nginx reverse proxy
+cp config-templates/nginx.conf /etc/nginx/sites-available/dc-overview
+ln -sf /etc/nginx/sites-available/dc-overview /etc/nginx/sites-enabled/
+htpasswd -c /etc/nginx/.htpasswd_prometheus admin  # Set Prometheus password
+nginx -t && systemctl reload nginx
+
+# Start monitoring stack
+cd /root
+docker compose up -d
+```
+
+### Step 2: Worker Server Setup (Each GPU Server)
+
+#### Install Node Exporter (System Metrics)
+
+```bash
+# Download and install
+wget https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz
+tar xvf node_exporter-*.tar.gz
+sudo cp node_exporter-*/node_exporter /usr/local/bin/
+sudo useradd -rs /bin/false node_exporter
+
+# Create service
+sudo cp config-templates/systemd/node-exporter.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now node-exporter
+
+# Verify: curl http://localhost:9100/metrics
+```
+
+#### Install DCGM Exporter (GPU Metrics)
+
+```bash
+# Install DCGM (NVIDIA Data Center GPU Manager)
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+sudo dpkg -i cuda-keyring_1.1-1_all.deb
+sudo apt update
+sudo apt install -y datacenter-gpu-manager
+
+# Build dcgm-exporter from source
+git clone https://github.com/NVIDIA/dcgm-exporter.git
+cd dcgm-exporter
+make binary
+sudo cp cmd/dcgm-exporter/dcgm-exporter /usr/local/bin/
+
+# Create service
+sudo cp config-templates/systemd/dcgm-exporter.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now nvidia-dcgm dcgm-exporter
+
+# Verify: curl http://localhost:9400/metrics
+```
+
+#### Install DC Exporter (VRAM/Hotspot Temps)
+
+See [dc-exporter](https://github.com/cryptolabsza/dc-exporter) for installation.
+
+```bash
+# Requires: iomem=relaxed kernel parameter for direct GPU register access
+# Add to /etc/default/grub: GRUB_CMDLINE_LINUX_DEFAULT="... iomem=relaxed"
+# Then: sudo update-grub && reboot
+
+# Build and install
+git clone https://github.com/cryptolabsza/dc-exporter.git
+cd dc-exporter
+make
+sudo make install
+sudo systemctl enable --now dc-exporter
+
+# Verify: curl http://localhost:9835/metrics
+```
+
+### Step 3: Update Prometheus Configuration
+
+Edit `/root/.config/dc-overview/prometheus.yml` with your server IPs:
 
 ```yaml
-# docker-compose.yml
-version: '3.8'
+scrape_configs:
+  - job_name: "master"
+    static_configs:
+      - targets: ["192.168.1.100:9100", "192.168.1.100:9400"]
+
+  - job_name: "worker-01"
+    static_configs:
+      - targets: ["192.168.1.101:9100", "192.168.1.101:9400"]
+
+  - job_name: "dc-exporter"
+    static_configs:
+      - targets:
+        - "192.168.1.100:9835"
+        - "192.168.1.101:9835"
+```
+
+Reload Prometheus:
+```bash
+curl -X POST http://localhost:9090/prometheus/-/reload
+```
+
+### Step 4: Import Dashboards
+
+Import these dashboards from `dashboards/` into Grafana:
+
+| Dashboard | File | Description |
+|-----------|------|-------------|
+| DC Overview | `DC OverView-*.json` | Fleet overview with all GPU metrics |
+| Node Exporter Full | `Node Exporter Full.json` | System metrics |
+| NVIDIA DCGM | `NVIDIA DCGM Exporter.json` | GPU performance |
+| Vast Dashboard | `Vast Dashboard.json` | Vast.ai provider metrics |
+
+### Port Reference
+
+| Service | Port | Metrics |
+|---------|------|---------|
+| Node Exporter | 9100 | `node_*` (CPU, RAM, disk) |
+| DCGM Exporter | 9400 | `DCGM_*` (GPU temp, power, util) |
+| DC Exporter | 9835 | `DCXP_*` (VRAM temp, hotspot, throttle) |
+| Vast.ai Exporter | 8622 | `vast_machine_*` (earnings, reliability) |
+| Prometheus | 9090 | Time-series DB |
+| Grafana | 3000 | Dashboards |
+| Nginx HTTPS | 443 | Reverse proxy |
+
+### Recording Rules (Unified Metrics)
+
+The `recording_rules.yml` creates unified metric names that work regardless of exporter:
+
+```promql
+# Use these in dashboards for compatibility:
+gpu:core_temp:celsius       # GPU temperature
+gpu:memory_temp:celsius     # VRAM temperature (DCXP or DCGM)
+gpu:hotspot_temp:celsius    # Hotspot temp (DCXP or GPU temp)
+gpu:power_usage:watts       # Power consumption
+gpu:utilization:percent     # GPU utilization
+gpu:fan_speed:percent       # Fan speed
+fleet:gpu_count:total       # Total GPUs monitored
+fleet:power_usage:total_watts  # Total power draw
+```
+
+---
+
+## 🐳 Docker Alternative (Quick Reference)
+
+Minimal docker-compose.yml for just Prometheus + Grafana:
+
+```yaml
 services:
   prometheus:
     image: prom/prometheus:latest
     ports: ["9090:9090"]
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--web.external-url=/prometheus/"
 
   grafana:
     image: grafana/grafana:latest
     ports: ["3000:3000"]
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
 ```
+
+For the full production setup with networking, SSL, and all features, use `config-templates/docker-compose.yml`.
 
 ---
 
