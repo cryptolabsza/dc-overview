@@ -18,13 +18,13 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 1,
+  "id": 4,
   "links": [],
   "panels": [
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "fdfcbypxyeps0d"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "",
       "fieldConfig": {
@@ -147,7 +147,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:hotspot_temp:celsius{gpu=\"0\"}",
@@ -160,7 +160,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:hotspot_temp:celsius{gpu=\"1\"}",
@@ -173,7 +173,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:hotspot_temp:celsius{gpu=\"2\"}",
@@ -186,7 +186,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:hotspot_temp:celsius{gpu=\"3\"}",
@@ -199,7 +199,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:hotspot_temp:celsius{gpu=\"4\"}",
@@ -212,7 +212,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:hotspot_temp:celsius{gpu=\"5\"}",
@@ -225,7 +225,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:hotspot_temp:celsius{gpu=\"6\"}",
@@ -238,7 +238,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:hotspot_temp:celsius{gpu=\"7\"}",
@@ -262,22 +262,7 @@
           "id": "organize",
           "options": {
             "excludeByName": {
-              "DCGM_FI_DRIVER_VERSION 1": true,
-              "DCGM_FI_DRIVER_VERSION 2": true,
-              "DCGM_FI_DRIVER_VERSION 3": true,
-              "DCGM_FI_DRIVER_VERSION 4": true,
-              "DCGM_FI_DRIVER_VERSION 5": true,
-              "DCGM_FI_DRIVER_VERSION 6": true,
-              "DCGM_FI_DRIVER_VERSION 7": true,
-              "DCGM_FI_DRIVER_VERSION 8": true,
-              "Hostname 1": true,
-              "Hostname 2": true,
-              "Hostname 3": true,
-              "Hostname 4": true,
-              "Hostname 5": true,
-              "Hostname 6": true,
-              "Hostname 7": true,
-              "Hostname 8": true,
+              "Time": true,
               "Time 1": true,
               "Time 2": true,
               "Time 3": true,
@@ -286,39 +271,7 @@
               "Time 6": true,
               "Time 7": true,
               "Time 8": true,
-              "UUID 1": true,
-              "UUID 2": true,
-              "UUID 3": true,
-              "UUID 4": true,
-              "UUID 5": true,
-              "UUID 6": true,
-              "UUID 7": true,
-              "UUID 8": true,
-              "Value #D": false,
-              "__name__ 1": true,
-              "__name__ 2": true,
-              "__name__ 3": true,
-              "__name__ 4": true,
-              "__name__ 5": true,
-              "__name__ 6": true,
-              "__name__ 7": true,
-              "__name__ 8": true,
-              "device 1": true,
-              "device 2": true,
-              "device 3": true,
-              "device 4": true,
-              "device 5": true,
-              "device 6": true,
-              "device 7": true,
-              "device 8": true,
-              "gpu 1": true,
-              "gpu 2": true,
-              "gpu 3": true,
-              "gpu 4": true,
-              "gpu 5": true,
-              "gpu 6": true,
-              "gpu 7": true,
-              "gpu 8": true,
+              "instance": true,
               "instance 1": true,
               "instance 2": true,
               "instance 3": true,
@@ -327,6 +280,61 @@
               "instance 6": true,
               "instance 7": true,
               "instance 8": true,
+              "source": true,
+              "source 1": true,
+              "source 2": true,
+              "source 3": true,
+              "source 4": true,
+              "source 5": true,
+              "source 6": true,
+              "source 7": true,
+              "source 8": true,
+              "device": true,
+              "device 1": true,
+              "device 2": true,
+              "device 3": true,
+              "device 4": true,
+              "device 5": true,
+              "device 6": true,
+              "device 7": true,
+              "device 8": true,
+              "UUID": true,
+              "UUID 1": true,
+              "UUID 2": true,
+              "UUID 3": true,
+              "UUID 4": true,
+              "UUID 5": true,
+              "UUID 6": true,
+              "UUID 7": true,
+              "UUID 8": true,
+              "DCGM_FI_DRIVER_VERSION": true,
+              "DCGM_FI_DRIVER_VERSION 1": true,
+              "DCGM_FI_DRIVER_VERSION 2": true,
+              "DCGM_FI_DRIVER_VERSION 3": true,
+              "DCGM_FI_DRIVER_VERSION 4": true,
+              "DCGM_FI_DRIVER_VERSION 5": true,
+              "DCGM_FI_DRIVER_VERSION 6": true,
+              "DCGM_FI_DRIVER_VERSION 7": true,
+              "DCGM_FI_DRIVER_VERSION 8": true,
+              "DCXP_FI_DRIVER_VERSION": true,
+              "DCXP_FI_DRIVER_VERSION 1": true,
+              "DCXP_FI_DRIVER_VERSION 2": true,
+              "DCXP_FI_DRIVER_VERSION 3": true,
+              "DCXP_FI_DRIVER_VERSION 4": true,
+              "DCXP_FI_DRIVER_VERSION 5": true,
+              "DCXP_FI_DRIVER_VERSION 6": true,
+              "DCXP_FI_DRIVER_VERSION 7": true,
+              "DCXP_FI_DRIVER_VERSION 8": true,
+              "pci_bus_id": true,
+              "pci_bus_id 1": true,
+              "pci_bus_id 2": true,
+              "pci_bus_id 3": true,
+              "pci_bus_id 4": true,
+              "pci_bus_id 5": true,
+              "pci_bus_id 6": true,
+              "pci_bus_id 7": true,
+              "pci_bus_id 8": true,
+              "modelName": true,
               "modelName 1": true,
               "modelName 2": true,
               "modelName 3": true,
@@ -334,53 +342,49 @@
               "modelName 5": true,
               "modelName 6": true,
               "modelName 7": true,
-              "modelName 8": true
+              "modelName 8": true,
+              "job": true,
+              "job 1": true,
+              "job 2": true,
+              "job 3": true,
+              "job 4": true,
+              "job 5": true,
+              "job 6": true,
+              "job 7": true,
+              "job 8": true,
+              "reason": true,
+              "reason 1": true,
+              "reason 2": true,
+              "reason 3": true,
+              "reason 4": true,
+              "reason 5": true,
+              "reason 6": true,
+              "reason 7": true,
+              "reason 8": true
             },
             "includeByName": {},
             "indexByName": {
-              "DCGM_FI_DRIVER_VERSION 1": 1,
-              "DCGM_FI_DRIVER_VERSION 2": 13,
-              "DCGM_FI_DRIVER_VERSION 3": 22,
-              "DCGM_FI_DRIVER_VERSION 4": 32,
-              "Hostname 1": 5,
-              "Hostname 2": 14,
-              "Hostname 3": 23,
-              "Hostname 4": 33,
-              "Time 1": 4,
-              "Time 2": 12,
-              "Time 3": 21,
-              "Time 4": 31,
-              "UUID 1": 6,
-              "UUID 2": 15,
-              "UUID 3": 24,
-              "UUID 4": 34,
-              "Value #A": 2,
-              "Value #B": 3,
-              "Value #C": 30,
-              "Value #D": 40,
-              "__name__ 1": 7,
-              "__name__ 2": 16,
-              "__name__ 3": 25,
-              "__name__ 4": 35,
-              "device 1": 8,
-              "device 2": 17,
-              "device 3": 26,
-              "device 4": 36,
-              "gpu 1": 9,
-              "gpu 2": 18,
-              "gpu 3": 27,
-              "gpu 4": 37,
-              "instance 1": 10,
-              "instance 2": 19,
-              "instance 3": 28,
-              "instance 4": 38,
-              "job": 0,
-              "modelName 1": 11,
-              "modelName 2": 20,
-              "modelName 3": 29,
-              "modelName 4": 39
+              "Machine": 0,
+              "Hostname": 0,
+              "GPU0": 1,
+              "Value #A": 1,
+              "GPU1": 2,
+              "Value #B": 2,
+              "GPU2": 3,
+              "Value #C": 3,
+              "GPU3": 4,
+              "Value #D": 4,
+              "GPU4": 5,
+              "Value #E": 5,
+              "GPU5": 6,
+              "Value #F": 6,
+              "GPU6": 7,
+              "Value #G": 7,
+              "GPU7": 8,
+              "Value #H": 8
             },
             "renameByName": {
+              "Hostname": "Machine",
               "Hostname 1": "",
               "Value #A": "GPU0",
               "Value #B": "GPU1",
@@ -389,8 +393,7 @@
               "Value #E": "GPU4",
               "Value #F": "GPU5",
               "Value #G": "GPU6",
-              "Value #H": "GPU7",
-              "Hostname": "Machine"
+              "Value #H": "GPU7"
             }
           }
         },
@@ -411,7 +414,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "fdfcbypxyeps0d"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "",
       "fieldConfig": {
@@ -523,7 +526,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:fan_speed:percent{gpu=\"0\"}",
@@ -536,7 +539,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:fan_speed:percent{gpu=\"1\"}",
@@ -549,7 +552,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:fan_speed:percent{gpu=\"2\"}",
@@ -562,7 +565,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:fan_speed:percent{gpu=\"3\"}",
@@ -575,7 +578,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:fan_speed:percent{gpu=\"4\"}",
@@ -588,7 +591,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:fan_speed:percent{gpu=\"5\"}",
@@ -601,7 +604,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:fan_speed:percent{gpu=\"6\"}",
@@ -614,7 +617,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:fan_speed:percent{gpu=\"7\"}",
@@ -638,22 +641,7 @@
           "id": "organize",
           "options": {
             "excludeByName": {
-              "DCGM_FI_DRIVER_VERSION 1": true,
-              "DCGM_FI_DRIVER_VERSION 2": true,
-              "DCGM_FI_DRIVER_VERSION 3": true,
-              "DCGM_FI_DRIVER_VERSION 4": true,
-              "DCGM_FI_DRIVER_VERSION 5": true,
-              "DCGM_FI_DRIVER_VERSION 6": true,
-              "DCGM_FI_DRIVER_VERSION 7": true,
-              "DCGM_FI_DRIVER_VERSION 8": true,
-              "Hostname 1": true,
-              "Hostname 2": true,
-              "Hostname 3": true,
-              "Hostname 4": true,
-              "Hostname 5": true,
-              "Hostname 6": true,
-              "Hostname 7": true,
-              "Hostname 8": true,
+              "Time": true,
               "Time 1": true,
               "Time 2": true,
               "Time 3": true,
@@ -662,39 +650,7 @@
               "Time 6": true,
               "Time 7": true,
               "Time 8": true,
-              "UUID 1": true,
-              "UUID 2": true,
-              "UUID 3": true,
-              "UUID 4": true,
-              "UUID 5": true,
-              "UUID 6": true,
-              "UUID 7": true,
-              "UUID 8": true,
-              "Value #D": false,
-              "__name__ 1": true,
-              "__name__ 2": true,
-              "__name__ 3": true,
-              "__name__ 4": true,
-              "__name__ 5": true,
-              "__name__ 6": true,
-              "__name__ 7": true,
-              "__name__ 8": true,
-              "device 1": true,
-              "device 2": true,
-              "device 3": true,
-              "device 4": true,
-              "device 5": true,
-              "device 6": true,
-              "device 7": true,
-              "device 8": true,
-              "gpu 1": true,
-              "gpu 2": true,
-              "gpu 3": true,
-              "gpu 4": true,
-              "gpu 5": true,
-              "gpu 6": true,
-              "gpu 7": true,
-              "gpu 8": true,
+              "instance": true,
               "instance 1": true,
               "instance 2": true,
               "instance 3": true,
@@ -703,7 +659,61 @@
               "instance 6": true,
               "instance 7": true,
               "instance 8": true,
-              "job": false,
+              "source": true,
+              "source 1": true,
+              "source 2": true,
+              "source 3": true,
+              "source 4": true,
+              "source 5": true,
+              "source 6": true,
+              "source 7": true,
+              "source 8": true,
+              "device": true,
+              "device 1": true,
+              "device 2": true,
+              "device 3": true,
+              "device 4": true,
+              "device 5": true,
+              "device 6": true,
+              "device 7": true,
+              "device 8": true,
+              "UUID": true,
+              "UUID 1": true,
+              "UUID 2": true,
+              "UUID 3": true,
+              "UUID 4": true,
+              "UUID 5": true,
+              "UUID 6": true,
+              "UUID 7": true,
+              "UUID 8": true,
+              "DCGM_FI_DRIVER_VERSION": true,
+              "DCGM_FI_DRIVER_VERSION 1": true,
+              "DCGM_FI_DRIVER_VERSION 2": true,
+              "DCGM_FI_DRIVER_VERSION 3": true,
+              "DCGM_FI_DRIVER_VERSION 4": true,
+              "DCGM_FI_DRIVER_VERSION 5": true,
+              "DCGM_FI_DRIVER_VERSION 6": true,
+              "DCGM_FI_DRIVER_VERSION 7": true,
+              "DCGM_FI_DRIVER_VERSION 8": true,
+              "DCXP_FI_DRIVER_VERSION": true,
+              "DCXP_FI_DRIVER_VERSION 1": true,
+              "DCXP_FI_DRIVER_VERSION 2": true,
+              "DCXP_FI_DRIVER_VERSION 3": true,
+              "DCXP_FI_DRIVER_VERSION 4": true,
+              "DCXP_FI_DRIVER_VERSION 5": true,
+              "DCXP_FI_DRIVER_VERSION 6": true,
+              "DCXP_FI_DRIVER_VERSION 7": true,
+              "DCXP_FI_DRIVER_VERSION 8": true,
+              "pci_bus_id": true,
+              "pci_bus_id 1": true,
+              "pci_bus_id 2": true,
+              "pci_bus_id 3": true,
+              "pci_bus_id 4": true,
+              "pci_bus_id 5": true,
+              "pci_bus_id 6": true,
+              "pci_bus_id 7": true,
+              "pci_bus_id 8": true,
+              "modelName": true,
               "modelName 1": true,
               "modelName 2": true,
               "modelName 3": true,
@@ -712,54 +722,45 @@
               "modelName 6": true,
               "modelName 7": true,
               "modelName 8": true,
-              "pci_bus_id 1": true,
-              "pci_bus_id 2": true,
-              "pci_bus_id 3": true,
-              "pci_bus_id 4": true
+              "job": true,
+              "job 1": true,
+              "job 2": true,
+              "job 3": true,
+              "job 4": true,
+              "job 5": true,
+              "job 6": true,
+              "job 7": true,
+              "job 8": true,
+              "reason": true,
+              "reason 1": true,
+              "reason 2": true,
+              "reason 3": true,
+              "reason 4": true,
+              "reason 5": true,
+              "reason 6": true,
+              "reason 7": true,
+              "reason 8": true
             },
             "includeByName": {},
             "indexByName": {
-              "DCGM_FI_DRIVER_VERSION 1": 1,
-              "DCGM_FI_DRIVER_VERSION 2": 13,
-              "DCGM_FI_DRIVER_VERSION 3": 22,
-              "DCGM_FI_DRIVER_VERSION 4": 32,
-              "Hostname 1": 5,
-              "Hostname 2": 14,
-              "Hostname 3": 23,
-              "Hostname 4": 33,
-              "Time 1": 4,
-              "Time 2": 12,
-              "Time 3": 21,
-              "Time 4": 31,
-              "UUID 1": 6,
-              "UUID 2": 15,
-              "UUID 3": 24,
-              "UUID 4": 34,
-              "Value #A": 2,
-              "Value #B": 3,
-              "Value #C": 30,
-              "Value #D": 40,
-              "__name__ 1": 7,
-              "__name__ 2": 16,
-              "__name__ 3": 25,
-              "__name__ 4": 35,
-              "device 1": 8,
-              "device 2": 17,
-              "device 3": 26,
-              "device 4": 36,
-              "gpu 1": 9,
-              "gpu 2": 18,
-              "gpu 3": 27,
-              "gpu 4": 37,
-              "instance 1": 10,
-              "instance 2": 19,
-              "instance 3": 28,
-              "instance 4": 38,
-              "job": 0,
-              "modelName 1": 11,
-              "modelName 2": 20,
-              "modelName 3": 29,
-              "modelName 4": 39
+              "Machine": 0,
+              "Hostname": 0,
+              "GPU0": 1,
+              "Value #A": 1,
+              "GPU1": 2,
+              "Value #B": 2,
+              "GPU2": 3,
+              "Value #C": 3,
+              "GPU3": 4,
+              "Value #D": 4,
+              "GPU4": 5,
+              "Value #E": 5,
+              "GPU5": 6,
+              "Value #F": 6,
+              "GPU6": 7,
+              "Value #G": 7,
+              "GPU7": 8,
+              "Value #H": 8
             },
             "renameByName": {
               "Hostname 1": "",
@@ -771,7 +772,8 @@
               "Value #F": "GPU5",
               "Value #G": "GPU6",
               "Value #H": "GPU7",
-              "job": "Machine"
+              "job": "Machine",
+              "Hostname": "Machine"
             }
           }
         },
@@ -792,7 +794,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "fdfcbypxyeps0d"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "",
       "fieldConfig": {
@@ -904,7 +906,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:power_usage:watts{gpu=\"0\"}",
@@ -917,7 +919,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:power_usage:watts{gpu=\"1\"}",
@@ -930,7 +932,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:power_usage:watts{gpu=\"2\"}",
@@ -943,7 +945,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:power_usage:watts{gpu=\"3\"}",
@@ -956,7 +958,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:power_usage:watts{gpu=\"4\"}",
@@ -969,7 +971,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:power_usage:watts{gpu=\"5\"}",
@@ -982,7 +984,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:power_usage:watts{gpu=\"6\"}",
@@ -995,7 +997,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:power_usage:watts{gpu=\"7\"}",
@@ -1019,22 +1021,7 @@
           "id": "organize",
           "options": {
             "excludeByName": {
-              "DCGM_FI_DRIVER_VERSION 1": true,
-              "DCGM_FI_DRIVER_VERSION 2": true,
-              "DCGM_FI_DRIVER_VERSION 3": true,
-              "DCGM_FI_DRIVER_VERSION 4": true,
-              "DCGM_FI_DRIVER_VERSION 5": true,
-              "DCGM_FI_DRIVER_VERSION 6": true,
-              "DCGM_FI_DRIVER_VERSION 7": true,
-              "DCGM_FI_DRIVER_VERSION 8": true,
-              "Hostname 1": true,
-              "Hostname 2": true,
-              "Hostname 3": true,
-              "Hostname 4": true,
-              "Hostname 5": true,
-              "Hostname 6": true,
-              "Hostname 7": true,
-              "Hostname 8": true,
+              "Time": true,
               "Time 1": true,
               "Time 2": true,
               "Time 3": true,
@@ -1043,39 +1030,7 @@
               "Time 6": true,
               "Time 7": true,
               "Time 8": true,
-              "UUID 1": true,
-              "UUID 2": true,
-              "UUID 3": true,
-              "UUID 4": true,
-              "UUID 5": true,
-              "UUID 6": true,
-              "UUID 7": true,
-              "UUID 8": true,
-              "Value #D": false,
-              "__name__ 1": true,
-              "__name__ 2": true,
-              "__name__ 3": true,
-              "__name__ 4": true,
-              "__name__ 5": true,
-              "__name__ 6": true,
-              "__name__ 7": true,
-              "__name__ 8": true,
-              "device 1": true,
-              "device 2": true,
-              "device 3": true,
-              "device 4": true,
-              "device 5": true,
-              "device 6": true,
-              "device 7": true,
-              "device 8": true,
-              "gpu 1": true,
-              "gpu 2": true,
-              "gpu 3": true,
-              "gpu 4": true,
-              "gpu 5": true,
-              "gpu 6": true,
-              "gpu 7": true,
-              "gpu 8": true,
+              "instance": true,
               "instance 1": true,
               "instance 2": true,
               "instance 3": true,
@@ -1084,7 +1039,61 @@
               "instance 6": true,
               "instance 7": true,
               "instance 8": true,
-              "job": false,
+              "source": true,
+              "source 1": true,
+              "source 2": true,
+              "source 3": true,
+              "source 4": true,
+              "source 5": true,
+              "source 6": true,
+              "source 7": true,
+              "source 8": true,
+              "device": true,
+              "device 1": true,
+              "device 2": true,
+              "device 3": true,
+              "device 4": true,
+              "device 5": true,
+              "device 6": true,
+              "device 7": true,
+              "device 8": true,
+              "UUID": true,
+              "UUID 1": true,
+              "UUID 2": true,
+              "UUID 3": true,
+              "UUID 4": true,
+              "UUID 5": true,
+              "UUID 6": true,
+              "UUID 7": true,
+              "UUID 8": true,
+              "DCGM_FI_DRIVER_VERSION": true,
+              "DCGM_FI_DRIVER_VERSION 1": true,
+              "DCGM_FI_DRIVER_VERSION 2": true,
+              "DCGM_FI_DRIVER_VERSION 3": true,
+              "DCGM_FI_DRIVER_VERSION 4": true,
+              "DCGM_FI_DRIVER_VERSION 5": true,
+              "DCGM_FI_DRIVER_VERSION 6": true,
+              "DCGM_FI_DRIVER_VERSION 7": true,
+              "DCGM_FI_DRIVER_VERSION 8": true,
+              "DCXP_FI_DRIVER_VERSION": true,
+              "DCXP_FI_DRIVER_VERSION 1": true,
+              "DCXP_FI_DRIVER_VERSION 2": true,
+              "DCXP_FI_DRIVER_VERSION 3": true,
+              "DCXP_FI_DRIVER_VERSION 4": true,
+              "DCXP_FI_DRIVER_VERSION 5": true,
+              "DCXP_FI_DRIVER_VERSION 6": true,
+              "DCXP_FI_DRIVER_VERSION 7": true,
+              "DCXP_FI_DRIVER_VERSION 8": true,
+              "pci_bus_id": true,
+              "pci_bus_id 1": true,
+              "pci_bus_id 2": true,
+              "pci_bus_id 3": true,
+              "pci_bus_id 4": true,
+              "pci_bus_id 5": true,
+              "pci_bus_id 6": true,
+              "pci_bus_id 7": true,
+              "pci_bus_id 8": true,
+              "modelName": true,
               "modelName 1": true,
               "modelName 2": true,
               "modelName 3": true,
@@ -1093,58 +1102,45 @@
               "modelName 6": true,
               "modelName 7": true,
               "modelName 8": true,
-              "pci_bus_id 1": true,
-              "pci_bus_id 2": true,
-              "pci_bus_id 3": true,
-              "pci_bus_id 4": true,
-              "pci_bus_id 5": true,
-              "pci_bus_id 6": true,
-              "pci_bus_id 7": true,
-              "pci_bus_id 8": true
+              "job": true,
+              "job 1": true,
+              "job 2": true,
+              "job 3": true,
+              "job 4": true,
+              "job 5": true,
+              "job 6": true,
+              "job 7": true,
+              "job 8": true,
+              "reason": true,
+              "reason 1": true,
+              "reason 2": true,
+              "reason 3": true,
+              "reason 4": true,
+              "reason 5": true,
+              "reason 6": true,
+              "reason 7": true,
+              "reason 8": true
             },
             "includeByName": {},
             "indexByName": {
-              "DCGM_FI_DRIVER_VERSION 1": 1,
-              "DCGM_FI_DRIVER_VERSION 2": 13,
-              "DCGM_FI_DRIVER_VERSION 3": 22,
-              "DCGM_FI_DRIVER_VERSION 4": 32,
-              "Hostname 1": 5,
-              "Hostname 2": 14,
-              "Hostname 3": 23,
-              "Hostname 4": 33,
-              "Time 1": 4,
-              "Time 2": 12,
-              "Time 3": 21,
-              "Time 4": 31,
-              "UUID 1": 6,
-              "UUID 2": 15,
-              "UUID 3": 24,
-              "UUID 4": 34,
-              "Value #A": 2,
-              "Value #B": 3,
-              "Value #C": 30,
-              "Value #D": 40,
-              "__name__ 1": 7,
-              "__name__ 2": 16,
-              "__name__ 3": 25,
-              "__name__ 4": 35,
-              "device 1": 8,
-              "device 2": 17,
-              "device 3": 26,
-              "device 4": 36,
-              "gpu 1": 9,
-              "gpu 2": 18,
-              "gpu 3": 27,
-              "gpu 4": 37,
-              "instance 1": 10,
-              "instance 2": 19,
-              "instance 3": 28,
-              "instance 4": 38,
-              "job": 0,
-              "modelName 1": 11,
-              "modelName 2": 20,
-              "modelName 3": 29,
-              "modelName 4": 39
+              "Machine": 0,
+              "Hostname": 0,
+              "GPU0": 1,
+              "Value #A": 1,
+              "GPU1": 2,
+              "Value #B": 2,
+              "GPU2": 3,
+              "Value #C": 3,
+              "GPU3": 4,
+              "Value #D": 4,
+              "GPU4": 5,
+              "Value #E": 5,
+              "GPU5": 6,
+              "Value #F": 6,
+              "GPU6": 7,
+              "Value #G": 7,
+              "GPU7": 8,
+              "Value #H": 8
             },
             "renameByName": {
               "Hostname 1": "",
@@ -1156,7 +1152,8 @@
               "Value #F": "GPU5",
               "Value #G": "GPU6",
               "Value #H": "GPU7",
-              "job": "Machine"
+              "job": "Machine",
+              "Hostname": "Machine"
             }
           }
         },
@@ -1177,7 +1174,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "fdfcbypxyeps0d"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "",
       "fieldConfig": {
@@ -1289,7 +1286,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:core_temp:celsius{gpu=\"0\"}",
@@ -1302,7 +1299,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:core_temp:celsius{gpu=\"1\"}",
@@ -1315,7 +1312,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:core_temp:celsius{gpu=\"2\"}",
@@ -1328,7 +1325,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:core_temp:celsius{gpu=\"3\"}",
@@ -1341,7 +1338,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:core_temp:celsius{gpu=\"4\"}",
@@ -1354,7 +1351,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:core_temp:celsius{gpu=\"5\"}",
@@ -1367,7 +1364,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:core_temp:celsius{gpu=\"6\"}",
@@ -1380,7 +1377,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:core_temp:celsius{gpu=\"7\"}",
@@ -1404,22 +1401,7 @@
           "id": "organize",
           "options": {
             "excludeByName": {
-              "DCGM_FI_DRIVER_VERSION 1": true,
-              "DCGM_FI_DRIVER_VERSION 2": true,
-              "DCGM_FI_DRIVER_VERSION 3": true,
-              "DCGM_FI_DRIVER_VERSION 4": true,
-              "DCGM_FI_DRIVER_VERSION 5": true,
-              "DCGM_FI_DRIVER_VERSION 6": true,
-              "DCGM_FI_DRIVER_VERSION 7": true,
-              "DCGM_FI_DRIVER_VERSION 8": true,
-              "Hostname 1": true,
-              "Hostname 2": true,
-              "Hostname 3": true,
-              "Hostname 4": true,
-              "Hostname 5": true,
-              "Hostname 6": true,
-              "Hostname 7": true,
-              "Hostname 8": true,
+              "Time": true,
               "Time 1": true,
               "Time 2": true,
               "Time 3": true,
@@ -1428,39 +1410,7 @@
               "Time 6": true,
               "Time 7": true,
               "Time 8": true,
-              "UUID 1": true,
-              "UUID 2": true,
-              "UUID 3": true,
-              "UUID 4": true,
-              "UUID 5": true,
-              "UUID 6": true,
-              "UUID 7": true,
-              "UUID 8": true,
-              "Value #D": false,
-              "__name__ 1": true,
-              "__name__ 2": true,
-              "__name__ 3": true,
-              "__name__ 4": true,
-              "__name__ 5": true,
-              "__name__ 6": true,
-              "__name__ 7": true,
-              "__name__ 8": true,
-              "device 1": true,
-              "device 2": true,
-              "device 3": true,
-              "device 4": true,
-              "device 5": true,
-              "device 6": true,
-              "device 7": true,
-              "device 8": true,
-              "gpu 1": true,
-              "gpu 2": true,
-              "gpu 3": true,
-              "gpu 4": true,
-              "gpu 5": true,
-              "gpu 6": true,
-              "gpu 7": true,
-              "gpu 8": true,
+              "instance": true,
               "instance 1": true,
               "instance 2": true,
               "instance 3": true,
@@ -1469,6 +1419,61 @@
               "instance 6": true,
               "instance 7": true,
               "instance 8": true,
+              "source": true,
+              "source 1": true,
+              "source 2": true,
+              "source 3": true,
+              "source 4": true,
+              "source 5": true,
+              "source 6": true,
+              "source 7": true,
+              "source 8": true,
+              "device": true,
+              "device 1": true,
+              "device 2": true,
+              "device 3": true,
+              "device 4": true,
+              "device 5": true,
+              "device 6": true,
+              "device 7": true,
+              "device 8": true,
+              "UUID": true,
+              "UUID 1": true,
+              "UUID 2": true,
+              "UUID 3": true,
+              "UUID 4": true,
+              "UUID 5": true,
+              "UUID 6": true,
+              "UUID 7": true,
+              "UUID 8": true,
+              "DCGM_FI_DRIVER_VERSION": true,
+              "DCGM_FI_DRIVER_VERSION 1": true,
+              "DCGM_FI_DRIVER_VERSION 2": true,
+              "DCGM_FI_DRIVER_VERSION 3": true,
+              "DCGM_FI_DRIVER_VERSION 4": true,
+              "DCGM_FI_DRIVER_VERSION 5": true,
+              "DCGM_FI_DRIVER_VERSION 6": true,
+              "DCGM_FI_DRIVER_VERSION 7": true,
+              "DCGM_FI_DRIVER_VERSION 8": true,
+              "DCXP_FI_DRIVER_VERSION": true,
+              "DCXP_FI_DRIVER_VERSION 1": true,
+              "DCXP_FI_DRIVER_VERSION 2": true,
+              "DCXP_FI_DRIVER_VERSION 3": true,
+              "DCXP_FI_DRIVER_VERSION 4": true,
+              "DCXP_FI_DRIVER_VERSION 5": true,
+              "DCXP_FI_DRIVER_VERSION 6": true,
+              "DCXP_FI_DRIVER_VERSION 7": true,
+              "DCXP_FI_DRIVER_VERSION 8": true,
+              "pci_bus_id": true,
+              "pci_bus_id 1": true,
+              "pci_bus_id 2": true,
+              "pci_bus_id 3": true,
+              "pci_bus_id 4": true,
+              "pci_bus_id 5": true,
+              "pci_bus_id 6": true,
+              "pci_bus_id 7": true,
+              "pci_bus_id 8": true,
+              "modelName": true,
               "modelName 1": true,
               "modelName 2": true,
               "modelName 3": true,
@@ -1477,58 +1482,45 @@
               "modelName 6": true,
               "modelName 7": true,
               "modelName 8": true,
-              "pci_bus_id 1": true,
-              "pci_bus_id 2": true,
-              "pci_bus_id 3": true,
-              "pci_bus_id 4": true,
-              "pci_bus_id 5": true,
-              "pci_bus_id 6": true,
-              "pci_bus_id 7": true,
-              "pci_bus_id 8": true
+              "job": true,
+              "job 1": true,
+              "job 2": true,
+              "job 3": true,
+              "job 4": true,
+              "job 5": true,
+              "job 6": true,
+              "job 7": true,
+              "job 8": true,
+              "reason": true,
+              "reason 1": true,
+              "reason 2": true,
+              "reason 3": true,
+              "reason 4": true,
+              "reason 5": true,
+              "reason 6": true,
+              "reason 7": true,
+              "reason 8": true
             },
             "includeByName": {},
             "indexByName": {
-              "DCGM_FI_DRIVER_VERSION 1": 1,
-              "DCGM_FI_DRIVER_VERSION 2": 13,
-              "DCGM_FI_DRIVER_VERSION 3": 22,
-              "DCGM_FI_DRIVER_VERSION 4": 32,
-              "Hostname 1": 5,
-              "Hostname 2": 14,
-              "Hostname 3": 23,
-              "Hostname 4": 33,
-              "Time 1": 4,
-              "Time 2": 12,
-              "Time 3": 21,
-              "Time 4": 31,
-              "UUID 1": 6,
-              "UUID 2": 15,
-              "UUID 3": 24,
-              "UUID 4": 34,
-              "Value #A": 2,
-              "Value #B": 3,
-              "Value #C": 30,
-              "Value #D": 40,
-              "__name__ 1": 7,
-              "__name__ 2": 16,
-              "__name__ 3": 25,
-              "__name__ 4": 35,
-              "device 1": 8,
-              "device 2": 17,
-              "device 3": 26,
-              "device 4": 36,
-              "gpu 1": 9,
-              "gpu 2": 18,
-              "gpu 3": 27,
-              "gpu 4": 37,
-              "instance 1": 10,
-              "instance 2": 19,
-              "instance 3": 28,
-              "instance 4": 38,
-              "job": 0,
-              "modelName 1": 11,
-              "modelName 2": 20,
-              "modelName 3": 29,
-              "modelName 4": 39
+              "Machine": 0,
+              "Hostname": 0,
+              "GPU0": 1,
+              "Value #A": 1,
+              "GPU1": 2,
+              "Value #B": 2,
+              "GPU2": 3,
+              "Value #C": 3,
+              "GPU3": 4,
+              "Value #D": 4,
+              "GPU4": 5,
+              "Value #E": 5,
+              "GPU5": 6,
+              "Value #F": 6,
+              "GPU6": 7,
+              "Value #G": 7,
+              "GPU7": 8,
+              "Value #H": 8
             },
             "renameByName": {
               "Hostname 1": "",
@@ -1540,7 +1532,8 @@
               "Value #F": "GPU5",
               "Value #G": "GPU6",
               "Value #H": "GPU7",
-              "job": "Machine"
+              "job": "Machine",
+              "Hostname": "Machine"
             }
           }
         },
@@ -1561,7 +1554,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "fdfcbypxyeps0d"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "",
       "fieldConfig": {
@@ -1673,7 +1666,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:memory_temp:celsius{gpu=\"0\"}",
@@ -1686,7 +1679,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:memory_temp:celsius{gpu=\"1\"}",
@@ -1699,7 +1692,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:memory_temp:celsius{gpu=\"2\"}",
@@ -1712,7 +1705,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:memory_temp:celsius{gpu=\"3\"}",
@@ -1725,7 +1718,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:memory_temp:celsius{gpu=\"4\"}",
@@ -1738,7 +1731,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:memory_temp:celsius{gpu=\"5\"}",
@@ -1751,7 +1744,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:memory_temp:celsius{gpu=\"6\"}",
@@ -1764,7 +1757,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:memory_temp:celsius{gpu=\"7\"}",
@@ -1788,22 +1781,7 @@
           "id": "organize",
           "options": {
             "excludeByName": {
-              "DCGM_FI_DRIVER_VERSION 1": true,
-              "DCGM_FI_DRIVER_VERSION 2": true,
-              "DCGM_FI_DRIVER_VERSION 3": true,
-              "DCGM_FI_DRIVER_VERSION 4": true,
-              "DCGM_FI_DRIVER_VERSION 5": true,
-              "DCGM_FI_DRIVER_VERSION 6": true,
-              "DCGM_FI_DRIVER_VERSION 7": true,
-              "DCGM_FI_DRIVER_VERSION 8": true,
-              "Hostname 1": true,
-              "Hostname 2": true,
-              "Hostname 3": true,
-              "Hostname 4": true,
-              "Hostname 5": true,
-              "Hostname 6": true,
-              "Hostname 7": true,
-              "Hostname 8": true,
+              "Time": true,
               "Time 1": true,
               "Time 2": true,
               "Time 3": true,
@@ -1812,39 +1790,7 @@
               "Time 6": true,
               "Time 7": true,
               "Time 8": true,
-              "UUID 1": true,
-              "UUID 2": true,
-              "UUID 3": true,
-              "UUID 4": true,
-              "UUID 5": true,
-              "UUID 6": true,
-              "UUID 7": true,
-              "UUID 8": true,
-              "Value #D": false,
-              "__name__ 1": true,
-              "__name__ 2": true,
-              "__name__ 3": true,
-              "__name__ 4": true,
-              "__name__ 5": true,
-              "__name__ 6": true,
-              "__name__ 7": true,
-              "__name__ 8": true,
-              "device 1": true,
-              "device 2": true,
-              "device 3": true,
-              "device 4": true,
-              "device 5": true,
-              "device 6": true,
-              "device 7": true,
-              "device 8": true,
-              "gpu 1": true,
-              "gpu 2": true,
-              "gpu 3": true,
-              "gpu 4": true,
-              "gpu 5": true,
-              "gpu 6": true,
-              "gpu 7": true,
-              "gpu 8": true,
+              "instance": true,
               "instance 1": true,
               "instance 2": true,
               "instance 3": true,
@@ -1853,7 +1799,61 @@
               "instance 6": true,
               "instance 7": true,
               "instance 8": true,
-              "job": false,
+              "source": true,
+              "source 1": true,
+              "source 2": true,
+              "source 3": true,
+              "source 4": true,
+              "source 5": true,
+              "source 6": true,
+              "source 7": true,
+              "source 8": true,
+              "device": true,
+              "device 1": true,
+              "device 2": true,
+              "device 3": true,
+              "device 4": true,
+              "device 5": true,
+              "device 6": true,
+              "device 7": true,
+              "device 8": true,
+              "UUID": true,
+              "UUID 1": true,
+              "UUID 2": true,
+              "UUID 3": true,
+              "UUID 4": true,
+              "UUID 5": true,
+              "UUID 6": true,
+              "UUID 7": true,
+              "UUID 8": true,
+              "DCGM_FI_DRIVER_VERSION": true,
+              "DCGM_FI_DRIVER_VERSION 1": true,
+              "DCGM_FI_DRIVER_VERSION 2": true,
+              "DCGM_FI_DRIVER_VERSION 3": true,
+              "DCGM_FI_DRIVER_VERSION 4": true,
+              "DCGM_FI_DRIVER_VERSION 5": true,
+              "DCGM_FI_DRIVER_VERSION 6": true,
+              "DCGM_FI_DRIVER_VERSION 7": true,
+              "DCGM_FI_DRIVER_VERSION 8": true,
+              "DCXP_FI_DRIVER_VERSION": true,
+              "DCXP_FI_DRIVER_VERSION 1": true,
+              "DCXP_FI_DRIVER_VERSION 2": true,
+              "DCXP_FI_DRIVER_VERSION 3": true,
+              "DCXP_FI_DRIVER_VERSION 4": true,
+              "DCXP_FI_DRIVER_VERSION 5": true,
+              "DCXP_FI_DRIVER_VERSION 6": true,
+              "DCXP_FI_DRIVER_VERSION 7": true,
+              "DCXP_FI_DRIVER_VERSION 8": true,
+              "pci_bus_id": true,
+              "pci_bus_id 1": true,
+              "pci_bus_id 2": true,
+              "pci_bus_id 3": true,
+              "pci_bus_id 4": true,
+              "pci_bus_id 5": true,
+              "pci_bus_id 6": true,
+              "pci_bus_id 7": true,
+              "pci_bus_id 8": true,
+              "modelName": true,
               "modelName 1": true,
               "modelName 2": true,
               "modelName 3": true,
@@ -1861,53 +1861,49 @@
               "modelName 5": true,
               "modelName 6": true,
               "modelName 7": true,
-              "modelName 8": true
+              "modelName 8": true,
+              "job": true,
+              "job 1": true,
+              "job 2": true,
+              "job 3": true,
+              "job 4": true,
+              "job 5": true,
+              "job 6": true,
+              "job 7": true,
+              "job 8": true,
+              "reason": true,
+              "reason 1": true,
+              "reason 2": true,
+              "reason 3": true,
+              "reason 4": true,
+              "reason 5": true,
+              "reason 6": true,
+              "reason 7": true,
+              "reason 8": true
             },
             "includeByName": {},
             "indexByName": {
-              "DCGM_FI_DRIVER_VERSION 1": 1,
-              "DCGM_FI_DRIVER_VERSION 2": 13,
-              "DCGM_FI_DRIVER_VERSION 3": 22,
-              "DCGM_FI_DRIVER_VERSION 4": 32,
-              "Hostname 1": 5,
-              "Hostname 2": 14,
-              "Hostname 3": 23,
-              "Hostname 4": 33,
-              "Time 1": 4,
-              "Time 2": 12,
-              "Time 3": 21,
-              "Time 4": 31,
-              "UUID 1": 6,
-              "UUID 2": 15,
-              "UUID 3": 24,
-              "UUID 4": 34,
-              "Value #A": 2,
-              "Value #B": 3,
-              "Value #C": 30,
-              "Value #D": 40,
-              "__name__ 1": 7,
-              "__name__ 2": 16,
-              "__name__ 3": 25,
-              "__name__ 4": 35,
-              "device 1": 8,
-              "device 2": 17,
-              "device 3": 26,
-              "device 4": 36,
-              "gpu 1": 9,
-              "gpu 2": 18,
-              "gpu 3": 27,
-              "gpu 4": 37,
-              "instance 1": 10,
-              "instance 2": 19,
-              "instance 3": 28,
-              "instance 4": 38,
-              "job": 0,
-              "modelName 1": 11,
-              "modelName 2": 20,
-              "modelName 3": 29,
-              "modelName 4": 39
+              "Machine": 0,
+              "Hostname": 0,
+              "GPU0": 1,
+              "Value #A": 1,
+              "GPU1": 2,
+              "Value #B": 2,
+              "GPU2": 3,
+              "Value #C": 3,
+              "GPU3": 4,
+              "Value #D": 4,
+              "GPU4": 5,
+              "Value #E": 5,
+              "GPU5": 6,
+              "Value #F": 6,
+              "GPU6": 7,
+              "Value #G": 7,
+              "GPU7": 8,
+              "Value #H": 8
             },
             "renameByName": {
+              "Hostname": "Machine",
               "Hostname 1": "",
               "Value #A": "GPU0",
               "Value #B": "GPU1",
@@ -1916,8 +1912,7 @@
               "Value #E": "GPU4",
               "Value #F": "GPU5",
               "Value #G": "GPU6",
-              "Value #H": "GPU7",
-              "Hostname": "Machine"
+              "Value #H": "GPU7"
             }
           }
         },
@@ -1938,7 +1933,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "fdfcbypxyeps0d"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "",
       "fieldConfig": {
@@ -2028,7 +2023,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"0\"}",
@@ -2041,7 +2036,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"1\"}",
@@ -2054,7 +2049,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"2\"}",
@@ -2067,7 +2062,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"3\"}",
@@ -2080,7 +2075,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"4\"} ",
@@ -2093,7 +2088,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"5\"}",
@@ -2106,7 +2101,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"6\"}",
@@ -2119,7 +2114,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"7\"}",
@@ -2143,18 +2138,7 @@
           "id": "organize",
           "options": {
             "excludeByName": {
-              "DCGM_FI_DRIVER_VERSION 1": true,
-              "DCGM_FI_DRIVER_VERSION 2": true,
-              "DCGM_FI_DRIVER_VERSION 3": true,
-              "DCGM_FI_DRIVER_VERSION 4": true,
-              "Hostname 1": true,
-              "Hostname 2": true,
-              "Hostname 3": true,
-              "Hostname 4": true,
-              "Hostname 5": true,
-              "Hostname 6": true,
-              "Hostname 7": true,
-              "Hostname 8": true,
+              "Time": true,
               "Time 1": true,
               "Time 2": true,
               "Time 3": true,
@@ -2163,39 +2147,7 @@
               "Time 6": true,
               "Time 7": true,
               "Time 8": true,
-              "UUID 1": true,
-              "UUID 2": true,
-              "UUID 3": true,
-              "UUID 4": true,
-              "UUID 5": true,
-              "UUID 6": true,
-              "UUID 7": true,
-              "UUID 8": true,
-              "Value #D": false,
-              "__name__ 1": true,
-              "__name__ 2": true,
-              "__name__ 3": true,
-              "__name__ 4": true,
-              "__name__ 5": true,
-              "__name__ 6": true,
-              "__name__ 7": true,
-              "__name__ 8": true,
-              "device 1": true,
-              "device 2": true,
-              "device 3": true,
-              "device 4": true,
-              "device 5": true,
-              "device 6": true,
-              "device 7": true,
-              "device 8": true,
-              "gpu 1": true,
-              "gpu 2": true,
-              "gpu 3": true,
-              "gpu 4": true,
-              "gpu 5": true,
-              "gpu 6": true,
-              "gpu 7": true,
-              "gpu 8": true,
+              "instance": true,
               "instance 1": true,
               "instance 2": true,
               "instance 3": true,
@@ -2204,7 +2156,61 @@
               "instance 6": true,
               "instance 7": true,
               "instance 8": true,
-              "job": false,
+              "source": true,
+              "source 1": true,
+              "source 2": true,
+              "source 3": true,
+              "source 4": true,
+              "source 5": true,
+              "source 6": true,
+              "source 7": true,
+              "source 8": true,
+              "device": true,
+              "device 1": true,
+              "device 2": true,
+              "device 3": true,
+              "device 4": true,
+              "device 5": true,
+              "device 6": true,
+              "device 7": true,
+              "device 8": true,
+              "UUID": true,
+              "UUID 1": true,
+              "UUID 2": true,
+              "UUID 3": true,
+              "UUID 4": true,
+              "UUID 5": true,
+              "UUID 6": true,
+              "UUID 7": true,
+              "UUID 8": true,
+              "DCGM_FI_DRIVER_VERSION": true,
+              "DCGM_FI_DRIVER_VERSION 1": true,
+              "DCGM_FI_DRIVER_VERSION 2": true,
+              "DCGM_FI_DRIVER_VERSION 3": true,
+              "DCGM_FI_DRIVER_VERSION 4": true,
+              "DCGM_FI_DRIVER_VERSION 5": true,
+              "DCGM_FI_DRIVER_VERSION 6": true,
+              "DCGM_FI_DRIVER_VERSION 7": true,
+              "DCGM_FI_DRIVER_VERSION 8": true,
+              "DCXP_FI_DRIVER_VERSION": true,
+              "DCXP_FI_DRIVER_VERSION 1": true,
+              "DCXP_FI_DRIVER_VERSION 2": true,
+              "DCXP_FI_DRIVER_VERSION 3": true,
+              "DCXP_FI_DRIVER_VERSION 4": true,
+              "DCXP_FI_DRIVER_VERSION 5": true,
+              "DCXP_FI_DRIVER_VERSION 6": true,
+              "DCXP_FI_DRIVER_VERSION 7": true,
+              "DCXP_FI_DRIVER_VERSION 8": true,
+              "pci_bus_id": true,
+              "pci_bus_id 1": true,
+              "pci_bus_id 2": true,
+              "pci_bus_id 3": true,
+              "pci_bus_id 4": true,
+              "pci_bus_id 5": true,
+              "pci_bus_id 6": true,
+              "pci_bus_id 7": true,
+              "pci_bus_id 8": true,
+              "modelName": true,
               "modelName 1": true,
               "modelName 2": true,
               "modelName 3": true,
@@ -2213,53 +2219,48 @@
               "modelName 6": true,
               "modelName 7": true,
               "modelName 8": true,
-              "reason": true
+              "job": true,
+              "job 1": true,
+              "job 2": true,
+              "job 3": true,
+              "job 4": true,
+              "job 5": true,
+              "job 6": true,
+              "job 7": true,
+              "job 8": true,
+              "reason": true,
+              "reason 1": true,
+              "reason 2": true,
+              "reason 3": true,
+              "reason 4": true,
+              "reason 5": true,
+              "reason 6": true,
+              "reason 7": true,
+              "reason 8": true
             },
             "includeByName": {},
             "indexByName": {
-              "DCGM_FI_DRIVER_VERSION 1": 1,
-              "DCGM_FI_DRIVER_VERSION 2": 13,
-              "DCGM_FI_DRIVER_VERSION 3": 22,
-              "DCGM_FI_DRIVER_VERSION 4": 32,
-              "Hostname 1": 5,
-              "Hostname 2": 14,
-              "Hostname 3": 23,
-              "Hostname 4": 33,
-              "Time 1": 4,
-              "Time 2": 12,
-              "Time 3": 21,
-              "Time 4": 31,
-              "UUID 1": 6,
-              "UUID 2": 15,
-              "UUID 3": 24,
-              "UUID 4": 34,
-              "Value #A": 2,
-              "Value #B": 3,
-              "Value #C": 30,
-              "Value #D": 40,
-              "__name__ 1": 7,
-              "__name__ 2": 16,
-              "__name__ 3": 25,
-              "__name__ 4": 35,
-              "device 1": 8,
-              "device 2": 17,
-              "device 3": 26,
-              "device 4": 36,
-              "gpu 1": 9,
-              "gpu 2": 18,
-              "gpu 3": 27,
-              "gpu 4": 37,
-              "instance 1": 10,
-              "instance 2": 19,
-              "instance 3": 28,
-              "instance 4": 38,
-              "job": 0,
-              "modelName 1": 11,
-              "modelName 2": 20,
-              "modelName 3": 29,
-              "modelName 4": 39
+              "Machine": 0,
+              "Hostname": 0,
+              "GPU0": 1,
+              "Value #A": 1,
+              "GPU1": 2,
+              "Value #B": 2,
+              "GPU2": 3,
+              "Value #C": 3,
+              "GPU3": 4,
+              "Value #D": 4,
+              "GPU4": 5,
+              "Value #E": 5,
+              "GPU5": 6,
+              "Value #F": 6,
+              "GPU6": 7,
+              "Value #G": 7,
+              "GPU7": 8,
+              "Value #H": 8
             },
             "renameByName": {
+              "Hostname": "Machine",
               "Hostname 1": "",
               "Value #A": "GPU0",
               "Value #B": "GPU1",
@@ -2268,8 +2269,7 @@
               "Value #E": "GPU4",
               "Value #F": "GPU5",
               "Value #G": "GPU6",
-              "Value #H": "GPU7",
-              "Hostname": "Machine"
+              "Value #H": "GPU7"
             }
           }
         },
@@ -2290,7 +2290,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "fdfcbypxyeps0d"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "Cont of AER in system logs per GPU:  Advanced Error Reporting by PCI Express devices",
       "fieldConfig": {
@@ -2402,7 +2402,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:aer_errors:total{gpu=\"0\"}",
@@ -2415,7 +2415,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:aer_errors:total{gpu=\"1\"}",
@@ -2428,7 +2428,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:aer_errors:total{gpu=\"2\"}",
@@ -2441,7 +2441,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:aer_errors:total{gpu=\"3\"}",
@@ -2454,7 +2454,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:aer_errors:total{gpu=\"4\"}",
@@ -2467,7 +2467,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:aer_errors:total{gpu=\"5\"}",
@@ -2480,7 +2480,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:aer_errors:total{gpu=\"6\"}",
@@ -2493,7 +2493,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:aer_errors:total{gpu=\"7\"}",
@@ -2517,18 +2517,7 @@
           "id": "organize",
           "options": {
             "excludeByName": {
-              "DCGM_FI_DRIVER_VERSION 1": true,
-              "DCGM_FI_DRIVER_VERSION 2": true,
-              "DCGM_FI_DRIVER_VERSION 3": true,
-              "DCGM_FI_DRIVER_VERSION 4": true,
-              "Hostname 1": true,
-              "Hostname 2": true,
-              "Hostname 3": true,
-              "Hostname 4": true,
-              "Hostname 5": true,
-              "Hostname 6": true,
-              "Hostname 7": true,
-              "Hostname 8": true,
+              "Time": true,
               "Time 1": true,
               "Time 2": true,
               "Time 3": true,
@@ -2537,39 +2526,7 @@
               "Time 6": true,
               "Time 7": true,
               "Time 8": true,
-              "UUID 1": true,
-              "UUID 2": true,
-              "UUID 3": true,
-              "UUID 4": true,
-              "UUID 5": true,
-              "UUID 6": true,
-              "UUID 7": true,
-              "UUID 8": true,
-              "Value #D": false,
-              "__name__ 1": true,
-              "__name__ 2": true,
-              "__name__ 3": true,
-              "__name__ 4": true,
-              "__name__ 5": true,
-              "__name__ 6": true,
-              "__name__ 7": true,
-              "__name__ 8": true,
-              "device 1": true,
-              "device 2": true,
-              "device 3": true,
-              "device 4": true,
-              "device 5": true,
-              "device 6": true,
-              "device 7": true,
-              "device 8": true,
-              "gpu 1": true,
-              "gpu 2": true,
-              "gpu 3": true,
-              "gpu 4": true,
-              "gpu 5": true,
-              "gpu 6": true,
-              "gpu 7": true,
-              "gpu 8": true,
+              "instance": true,
               "instance 1": true,
               "instance 2": true,
               "instance 3": true,
@@ -2578,7 +2535,61 @@
               "instance 6": true,
               "instance 7": true,
               "instance 8": true,
-              "job": false,
+              "source": true,
+              "source 1": true,
+              "source 2": true,
+              "source 3": true,
+              "source 4": true,
+              "source 5": true,
+              "source 6": true,
+              "source 7": true,
+              "source 8": true,
+              "device": true,
+              "device 1": true,
+              "device 2": true,
+              "device 3": true,
+              "device 4": true,
+              "device 5": true,
+              "device 6": true,
+              "device 7": true,
+              "device 8": true,
+              "UUID": true,
+              "UUID 1": true,
+              "UUID 2": true,
+              "UUID 3": true,
+              "UUID 4": true,
+              "UUID 5": true,
+              "UUID 6": true,
+              "UUID 7": true,
+              "UUID 8": true,
+              "DCGM_FI_DRIVER_VERSION": true,
+              "DCGM_FI_DRIVER_VERSION 1": true,
+              "DCGM_FI_DRIVER_VERSION 2": true,
+              "DCGM_FI_DRIVER_VERSION 3": true,
+              "DCGM_FI_DRIVER_VERSION 4": true,
+              "DCGM_FI_DRIVER_VERSION 5": true,
+              "DCGM_FI_DRIVER_VERSION 6": true,
+              "DCGM_FI_DRIVER_VERSION 7": true,
+              "DCGM_FI_DRIVER_VERSION 8": true,
+              "DCXP_FI_DRIVER_VERSION": true,
+              "DCXP_FI_DRIVER_VERSION 1": true,
+              "DCXP_FI_DRIVER_VERSION 2": true,
+              "DCXP_FI_DRIVER_VERSION 3": true,
+              "DCXP_FI_DRIVER_VERSION 4": true,
+              "DCXP_FI_DRIVER_VERSION 5": true,
+              "DCXP_FI_DRIVER_VERSION 6": true,
+              "DCXP_FI_DRIVER_VERSION 7": true,
+              "DCXP_FI_DRIVER_VERSION 8": true,
+              "pci_bus_id": true,
+              "pci_bus_id 1": true,
+              "pci_bus_id 2": true,
+              "pci_bus_id 3": true,
+              "pci_bus_id 4": true,
+              "pci_bus_id 5": true,
+              "pci_bus_id 6": true,
+              "pci_bus_id 7": true,
+              "pci_bus_id 8": true,
+              "modelName": true,
               "modelName 1": true,
               "modelName 2": true,
               "modelName 3": true,
@@ -2586,52 +2597,48 @@
               "modelName 5": true,
               "modelName 6": true,
               "modelName 7": true,
-              "modelName 8": true
+              "modelName 8": true,
+              "job": true,
+              "job 1": true,
+              "job 2": true,
+              "job 3": true,
+              "job 4": true,
+              "job 5": true,
+              "job 6": true,
+              "job 7": true,
+              "job 8": true,
+              "reason": true,
+              "reason 1": true,
+              "reason 2": true,
+              "reason 3": true,
+              "reason 4": true,
+              "reason 5": true,
+              "reason 6": true,
+              "reason 7": true,
+              "reason 8": true
             },
             "indexByName": {
-              "DCGM_FI_DRIVER_VERSION 1": 1,
-              "DCGM_FI_DRIVER_VERSION 2": 13,
-              "DCGM_FI_DRIVER_VERSION 3": 22,
-              "DCGM_FI_DRIVER_VERSION 4": 32,
-              "Hostname 1": 5,
-              "Hostname 2": 14,
-              "Hostname 3": 23,
-              "Hostname 4": 33,
-              "Time 1": 4,
-              "Time 2": 12,
-              "Time 3": 21,
-              "Time 4": 31,
-              "UUID 1": 6,
-              "UUID 2": 15,
-              "UUID 3": 24,
-              "UUID 4": 34,
-              "Value #A": 2,
-              "Value #B": 3,
-              "Value #C": 30,
-              "Value #D": 40,
-              "__name__ 1": 7,
-              "__name__ 2": 16,
-              "__name__ 3": 25,
-              "__name__ 4": 35,
-              "device 1": 8,
-              "device 2": 17,
-              "device 3": 26,
-              "device 4": 36,
-              "gpu 1": 9,
-              "gpu 2": 18,
-              "gpu 3": 27,
-              "gpu 4": 37,
-              "instance 1": 10,
-              "instance 2": 19,
-              "instance 3": 28,
-              "instance 4": 38,
-              "job": 0,
-              "modelName 1": 11,
-              "modelName 2": 20,
-              "modelName 3": 29,
-              "modelName 4": 39
+              "Machine": 0,
+              "Hostname": 0,
+              "GPU0": 1,
+              "Value #A": 1,
+              "GPU1": 2,
+              "Value #B": 2,
+              "GPU2": 3,
+              "Value #C": 3,
+              "GPU3": 4,
+              "Value #D": 4,
+              "GPU4": 5,
+              "Value #E": 5,
+              "GPU5": 6,
+              "Value #F": 6,
+              "GPU6": 7,
+              "Value #G": 7,
+              "GPU7": 8,
+              "Value #H": 8
             },
             "renameByName": {
+              "Hostname": "Machine",
               "Hostname 1": "",
               "Value #A": "GPU0",
               "Value #B": "GPU1",
@@ -2640,8 +2647,7 @@
               "Value #E": "GPU4",
               "Value #F": "GPU5",
               "Value #G": "GPU6",
-              "Value #H": "GPU7",
-              "Hostname": "Machine"
+              "Value #H": "GPU7"
             }
           }
         },
@@ -2662,7 +2668,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "fdfcbypxyeps0d"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "APT_UPGRADABLE_PACKAGES Updated once every 1h\n",
       "fieldConfig": {
@@ -2733,7 +2739,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "APT_UPGRADABLE_PACKAGES",
@@ -2778,7 +2784,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "fdfcbypxyeps0d"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "GPU drivers\n",
       "fieldConfig": {
@@ -2873,7 +2879,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "count(gpu:memory_used:bytes / 1024 / 1024) by (Hostname)",
@@ -2885,7 +2891,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:sm_clock:mhz{Hostname=~\".+\"}",
@@ -2964,7 +2970,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "fdfcbypxyeps0d"
+        "uid": "ffamzhijdn1fke"
       },
       "description": "Current error state for GPU (2 for error, 1 for no error, 0 unknown state)",
       "fieldConfig": {
@@ -3068,7 +3074,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:error_state:status{gpu=\"0\"}",
@@ -3081,7 +3087,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:error_state:status{gpu=\"1\"}",
@@ -3094,7 +3100,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:error_state:status{gpu=\"2\"}",
@@ -3107,7 +3113,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:error_state:status{gpu=\"3\"}",
@@ -3120,7 +3126,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:error_state:status{gpu=\"4\"} ",
@@ -3133,7 +3139,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:error_state:status{gpu=\"5\"}",
@@ -3146,7 +3152,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:error_state:status{gpu=\"6\"}",
@@ -3159,7 +3165,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "gpu:error_state:status{gpu=\"7\"}",
@@ -3183,18 +3189,7 @@
           "id": "organize",
           "options": {
             "excludeByName": {
-              "DCGM_FI_DRIVER_VERSION 1": true,
-              "DCGM_FI_DRIVER_VERSION 2": true,
-              "DCGM_FI_DRIVER_VERSION 3": true,
-              "DCGM_FI_DRIVER_VERSION 4": true,
-              "Hostname 1": true,
-              "Hostname 2": true,
-              "Hostname 3": true,
-              "Hostname 4": true,
-              "Hostname 5": true,
-              "Hostname 6": true,
-              "Hostname 7": true,
-              "Hostname 8": true,
+              "Time": true,
               "Time 1": true,
               "Time 2": true,
               "Time 3": true,
@@ -3203,39 +3198,7 @@
               "Time 6": true,
               "Time 7": true,
               "Time 8": true,
-              "UUID 1": true,
-              "UUID 2": true,
-              "UUID 3": true,
-              "UUID 4": true,
-              "UUID 5": true,
-              "UUID 6": true,
-              "UUID 7": true,
-              "UUID 8": true,
-              "Value #D": false,
-              "__name__ 1": true,
-              "__name__ 2": true,
-              "__name__ 3": true,
-              "__name__ 4": true,
-              "__name__ 5": true,
-              "__name__ 6": true,
-              "__name__ 7": true,
-              "__name__ 8": true,
-              "device 1": true,
-              "device 2": true,
-              "device 3": true,
-              "device 4": true,
-              "device 5": true,
-              "device 6": true,
-              "device 7": true,
-              "device 8": true,
-              "gpu 1": true,
-              "gpu 2": true,
-              "gpu 3": true,
-              "gpu 4": true,
-              "gpu 5": true,
-              "gpu 6": true,
-              "gpu 7": true,
-              "gpu 8": true,
+              "instance": true,
               "instance 1": true,
               "instance 2": true,
               "instance 3": true,
@@ -3244,7 +3207,61 @@
               "instance 6": true,
               "instance 7": true,
               "instance 8": true,
-              "job": false,
+              "source": true,
+              "source 1": true,
+              "source 2": true,
+              "source 3": true,
+              "source 4": true,
+              "source 5": true,
+              "source 6": true,
+              "source 7": true,
+              "source 8": true,
+              "device": true,
+              "device 1": true,
+              "device 2": true,
+              "device 3": true,
+              "device 4": true,
+              "device 5": true,
+              "device 6": true,
+              "device 7": true,
+              "device 8": true,
+              "UUID": true,
+              "UUID 1": true,
+              "UUID 2": true,
+              "UUID 3": true,
+              "UUID 4": true,
+              "UUID 5": true,
+              "UUID 6": true,
+              "UUID 7": true,
+              "UUID 8": true,
+              "DCGM_FI_DRIVER_VERSION": true,
+              "DCGM_FI_DRIVER_VERSION 1": true,
+              "DCGM_FI_DRIVER_VERSION 2": true,
+              "DCGM_FI_DRIVER_VERSION 3": true,
+              "DCGM_FI_DRIVER_VERSION 4": true,
+              "DCGM_FI_DRIVER_VERSION 5": true,
+              "DCGM_FI_DRIVER_VERSION 6": true,
+              "DCGM_FI_DRIVER_VERSION 7": true,
+              "DCGM_FI_DRIVER_VERSION 8": true,
+              "DCXP_FI_DRIVER_VERSION": true,
+              "DCXP_FI_DRIVER_VERSION 1": true,
+              "DCXP_FI_DRIVER_VERSION 2": true,
+              "DCXP_FI_DRIVER_VERSION 3": true,
+              "DCXP_FI_DRIVER_VERSION 4": true,
+              "DCXP_FI_DRIVER_VERSION 5": true,
+              "DCXP_FI_DRIVER_VERSION 6": true,
+              "DCXP_FI_DRIVER_VERSION 7": true,
+              "DCXP_FI_DRIVER_VERSION 8": true,
+              "pci_bus_id": true,
+              "pci_bus_id 1": true,
+              "pci_bus_id 2": true,
+              "pci_bus_id 3": true,
+              "pci_bus_id 4": true,
+              "pci_bus_id 5": true,
+              "pci_bus_id 6": true,
+              "pci_bus_id 7": true,
+              "pci_bus_id 8": true,
+              "modelName": true,
               "modelName 1": true,
               "modelName 2": true,
               "modelName 3": true,
@@ -3253,53 +3270,48 @@
               "modelName 6": true,
               "modelName 7": true,
               "modelName 8": true,
-              "reason": true
+              "job": true,
+              "job 1": true,
+              "job 2": true,
+              "job 3": true,
+              "job 4": true,
+              "job 5": true,
+              "job 6": true,
+              "job 7": true,
+              "job 8": true,
+              "reason": true,
+              "reason 1": true,
+              "reason 2": true,
+              "reason 3": true,
+              "reason 4": true,
+              "reason 5": true,
+              "reason 6": true,
+              "reason 7": true,
+              "reason 8": true
             },
             "includeByName": {},
             "indexByName": {
-              "DCGM_FI_DRIVER_VERSION 1": 1,
-              "DCGM_FI_DRIVER_VERSION 2": 13,
-              "DCGM_FI_DRIVER_VERSION 3": 22,
-              "DCGM_FI_DRIVER_VERSION 4": 32,
-              "Hostname 1": 5,
-              "Hostname 2": 14,
-              "Hostname 3": 23,
-              "Hostname 4": 33,
-              "Time 1": 4,
-              "Time 2": 12,
-              "Time 3": 21,
-              "Time 4": 31,
-              "UUID 1": 6,
-              "UUID 2": 15,
-              "UUID 3": 24,
-              "UUID 4": 34,
-              "Value #A": 2,
-              "Value #B": 3,
-              "Value #C": 30,
-              "Value #D": 40,
-              "__name__ 1": 7,
-              "__name__ 2": 16,
-              "__name__ 3": 25,
-              "__name__ 4": 35,
-              "device 1": 8,
-              "device 2": 17,
-              "device 3": 26,
-              "device 4": 36,
-              "gpu 1": 9,
-              "gpu 2": 18,
-              "gpu 3": 27,
-              "gpu 4": 37,
-              "instance 1": 10,
-              "instance 2": 19,
-              "instance 3": 28,
-              "instance 4": 38,
-              "job": 0,
-              "modelName 1": 11,
-              "modelName 2": 20,
-              "modelName 3": 29,
-              "modelName 4": 39
+              "Machine": 0,
+              "Hostname": 0,
+              "GPU0": 1,
+              "Value #A": 1,
+              "GPU1": 2,
+              "Value #B": 2,
+              "GPU2": 3,
+              "Value #C": 3,
+              "GPU3": 4,
+              "Value #D": 4,
+              "GPU4": 5,
+              "Value #E": 5,
+              "GPU5": 6,
+              "Value #F": 6,
+              "GPU6": 7,
+              "Value #G": 7,
+              "GPU7": 8,
+              "Value #H": 8
             },
             "renameByName": {
+              "Hostname": "Machine",
               "Hostname 1": "",
               "Value #A": "GPU0",
               "Value #B": "GPU1",
@@ -3308,8 +3320,7 @@
               "Value #E": "GPU4",
               "Value #F": "GPU5",
               "Value #G": "GPU6",
-              "Value #H": "GPU7",
-              "Hostname": "Machine"
+              "Value #H": "GPU7"
             }
           }
         },
@@ -3330,7 +3341,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "fdfcbypxyeps0d"
+        "uid": "ffamzhijdn1fke"
       },
       "fieldConfig": {
         "defaults": {
@@ -3389,7 +3400,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "(sum by(instance) (irate(node_cpu_seconds_total{mode!=\"idle\"}[$__rate_interval])) / on(instance) group_left sum by (instance) (irate(node_cpu_seconds_total[$__rate_interval]))) * 100\r\n",
@@ -3401,7 +3412,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "node_uname_info",
@@ -3414,7 +3425,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "(sum by(instance) (node_memory_MemTotal_bytes{} - node_memory_MemFree_bytes{} - node_memory_Buffers_bytes{} - node_memory_Cached_bytes{})) / sum by(instance) (node_memory_MemTotal_bytes{}) * 100\r\n",
@@ -3427,7 +3438,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "(node_time_seconds - on(instance) node_boot_time_seconds ) / 60 /60",
@@ -3440,7 +3451,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "round(max by(instance)(rate(node_network_transmit_bytes_total[1m])*8/1000000), 0.1)\r\n\r\n\r\n\r\n",
@@ -3453,7 +3464,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "round(max by(instance)(rate(node_network_receive_bytes_total[1m])*8/1000000), 0.1)\r\n",
@@ -3466,7 +3477,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "(1 - avg by(instance)(node_filesystem_avail_bytes{mountpoint=\"/\"}/node_filesystem_size_bytes{mountpoint=\"/\"})) * 100\r\n",
@@ -3479,7 +3490,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "(1 - avg by(instance)(node_filesystem_avail_bytes{mountpoint=\"/var/lib/docker\"}/node_filesystem_size_bytes{mountpoint=\"/var/lib/docker\"})) * 100 \r\n",
@@ -3492,7 +3503,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "avg by(instance)(node_cpu_temperature{})\r\n",
@@ -3505,7 +3516,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "(1 - avg by(instance)(node_filesystem_avail_bytes{mountpoint=\"/var/lib/mfs\"}/node_filesystem_size_bytes{mountpoint=\"/var/lib/mfs\"})) * 100",
@@ -3518,7 +3529,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fdfcbypxyeps0d"
+            "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
           "expr": "(1 - avg by(instance)(node_filesystem_avail_bytes{mountpoint=~\"/mnt/mfschunks1|/mnt/chunks4\"}/node_filesystem_size_bytes{mountpoint=~\"/mnt/mfschunks1|/mnt/chunks4\"})) * 100",
@@ -3643,5 +3654,6 @@
   "timezone": "",
   "title": "DC OverView",
   "uid": "b7573857-fb4d-4389-8159-edbad8b65e5b",
-  "version": 28
+  "version": 28,
+  "weekStart": ""
 }
