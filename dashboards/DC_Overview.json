@@ -722,7 +722,7 @@
         {
           "id": "joinByField",
           "options": {
-            "byField": "job",
+            "byField": "Hostname",
             "mode": "outer"
           }
         },
@@ -1190,7 +1190,7 @@
         {
           "id": "joinByField",
           "options": {
-            "byField": "job",
+            "byField": "Hostname",
             "mode": "outer"
           }
         },
@@ -1658,7 +1658,7 @@
         {
           "id": "joinByField",
           "options": {
-            "byField": "job",
+            "byField": "Hostname",
             "mode": "outer"
           }
         },
