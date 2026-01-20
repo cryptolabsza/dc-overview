@@ -6,7 +6,7 @@
 # MASTER SERVER (runs Prometheus + Grafana)
 # =============================================================================
 master:
-  ssh: "vast@41.193.204.66 -p 100"
+  ssh: "root@41.193.204.66 -p 100"
   ssh_key: "~/.ssh/ubuntu_key"
   ip: "192.168.1.100"
   hostname: "master"
@@ -29,7 +29,7 @@ master:
 # =============================================================================
 workers:
   - name: "worker-01"
-    ssh: "vast@41.193.204.66 -p 101"
+    ssh: "root@41.193.204.66 -p 101"
     ssh_key: "~/.ssh/ubuntu_key"
     ip: "192.168.1.101"
     gpus: 4
@@ -39,7 +39,7 @@ workers:
       - vast_exporter: 9200  # If Vast.ai host
       
   - name: "worker-03"  
-    ssh: "vast@41.193.204.66 -p 103"
+    ssh: "root@41.193.204.66 -p 103"
     ssh_key: "~/.ssh/ubuntu_key"
     ip: "192.168.1.103"
     gpus: 4
@@ -69,6 +69,14 @@ bmc_servers:
     ipmi_username: "admin"
     ipmi_password: "Romans8:28"
     protocol: "ipmi"
+
+# =============================================================================
+# VAST.AI CONFIGURATION (optional)
+# =============================================================================
+vastai:
+  api_key: "6cac575c555d39e07bfafecce58737851307a0aacbe81def6768ed2032678ce9"
+  exporter_port: 8622
+  scrape_interval: "60s"
 
 # =============================================================================
 # DASHBOARDS TO IMPORT

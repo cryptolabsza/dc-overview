@@ -584,7 +584,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "count(DCGM_FI_DEV_GPU_UTIL{})/sum(vast_machine_gpu_name) * 100",
+          "expr": "count(gpu:utilization:percent{})/sum(vast_machine_gpu_name) * 100",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -1354,7 +1354,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(\r\n  sum by (job) (\r\n    $BasePower + $CPU_Max_Power *  \r\n    irate(node_cpu_seconds_total{mode=\"system\"}[$__rate_interval])\r\n  ) /   sum by (job) (\r\n    (irate(node_cpu_seconds_total{}[$__rate_interval]))\r\n  ) \r\n)   + sum(\r\n  sum by (job) (DCGM_FI_DEV_POWER_USAGE)\r\n) \r\n",
+          "expr": "sum(\r\n  sum by (job) (\r\n    $BasePower + $CPU_Max_Power *  \r\n    irate(node_cpu_seconds_total{mode=\"system\"}[$__rate_interval])\r\n  ) /   sum by (job) (\r\n    (irate(node_cpu_seconds_total{}[$__rate_interval]))\r\n  ) \r\n)   + sum(\r\n  sum by (job) (gpu:power_usage:watts)\r\n) \r\n",
           "format": "table",
           "instant": false,
           "legendFormat": "__auto",
@@ -1451,7 +1451,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (job) (irate(node_cpu_seconds_total{mode=\"system\"}[$__rate_interval])) / on(job) group_left sum by (job)((irate(node_cpu_seconds_total{}[$__rate_interval]))) * $CPU_Max_Power * count by (job)(node_cpu_temperature{package=~\"[0-9]+\"}) + sum by (job) (DCGM_FI_DEV_POWER_USAGE) + $BasePower",
+          "expr": "sum by (job) (irate(node_cpu_seconds_total{mode=\"system\"}[$__rate_interval])) / on(job) group_left sum by (job)((irate(node_cpu_seconds_total{}[$__rate_interval]))) * $CPU_Max_Power * count by (job)(node_cpu_temperature{package=~\"[0-9]+\"}) + sum by (job) (gpu:power_usage:watts) + $BasePower",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -2161,7 +2161,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "count(DCGM_FI_DEV_FB_USED) by (Hostname)",
+          "expr": "count(gpu:memory_used:bytes / 1024 / 1024) by (Hostname)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2174,7 +2174,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_SM_CLOCK{Hostname=~\".+\"}",
+          "expr": "gpu:sm_clock:mhz{Hostname=~\".+\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2888,6 +2888,8 @@
               "Time 4": true,
               "Time 5": true,
               "Time 6": true,
+              "Time 7": true,
+              "Time 8": true,
               "Value #A": false,
               "Value #F": false,
               "__name__ 1": true,
@@ -2896,42 +2898,55 @@
               "__name__ 4": true,
               "__name__ 5": true,
               "__name__ 6": true,
+              "__name__ 7": true,
+              "__name__ 8": true,
               "gpu 1": true,
               "gpu 2": true,
               "gpu 3": true,
               "gpu 4": true,
               "gpu 5": true,
               "gpu 6": true,
+              "gpu 7": true,
+              "gpu 8": true,
               "instance 1": true,
               "instance 2": true,
               "instance 3": true,
               "instance 4": true,
               "instance 5": true,
               "instance 6": true,
+              "instance 7": true,
+              "instance 8": true,
               "job 1": true,
               "job 2": true,
               "job 3": true,
               "job 4": true,
               "job 5": true,
               "job 6": true,
+              "job 7": true,
+              "job 8": true,
               "machine_id 1": true,
               "machine_id 2": true,
               "machine_id 3": true,
               "machine_id 4": true,
               "machine_id 5": true,
-              "machine_id 6": true
+              "machine_id 6": true,
+              "machine_id 7": true,
+              "machine_id 8": true
             },
             "includeByName": {},
             "indexByName": {},
             "renameByName": {
               "Time 2": "",
-              "Value #A": "GPU 1",
-              "Value #B": "GPU 2",
-              "Value #C": "GPU 3",
-              "Value #D": "GPU 4",
-              "Value #E": "GPU 5",
-              "Value #F": "GPU 6",
-              "gpu 2": "GPU 2",
+              "Value #A": "GPU 0",
+              "Value #B": "GPU 1",
+              "Value #C": "GPU 2",
+              "Value #D": "GPU 3",
+              "Value #E": "GPU 4",
+              "Value #F": "GPU 5",
+              "Value #G": "GPU 6",
+              "Value #H": "GPU 7",
+              "Hostname": "Machine",
+              "gpu 2": "",
               "gpu 5": "",
               "instance 6": ""
             }
@@ -3223,7 +3238,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"0\"}",
+          "expr": "gpu:error_state:status{gpu=\"0\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3236,7 +3251,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"1\"}",
+          "expr": "gpu:error_state:status{gpu=\"1\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3249,7 +3264,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"2\"}",
+          "expr": "gpu:error_state:status{gpu=\"2\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3262,7 +3277,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"3\"}",
+          "expr": "gpu:error_state:status{gpu=\"3\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3275,7 +3290,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"4\"} ",
+          "expr": "gpu:error_state:status{gpu=\"4\"} ",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3288,7 +3303,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"5\"}",
+          "expr": "gpu:error_state:status{gpu=\"5\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3301,7 +3316,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"6\"}",
+          "expr": "gpu:error_state:status{gpu=\"6\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3314,7 +3329,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"7\"}",
+          "expr": "gpu:error_state:status{gpu=\"7\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3668,7 +3683,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_VRAM_TEMP{gpu=\"0\"}",
+          "expr": "gpu:memory_temp:celsius{gpu=\"0\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3681,7 +3696,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_VRAM_TEMP{gpu=\"1\"}",
+          "expr": "gpu:memory_temp:celsius{gpu=\"1\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3694,7 +3709,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_VRAM_TEMP{gpu=\"2\"}",
+          "expr": "gpu:memory_temp:celsius{gpu=\"2\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3707,7 +3722,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_VRAM_TEMP{gpu=\"3\"}",
+          "expr": "gpu:memory_temp:celsius{gpu=\"3\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3720,7 +3735,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_VRAM_TEMP{gpu=\"4\"}",
+          "expr": "gpu:memory_temp:celsius{gpu=\"4\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3733,7 +3748,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_VRAM_TEMP{gpu=\"5\"}",
+          "expr": "gpu:memory_temp:celsius{gpu=\"5\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3746,7 +3761,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_VRAM_TEMP{gpu=\"6\"}",
+          "expr": "gpu:memory_temp:celsius{gpu=\"6\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3759,7 +3774,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_VRAM_TEMP{gpu=\"7\"}",
+          "expr": "gpu:memory_temp:celsius{gpu=\"7\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4041,7 +4056,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "last_over_time(DCGM_FI_DEV_HOT_SPOT_TEMP{gpu=\"0\"}[1m])",
+          "expr": "last_over_time(gpu:hotspot_temp:celsius{gpu=\"0\"}[1m])",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4054,7 +4069,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "last_over_time(DCGM_FI_DEV_HOT_SPOT_TEMP{gpu=\"1\"}[1m])\r\n",
+          "expr": "last_over_time(gpu:hotspot_temp:celsius{gpu=\"1\"}[1m])\r\n",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4067,7 +4082,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "last_over_time(DCGM_FI_DEV_HOT_SPOT_TEMP{gpu=\"2\"}[1m])",
+          "expr": "last_over_time(gpu:hotspot_temp:celsius{gpu=\"2\"}[1m])",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4080,7 +4095,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "last_over_time(DCGM_FI_DEV_HOT_SPOT_TEMP{gpu=\"3\"}[1m])",
+          "expr": "last_over_time(gpu:hotspot_temp:celsius{gpu=\"3\"}[1m])",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4093,7 +4108,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "last_over_time(DCGM_FI_DEV_HOT_SPOT_TEMP{gpu=\"4\"}[1m])",
+          "expr": "last_over_time(gpu:hotspot_temp:celsius{gpu=\"4\"}[1m])",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4106,7 +4121,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "last_over_time(DCGM_FI_DEV_HOT_SPOT_TEMP{gpu=\"5\"}[1m])",
+          "expr": "last_over_time(gpu:hotspot_temp:celsius{gpu=\"5\"}[1m])",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4119,7 +4134,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "last_over_time(DCGM_FI_DEV_HOT_SPOT_TEMP{gpu=\"6\"}[1m])",
+          "expr": "last_over_time(gpu:hotspot_temp:celsius{gpu=\"6\"}[1m])",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4132,7 +4147,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "last_over_time(DCGM_FI_DEV_HOT_SPOT_TEMP{gpu=\"7\"}[1m])",
+          "expr": "last_over_time(gpu:hotspot_temp:celsius{gpu=\"7\"}[1m])",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4403,7 +4418,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"0\"}",
+          "expr": "gpu:fan_speed:percent{gpu=\"0\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4416,7 +4431,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"1\"}",
+          "expr": "gpu:fan_speed:percent{gpu=\"1\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4429,7 +4444,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"2\"}",
+          "expr": "gpu:fan_speed:percent{gpu=\"2\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4442,7 +4457,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"3\"}",
+          "expr": "gpu:fan_speed:percent{gpu=\"3\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4455,7 +4470,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"4\"}",
+          "expr": "gpu:fan_speed:percent{gpu=\"4\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4468,7 +4483,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"5\"}",
+          "expr": "gpu:fan_speed:percent{gpu=\"5\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4481,7 +4496,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"6\"}",
+          "expr": "gpu:fan_speed:percent{gpu=\"6\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4494,7 +4509,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"7\"}",
+          "expr": "gpu:fan_speed:percent{gpu=\"7\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4768,7 +4783,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"0\"}",
+          "expr": "gpu:core_temp:celsius{gpu=\"0\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4781,7 +4796,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"1\"}",
+          "expr": "gpu:core_temp:celsius{gpu=\"1\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4794,7 +4809,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"2\"}",
+          "expr": "gpu:core_temp:celsius{gpu=\"2\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4807,7 +4822,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"3\"}",
+          "expr": "gpu:core_temp:celsius{gpu=\"3\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4820,7 +4835,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"4\"}",
+          "expr": "gpu:core_temp:celsius{gpu=\"4\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4833,7 +4848,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"5\"}",
+          "expr": "gpu:core_temp:celsius{gpu=\"5\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4846,7 +4861,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"6\"}",
+          "expr": "gpu:core_temp:celsius{gpu=\"6\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4859,7 +4874,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"7\"}",
+          "expr": "gpu:core_temp:celsius{gpu=\"7\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5111,7 +5126,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_CLOCKS_THROTTLE_REASON{reason=\"SwThermalSlowdown\", gpu=\"0\"}",
+          "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"0\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5124,7 +5139,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_CLOCKS_THROTTLE_REASON{reason=\"SwThermalSlowdown\", gpu=\"1\"}",
+          "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"1\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5137,7 +5152,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_CLOCKS_THROTTLE_REASON{reason=\"SwThermalSlowdown\", gpu=\"2\"}",
+          "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"2\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5150,7 +5165,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_CLOCKS_THROTTLE_REASON{reason=\"SwThermalSlowdown\", gpu=\"3\"}",
+          "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"3\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5163,7 +5178,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_CLOCKS_THROTTLE_REASON{reason=\"SwThermalSlowdown\", gpu=\"4\"} ",
+          "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"4\"} ",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5176,7 +5191,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_CLOCKS_THROTTLE_REASON{reason=\"SwThermalSlowdown\", gpu=\"5\"}",
+          "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"5\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5189,7 +5204,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_CLOCKS_THROTTLE_REASON{reason=\"SwThermalSlowdown\", gpu=\"6\"}",
+          "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"6\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5202,7 +5217,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_CLOCKS_THROTTLE_REASON{reason=\"SwThermalSlowdown\", gpu=\"7\"}",
+          "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"7\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5475,7 +5490,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"0\"}",
+          "expr": "gpu:power_usage:watts{gpu=\"0\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5488,7 +5503,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"1\"}",
+          "expr": "gpu:power_usage:watts{gpu=\"1\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5501,7 +5516,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"2\"}",
+          "expr": "gpu:power_usage:watts{gpu=\"2\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5514,7 +5529,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"3\"}",
+          "expr": "gpu:power_usage:watts{gpu=\"3\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5527,7 +5542,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"4\"}",
+          "expr": "gpu:power_usage:watts{gpu=\"4\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5540,7 +5555,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"5\"}",
+          "expr": "gpu:power_usage:watts{gpu=\"5\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5553,7 +5568,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"6\"}",
+          "expr": "gpu:power_usage:watts{gpu=\"6\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5566,7 +5581,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"7\"}",
+          "expr": "gpu:power_usage:watts{gpu=\"7\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5840,7 +5855,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "GPU_AER_TOTAL_ERRORS{gpu=\"0\"}",
+          "expr": "gpu:aer_errors:total{gpu=\"0\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5853,7 +5868,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "GPU_AER_TOTAL_ERRORS{gpu=\"1\"}",
+          "expr": "gpu:aer_errors:total{gpu=\"1\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5866,7 +5881,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "GPU_AER_TOTAL_ERRORS{gpu=\"2\"}",
+          "expr": "gpu:aer_errors:total{gpu=\"2\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5879,7 +5894,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "GPU_AER_TOTAL_ERRORS{gpu=\"3\"}",
+          "expr": "gpu:aer_errors:total{gpu=\"3\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5892,7 +5907,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "GPU_AER_TOTAL_ERRORS{gpu=\"4\"}",
+          "expr": "gpu:aer_errors:total{gpu=\"4\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5905,7 +5920,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "GPU_AER_TOTAL_ERRORS{gpu=\"5\"}",
+          "expr": "gpu:aer_errors:total{gpu=\"5\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5918,7 +5933,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "GPU_AER_TOTAL_ERRORS{gpu=\"6\"}",
+          "expr": "gpu:aer_errors:total{gpu=\"6\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -5931,7 +5946,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "GPU_AER_TOTAL_ERRORSE{gpu=\"7\"}",
+          "expr": "gpu:aer_errors:totalE{gpu=\"7\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",

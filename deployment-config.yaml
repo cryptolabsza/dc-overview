@@ -1,0 +1,117 @@
+# DC Overview Deployment Configuration
+# =====================================
+# This file contains all settings for redeploying the monitoring stack
+# Last updated: 2026-01-19
+
+# Master Server Configuration
+master:
+  ip: "192.168.1.100"
+  hostname: "master"
+  ssh_user: "root"
+  ssh_port: 22
+
+# Worker Servers
+workers:
+  - name: "wk01"
+    ip: "192.168.1.101"
+    ssh_user: "root"
+    gpus:
+      - "NVIDIA RTX A6000"
+  - name: "wk03"
+    ip: "192.168.1.103"
+    ssh_user: "root"
+    gpus:
+      - "NVIDIA GeForce RTX 4090"
+      - "NVIDIA GeForce RTX 4090"
+
+# Grafana Configuration
+grafana:
+  admin_user: "admin"
+  admin_password: "DcOverview2024!"
+  port: 3000
+  plugins:
+    - "grafana-clock-panel"
+    - "grafana-piechart-panel"
+
+# Prometheus Configuration
+prometheus:
+  port: 9090
+  retention: "30d"
+  scrape_interval: "15s"
+
+# Nginx/SSL Configuration
+nginx:
+  external_port: 8443
+  ssl_cert: "/etc/dc-overview/ssl/server.crt"
+  ssl_key: "/etc/dc-overview/ssl/server.key"
+  prometheus_auth:
+    user: "admin"
+    password: "DcOverview2024!"
+
+# Vast.ai Integration
+vastai:
+  enabled: true
+  api_key: "6cac575c555d39e07bfafecce58737851307a0aacbe81def6768ed2032678ce9"
+  exporter_port: 8622
+  scrape_interval: "60s"
+
+# IPMI Monitor Configuration
+ipmi_monitor:
+  enabled: true
+  port: 5000
+  admin_user: "admin"
+  admin_password: "admin"  # Change on first login
+  servers:
+    - name: "Server-83"
+      bmc_ip: "192.168.1.83"
+      username: "root"
+      password: "Romans8:28"
+    - name: "Server-85"
+      bmc_ip: "192.168.1.85"
+      username: "admin"
+      password: "Romans8:28"
+    - name: "Server-88"
+      bmc_ip: "192.168.1.88"
+      username: "admin"
+      password: "Romans8:28"
+
+# Exporter Ports Reference
+exporters:
+  node_exporter:
+    port: 9100
+    install_type: "native"  # native systemd service
+  gpu_exporter:
+    port: 9400
+    install_type: "native"  # DCGM-compatible, nvidia-smi based
+  dc_exporter:
+    port: 9835
+    install_type: "native"
+
+# Dashboards
+dashboards:
+  - name: "DC Overview"
+    uid: "104cfc17-1c29-43ad-a431-f5479f79dfd7"
+  - name: "NVIDIA DCGM Exporter"
+    uid: "Oxed_c6Wz2"
+  - name: "Node Exporter Full"
+    uid: "rYdddlPWk"
+  - name: "IPMI Monitor"
+    uid: "ipmi-monitor-main"
+  - name: "Vast Dashboard"
+    uid: "cca20c35-3382-46eb-8af5-5b89112e6c8e"
+
+# Landing Page Stats
+landing_page:
+  url: "/"
+  stats:
+    - gpu_count: "count(DCGM_FI_DEV_GPU_TEMP)"
+    - server_count: "count by IP from targets"
+    - uptime: "process_start_time_seconds{job='prometheus'}"
+
+# Notes
+notes: |
+  - All exporters run as native systemd services (not Docker)
+  - GPU Exporter uses nvidia-smi for DCGM-compatible metrics
+  - Prometheus and Grafana run in Docker containers
+  - External access via Nginx reverse proxy on port 8443
+  - IPMI Monitor requires pipx install ipmi-monitor
