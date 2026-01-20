@@ -11,30 +11,18 @@ scrape_configs:
     static_configs:
       - targets: ["localhost:9090"]
 
+  # Node exporters - grouped by hostname
   - job_name: "master"
     static_configs:
-      - targets: ["192.168.1.100:9100"]
-        labels:
-          group: "master"
+      - targets: ["192.168.1.100:9100", "192.168.1.100:9835"]
 
   - job_name: "wk01"
     static_configs:
-      - targets: ["192.168.1.101:9100"]
-        labels:
-          group: "workers"
+      - targets: ["192.168.1.101:9100", "192.168.1.101:9835"]
 
   - job_name: "wk03"
     static_configs:
-      - targets: ["192.168.1.103:9100"]
-        labels:
-          group: "workers"
-
-  - job_name: "dc-exporter"
-    static_configs:
-      - targets:
-        - "192.168.1.100:9835"
-        - "192.168.1.101:9835"
-        - "192.168.1.103:9835"
+      - targets: ["192.168.1.103:9100", "192.168.1.103:9835"]
 
   - job_name: "vastai-exporter"
     scrape_interval: 60s
