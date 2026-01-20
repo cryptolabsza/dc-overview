@@ -67,6 +67,18 @@ groups:
         labels:
           source: "dcxp"
       
+      # AER errors from DC Exporter
+      - record: gpu:aer_errors:total
+        expr: DCXP_AER_TOTAL_ERRORS
+        labels:
+          source: "dcxp"
+      
+      # GPU error state from DC Exporter
+      - record: gpu:error_state:status
+        expr: DCXP_ERROR_STATE
+        labels:
+          source: "dcxp"
+      
       # Encoder utilization
       - record: gpu:enc_util:percent
         expr: DCGM_FI_DEV_ENC_UTIL
