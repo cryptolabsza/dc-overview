@@ -347,6 +347,9 @@ def setup_reverse_proxy(
         print(f"  • Prometheus: https://{domain}/prometheus/ (user: admin)")
         if ipmi_enabled:
             print(f"  • IPMI Monitor: https://{domain}/ipmi/")
+        print(f"\n📝 Prometheus UI credentials:")
+        print(f"   Username: admin")
+        print(f"   Password: {prom_pass}")
         print(f"\nSubdomains (if DNS configured):")
         print(f"  • https://grafana.{domain}/")
         if ipmi_enabled:
@@ -372,6 +375,8 @@ def setup_reverse_proxy(
         if domain:
             print(f"\n   To upgrade to Let's Encrypt later:")
             print(f"   sudo dc-overview setup-ssl -d {domain} --letsencrypt -e your@email.com")
+    
+    return prom_pass
 
 
 if __name__ == "__main__":

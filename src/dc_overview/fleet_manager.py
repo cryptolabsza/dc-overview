@@ -752,10 +752,11 @@ scrape_configs:
             return value
         
         def fix_datasource_object(obj):
-            """Fix a datasource object like {"uid": "${DS_PROMETHEUS}"}."""
+            """Fix a datasource object - replace ANY uid with the correct Prometheus UID."""
             if isinstance(obj, dict):
-                uid = obj.get("uid", "")
-                if uid in ["${DS_PROMETHEUS}", "${datasource}", "$datasource", "$DS_PROMETHEUS"]:
+                ds_type = obj.get("type", "")
+                # If it's a prometheus datasource (or unspecified), replace the uid
+                if ds_type in ["prometheus", ""] or "uid" in obj:
                     return {
                         "type": "prometheus",
                         "uid": prometheus_uid
