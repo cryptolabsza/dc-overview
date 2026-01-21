@@ -119,11 +119,18 @@ class FleetManager:
         
         console.print("\n[bold]Step 2: Setting up SSH Keys[/bold]\n")
         
-        # Generate key
-        key_path, pub_key = self.ssh.generate_key()
-        self.config.ssh_key_generated = True
+        # Check if using existing key that already has access
+        if self.config.ssh_key_generated and self.config.ssh.key_path:
+            console.print(f"[dim]Using existing SSH key: {self.config.ssh.key_path}[/dim]")
+            console.print("[green]✓[/green] SSH key already configured")
+            return
         
-        # Deploy to workers
+        # Generate key if not using existing
+        if not self.config.ssh.key_path:
+            key_path, pub_key = self.ssh.generate_key()
+            self.config.ssh.key_path = key_path
+        
+        # Deploy to workers (only if we have password to do so)
         if self.config.ssh.password:
             console.print("[dim]Deploying SSH keys to workers...[/dim]")
             
@@ -150,10 +157,11 @@ class FleetManager:
                     
                     progress.advance(task)
             
+            self.config.ssh_key_generated = True
             console.print("[green]✓[/green] SSH keys deployed")
-        elif self.config.ssh.key_path:
-            # Deploy using existing key
-            console.print("[dim]Using existing SSH key for deployment[/dim]")
+        else:
+            console.print("[dim]No password provided - assuming SSH key already deployed[/dim]")
+            self.config.ssh_key_generated = True
     
     # ============ Step 3: Prometheus + Grafana ============
     
@@ -226,6 +234,16 @@ providers:
     
     def _generate_docker_compose(self) -> str:
         """Generate docker-compose.yml content."""
+        # Determine the ROOT_URL based on domain and external port
+        external_port = self.config.ssl.external_port
+        domain = self.config.ssl.domain or "%(domain)s"
+        
+        # If using non-standard port, include it in URL
+        if external_port and external_port != 443:
+            root_url = f"https://{domain}:{external_port}/grafana/"
+        else:
+            root_url = f"%(protocol)s://{domain}/grafana/"
+        
         return f"""version: '3.8'
 
 services:
@@ -262,7 +280,7 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD={self.config.grafana.admin_password}
       - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-piechart-panel
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana/
+      - GF_SERVER_ROOT_URL={root_url}
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
     depends_on:
       - prometheus
@@ -1004,18 +1022,25 @@ WantedBy=multi-user.target
         
         master_ip = self.config.master_ip or get_local_ip()
         domain = self.config.ssl.domain or master_ip
+        external_port = self.config.ssl.external_port
+        
+        # Build base URL with port if non-standard
+        if external_port and external_port != 443:
+            base_url = f"https://{domain}:{external_port}"
+        else:
+            base_url = f"https://{domain}"
         
         # Access info table
         table = Table(title="Access Information", show_header=False)
         table.add_column("Service", style="cyan")
         table.add_column("URL")
         
-        table.add_row("Dashboard", f"https://{domain}/")
-        table.add_row("Grafana", f"https://{domain}/grafana/")
+        table.add_row("Dashboard", f"{base_url}/")
+        table.add_row("Grafana", f"{base_url}/grafana/")
         table.add_row("  └─ Login", f"admin / {self.config.grafana.admin_password}")
         
         if self.config.components.ipmi_monitor:
-            table.add_row("IPMI Monitor", f"https://{domain}/ipmi/")
+            table.add_row("IPMI Monitor", f"{base_url}/ipmi/")
         
         console.print(table)
         console.print()
@@ -1058,7 +1083,7 @@ WantedBy=multi-user.target
         
         # Next steps
         console.print("[bold]Next Steps:[/bold]")
-        console.print(f"  1. Open your browser: [cyan]https://{domain}/[/cyan]")
+        console.print(f"  1. Open your browser: [cyan]{base_url}/[/cyan]")
         if self.config.ssl.mode == SSLMode.SELF_SIGNED:
             console.print("     (Accept the certificate warning - normal for self-signed)")
         console.print("  2. Log into Grafana and explore dashboards")

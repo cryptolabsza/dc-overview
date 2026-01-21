@@ -32,6 +32,7 @@ class SSLConfig:
     email: Optional[str] = None  # Required for Let's Encrypt
     cert_path: Optional[str] = None
     key_path: Optional[str] = None
+    external_port: int = 443  # External HTTPS port (e.g., 8443 if router maps 8443->443)
 
 
 @dataclass
@@ -221,6 +222,7 @@ class FleetConfig:
                 "email": self.ssl.email,
                 "cert_path": self.ssl.cert_path,
                 "key_path": self.ssl.key_path,
+                "external_port": self.ssl.external_port,
             },
             "ssh": {
                 "username": self.ssh.username,
@@ -250,6 +252,7 @@ class FleetConfig:
                     "name": s.name,
                     "server_ip": s.server_ip,
                     "bmc_ip": s.bmc_ip,
+                    "bmc_user": s.bmc_user,  # Per-server BMC credentials
                     "has_gpu": s.has_gpu,
                     "exporters_installed": s.exporters_installed,
                     "ipmi_configured": s.ipmi_configured,
@@ -269,7 +272,7 @@ class FleetConfig:
     
     def _get_secrets(self) -> Dict[str, Any]:
         """Get secrets for separate storage."""
-        return {
+        secrets = {
             "ssh_password": self.ssh.password,
             "bmc_password": self.bmc.password,
             "grafana_password": self.grafana.admin_password,
@@ -277,6 +280,16 @@ class FleetConfig:
             "vast_api_key": self.vast.api_key,
             "ipmi_ai_license": self.ipmi_monitor.ai_license_key,
         }
+        
+        # Add per-server BMC passwords
+        server_bmc_passwords = {}
+        for s in self.servers:
+            if s.bmc_password:
+                server_bmc_passwords[s.name] = s.bmc_password
+        if server_bmc_passwords:
+            secrets["server_bmc_passwords"] = server_bmc_passwords
+        
+        return secrets
     
     @classmethod
     def load(cls, config_dir: Path = None) -> "FleetConfig":
@@ -307,6 +320,7 @@ class FleetConfig:
             config.ssl.email = ssl.get("email")
             config.ssl.cert_path = ssl.get("cert_path")
             config.ssl.key_path = ssl.get("key_path")
+            config.ssl.external_port = ssl.get("external_port", 443)
             
             # SSH
             ssh = data.get("ssh", {})
@@ -340,6 +354,7 @@ class FleetConfig:
                     name=s.get("name"),
                     server_ip=s.get("server_ip"),
                     bmc_ip=s.get("bmc_ip"),
+                    bmc_user=s.get("bmc_user"),  # Per-server BMC credentials
                     has_gpu=s.get("has_gpu", False),
                     exporters_installed=s.get("exporters_installed", False),
                     ipmi_configured=s.get("ipmi_configured", False),
@@ -356,6 +371,12 @@ class FleetConfig:
             config.ipmi_monitor.admin_password = secrets.get("ipmi_monitor_password")
             config.vast.api_key = secrets.get("vast_api_key")
             config.ipmi_monitor.ai_license_key = secrets.get("ipmi_ai_license")
+            
+            # Load per-server BMC passwords
+            server_bmc_passwords = secrets.get("server_bmc_passwords", {})
+            for server in config.servers:
+                if server.name in server_bmc_passwords:
+                    server.bmc_password = server_bmc_passwords[server.name]
         
         return config
 

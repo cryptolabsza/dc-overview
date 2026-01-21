@@ -223,30 +223,40 @@ class FleetWizard:
         auth_method = questionary.select(
             "SSH authentication method:",
             choices=[
+                questionary.Choice("Existing SSH Key (already has access to workers)", value="existing_key"),
+                questionary.Choice("SSH Key (will generate and deploy)", value="key"),
                 questionary.Choice("Password", value="password"),
-                questionary.Choice("SSH Key", value="key"),
             ],
             style=custom_style
         ).ask()
         
-        self.config.ssh.auth_method = AuthMethod(auth_method)
-        
-        if auth_method == "password":
-            self.config.ssh.password = questionary.password(
-                "SSH password (for all workers):",
-                style=custom_style
-            ).ask()
-        else:
+        if auth_method == "existing_key":
+            self.config.ssh.auth_method = AuthMethod.KEY
             default_key = os.path.expanduser("~/.ssh/id_rsa")
             self.config.ssh.key_path = questionary.text(
-                "SSH private key path:",
+                "Path to SSH private key (already authorized on workers):",
                 default=default_key,
                 validate=lambda x: Path(x).exists() or f"Key not found: {x}",
                 style=custom_style
             ).ask()
+            self.config.ssh_key_generated = True  # Mark as already set up
+            console.print("[dim]Will use existing key for SSH connections[/dim]")
+        elif auth_method == "key":
+            self.config.ssh.auth_method = AuthMethod.KEY
+            console.print("[dim]A new SSH key will be generated and deployed to workers[/dim]")
+            self.config.ssh.password = questionary.password(
+                "SSH password (needed once to deploy the new key):",
+                style=custom_style
+            ).ask()
+        else:
+            self.config.ssh.auth_method = AuthMethod.PASSWORD
+            self.config.ssh.password = questionary.password(
+                "SSH password (for all workers):",
+                style=custom_style
+            ).ask()
         
         self.config.ssh.port = int(questionary.text(
-            "SSH port:",
+            "SSH port (for internal network):",
             default="22",
             validate=lambda x: x.isdigit() and 1 <= int(x) <= 65535,
             style=custom_style
@@ -255,16 +265,17 @@ class FleetWizard:
         # BMC/IPMI Credentials (if IPMI Monitor enabled)
         if self.config.components.ipmi_monitor:
             console.print("\n[bold]BMC/IPMI Access (for server management)[/bold]")
-            console.print("[dim]Used to monitor server health via IPMI[/dim]\n")
+            console.print("[dim]Used to monitor server health via IPMI[/dim]")
+            console.print("[dim]You can set per-server credentials later when adding servers[/dim]\n")
             
             self.config.bmc.username = questionary.text(
-                "BMC username (for all servers):",
-                default="ADMIN",
+                "Default BMC username (for all servers):",
+                default="admin",
                 style=custom_style
-            ).ask() or "ADMIN"
+            ).ask() or "admin"
             
             self.config.bmc.password = questionary.password(
-                "BMC password (for all servers):",
+                "Default BMC password (for all servers):",
                 style=custom_style
             ).ask()
         
@@ -331,6 +342,10 @@ class FleetWizard:
   gpu-02,192.168.1.102,192.168.1.85
   gpu-03,192.168.1.103,192.168.1.88
 
+[cyan]Option 4: Name, Server IP, BMC IP, BMC User, BMC Pass[/cyan]
+  master,192.168.1.100,192.168.1.83,root,password
+  gpu-01,192.168.1.101,192.168.1.85,admin,password
+
 [dim]Paste your list below, then press Enter on an empty line.[/dim]
 """
         else:
@@ -371,11 +386,17 @@ class FleetWizard:
             
             parts = [p.strip() for p in line.split(",")]
             
+            # Initialize variables
+            name = None
+            server_ip = None
+            bmc_ip = None
+            bmc_user = None
+            bmc_password = None
+            
             if len(parts) == 1:
                 # Just IP
                 server_ip = parts[0]
                 name = f"server-{i+1:02d}"
-                bmc_ip = None
             elif len(parts) == 2:
                 # Could be name,ip or ip,bmc_ip
                 if self._looks_like_ip(parts[0]) and self._looks_like_ip(parts[1]):
@@ -387,12 +408,24 @@ class FleetWizard:
                     # name,ip
                     name = parts[0]
                     server_ip = parts[1]
-                    bmc_ip = None
-            elif len(parts) >= 3:
+            elif len(parts) == 3:
                 # name,ip,bmc_ip
                 name = parts[0]
                 server_ip = parts[1]
                 bmc_ip = parts[2] if parts[2] else None
+            elif len(parts) == 4:
+                # name,ip,bmc_ip,bmc_user
+                name = parts[0]
+                server_ip = parts[1]
+                bmc_ip = parts[2] if parts[2] else None
+                bmc_user = parts[3] if parts[3] else None
+            elif len(parts) >= 5:
+                # name,ip,bmc_ip,bmc_user,bmc_password
+                name = parts[0]
+                server_ip = parts[1]
+                bmc_ip = parts[2] if parts[2] else None
+                bmc_user = parts[3] if parts[3] else None
+                bmc_password = parts[4] if parts[4] else None
             else:
                 continue
             
@@ -402,9 +435,16 @@ class FleetWizard:
             self.config.add_server(
                 name=name,
                 server_ip=server_ip,
-                bmc_ip=bmc_ip
+                bmc_ip=bmc_ip,
+                bmc_user=bmc_user,
+                bmc_password=bmc_password,
             )
-            console.print(f"  [green]✓[/green] Added: {name} ({server_ip})")
+            
+            # Show credential info if per-server credentials were provided
+            if bmc_user:
+                console.print(f"  [green]✓[/green] Added: {name} ({server_ip}) [dim]BMC user: {bmc_user}[/dim]")
+            else:
+                console.print(f"  [green]✓[/green] Added: {name} ({server_ip})")
         
         console.print(f"\n[green]✓[/green] Added {len(self.config.servers)} servers")
     
@@ -433,6 +473,9 @@ class FleetWizard:
                 break
             
             bmc_ip = None
+            bmc_user = None
+            bmc_password = None
+            
             if has_ipmi:
                 bmc_ip = questionary.text(
                     "BMC/IPMI IP (or leave empty to skip):",
@@ -442,11 +485,33 @@ class FleetWizard:
                 
                 if bmc_ip and not self._looks_like_ip(bmc_ip):
                     bmc_ip = None
+                
+                # Ask for per-server BMC credentials if different from default
+                if bmc_ip:
+                    use_custom_bmc = questionary.confirm(
+                        f"Use different BMC credentials for {name}? (default: {self.config.bmc.username})",
+                        default=False,
+                        style=custom_style
+                    ).ask()
+                    
+                    if use_custom_bmc:
+                        bmc_user = questionary.text(
+                            f"BMC username for {name}:",
+                            default=self.config.bmc.username,
+                            style=custom_style
+                        ).ask()
+                        
+                        bmc_password = questionary.password(
+                            f"BMC password for {name}:",
+                            style=custom_style
+                        ).ask()
             
             self.config.add_server(
                 name=name,
                 server_ip=server_ip,
-                bmc_ip=bmc_ip or None
+                bmc_ip=bmc_ip or None,
+                bmc_user=bmc_user,
+                bmc_password=bmc_password,
             )
             console.print(f"[green]✓[/green] Added: {name}")
             
@@ -515,6 +580,29 @@ class FleetWizard:
             self.config.ssl.mode = SSLMode.SELF_SIGNED
             console.print("[dim]Using self-signed certificate for IP access[/dim]")
         
+        # Ask about external port mapping
+        console.print("\n[bold]External Port Configuration[/bold]")
+        console.print("[dim]If your router forwards a different port to this server's port 443[/dim]")
+        console.print("[dim]Example: Router port 8443 → Server port 443[/dim]\n")
+        
+        different_port = questionary.confirm(
+            "Is the external HTTPS port different from 443?",
+            default=False,
+            style=custom_style
+        ).ask()
+        
+        if different_port:
+            external_port = questionary.text(
+                "External HTTPS port (the port users connect to):",
+                default="8443",
+                validate=lambda x: x.isdigit() and 1 <= int(x) <= 65535,
+                style=custom_style
+            ).ask()
+            self.config.ssl.external_port = int(external_port)
+            console.print(f"[dim]Grafana will be configured for external port {external_port}[/dim]")
+        else:
+            self.config.ssl.external_port = 443
+        
         console.print()
     
     # ============ Step 5: Review ============
@@ -565,6 +653,8 @@ class FleetWizard:
         if self.config.ssl.domain:
             config_table.add_row("Domain", self.config.ssl.domain)
         config_table.add_row("SSL Mode", ssl_mode)
+        if self.config.ssl.external_port != 443:
+            config_table.add_row("External Port", str(self.config.ssl.external_port))
         
         console.print(config_table)
         console.print()
@@ -576,16 +666,28 @@ class FleetWizard:
             srv_table.add_column("Server IP")
             if self.config.components.ipmi_monitor:
                 srv_table.add_column("BMC IP")
+                srv_table.add_column("BMC User")
             
             for server in self.config.servers[:10]:  # Show first 10
                 if self.config.components.ipmi_monitor:
-                    srv_table.add_row(server.name, server.server_ip, server.bmc_ip or "—")
+                    # Show per-server BMC user or default
+                    bmc_user = server.bmc_user or self.config.bmc.username
+                    bmc_user_display = bmc_user if server.bmc_user else f"[dim]{bmc_user}[/dim]"
+                    srv_table.add_row(
+                        server.name, 
+                        server.server_ip, 
+                        server.bmc_ip or "—",
+                        bmc_user_display
+                    )
                 else:
                     srv_table.add_row(server.name, server.server_ip)
             
             if len(self.config.servers) > 10:
                 remaining = len(self.config.servers) - 10
-                srv_table.add_row(f"... and {remaining} more", "", "")
+                if self.config.components.ipmi_monitor:
+                    srv_table.add_row(f"... and {remaining} more", "", "", "")
+                else:
+                    srv_table.add_row(f"... and {remaining} more", "")
             
             console.print(srv_table)
         else:
