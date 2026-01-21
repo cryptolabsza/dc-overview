@@ -76,7 +76,7 @@ WorkingDirectory=/opt/dc-exporter
 WantedBy=multi-user.target
 """
 
-DC_EXPORTER_RUN_SCRIPT = '''#!/bin/bash
+DC_EXPORTER_RUN_SCRIPT = r'''#!/bin/bash
 cd /opt/dc-exporter
 
 # Kill any existing process on port 9835
@@ -91,26 +91,25 @@ sleep 1
     done
 ) &
 
-# Serve the metrics file via HTTP with SO_REUSEADDR
-exec python3 -c "
+# Serve the metrics file via HTTP
+exec python3 << 'PYEOF'
 import http.server
 import socketserver
-import socket
 
 class ReuseAddrTCPServer(socketserver.TCPServer):
     allow_reuse_address = True
 
 class MetricsHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
-        if self.path == \\"/metrics\\" or self.path == \\"/\\":
+        if self.path == "/metrics" or self.path == "/":
             self.send_response(200)
-            self.send_header(\\"Content-type\\", \\"text/plain\\")
+            self.send_header("Content-type", "text/plain")
             self.end_headers()
             try:
-                with open(\\"metrics.txt\\", \\"r\\") as f:
+                with open("metrics.txt", "r") as f:
                     self.wfile.write(f.read().encode())
             except FileNotFoundError:
-                self.wfile.write(b\\"# No metrics yet\\\\n\\")
+                self.wfile.write(b"# No metrics yet\n")
         else:
             self.send_response(404)
             self.end_headers()
@@ -119,10 +118,10 @@ class MetricsHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 PORT = 9835
-with ReuseAddrTCPServer((\\"\\"\\", PORT), MetricsHandler) as httpd:
-    print(f\\"DC Exporter serving on port {PORT}\\")
+with ReuseAddrTCPServer(("", PORT), MetricsHandler) as httpd:
+    print(f"DC Exporter serving on port {PORT}")
     httpd.serve_forever()
-"
+PYEOF
 '''
 
 DC_EXPORTER_CONFIG = """[agent]
