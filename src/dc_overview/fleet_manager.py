@@ -463,9 +463,16 @@ scrape_configs:
             return False
         
         # Install dc-overview and exporters
+        # Note: Install from GitHub dev branch during testing
+        # TODO: Change to PyPI once dev branch is validated and pushed to main
+        install_cmd = (
+            "pip3 install git+https://github.com/cryptolabsza/dc-overview.git@dev "
+            "--break-system-packages -q 2>/dev/null || "
+            "pip3 install git+https://github.com/cryptolabsza/dc-overview.git@dev -q"
+        )
         commands = [
             "which pip3 || (apt-get update -qq && apt-get install -y -qq python3-pip)",
-            "pip3 install dc-overview --break-system-packages -q 2>/dev/null || pip3 install dc-overview -q",
+            install_cmd,
             "dc-overview install-exporters",
         ]
         
