@@ -206,14 +206,30 @@ class SSHManager:
     
     # ============ Remote Execution ============
     
-    def test_connection(self, host: str, username: str = "root", port: int = 22) -> bool:
-        """Test SSH connection to a host using our fleet key."""
-        if not self.key_exists():
+    def test_connection(
+        self, 
+        host: str, 
+        username: str = "root", 
+        port: int = 22,
+        key_path: str = None,
+    ) -> bool:
+        """Test SSH connection to a host.
+        
+        Args:
+            host: Remote host IP
+            username: SSH username
+            port: SSH port
+            key_path: Optional custom key path (uses fleet key if not provided)
+        """
+        # Use provided key or fall back to fleet key
+        ssh_key = key_path or str(self.key_path)
+        
+        if not Path(ssh_key).exists():
             return False
         
         cmd = [
             "ssh",
-            "-i", str(self.key_path),
+            "-i", ssh_key,
             "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "ConnectTimeout=5",
@@ -237,6 +253,7 @@ class SSHManager:
         port: int = 22,
         timeout: int = 300,
         sudo: bool = False,
+        key_path: str = None,
     ) -> SSHResult:
         """
         Run a command on a remote host via SSH.
@@ -248,19 +265,23 @@ class SSHManager:
             port: SSH port
             timeout: Command timeout in seconds
             sudo: Whether to prefix with sudo
+            key_path: Optional custom key path (uses fleet key if not provided)
         
         Returns:
             SSHResult with success status and output
         """
-        if not self.key_exists():
-            return SSHResult(success=False, output="No SSH key configured", exit_code=-1)
+        # Use provided key or fall back to fleet key
+        ssh_key = key_path or str(self.key_path)
+        
+        if not Path(ssh_key).exists():
+            return SSHResult(success=False, output=f"SSH key not found: {ssh_key}", exit_code=-1)
         
         if sudo and username != "root":
             command = f"sudo {command}"
         
         cmd = [
             "ssh",
-            "-i", str(self.key_path),
+            "-i", ssh_key,
             "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "ConnectTimeout=10",

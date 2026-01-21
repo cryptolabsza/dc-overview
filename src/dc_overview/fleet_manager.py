@@ -455,8 +455,11 @@ scrape_configs:
         """Install exporters on a single server via SSH."""
         creds = self.config.get_server_ssh_creds(server)
         
+        # Determine which SSH key to use
+        ssh_key = creds.key_path or self.config.ssh.key_path
+        
         # First, test connection
-        if not self.ssh.test_connection(server.server_ip, creds.username, creds.port):
+        if not self.ssh.test_connection(server.server_ip, creds.username, creds.port, key_path=ssh_key):
             return False
         
         # Install dc-overview and exporters
@@ -474,6 +477,7 @@ scrape_configs:
                 port=creds.port,
                 timeout=120,
                 sudo=True,
+                key_path=ssh_key,
             )
             
             if not result.success and "install-exporters" in cmd:
@@ -485,6 +489,7 @@ scrape_configs:
             command="nvidia-smi -L 2>/dev/null | wc -l",
             username=creds.username,
             port=creds.port,
+            key_path=ssh_key,
         )
         
         if result.success:
