@@ -970,44 +970,40 @@ WantedBy=multi-user.target
     def _install_ipmi_monitor_package(self) -> bool:
         """Install ipmi-monitor package via pip with proper error handling."""
         try:
-            # Check if already installed
-            result = subprocess.run(
-                ["pip3", "show", "ipmi-monitor"],
-                capture_output=True,
-                text=True
-            )
-            
-            if result.returncode == 0:
-                console.print("[dim]ipmi-monitor already installed[/dim]")
-                return True
-            
             console.print("[dim]Installing ipmi-monitor package...[/dim]")
             
-            # Try standard install first
+            # Install from GitHub dev branch to get development version with tag
+            # TODO: Change to PyPI once dev branch is validated and pushed to main
+            install_cmd = [
+                "pip3", "install", 
+                "git+https://github.com/cryptolabsza/ipmi-monitor.git@dev",
+                "--break-system-packages", "-q", "--force-reinstall"
+            ]
+            
             result = subprocess.run(
-                ["pip3", "install", "ipmi-monitor", "--break-system-packages", "-q"],
+                install_cmd,
                 capture_output=True,
                 text=True,
-                timeout=120
+                timeout=180
             )
             
             if result.returncode == 0:
-                console.print("[green]✓[/green] ipmi-monitor installed via pip")
+                console.print("[green]✓[/green] ipmi-monitor installed via pip (dev)")
                 return True
             
             # If failed due to dependency conflicts, try with --ignore-installed
             if "Cannot uninstall" in result.stderr or "blinker" in result.stderr.lower():
                 console.print("[dim]Retrying with --ignore-installed...[/dim]")
+                install_cmd.extend(["--ignore-installed", "blinker"])
                 result = subprocess.run(
-                    ["pip3", "install", "ipmi-monitor", "--break-system-packages", 
-                     "--ignore-installed", "blinker", "-q"],
+                    install_cmd,
                     capture_output=True,
                     text=True,
-                    timeout=120
+                    timeout=180
                 )
                 
                 if result.returncode == 0:
-                    console.print("[green]✓[/green] ipmi-monitor installed via pip")
+                    console.print("[green]✓[/green] ipmi-monitor installed via pip (dev)")
                     return True
             
             console.print(f"[yellow]⚠[/yellow] pip install failed: {result.stderr[:100]}")
@@ -1060,7 +1056,7 @@ WantedBy=multi-user.target
             email=self.config.ssl.email,
             site_name=self.config.site_name,
             ipmi_enabled=self.config.components.ipmi_monitor,
-            prometheus_enabled=False,  # Disabled by default (no auth)
+            prometheus_enabled=True,  # Now protected by basic auth (htpasswd)
             use_letsencrypt=self.config.ssl.mode == SSLMode.LETSENCRYPT,
         )
     

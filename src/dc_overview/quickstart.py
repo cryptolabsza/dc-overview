@@ -1244,7 +1244,7 @@ def setup_reverse_proxy_wizard(local_ip: str):
                 email=email,
                 site_name=site_name,
                 ipmi_enabled=ipmi_enabled,
-                prometheus_enabled=False,  # Disabled by default (no auth)
+                prometheus_enabled=True,  # Now protected by basic auth (htpasswd)
                 use_letsencrypt=use_letsencrypt,
             )
         except Exception as e:
