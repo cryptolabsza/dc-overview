@@ -525,9 +525,9 @@ scrape_configs:
             }
         ]
         
-        # Add workers
+        # Add workers (skip master since it's already added above)
         for server in self.config.servers:
-            if server.exporters_installed:
+            if server.exporters_installed and server.server_ip != master_ip:
                 targets = [
                     f"{server.server_ip}:9100",  # node_exporter
                     f"{server.server_ip}:9835",  # dc-exporter (includes DCGM metrics)
