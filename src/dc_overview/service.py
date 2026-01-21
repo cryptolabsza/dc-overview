@@ -71,9 +71,7 @@ class ServiceManager:
         if exporters.get("node_exporter", True):
             installer.install_node_exporter()
         
-        if exporters.get("dcgm_exporter", True):
-            installer.install_dcgm_exporter()
-        
+        # dc-exporter replaces dcgm-exporter with VM-safe GPU metrics
         if exporters.get("dc_exporter", True):
             installer.install_dc_exporter()
     

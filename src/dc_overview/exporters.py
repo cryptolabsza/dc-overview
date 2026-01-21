@@ -17,13 +17,14 @@ console = Console()
 
 # Latest versions
 NODE_EXPORTER_VERSION = "1.7.0"
-DCGM_EXPORTER_VERSION = "3.3.5-3.4.1"
 DC_EXPORTER_VERSION = "1.0.0"
 
 # Download URLs
 NODE_EXPORTER_URL = f"https://github.com/prometheus/node_exporter/releases/download/v{NODE_EXPORTER_VERSION}/node_exporter-{NODE_EXPORTER_VERSION}.linux-amd64.tar.gz"
-DC_EXPORTER_URL = f"https://github.com/cryptolabsza/dc-exporter/releases/download/v{DC_EXPORTER_VERSION}/dc-exporter-collector"
-DC_EXPORTER_SERVER_URL = f"https://github.com/cryptolabsza/dc-exporter/releases/download/v{DC_EXPORTER_VERSION}/dc-exporter-server"
+
+# DC Exporter - try pre-compiled binary first, fall back to source compilation
+DC_EXPORTER_BINARY_URL = f"https://github.com/cryptolabsza/dc-exporter/releases/download/v{DC_EXPORTER_VERSION}/dc-exporter-c"
+DC_EXPORTER_SOURCE_URL = "https://raw.githubusercontent.com/cryptolabsza/dc-exporter/main/dc-exporter.c"
 
 
 # Systemd service templates
@@ -301,7 +302,16 @@ class ExporterInstaller:
             return False
     
     def install_dc_exporter(self) -> bool:
-        """Install dc-exporter for VRAM/hotspot temperatures and GPU metrics."""
+        """Install dc-exporter for VRAM/hotspot temperatures and GPU metrics.
+        
+        Provides DCGM-compatible metrics (DCGM_FI_*) plus additional metrics:
+        - DCXP_FI_DEV_VRAM_TEMP - VRAM temperature
+        - DCXP_FI_DEV_HOT_SPOT_TEMP - Hotspot temperature  
+        - DCXP_FI_DEV_CLOCKS_THROTTLE_REASON - Throttle status
+        - DCXP_AER_TOTAL_ERRORS - PCIe errors
+        
+        This replaces dcgm-exporter and works with VMs.
+        """
         console.print("\n[bold]Installing dc-exporter...[/bold]")
         
         try:
@@ -310,17 +320,41 @@ class ExporterInstaller:
                 TextColumn("[progress.description]{task.description}"),
                 console=console
             ) as progress:
-                task = progress.add_task("Downloading dc-exporter...", total=None)
+                task = progress.add_task("Setting up dc-exporter...", total=None)
                 
                 # Create installation directory
                 os.makedirs("/opt/dc-exporter", exist_ok=True)
                 
-                # Download the collector binary
-                urllib.request.urlretrieve(
-                    DC_EXPORTER_URL, 
-                    "/opt/dc-exporter/dc-exporter-c"
-                )
-                subprocess.run(["chmod", "+x", "/opt/dc-exporter/dc-exporter-c"], check=True)
+                binary_installed = False
+                
+                # Method 1: Try to download pre-compiled binary
+                progress.update(task, description="Downloading pre-compiled binary...")
+                try:
+                    urllib.request.urlretrieve(
+                        DC_EXPORTER_BINARY_URL, 
+                        "/opt/dc-exporter/dc-exporter-c"
+                    )
+                    subprocess.run(["chmod", "+x", "/opt/dc-exporter/dc-exporter-c"], check=True)
+                    
+                    # Test if binary works
+                    result = subprocess.run(
+                        ["/opt/dc-exporter/dc-exporter-c", "--version"],
+                        capture_output=True, timeout=5
+                    )
+                    binary_installed = True
+                    console.print("[dim]Using pre-compiled binary[/dim]")
+                except Exception:
+                    pass
+                
+                # Method 2: Try to compile from source
+                if not binary_installed:
+                    progress.update(task, description="Compiling from source...")
+                    binary_installed = self._compile_dc_exporter_from_source()
+                
+                if not binary_installed:
+                    console.print("[yellow]⚠[/yellow] dc-exporter binary not available")
+                    console.print("[dim]GPU metrics will be limited. Install manually or check dependencies.[/dim]")
+                    return False
                 
                 # Create the run script (Python HTTP server on port 9835)
                 progress.update(task, description="Creating run script...")
@@ -338,11 +372,47 @@ class ExporterInstaller:
                 subprocess.run(["systemctl", "restart", "dc-exporter"], check=True)
             
             console.print("[green]✓[/green] dc-exporter installed (port 9835)")
+            console.print("[dim]  Provides: DCGM_FI_* + DCXP_FI_* metrics (VM-safe)[/dim]")
             return True
             
         except Exception as e:
             console.print(f"[red]✗[/red] Failed to install dc-exporter: {e}")
             return False
+    
+    def _compile_dc_exporter_from_source(self) -> bool:
+        """Try to compile dc-exporter from source."""
+        try:
+            # Check for required dependencies
+            result = subprocess.run(["which", "gcc"], capture_output=True)
+            if result.returncode != 0:
+                console.print("[dim]gcc not found, installing...[/dim]")
+                subprocess.run(["apt-get", "update", "-qq"], capture_output=True)
+                subprocess.run(["apt-get", "install", "-y", "-qq", "gcc", "libpci-dev"], capture_output=True)
+            
+            # Download source
+            urllib.request.urlretrieve(
+                DC_EXPORTER_SOURCE_URL,
+                "/opt/dc-exporter/dc-exporter.c"
+            )
+            
+            # Compile
+            result = subprocess.run(
+                ["gcc", "-O2", "-Wall", "-o", "/opt/dc-exporter/dc-exporter-c", 
+                 "/opt/dc-exporter/dc-exporter.c", "-lpci", "-lnvidia-ml",
+                 "-I/usr/local/cuda/include"],
+                capture_output=True,
+                cwd="/opt/dc-exporter"
+            )
+            
+            if result.returncode == 0 and Path("/opt/dc-exporter/dc-exporter-c").exists():
+                subprocess.run(["chmod", "+x", "/opt/dc-exporter/dc-exporter-c"], check=True)
+                console.print("[dim]Compiled from source[/dim]")
+                return True
+                
+        except Exception as e:
+            console.print(f"[dim]Source compilation failed: {e}[/dim]")
+        
+        return False
     
     def uninstall_all(self):
         """Uninstall all exporters."""

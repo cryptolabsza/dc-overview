@@ -463,7 +463,6 @@ class DeployManager:
             "reachable": False,
             "gpus": 0,
             "node_exporter": False,
-            "dcgm_exporter": False,
             "dc_exporter": False,
         }
         
@@ -482,8 +481,8 @@ class DeployManager:
             except ValueError:
                 pass
         
-        # Check exporters
-        for exporter in ["node_exporter", "dcgm-exporter", "dc-exporter"]:
+        # Check exporters (dc-exporter provides DCGM-compatible metrics)
+        for exporter in ["node_exporter", "dc-exporter"]:
             success, output = self.run_remote_command(
                 worker, f"systemctl is-active {exporter} 2>/dev/null"
             )
@@ -605,8 +604,6 @@ class DeployManager:
                 exporters = []
                 if status.get("node_exporter"):
                     exporters.append("node")
-                if status.get("dcgm_exporter"):
-                    exporters.append("dcgm")
                 if status.get("dc_exporter"):
                     exporters.append("dc")
                 
@@ -742,8 +739,6 @@ def deploy_wizard():
             ports = []
             if status.get("node_exporter"):
                 ports.append(9100)
-            if status.get("dcgm_exporter"):
-                ports.append(9400)
             if status.get("dc_exporter"):
                 ports.append(9835)
             

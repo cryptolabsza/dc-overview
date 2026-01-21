@@ -878,22 +878,11 @@ scrape_configs:
         """Deploy IPMI Monitor service."""
         console.print("\n[bold]Step 7: Installing IPMI Monitor[/bold]\n")
         
-        # Check if ipmi-monitor is installed
-        try:
-            result = subprocess.run(
-                ["pip3", "show", "ipmi-monitor"],
-                capture_output=True,
-                text=True
-            )
-            
-            if result.returncode != 0:
-                console.print("[dim]Installing ipmi-monitor package...[/dim]")
-                subprocess.run(
-                    ["pip3", "install", "ipmi-monitor", "--break-system-packages", "-q"],
-                    capture_output=True
-                )
-        except Exception:
-            pass
+        # Install ipmi-monitor from pip
+        if not self._install_ipmi_monitor_package():
+            console.print("[yellow]⚠[/yellow] IPMI Monitor package installation failed")
+            console.print("[dim]You can install manually: pip3 install ipmi-monitor[/dim]")
+            return
         
         # Create IPMI Monitor config directory
         ipmi_config_dir = Path("/etc/ipmi-monitor")
@@ -965,6 +954,59 @@ WantedBy=multi-user.target
         
         if servers:
             console.print(f"[dim]  Configured {len(servers)} servers for IPMI monitoring[/dim]")
+    
+    def _install_ipmi_monitor_package(self) -> bool:
+        """Install ipmi-monitor package via pip with proper error handling."""
+        try:
+            # Check if already installed
+            result = subprocess.run(
+                ["pip3", "show", "ipmi-monitor"],
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode == 0:
+                console.print("[dim]ipmi-monitor already installed[/dim]")
+                return True
+            
+            console.print("[dim]Installing ipmi-monitor package...[/dim]")
+            
+            # Try standard install first
+            result = subprocess.run(
+                ["pip3", "install", "ipmi-monitor", "--break-system-packages", "-q"],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            
+            if result.returncode == 0:
+                console.print("[green]✓[/green] ipmi-monitor installed via pip")
+                return True
+            
+            # If failed due to dependency conflicts, try with --ignore-installed
+            if "Cannot uninstall" in result.stderr or "blinker" in result.stderr.lower():
+                console.print("[dim]Retrying with --ignore-installed...[/dim]")
+                result = subprocess.run(
+                    ["pip3", "install", "ipmi-monitor", "--break-system-packages", 
+                     "--ignore-installed", "blinker", "-q"],
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+                
+                if result.returncode == 0:
+                    console.print("[green]✓[/green] ipmi-monitor installed via pip")
+                    return True
+            
+            console.print(f"[yellow]⚠[/yellow] pip install failed: {result.stderr[:100]}")
+            return False
+            
+        except subprocess.TimeoutExpired:
+            console.print("[yellow]⚠[/yellow] pip install timed out")
+            return False
+        except Exception as e:
+            console.print(f"[yellow]⚠[/yellow] Error installing ipmi-monitor: {e}")
+            return False
     
     # ============ Step 8: Vast.ai Exporter ============
     

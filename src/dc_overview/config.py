@@ -126,8 +126,7 @@ class Config:
             },
             "exporters": {
                 "node_exporter": True,
-                "dcgm_exporter": True,
-                "dc_exporter": True,
+                "dc_exporter": True,  # Provides DCGM-compatible metrics + VRAM/hotspot temps
             },
             "vast_api_key": None,
         }

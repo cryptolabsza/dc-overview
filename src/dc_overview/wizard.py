@@ -59,8 +59,7 @@ class SetupWizard:
             },
             "exporters": {
                 "node_exporter": True,
-                "dcgm_exporter": True,
-                "dc_exporter": True,
+                "dc_exporter": True,  # Replaces dcgm-exporter with VM-safe GPU metrics
             },
             "targets": [],
             "vast_api_key": None,
@@ -247,14 +246,12 @@ class SetupWizard:
             "Select exporters to install:",
             choices=[
                 questionary.Choice("node_exporter (CPU, RAM, disk) - port 9100", value="node_exporter", checked=True),
-                questionary.Choice("dcgm-exporter (NVIDIA GPU) - port 9400", value="dcgm_exporter", checked=True),
-                questionary.Choice("dc-exporter (GPU metrics: VRAM, hotspot, power, util) - port 9835", value="dc_exporter", checked=True),
+                questionary.Choice("dc-exporter (GPU: VRAM, hotspot, power, util + DCGM metrics) - port 9835", value="dc_exporter", checked=True),
             ],
             style=custom_style
         ).ask()
         
         self.config["exporters"]["node_exporter"] = "node_exporter" in exporters
-        self.config["exporters"]["dcgm_exporter"] = "dcgm_exporter" in exporters
         self.config["exporters"]["dc_exporter"] = "dc_exporter" in exporters
         
         # Master server IP
@@ -300,8 +297,7 @@ class SetupWizard:
                 "Ports to scrape:",
                 choices=[
                     questionary.Choice("9100 (node_exporter)", value=9100, checked=True),
-                    questionary.Choice("9400 (dcgm-exporter)", value=9400, checked=True),
-                    questionary.Choice("9835 (dc-exporter)", value=9835, checked=True),
+                    questionary.Choice("9835 (dc-exporter - GPU metrics)", value=9835, checked=True),
                 ],
                 style=custom_style
             ).ask()
