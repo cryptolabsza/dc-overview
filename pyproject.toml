@@ -74,6 +74,7 @@ dc_overview = [
     "templates/*.conf",
     "dashboards/*.json",
     "dc_exporter/*.c",
+    "dc_exporter/*.py",
 ]
 
 [tool.black]

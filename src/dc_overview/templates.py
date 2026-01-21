@@ -62,7 +62,7 @@ services:
     container_name: vastai-exporter
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8622:8622"
+      - "8622:8622"
     command:
       - "-api-key"
       - "{{ vast_api_key }}"

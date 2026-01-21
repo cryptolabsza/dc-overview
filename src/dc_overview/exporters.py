@@ -76,14 +76,14 @@ WorkingDirectory=/opt/dc-exporter
 WantedBy=multi-user.target
 """
 
-DC_EXPORTER_RUN_SCRIPT = r'''#!/bin/bash
+DC_EXPORTER_RUN_SCRIPT = '''#!/bin/bash
 cd /opt/dc-exporter
 
 # Kill any existing process on port 9835
 fuser -k 9835/tcp 2>/dev/null || true
 sleep 1
 
-# Run the exporter in a loop to update metrics
+# Run the collector in background loop to update metrics.txt
 (
     while true; do
         ./dc-exporter-c >/dev/null 2>&1 || true
@@ -91,37 +91,8 @@ sleep 1
     done
 ) &
 
-# Serve the metrics file via HTTP
-exec python3 << 'PYEOF'
-import http.server
-import socketserver
-
-class ReuseAddrTCPServer(socketserver.TCPServer):
-    allow_reuse_address = True
-
-class MetricsHandler(http.server.SimpleHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == "/metrics" or self.path == "/":
-            self.send_response(200)
-            self.send_header("Content-type", "text/plain")
-            self.end_headers()
-            try:
-                with open("metrics.txt", "r") as f:
-                    self.wfile.write(f.read().encode())
-            except FileNotFoundError:
-                self.wfile.write(b"# No metrics yet\n")
-        else:
-            self.send_response(404)
-            self.end_headers()
-    
-    def log_message(self, format, *args):
-        pass
-
-PORT = 9835
-with ReuseAddrTCPServer(("", PORT), MetricsHandler) as httpd:
-    print(f"DC Exporter serving on port {PORT}")
-    httpd.serve_forever()
-PYEOF
+# Serve the metrics file via HTTP using the bundled Python server
+exec python3 /opt/dc-exporter/metrics_server.py
 '''
 
 DC_EXPORTER_CONFIG = """[agent]
@@ -355,7 +326,21 @@ class ExporterInstaller:
                     console.print("[dim]GPU metrics will be limited. Install manually or check dependencies.[/dim]")
                     return False
                 
-                # Create the run script (Python HTTP server on port 9835)
+                # Copy the metrics server Python script from package
+                progress.update(task, description="Installing metrics server...")
+                try:
+                    import dc_overview
+                    pkg_path = Path(dc_overview.__file__).parent / "dc_exporter" / "metrics_server.py"
+                    if pkg_path.exists():
+                        import shutil
+                        shutil.copy(pkg_path, "/opt/dc-exporter/metrics_server.py")
+                        subprocess.run(["chmod", "+x", "/opt/dc-exporter/metrics_server.py"], check=True)
+                    else:
+                        console.print("[yellow]⚠[/yellow] metrics_server.py not found in package")
+                except Exception as e:
+                    console.print(f"[yellow]⚠[/yellow] Could not copy metrics_server.py: {e}")
+                
+                # Create the run script
                 progress.update(task, description="Creating run script...")
                 with open("/opt/dc-exporter/run.sh", "w") as f:
                     f.write(DC_EXPORTER_RUN_SCRIPT)

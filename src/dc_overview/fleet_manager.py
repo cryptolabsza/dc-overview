@@ -1025,7 +1025,7 @@ WantedBy=multi-user.target
             "docker", "run", "-d",
             "--name", "vastai-exporter",
             "--restart", "unless-stopped",
-            "-p", "127.0.0.1:8622:8622",
+            "-p", "8622:8622",
             "jjziets/vastai-exporter:latest",
             "-api-key", self.config.vast.api_key
         ], capture_output=True, text=True)
