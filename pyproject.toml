@@ -73,6 +73,7 @@ dc_overview = [
     "templates/*.html",
     "templates/*.conf",
     "dashboards/*.json",
+    "dc_exporter/*.c",
 ]
 
 [tool.black]

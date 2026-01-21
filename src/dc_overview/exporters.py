@@ -24,7 +24,7 @@ NODE_EXPORTER_URL = f"https://github.com/prometheus/node_exporter/releases/downl
 
 # DC Exporter - try pre-compiled binary first, fall back to source compilation
 DC_EXPORTER_BINARY_URL = f"https://github.com/cryptolabsza/dc-exporter/releases/download/v{DC_EXPORTER_VERSION}/dc-exporter-c"
-DC_EXPORTER_SOURCE_URL = "https://raw.githubusercontent.com/cryptolabsza/dc-exporter/main/dc-exporter.c"
+# Source is bundled with the package for compilation if binary unavailable
 
 
 # Systemd service templates
@@ -380,7 +380,7 @@ class ExporterInstaller:
             return False
     
     def _compile_dc_exporter_from_source(self) -> bool:
-        """Try to compile dc-exporter from source."""
+        """Try to compile dc-exporter from bundled source."""
         try:
             # Check for required dependencies
             result = subprocess.run(["which", "gcc"], capture_output=True)
@@ -389,11 +389,20 @@ class ExporterInstaller:
                 subprocess.run(["apt-get", "update", "-qq"], capture_output=True)
                 subprocess.run(["apt-get", "install", "-y", "-qq", "gcc", "libpci-dev"], capture_output=True)
             
-            # Download source
-            urllib.request.urlretrieve(
-                DC_EXPORTER_SOURCE_URL,
-                "/opt/dc-exporter/dc-exporter.c"
-            )
+            # Copy bundled source from package
+            try:
+                import dc_overview
+                pkg_path = Path(dc_overview.__file__).parent / "dc_exporter" / "dc-exporter.c"
+                if pkg_path.exists():
+                    import shutil
+                    shutil.copy(pkg_path, "/opt/dc-exporter/dc-exporter.c")
+                    console.print("[dim]Using bundled source[/dim]")
+                else:
+                    console.print("[dim]Bundled source not found[/dim]")
+                    return False
+            except Exception as e:
+                console.print(f"[dim]Could not locate bundled source: {e}[/dim]")
+                return False
             
             # Compile
             result = subprocess.run(
@@ -401,6 +410,7 @@ class ExporterInstaller:
                  "/opt/dc-exporter/dc-exporter.c", "-lpci", "-lnvidia-ml",
                  "-I/usr/local/cuda/include"],
                 capture_output=True,
+                text=True,
                 cwd="/opt/dc-exporter"
             )
             
@@ -408,6 +418,8 @@ class ExporterInstaller:
                 subprocess.run(["chmod", "+x", "/opt/dc-exporter/dc-exporter-c"], check=True)
                 console.print("[dim]Compiled from source[/dim]")
                 return True
+            else:
+                console.print(f"[dim]Compilation failed: {result.stderr[:100]}[/dim]")
                 
         except Exception as e:
             console.print(f"[dim]Source compilation failed: {e}[/dim]")
