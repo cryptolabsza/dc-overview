@@ -543,6 +543,110 @@ For the full production setup with networking, SSL, and all features, use `confi
 
 ---
 
+## 🖥️ IPMI Monitor - BMC/IPMI Health Monitoring
+
+For complete server health monitoring (SEL logs, sensors, ECC errors), add IPMI Monitor to your master server.
+
+### Quick Install
+
+**Ubuntu 24.04+ / Python 3.12+:**
+```bash
+sudo apt install pipx -y
+pipx install ipmi-monitor
+pipx ensurepath && source ~/.bashrc
+sudo ipmi-monitor quickstart
+```
+
+**Ubuntu 22.04 / Python 3.10:**
+```bash
+pip install ipmi-monitor
+sudo ipmi-monitor quickstart
+```
+
+**If "externally-managed-environment" error:**
+```bash
+pip install ipmi-monitor --break-system-packages
+sudo ipmi-monitor quickstart
+```
+
+### What IPMI Monitor Does
+
+- **IPMI/BMC Monitoring** - Collect System Event Logs (SEL), sensor data
+- **ECC Memory Tracking** - Identify which DIMM has errors
+- **GPU Health via SSH** - Detect NVIDIA Xid errors
+- **System Logs** - Collect dmesg, journalctl, Docker daemon logs
+- **Alert Rules** - Email, Telegram, webhook notifications
+- **AI Insights** - Optional AI-powered diagnostics
+
+### Quickstart Flow
+
+The quickstart deploys via Docker with automatic updates:
+
+```
+╭──────────────────────────────────────────────────╮
+│           IPMI Monitor - Quick Setup             │
+│   Deploys via Docker with automatic updates.    │
+╰──────────────────────────────────────────────────╯
+
+Step 1: Add Servers
+  BMC IP: 192.168.1.83
+  BMC username: ADMIN
+  BMC password: ******
+  ✓ IPMI connection successful
+  
+  Add SSH access? [Y/n]: y
+  Server IP: 192.168.1.101
+  SSH username: root
+  SSH authentication: Password / SSH Key
+  SSH password: ******
+
+Step 2: Web Interface Port [5000]
+
+Step 3: Admin Password
+  Set custom password? [Y/n]: y
+  Admin password: ******
+
+Step 4: AI Features [y/N]: n
+
+Step 5: Auto-Updates [Y/n]: y
+
+Step 6: HTTPS Reverse Proxy [y/N]: n
+
+Step 7: Deploying...
+  ✓ Docker image pulled
+  ✓ IPMI Monitor started
+
+╭────────────────────────────────────────╮
+│        ✓ Setup Complete!               │
+╰────────────────────────────────────────╯
+Web Interface: http://192.168.1.100:5000
+```
+
+### After IPMI Monitor Setup
+
+```bash
+# Check status
+ipmi-monitor status
+
+# View logs
+ipmi-monitor logs -f
+
+# Upgrade to latest
+ipmi-monitor upgrade
+
+# Stop/start
+ipmi-monitor stop
+ipmi-monitor start
+```
+
+### Access
+
+- **Direct**: `http://server-ip:5000`
+- **With HTTPS proxy**: `https://server-ip/ipmi/`
+- **With domain**: `https://monitor.example.com/ipmi/`
+
+---
+
 ## 📖 Full Suite Setup (Master + Workers)
 
 For a complete datacenter setup with IPMI monitoring:
