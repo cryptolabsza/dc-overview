@@ -551,6 +551,102 @@ def import_ipmi_config(ipmi_config: Dict) -> tuple:
     return ssh_keys, servers
 
 
+def detect_existing_proxy() -> Optional[Dict]:
+    """Detect if cryptolabs-proxy is already running."""
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "cryptolabs-proxy", "--format", "{{.State.Status}}"],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0 and result.stdout.strip() == "running":
+            # Get existing proxy config
+            config = {"running": True}
+            
+            # Try to get domain from nginx config
+            nginx_conf = Path("/etc/ipmi-monitor/nginx.conf")
+            if nginx_conf.exists():
+                content = nginx_conf.read_text()
+                import re
+                match = re.search(r'server_name\s+([^;]+);', content)
+                if match:
+                    config["domain"] = match.group(1).strip()
+            
+            # Check if SSL certs exist
+            ssl_dir = Path("/etc/ipmi-monitor/ssl")
+            if ssl_dir.exists():
+                config["ssl_dir"] = ssl_dir
+            
+            return config
+    except Exception:
+        pass
+    return None
+
+
+def update_existing_nginx_config(nginx_path: Path, dc_port: int = 5001):
+    """Update existing nginx.conf to add /dc/ route for dc-overview."""
+    import re
+    
+    content = nginx_path.read_text()
+    
+    # Check if /dc/ route already exists
+    if '/dc/' in content or 'dc-overview' in content:
+        console.print("[dim]  /dc/ route already exists in nginx config[/dim]")
+        return
+    
+    # DC Overview location block to add
+    dc_location = f'''
+        # DC Overview - GPU Datacenter Monitoring
+        location /dc/ {{
+            proxy_pass http://dc-overview:{dc_port}/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+        }}
+'''
+    
+    # Find a good place to insert - after /ipmi/ or /grafana/ location
+    # Look for the last location block before the closing brace of the server block
+    
+    # Try to insert after /ipmi/ location
+    ipmi_pattern = r'(location\s+/ipmi/\s*\{[^}]+\})'
+    match = re.search(ipmi_pattern, content, re.DOTALL)
+    
+    if match:
+        # Insert after /ipmi/ block
+        insert_pos = match.end()
+        new_content = content[:insert_pos] + dc_location + content[insert_pos:]
+    else:
+        # Try to insert before the last closing brace of the server block
+        # Find "location / {" and insert before it
+        root_pattern = r'(\s+location\s+/\s*\{)'
+        match = re.search(root_pattern, content)
+        if match:
+            insert_pos = match.start()
+            new_content = content[:insert_pos] + dc_location + content[insert_pos:]
+        else:
+            console.print("[yellow]⚠[/yellow] Could not find insertion point in nginx.conf")
+            console.print("[dim]  Please add /dc/ location manually[/dim]")
+            return
+    
+    # Write updated config
+    nginx_path.write_text(new_content)
+    
+    # Reload nginx in the proxy container
+    try:
+        subprocess.run(
+            ["docker", "exec", "cryptolabs-proxy", "nginx", "-s", "reload"],
+            capture_output=True, check=True
+        )
+        console.print("[dim]  Nginx configuration reloaded[/dim]")
+    except Exception as e:
+        console.print(f"[yellow]⚠[/yellow] Could not reload nginx: {e}")
+        console.print("[dim]  Run: docker exec cryptolabs-proxy nginx -s reload[/dim]")
+
+
 def setup_master_docker():
     """Set up master with Docker using cryptolabs-proxy."""
     from jinja2 import Environment, PackageLoader, select_autoescape
@@ -560,17 +656,53 @@ def setup_master_docker():
     config_dir = Path("/etc/dc-overview")
     config_dir.mkdir(parents=True, exist_ok=True)
     
-    # Detect ipmi-monitor
+    # ===========================================================================
+    # DETECT EXISTING SETUP
+    # ===========================================================================
     ipmi_config = detect_ipmi_monitor()
+    existing_proxy = detect_existing_proxy()
+    imported_servers = []
+    imported_ssh_keys = []
     ipmi_enabled = False
     
+    # If IPMI Monitor exists, offer to import its data
     if ipmi_config:
-        console.print("[green]✓[/green] IPMI Monitor detected")
-        ipmi_enabled = questionary.confirm(
-            "Include IPMI Monitor in reverse proxy?",
+        console.print("\n[bold green]✓ IPMI Monitor Detected![/bold green]")
+        console.print("[dim]Found existing IPMI Monitor installation with servers and SSH keys.[/dim]\n")
+        
+        import_data = questionary.confirm(
+            "Import servers and SSH keys from IPMI Monitor?",
             default=True,
             style=custom_style
         ).ask()
+        
+        if import_data:
+            imported_ssh_keys, imported_servers = import_ipmi_config(ipmi_config)
+            ipmi_enabled = True
+            
+            if imported_servers:
+                console.print(f"\n[cyan]Servers available for monitoring:[/cyan]")
+                for srv in imported_servers[:10]:  # Show first 10
+                    ip = srv.get('server_ip') or srv.get('bmc_ip')
+                    console.print(f"  • {srv['name']} ({ip})")
+                if len(imported_servers) > 10:
+                    console.print(f"  ... and {len(imported_servers) - 10} more")
+    
+    # If proxy already running, skip proxy setup
+    if existing_proxy and existing_proxy.get("running"):
+        console.print("\n[bold green]✓ CryptoLabs Proxy Already Running![/bold green]")
+        console.print("[dim]Will add DC Overview to existing proxy setup.[/dim]\n")
+        setup_proxy = True  # Use existing proxy
+        domain = existing_proxy.get("domain")
+        use_letsencrypt = False  # Already configured
+        external_port = 443
+        skip_proxy_questions = True
+    else:
+        skip_proxy_questions = False
+    
+    # ===========================================================================
+    # CONFIGURATION QUESTIONS
+    # ===========================================================================
     
     # Ask for DC Overview port
     console.print("\n[bold]Port Configuration[/bold]")
@@ -591,60 +723,75 @@ def setup_master_docker():
         style=custom_style
     ).ask() or "admin"
     
-    # Ask about reverse proxy
-    console.print("\n[bold]HTTPS Reverse Proxy[/bold]")
-    console.print("[dim]Set up cryptolabs-proxy for secure access via HTTPS.[/dim]\n")
-    
-    setup_proxy = questionary.confirm(
-        "Set up HTTPS reverse proxy? (recommended)",
-        default=True,
-        style=custom_style
-    ).ask()
-    
-    domain = None
-    use_letsencrypt = False
-    external_port = 443
-    
-    if setup_proxy:
-        has_domain = questionary.confirm(
-            "Do you have a domain name pointing to this server?",
-            default=False,
+    # Reverse proxy questions (only if not already set up)
+    if not skip_proxy_questions:
+        console.print("\n[bold]HTTPS Reverse Proxy[/bold]")
+        console.print("[dim]Set up cryptolabs-proxy for secure access via HTTPS.[/dim]\n")
+        
+        setup_proxy = questionary.confirm(
+            "Set up HTTPS reverse proxy? (recommended)",
+            default=True,
             style=custom_style
         ).ask()
         
-        if has_domain:
-            domain = questionary.text(
-                "Domain name:",
-                validate=lambda x: '.' in x and len(x) > 3,
-                style=custom_style
-            ).ask()
-            
-            use_letsencrypt = questionary.confirm(
-                "Use Let's Encrypt for trusted certificate?",
+        domain = None
+        use_letsencrypt = False
+        external_port = 443
+        
+        if setup_proxy:
+            has_domain = questionary.confirm(
+                "Do you have a domain name pointing to this server?",
                 default=False,
                 style=custom_style
             ).ask()
-        
-        different_port = questionary.confirm(
-            "Is the external HTTPS port different from 443?",
-            default=False,
+            
+            if has_domain:
+                domain = questionary.text(
+                    "Domain name:",
+                    validate=lambda x: '.' in x and len(x) > 3,
+                    style=custom_style
+                ).ask()
+                
+                use_letsencrypt = questionary.confirm(
+                    "Use Let's Encrypt for trusted certificate?",
+                    default=False,
+                    style=custom_style
+                ).ask()
+            
+            different_port = questionary.confirm(
+                "Is the external HTTPS port different from 443?",
+                default=False,
+                style=custom_style
+            ).ask()
+            
+            if different_port:
+                external_port = int(questionary.text(
+                    "External HTTPS port:",
+                    default="8443",
+                    validate=lambda x: x.isdigit(),
+                    style=custom_style
+                ).ask() or "443")
+    
+    # Ask about watchtower (skip if already running)
+    watchtower_running = False
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "watchtower", "--format", "{{.State.Status}}"],
+            capture_output=True, text=True
+        )
+        watchtower_running = result.returncode == 0 and result.stdout.strip() == "running"
+    except Exception:
+        pass
+    
+    if watchtower_running:
+        console.print("[green]✓[/green] Watchtower already running")
+        enable_watchtower = False  # Don't create another
+    else:
+        enable_watchtower = questionary.confirm(
+            "Enable automatic updates (Watchtower)?",
+            default=True,
             style=custom_style
         ).ask()
-        
-        if different_port:
-            external_port = int(questionary.text(
-                "External HTTPS port:",
-                default="8443",
-                validate=lambda x: x.isdigit(),
-                style=custom_style
-            ).ask() or "443")
-    
-    # Ask about watchtower
-    enable_watchtower = questionary.confirm(
-        "Enable automatic updates (Watchtower)?",
-        default=True,
-        style=custom_style
-    ).ask()
     
     # Generate secret key
     secret_key = secrets.token_hex(32)
@@ -665,21 +812,27 @@ GRAFANA_PASSWORD={grafana_pass}
         )
         
         # docker-compose.yml
+        # Don't start a new proxy if one already exists - just use the network
+        start_new_proxy = setup_proxy and not skip_proxy_questions
+        
         compose_template = env.get_template("docker-compose.yml.j2")
         compose_content = compose_template.render(
-            image_tag="latest",
+            image_tag="dev",  # Use dev tag for now
             proxy_tag="latest",
             dc_port=dc_port,
-            enable_proxy=setup_proxy,
+            enable_proxy=start_new_proxy,
             enable_watchtower=enable_watchtower,
             use_letsencrypt=use_letsencrypt,
             external_port=external_port,
             ipmi_enabled=ipmi_enabled,
             vast_enabled=False,
-            ssh_keys_dir=False
+            ssh_keys_dir=True if (config_dir / "ssh_keys").exists() else False
         )
         (config_dir / "docker-compose.yml").write_text(compose_content)
         console.print("[green]✓[/green] docker-compose.yml generated")
+        
+        if skip_proxy_questions:
+            console.print("[dim]  (Using existing cryptolabs network, no new proxy)[/dim]")
         
         # prometheus.yml
         prometheus_template = env.get_template("prometheus.yml.j2")
@@ -695,22 +848,42 @@ GRAFANA_PASSWORD={grafana_pass}
         
         # nginx.conf (if proxy enabled)
         if setup_proxy:
-            nginx_template = env.get_template("nginx.conf.j2")
-            nginx_content = nginx_template.render(
-                domain=domain or local_ip,
-                dc_port=dc_port,
-                ipmi_enabled=ipmi_enabled,
-                use_letsencrypt=use_letsencrypt,
-                ssl_cert="/etc/nginx/ssl/server.crt",
-                ssl_key="/etc/nginx/ssl/server.key"
-            )
-            (config_dir / "nginx.conf").write_text(nginx_content)
-            console.print("[green]✓[/green] nginx.conf generated")
-            
-            # Generate self-signed certificate
-            ssl_dir = config_dir / "ssl"
-            ssl_dir.mkdir(exist_ok=True)
-            generate_self_signed_cert(ssl_dir, domain or local_ip)
+            if skip_proxy_questions and existing_proxy:
+                # Update existing ipmi-monitor nginx.conf to add /dc/ route
+                ipmi_nginx = Path("/etc/ipmi-monitor/nginx.conf")
+                if ipmi_nginx.exists():
+                    update_existing_nginx_config(ipmi_nginx, dc_port)
+                    console.print("[green]✓[/green] Updated existing nginx.conf with /dc/ route")
+                else:
+                    # Fallback: create our own nginx.conf
+                    nginx_template = env.get_template("nginx.conf.j2")
+                    nginx_content = nginx_template.render(
+                        domain=domain or local_ip,
+                        dc_port=dc_port,
+                        ipmi_enabled=ipmi_enabled,
+                        use_letsencrypt=use_letsencrypt,
+                        ssl_cert="/etc/nginx/ssl/server.crt",
+                        ssl_key="/etc/nginx/ssl/server.key"
+                    )
+                    (config_dir / "nginx.conf").write_text(nginx_content)
+                    console.print("[green]✓[/green] nginx.conf generated")
+            else:
+                nginx_template = env.get_template("nginx.conf.j2")
+                nginx_content = nginx_template.render(
+                    domain=domain or local_ip,
+                    dc_port=dc_port,
+                    ipmi_enabled=ipmi_enabled,
+                    use_letsencrypt=use_letsencrypt,
+                    ssl_cert="/etc/nginx/ssl/server.crt",
+                    ssl_key="/etc/nginx/ssl/server.key"
+                )
+                (config_dir / "nginx.conf").write_text(nginx_content)
+                console.print("[green]✓[/green] nginx.conf generated")
+                
+                # Generate self-signed certificate
+                ssl_dir = config_dir / "ssl"
+                ssl_dir.mkdir(exist_ok=True)
+                generate_self_signed_cert(ssl_dir, domain or local_ip)
         
     except Exception as e:
         console.print(f"[yellow]⚠[/yellow] Template error: {e}, using fallback")
@@ -758,8 +931,26 @@ providers:
     except Exception as e:
         console.print(f"[yellow]⚠[/yellow] Grafana provisioning warning: {e}")
     
-    # Create empty prometheus targets file
-    (config_dir / "prometheus_targets.json").write_text("[]")
+    # Create prometheus targets file with imported servers
+    if imported_servers:
+        targets = []
+        for srv in imported_servers:
+            ip = srv.get('server_ip') or srv.get('bmc_ip')
+            if ip:
+                # Add node_exporter target (will be installed)
+                targets.append({
+                    "targets": [f"{ip}:9100"],
+                    "labels": {"instance": srv['name'], "job": "node-exporter"}
+                })
+                # Add dc-exporter target (will be installed)
+                targets.append({
+                    "targets": [f"{ip}:9835"],
+                    "labels": {"instance": srv['name'], "job": "dc-exporter"}
+                })
+        (config_dir / "prometheus_targets.json").write_text(json.dumps(targets, indent=2))
+        console.print(f"[green]✓[/green] Prometheus targets configured ({len(imported_servers)} servers)")
+    else:
+        (config_dir / "prometheus_targets.json").write_text("[]")
     
     # Copy dashboards
     copy_dashboards(config_dir / "grafana" / "dashboards")
@@ -783,12 +974,96 @@ providers:
         console.print("[green]✓[/green] DC Overview running on port", dc_port)
         console.print("[green]✓[/green] Prometheus running on port 9090")
         console.print("[green]✓[/green] Grafana running on port 3000")
-        if setup_proxy:
+        if setup_proxy and not skip_proxy_questions:
             console.print("[green]✓[/green] CryptoLabs Proxy running on ports 80/443")
+        elif skip_proxy_questions:
+            console.print("[green]✓[/green] Using existing CryptoLabs Proxy")
         console.print(f"[dim]  Grafana login: admin / {grafana_pass}[/dim]")
     else:
         console.print(f"[red]Error starting services:[/red] {result.stderr.decode()[:200]}")
         return
+    
+    # ===========================================================================
+    # INSTALL EXPORTERS ON IMPORTED SERVERS
+    # ===========================================================================
+    if imported_servers and imported_ssh_keys:
+        console.print("\n[bold]GPU Worker Exporter Installation[/bold]")
+        console.print(f"[dim]Found {len(imported_servers)} servers from IPMI Monitor.[/dim]")
+        console.print("[dim]DC-exporter provides GPU VRAM temps, hotspot temps, power, utilization.[/dim]\n")
+        
+        install_exporters = questionary.confirm(
+            f"Install dc-exporter on {len(imported_servers)} servers?",
+            default=True,
+            style=custom_style
+        ).ask()
+        
+        if install_exporters:
+            # Find the SSH key to use
+            ssh_key_path = None
+            if imported_ssh_keys:
+                # Use first available key
+                for key in imported_ssh_keys:
+                    key_path = Path(key.get('path', ''))
+                    if key_path.exists():
+                        ssh_key_path = str(key_path)
+                        break
+                    # Try in dc-overview ssh_keys dir
+                    dc_key = config_dir / "ssh_keys" / key_path.name
+                    if dc_key.exists():
+                        ssh_key_path = str(dc_key)
+                        break
+            
+            if not ssh_key_path:
+                console.print("[yellow]⚠[/yellow] No SSH key found, will try password auth")
+                ssh_password = questionary.password(
+                    "SSH password for workers:",
+                    style=custom_style
+                ).ask()
+            else:
+                ssh_password = None
+                console.print(f"[dim]Using SSH key: {ssh_key_path}[/dim]")
+            
+            # Install on each server
+            success_count = 0
+            fail_count = 0
+            
+            for srv in imported_servers:
+                ip = srv.get('server_ip') or srv.get('bmc_ip')
+                name = srv.get('name', ip)
+                ssh_user = srv.get('ssh_user', 'root')
+                ssh_port = srv.get('ssh_port', 22)
+                
+                if not ip:
+                    continue
+                
+                console.print(f"  Installing on {name} ({ip})...", end=" ")
+                
+                # Check if already running
+                if test_machine_connection(ip, 9835):
+                    console.print("[green]✓ already running[/green]")
+                    success_count += 1
+                    continue
+                
+                # Try to install
+                success = install_exporters_remote(
+                    ip=ip,
+                    user=ssh_user,
+                    password=ssh_password,
+                    key_path=ssh_key_path,
+                    port=ssh_port
+                )
+                
+                if success:
+                    console.print("[green]✓[/green]")
+                    success_count += 1
+                else:
+                    console.print("[yellow]⚠ manual install needed[/yellow]")
+                    fail_count += 1
+            
+            console.print(f"\n[green]✓[/green] Exporters installed: {success_count}/{len(imported_servers)}")
+            if fail_count > 0:
+                console.print(f"[yellow]⚠[/yellow] {fail_count} servers need manual installation:")
+                console.print("  [cyan]pip install dc-overview && sudo dc-overview install-exporters[/cyan]")
     
     # Save configuration for reference
     config_info = {
@@ -799,9 +1074,10 @@ providers:
         "domain": domain,
         "external_port": external_port,
         "ipmi_enabled": ipmi_enabled,
-        "watchtower_enabled": enable_watchtower
+        "watchtower_enabled": enable_watchtower,
+        "imported_servers": len(imported_servers) if imported_servers else 0
     }
-    (config_dir / "config.json").write_text(yaml.dump(config_info))
+    (config_dir / "config.json").write_text(json.dumps(config_info, indent=2))
 
 
 def generate_self_signed_cert(ssl_dir: Path, domain: str):
