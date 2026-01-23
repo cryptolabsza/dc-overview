@@ -11,6 +11,9 @@ And answers a few questions. That's it.
 import os
 import subprocess
 import sys
+import json
+import secrets
+import shutil
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
@@ -401,24 +404,185 @@ WantedBy=multi-user.target
 
 
 def setup_master():
-    """Set up master monitoring server (Prometheus + Grafana)."""
-    console.print("[dim]Installing Prometheus and Grafana...[/dim]\n")
+    """Set up master monitoring server (Prometheus + Grafana) via Docker."""
+    console.print("[dim]Setting up monitoring stack via Docker...[/dim]\n")
     
-    # Check if Docker is available (easier setup)
-    docker_available = subprocess.run(["which", "docker"], capture_output=True).returncode == 0
-    
-    if docker_available:
-        console.print("[dim]Docker detected - using containerized setup (recommended)[/dim]")
-        setup_master_docker()
+    # Check Docker
+    if not check_docker_installed():
+        console.print("[yellow]Docker is not installed.[/yellow]")
+        install = questionary.confirm(
+            "Install Docker now?",
+            default=True,
+            style=custom_style
+        ).ask()
+        
+        if install:
+            if not install_docker():
+                console.print("[red]Cannot continue without Docker.[/red]")
+                return
+        else:
+            console.print("[red]Cannot continue without Docker.[/red]")
+            console.print("[dim]Install Docker manually: https://docs.docker.com/engine/install/[/dim]")
+            return
     else:
-        console.print("[dim]Docker not found - installing natively[/dim]")
-        setup_master_native()
+        console.print("[green]✓[/green] Docker is installed")
+    
+    setup_master_docker()
+
+
+def check_docker_installed() -> bool:
+    """Check if Docker is installed and running."""
+    try:
+        result = subprocess.run(["docker", "--version"], capture_output=True, text=True)
+        if result.returncode != 0:
+            return False
+        result = subprocess.run(["docker", "info"], capture_output=True, text=True)
+        return result.returncode == 0
+    except FileNotFoundError:
+        return False
+
+
+def install_docker() -> bool:
+    """Install Docker using the official convenience script."""
+    console.print("\n[bold]Installing Docker...[/bold]\n")
+    try:
+        with Progress(SpinnerColumn(), TextColumn("Downloading Docker installer..."), console=console) as progress:
+            progress.add_task("", total=None)
+            subprocess.run(
+                ["curl", "-fsSL", "https://get.docker.com", "-o", "/tmp/get-docker.sh"],
+                check=True, capture_output=True
+            )
+        with Progress(SpinnerColumn(), TextColumn("Installing Docker (this may take a few minutes)..."), console=console) as progress:
+            progress.add_task("", total=None)
+            subprocess.run(["sh", "/tmp/get-docker.sh"], check=True, capture_output=True)
+        subprocess.run(["systemctl", "start", "docker"], capture_output=True)
+        subprocess.run(["systemctl", "enable", "docker"], capture_output=True)
+        console.print("[green]✓[/green] Docker installed successfully")
+        return True
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]✗[/red] Docker installation failed: {e}")
+        return False
+
+
+def detect_ipmi_monitor() -> Optional[Dict]:
+    """Detect if ipmi-monitor is installed."""
+    ipmi_config_dir = Path("/etc/ipmi-monitor")
+    
+    if not ipmi_config_dir.exists():
+        return None
+    
+    # Check for running container
+    result = subprocess.run(
+        ["docker", "inspect", "ipmi-monitor"],
+        capture_output=True
+    )
+    
+    if result.returncode != 0:
+        return None
+    
+    return {
+        "config_dir": ipmi_config_dir,
+        "db_path": ipmi_config_dir / "data" / "ipmi_monitor.db",
+        "ssh_keys_dir": ipmi_config_dir / "ssh_keys"
+    }
+
+
+def import_ipmi_config(ipmi_config: Dict) -> tuple:
+    """Import SSH keys and servers from IPMI Monitor.
+    
+    Returns:
+        Tuple of (ssh_keys, servers)
+    """
+    import sqlite3
+    
+    ssh_keys = []
+    servers = []
+    
+    db_path = ipmi_config.get("db_path")
+    
+    if db_path and db_path.exists():
+        try:
+            conn = sqlite3.connect(str(db_path))
+            cursor = conn.cursor()
+            
+            # Import servers (for Prometheus targets)
+            cursor.execute("""
+                SELECT name, bmc_ip, server_ip, ssh_user, ssh_port
+                FROM server
+            """)
+            
+            for row in cursor.fetchall():
+                servers.append({
+                    "name": row[0],
+                    "bmc_ip": row[1],
+                    "server_ip": row[2],
+                    "ssh_user": row[3] or "root",
+                    "ssh_port": row[4] or 22
+                })
+            
+            # Import SSH keys
+            cursor.execute("SELECT id, name, key_path FROM ssh_key")
+            for row in cursor.fetchall():
+                ssh_keys.append({
+                    "id": row[0],
+                    "name": row[1],
+                    "path": row[2]
+                })
+            
+            conn.close()
+            console.print(f"[green]✓[/green] Imported {len(servers)} servers from IPMI Monitor")
+            console.print(f"[green]✓[/green] Imported {len(ssh_keys)} SSH keys from IPMI Monitor")
+        except Exception as e:
+            console.print(f"[yellow]⚠[/yellow] Could not import from IPMI Monitor: {e}")
+    
+    # Copy SSH keys to DC Overview directory
+    ssh_keys_dir = ipmi_config.get("ssh_keys_dir")
+    if ssh_keys_dir and ssh_keys_dir.exists():
+        dc_ssh_dir = Path("/etc/dc-overview/ssh_keys")
+        dc_ssh_dir.mkdir(parents=True, exist_ok=True)
+        
+        for key_file in ssh_keys_dir.iterdir():
+            if key_file.is_file():
+                shutil.copy2(key_file, dc_ssh_dir / key_file.name)
+                os.chmod(dc_ssh_dir / key_file.name, 0o600)
+        
+        console.print(f"[green]✓[/green] SSH keys copied to /etc/dc-overview/ssh_keys/")
+    
+    return ssh_keys, servers
 
 
 def setup_master_docker():
-    """Set up master with Docker (easier)."""
+    """Set up master with Docker using cryptolabs-proxy."""
+    from jinja2 import Environment, PackageLoader, select_autoescape
+    import secrets
+    import shutil
+    
     config_dir = Path("/etc/dc-overview")
     config_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Detect ipmi-monitor
+    ipmi_config = detect_ipmi_monitor()
+    ipmi_enabled = False
+    
+    if ipmi_config:
+        console.print("[green]✓[/green] IPMI Monitor detected")
+        ipmi_enabled = questionary.confirm(
+            "Include IPMI Monitor in reverse proxy?",
+            default=True,
+            style=custom_style
+        ).ask()
+    
+    # Ask for DC Overview port
+    console.print("\n[bold]Port Configuration[/bold]")
+    console.print("[dim]DC Overview default port is 5001. Change if needed.[/dim]\n")
+    
+    dc_port = questionary.text(
+        "DC Overview port:",
+        default="5001",
+        validate=lambda x: x.isdigit() and 1 <= int(x) <= 65535,
+        style=custom_style
+    ).ask() or "5001"
+    dc_port = int(dc_port)
     
     # Ask for Grafana password
     grafana_pass = questionary.password(
@@ -427,12 +591,260 @@ def setup_master_docker():
         style=custom_style
     ).ask() or "admin"
     
-    # Save password for later use
-    (config_dir / ".grafana_pass").write_text(grafana_pass)
+    # Ask about reverse proxy
+    console.print("\n[bold]HTTPS Reverse Proxy[/bold]")
+    console.print("[dim]Set up cryptolabs-proxy for secure access via HTTPS.[/dim]\n")
     
-    # Create docker-compose.yml
-    compose = f"""version: '3.8'
-services:
+    setup_proxy = questionary.confirm(
+        "Set up HTTPS reverse proxy? (recommended)",
+        default=True,
+        style=custom_style
+    ).ask()
+    
+    domain = None
+    use_letsencrypt = False
+    external_port = 443
+    
+    if setup_proxy:
+        has_domain = questionary.confirm(
+            "Do you have a domain name pointing to this server?",
+            default=False,
+            style=custom_style
+        ).ask()
+        
+        if has_domain:
+            domain = questionary.text(
+                "Domain name:",
+                validate=lambda x: '.' in x and len(x) > 3,
+                style=custom_style
+            ).ask()
+            
+            use_letsencrypt = questionary.confirm(
+                "Use Let's Encrypt for trusted certificate?",
+                default=False,
+                style=custom_style
+            ).ask()
+        
+        different_port = questionary.confirm(
+            "Is the external HTTPS port different from 443?",
+            default=False,
+            style=custom_style
+        ).ask()
+        
+        if different_port:
+            external_port = int(questionary.text(
+                "External HTTPS port:",
+                default="8443",
+                validate=lambda x: x.isdigit(),
+                style=custom_style
+            ).ask() or "443")
+    
+    # Ask about watchtower
+    enable_watchtower = questionary.confirm(
+        "Enable automatic updates (Watchtower)?",
+        default=True,
+        style=custom_style
+    ).ask()
+    
+    # Generate secret key
+    secret_key = secrets.token_hex(32)
+    
+    # Save .env file
+    env_content = f"""# DC Overview Environment Configuration
+SECRET_KEY={secret_key}
+GRAFANA_PASSWORD={grafana_pass}
+"""
+    (config_dir / ".env").write_text(env_content)
+    os.chmod(config_dir / ".env", 0o600)
+    
+    # Generate docker-compose.yml using template
+    try:
+        env = Environment(
+            loader=PackageLoader("dc_overview", "templates"),
+            autoescape=select_autoescape()
+        )
+        
+        # docker-compose.yml
+        compose_template = env.get_template("docker-compose.yml.j2")
+        compose_content = compose_template.render(
+            image_tag="latest",
+            proxy_tag="latest",
+            dc_port=dc_port,
+            enable_proxy=setup_proxy,
+            enable_watchtower=enable_watchtower,
+            use_letsencrypt=use_letsencrypt,
+            external_port=external_port,
+            ipmi_enabled=ipmi_enabled,
+            vast_enabled=False,
+            ssh_keys_dir=False
+        )
+        (config_dir / "docker-compose.yml").write_text(compose_content)
+        console.print("[green]✓[/green] docker-compose.yml generated")
+        
+        # prometheus.yml
+        prometheus_template = env.get_template("prometheus.yml.j2")
+        local_ip = get_local_ip()
+        prometheus_content = prometheus_template.render(
+            dc_port=dc_port,
+            ipmi_enabled=ipmi_enabled,
+            vast_enabled=False,
+            static_targets=[{"name": "master", "ip": local_ip}]
+        )
+        (config_dir / "prometheus.yml").write_text(prometheus_content)
+        console.print("[green]✓[/green] prometheus.yml generated")
+        
+        # nginx.conf (if proxy enabled)
+        if setup_proxy:
+            nginx_template = env.get_template("nginx.conf.j2")
+            nginx_content = nginx_template.render(
+                domain=domain or local_ip,
+                dc_port=dc_port,
+                ipmi_enabled=ipmi_enabled,
+                use_letsencrypt=use_letsencrypt,
+                ssl_cert="/etc/nginx/ssl/server.crt",
+                ssl_key="/etc/nginx/ssl/server.key"
+            )
+            (config_dir / "nginx.conf").write_text(nginx_content)
+            console.print("[green]✓[/green] nginx.conf generated")
+            
+            # Generate self-signed certificate
+            ssl_dir = config_dir / "ssl"
+            ssl_dir.mkdir(exist_ok=True)
+            generate_self_signed_cert(ssl_dir, domain or local_ip)
+        
+    except Exception as e:
+        console.print(f"[yellow]⚠[/yellow] Template error: {e}, using fallback")
+        # Fallback to basic compose file
+        compose_content = generate_basic_compose(dc_port, grafana_pass, setup_proxy)
+        (config_dir / "docker-compose.yml").write_text(compose_content)
+    
+    # Create Grafana provisioning directories
+    grafana_dirs = [
+        config_dir / "grafana" / "provisioning" / "datasources",
+        config_dir / "grafana" / "provisioning" / "dashboards",
+        config_dir / "grafana" / "dashboards"
+    ]
+    for d in grafana_dirs:
+        d.mkdir(parents=True, exist_ok=True)
+    
+    # Copy Grafana provisioning configs
+    try:
+        # Datasource config
+        datasource_config = """apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+"""
+        (config_dir / "grafana" / "provisioning" / "datasources" / "prometheus.yml").write_text(datasource_config)
+        
+        # Dashboard provisioning config
+        dashboard_config = """apiVersion: 1
+providers:
+  - name: 'DC Overview'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+"""
+        (config_dir / "grafana" / "provisioning" / "dashboards" / "default.yml").write_text(dashboard_config)
+        console.print("[green]✓[/green] Grafana provisioning configured")
+    except Exception as e:
+        console.print(f"[yellow]⚠[/yellow] Grafana provisioning warning: {e}")
+    
+    # Create empty prometheus targets file
+    (config_dir / "prometheus_targets.json").write_text("[]")
+    
+    # Copy dashboards
+    copy_dashboards(config_dir / "grafana" / "dashboards")
+    
+    # Pull and start services
+    console.print("\n[bold]Starting Services[/bold]\n")
+    
+    with Progress(SpinnerColumn(), TextColumn("Pulling Docker images..."), console=console) as progress:
+        progress.add_task("", total=None)
+        subprocess.run(["docker", "compose", "pull"], cwd=config_dir, capture_output=True)
+    
+    with Progress(SpinnerColumn(), TextColumn("Starting containers..."), console=console) as progress:
+        progress.add_task("", total=None)
+        result = subprocess.run(
+            ["docker", "compose", "up", "-d"],
+            cwd=config_dir,
+            capture_output=True
+        )
+    
+    if result.returncode == 0:
+        console.print("[green]✓[/green] DC Overview running on port", dc_port)
+        console.print("[green]✓[/green] Prometheus running on port 9090")
+        console.print("[green]✓[/green] Grafana running on port 3000")
+        if setup_proxy:
+            console.print("[green]✓[/green] CryptoLabs Proxy running on ports 80/443")
+        console.print(f"[dim]  Grafana login: admin / {grafana_pass}[/dim]")
+    else:
+        console.print(f"[red]Error starting services:[/red] {result.stderr.decode()[:200]}")
+        return
+    
+    # Save configuration for reference
+    config_info = {
+        "dc_port": dc_port,
+        "grafana_port": 3000,
+        "prometheus_port": 9090,
+        "proxy_enabled": setup_proxy,
+        "domain": domain,
+        "external_port": external_port,
+        "ipmi_enabled": ipmi_enabled,
+        "watchtower_enabled": enable_watchtower
+    }
+    (config_dir / "config.json").write_text(yaml.dump(config_info))
+
+
+def generate_self_signed_cert(ssl_dir: Path, domain: str):
+    """Generate self-signed SSL certificate."""
+    cert_path = ssl_dir / "server.crt"
+    key_path = ssl_dir / "server.key"
+    
+    cmd = [
+        "openssl", "req", "-x509", "-nodes",
+        "-days", "365",
+        "-newkey", "rsa:2048",
+        "-keyout", str(key_path),
+        "-out", str(cert_path),
+        "-subj", f"/CN={domain}/O=CryptoLabs/C=ZA",
+    ]
+    
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+        os.chmod(key_path, 0o600)
+        console.print("[green]✓[/green] Self-signed certificate generated")
+    except Exception as e:
+        console.print(f"[yellow]⚠[/yellow] Could not generate certificate: {e}")
+
+
+def generate_basic_compose(dc_port: int, grafana_pass: str, enable_proxy: bool) -> str:
+    """Generate basic docker-compose.yml without templates."""
+    return f"""services:
+  dc-overview:
+    image: ghcr.io/cryptolabsza/dc-overview:latest
+    container_name: dc-overview
+    restart: unless-stopped
+    ports:
+      - "{dc_port}:{dc_port}"
+    environment:
+      - DC_OVERVIEW_PORT={dc_port}
+      - SECRET_KEY=${{SECRET_KEY}}
+      - GRAFANA_URL=http://grafana:3000
+      - PROMETHEUS_URL=http://prometheus:9090
+    volumes:
+      - dc_data:/data
+    networks:
+      - cryptolabs
+
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
@@ -441,10 +853,12 @@ services:
       - "9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
+      - prometheus_data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=30d"
+    networks:
+      - cryptolabs
 
   grafana:
     image: grafana/grafana:latest
@@ -452,54 +866,39 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
-    volumes:
-      - grafana-data:/var/lib/grafana
     environment:
       - GF_SECURITY_ADMIN_PASSWORD={grafana_pass}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - cryptolabs
 
 volumes:
-  prometheus-data:
-  grafana-data:
-"""
-    (config_dir / "docker-compose.yml").write_text(compose)
-    
-    # Create initial prometheus.yml
-    local_ip = get_local_ip()
-    prometheus_yml = f"""global:
-  scrape_interval: 15s
+  dc_data:
+  prometheus_data:
+  grafana_data:
 
-scrape_configs:
-  - job_name: 'prometheus'
-    static_configs:
-      - targets: ['prometheus:9090']  # Use Docker network name
-
-  - job_name: 'local'
-    static_configs:
-      - targets: ['{local_ip}:9100', '{local_ip}:9835']
-        labels:
-          instance: 'master'
+networks:
+  cryptolabs:
+    name: cryptolabs
+    driver: bridge
 """
-    (config_dir / "prometheus.yml").write_text(prometheus_yml)
-    
-    # Start services
-    with Progress(SpinnerColumn(), TextColumn("Starting monitoring services..."), console=console) as progress:
-        progress.add_task("", total=None)
-        
-        result = subprocess.run(
-            ["docker", "compose", "up", "-d"],
-            cwd=config_dir,
-            capture_output=True
-        )
-    
-    if result.returncode == 0:
-        console.print("[green]✓[/green] Prometheus running on port 9090")
-        console.print("[green]✓[/green] Grafana running on port 3000")
-        console.print(f"[dim]  Login: admin / {grafana_pass}[/dim]")
-        
-        # Configure Grafana
-        configure_grafana(grafana_pass)
-    else:
-        console.print(f"[red]Error starting services:[/red] {result.stderr.decode()[:200]}")
+
+
+def copy_dashboards(dest_dir: Path):
+    """Copy bundled dashboards to Grafana directory."""
+    try:
+        import dc_overview
+        pkg_path = Path(dc_overview.__file__).parent / "dashboards"
+        if pkg_path.exists():
+            import shutil
+            for dashboard_file in pkg_path.glob("*.json"):
+                shutil.copy(dashboard_file, dest_dir / dashboard_file.name)
+            console.print(f"[green]✓[/green] Dashboards copied ({len(list(pkg_path.glob('*.json')))} files)")
+    except Exception as e:
+        console.print(f"[yellow]⚠[/yellow] Could not copy dashboards: {e}")
 
 
 def configure_grafana(password: str):

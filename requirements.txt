@@ -1,0 +1,32 @@
+# DC Overview - Python Dependencies
+# Generated for Docker builds
+
+# Web framework
+flask>=2.3.0
+gunicorn>=21.0.0
+
+# Database
+flask-sqlalchemy>=3.0.0
+
+# CLI and wizard
+click>=8.1.0
+rich>=13.0.0
+questionary>=2.0.0
+
+# Configuration
+pyyaml>=6.0
+
+# HTTP client
+requests>=2.31.0
+
+# Templates
+jinja2>=3.0.0
+
+# SSH connections
+paramiko>=3.0.0
+
+# Prometheus metrics
+prometheus-client>=0.19.0
+
+# Security
+werkzeug>=2.3.0

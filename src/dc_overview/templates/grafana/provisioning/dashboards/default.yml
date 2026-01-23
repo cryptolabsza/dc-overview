@@ -1,0 +1,15 @@
+# Grafana Dashboard Provisioning
+# Auto-imports dashboards from the dashboards directory
+
+apiVersion: 1
+
+providers:
+  - name: 'DC Overview Dashboards'
+    orgId: 1
+    folder: 'DC Overview'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
