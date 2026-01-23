@@ -407,6 +407,27 @@ class FleetWizard:
             self._ipmi_data_cache = (servers, ssh_keys)
             return servers, ssh_keys
 
+        # Try to import from servers.yaml first (Docker deployment)
+        yaml_path = ipmi_config_dir / "servers.yaml"
+        if yaml_path.exists():
+            try:
+                import yaml
+                with open(yaml_path, 'r') as f:
+                    config = yaml.safe_load(f)
+                    if config and 'servers' in config:
+                        for server in config['servers']:
+                            servers.append({
+                                "name": server.get('name'),
+                                "bmc_ip": server.get('bmc_ip'),
+                                "server_ip": server.get('server_ip'),
+                                "ssh_user": server.get('ssh_user', 'root'),
+                                "ssh_port": server.get('ssh_port', 22)
+                            })
+                console.print(f"[dim]Imported from servers.yaml[/dim]")
+            except Exception as e:
+                console.print(f"[yellow]⚠[/yellow] Could not read servers.yaml: {e}")
+
+        # Try database if no servers from YAML
         db_path = ipmi_config_dir / "data" / "ipmi_monitor.db"
 
         if db_path.exists():
@@ -514,15 +535,21 @@ class FleetWizard:
                 self._ipmi_data_cache = (servers, ssh_keys)
                 return servers, ssh_keys
 
-        # Copy SSH keys to DC Overview directory
+        # Import SSH keys from ssh_keys directory
         ssh_keys_dir = ipmi_config_dir / "ssh_keys"
         if ssh_keys_dir.exists():
             dc_ssh_dir = Path("/etc/dc-overview/ssh_keys")
             dc_ssh_dir.mkdir(parents=True, exist_ok=True)
 
             for key_file in ssh_keys_dir.iterdir():
-                if key_file.is_file():
+                if key_file.is_file() and not key_file.name.startswith('.'):
+                    ssh_keys.append({
+                        "id": None,
+                        "name": key_file.stem,  # filename without extension
+                        "path": str(key_file)
+                    })
                     try:
+                        # Copy to DC Overview directory
                         shutil.copy2(key_file, dc_ssh_dir / key_file.name)
                         os.chmod(dc_ssh_dir / key_file.name, 0o600)
                     except Exception as e:
