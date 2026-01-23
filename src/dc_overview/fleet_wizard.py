@@ -51,6 +51,8 @@ class FleetWizard:
         self.config_dir = config_dir or Path("/etc/dc-overview")
         self.config = FleetConfig(config_dir=self.config_dir)
         self.config.master_ip = get_local_ip()
+        # Cache for IPMI data import (to avoid reading database multiple times)
+        self._ipmi_data_cache: Optional[Tuple[List[Dict], List[Dict]]] = None
     
     def run(self) -> FleetConfig:
         """Run the complete wizard and return configuration."""
@@ -248,34 +250,86 @@ class FleetWizard:
         # SSH Credentials (for worker deployment)
         console.print("\n[bold]SSH Access (for deploying to workers)[/bold]")
         console.print("[dim]Used to install exporters on GPU worker machines[/dim]\n")
-        
+
+        # If IPMI Monitor is installed, try to get SSH defaults from it
+        ssh_username_default = "root"
+        ssh_key_path_default = None
+        has_ipmi_ssh = False
+
+        if self.config.components.ipmi_monitor and self._detect_existing_ipmi():
+            servers, ssh_keys = self._import_ipmi_data()
+
+            if servers:
+                # Get SSH username from first server (they usually all use the same)
+                ssh_username_default = servers[0].get("ssh_user", "root")
+                has_ipmi_ssh = True
+
+            if ssh_keys:
+                # Get first SSH key path as default
+                ssh_key_path_default = ssh_keys[0].get("path")
+                if ssh_key_path_default:
+                    # Convert to DC Overview path if copied
+                    key_name = Path(ssh_key_path_default).name
+                    dc_key_path = Path("/etc/dc-overview/ssh_keys") / key_name
+                    if dc_key_path.exists():
+                        ssh_key_path_default = str(dc_key_path)
+
+        if has_ipmi_ssh:
+            console.print(f"[green]✓[/green] Found SSH credentials from IPMI Monitor (using as defaults)\n")
+
         self.config.ssh.username = questionary.text(
             "SSH username:",
-            default="root",
+            default=ssh_username_default,
             style=custom_style
-        ).ask() or "root"
-        
-        auth_method = questionary.select(
-            "SSH authentication method:",
-            choices=[
-                questionary.Choice("Existing SSH Key (already has access to workers)", value="existing_key"),
-                questionary.Choice("SSH Key (will generate and deploy)", value="key"),
-                questionary.Choice("Password", value="password"),
-            ],
-            style=custom_style
-        ).ask()
+        ).ask() or ssh_username_default
+
+        # Auto-select existing key if we found one from IPMI
+        if ssh_key_path_default:
+            auth_method = questionary.select(
+                "SSH authentication method:",
+                choices=[
+                    questionary.Choice("Existing SSH Key (already has access to workers)", value="existing_key", checked=True),
+                    questionary.Choice("SSH Key (will generate and deploy)", value="key"),
+                    questionary.Choice("Password", value="password"),
+                ],
+                style=custom_style
+            ).ask()
+        else:
+            auth_method = questionary.select(
+                "SSH authentication method:",
+                choices=[
+                    questionary.Choice("Existing SSH Key (already has access to workers)", value="existing_key"),
+                    questionary.Choice("SSH Key (will generate and deploy)", value="key"),
+                    questionary.Choice("Password", value="password"),
+                ],
+                style=custom_style
+            ).ask()
         
         if auth_method == "existing_key":
             self.config.ssh.auth_method = AuthMethod.KEY
-            default_key = os.path.expanduser("~/.ssh/id_rsa")
-            self.config.ssh.key_path = questionary.text(
-                "Path to SSH private key (already authorized on workers):",
-                default=default_key,
-                validate=lambda x: Path(x).exists() or f"Key not found: {x}",
-                style=custom_style
-            ).ask()
+            # Use imported key path from IPMI or default to ~/.ssh/id_rsa
+            default_key = ssh_key_path_default or os.path.expanduser("~/.ssh/id_rsa")
+
+            # If we have a key from IPMI, allow just pressing Enter
+            if ssh_key_path_default:
+                key_input = questionary.text(
+                    "Path to SSH private key (press Enter to use IPMI Monitor key):",
+                    default=default_key,
+                    style=custom_style
+                ).ask()
+                # Accept empty input if we have a default
+                self.config.ssh.key_path = key_input or default_key
+                console.print(f"[dim]Using SSH key from IPMI Monitor: {self.config.ssh.key_path}[/dim]")
+            else:
+                self.config.ssh.key_path = questionary.text(
+                    "Path to SSH private key (already authorized on workers):",
+                    default=default_key,
+                    validate=lambda x: Path(x).exists() or f"Key not found: {x}",
+                    style=custom_style
+                ).ask()
+                console.print("[dim]Will use existing key for SSH connections[/dim]")
+
             self.config.ssh_key_generated = True  # Mark as already set up
-            console.print("[dim]Will use existing key for SSH connections[/dim]")
         elif auth_method == "key":
             self.config.ssh.auth_method = AuthMethod.KEY
             console.print("[dim]A new SSH key will be generated and deployed to workers[/dim]")
@@ -334,11 +388,16 @@ class FleetWizard:
         Returns:
             Tuple of (servers, ssh_keys)
         """
+        # Return cached data if already imported
+        if self._ipmi_data_cache is not None:
+            return self._ipmi_data_cache
+
         ipmi_config_dir = Path("/etc/ipmi-monitor")
         servers = []
         ssh_keys = []
 
         if not ipmi_config_dir.exists():
+            self._ipmi_data_cache = (servers, ssh_keys)
             return servers, ssh_keys
 
         db_path = ipmi_config_dir / "data" / "ipmi_monitor.db"
@@ -391,6 +450,8 @@ class FleetWizard:
                     except Exception as e:
                         console.print(f"[yellow]⚠[/yellow] Could not copy SSH key {key_file.name}: {e}")
 
+        # Cache the result so we don't read database multiple times
+        self._ipmi_data_cache = (servers, ssh_keys)
         return servers, ssh_keys
 
     def _collect_servers(self):
