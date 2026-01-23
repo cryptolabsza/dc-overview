@@ -414,33 +414,104 @@ class FleetWizard:
                 conn = sqlite3.connect(str(db_path))
                 cursor = conn.cursor()
 
-                # Import servers
-                cursor.execute("""
-                    SELECT name, bmc_ip, server_ip, ssh_user, ssh_port
-                    FROM server
-                """)
+                # Import servers - try to get as much data as possible
+                try:
+                    # First check what columns exist in the server table
+                    cursor.execute("PRAGMA table_info(server)")
+                    columns = {row[1]: row[0] for row in cursor.fetchall()}
 
-                for row in cursor.fetchall():
-                    servers.append({
-                        "name": row[0],
-                        "bmc_ip": row[1],
-                        "server_ip": row[2],
-                        "ssh_user": row[3] or "root",
-                        "ssh_port": row[4] or 22
-                    })
+                    # Build query based on available columns
+                    select_cols = []
+                    col_mapping = {}
+
+                    if 'name' in columns:
+                        select_cols.append('name')
+                        col_mapping['name'] = len(select_cols) - 1
+                    if 'hostname' in columns:
+                        select_cols.append('hostname')
+                        col_mapping['hostname'] = len(select_cols) - 1
+                    if 'bmc_ip' in columns:
+                        select_cols.append('bmc_ip')
+                        col_mapping['bmc_ip'] = len(select_cols) - 1
+                    if 'server_ip' in columns:
+                        select_cols.append('server_ip')
+                        col_mapping['server_ip'] = len(select_cols) - 1
+                    if 'ssh_ip' in columns:
+                        select_cols.append('ssh_ip')
+                        col_mapping['ssh_ip'] = len(select_cols) - 1
+                    if 'ssh_user' in columns:
+                        select_cols.append('ssh_user')
+                        col_mapping['ssh_user'] = len(select_cols) - 1
+                    if 'ssh_username' in columns:
+                        select_cols.append('ssh_username')
+                        col_mapping['ssh_username'] = len(select_cols) - 1
+                    if 'ssh_port' in columns:
+                        select_cols.append('ssh_port')
+                        col_mapping['ssh_port'] = len(select_cols) - 1
+
+                    if select_cols:
+                        query = f"SELECT {', '.join(select_cols)} FROM server"
+                        cursor.execute(query)
+
+                        for row in cursor.fetchall():
+                            # Get name (prefer 'name', fallback to 'hostname')
+                            name = None
+                            if 'name' in col_mapping:
+                                name = row[col_mapping['name']]
+                            elif 'hostname' in col_mapping:
+                                name = row[col_mapping['hostname']]
+
+                            # Get server IP (prefer 'server_ip', fallback to 'ssh_ip')
+                            server_ip = None
+                            if 'server_ip' in col_mapping:
+                                server_ip = row[col_mapping['server_ip']]
+                            elif 'ssh_ip' in col_mapping:
+                                server_ip = row[col_mapping['ssh_ip']]
+
+                            # Get SSH user (prefer 'ssh_user', fallback to 'ssh_username')
+                            ssh_user = "root"
+                            if 'ssh_user' in col_mapping:
+                                ssh_user = row[col_mapping['ssh_user']] or "root"
+                            elif 'ssh_username' in col_mapping:
+                                ssh_user = row[col_mapping['ssh_username']] or "root"
+
+                            # Get BMC IP
+                            bmc_ip = None
+                            if 'bmc_ip' in col_mapping:
+                                bmc_ip = row[col_mapping['bmc_ip']]
+
+                            # Get SSH port
+                            ssh_port = 22
+                            if 'ssh_port' in col_mapping:
+                                ssh_port = row[col_mapping['ssh_port']] or 22
+
+                            if name and server_ip:
+                                servers.append({
+                                    "name": name,
+                                    "bmc_ip": bmc_ip,
+                                    "server_ip": server_ip,
+                                    "ssh_user": ssh_user,
+                                    "ssh_port": ssh_port
+                                })
+                except Exception as e:
+                    console.print(f"[yellow]⚠[/yellow] Could not query server table: {e}")
 
                 # Import SSH keys
-                cursor.execute("SELECT id, name, key_path FROM ssh_key")
-                for row in cursor.fetchall():
-                    ssh_keys.append({
-                        "id": row[0],
-                        "name": row[1],
-                        "path": row[2]
-                    })
+                try:
+                    cursor.execute("SELECT id, name, key_path FROM ssh_key")
+                    for row in cursor.fetchall():
+                        ssh_keys.append({
+                            "id": row[0],
+                            "name": row[1],
+                            "path": row[2]
+                        })
+                except Exception as e:
+                    console.print(f"[yellow]⚠[/yellow] Could not query ssh_key table: {e}")
 
                 conn.close()
             except Exception as e:
-                console.print(f"[yellow]⚠[/yellow] Could not read IPMI Monitor database: {e}")
+                console.print(f"[yellow]⚠[/yellow] Could not connect to IPMI Monitor database: {e}")
+                self._ipmi_data_cache = (servers, ssh_keys)
                 return servers, ssh_keys
 
         # Copy SSH keys to DC Overview directory

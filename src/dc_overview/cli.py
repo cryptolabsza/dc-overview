@@ -13,7 +13,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich import print as rprint
 
-from . import __version__
+from . import __version__, get_version_info
 from .wizard import SetupWizard
 from .service import ServiceManager
 from .exporters import ExporterInstaller
@@ -32,7 +32,7 @@ DOCKER_CONFIG_DIR = Path("/etc/dc-overview")
 
 
 @click.group()
-@click.version_option(version=__version__, prog_name="dc-overview")
+@click.version_option(version=__version__, prog_name="dc-overview", message=get_version_info())
 def main():
     """
     DC Overview - GPU Datacenter Monitoring Suite
