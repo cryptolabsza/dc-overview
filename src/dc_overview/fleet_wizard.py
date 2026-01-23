@@ -215,28 +215,35 @@ class FleetWizard:
             style=custom_style
         ).ask() or "admin"
         
-        # IPMI Monitor password (if enabled)
-        if self.config.components.ipmi_monitor:
+        # IPMI Monitor password (only if enabled AND not already installed)
+        if self.config.components.ipmi_monitor and not self._detect_existing_ipmi():
             console.print("\n[bold]IPMI Monitor[/bold]")
+            console.print("[dim]Setting up a new IPMI Monitor installation[/dim]\n")
+
             self.config.ipmi_monitor.admin_password = questionary.password(
                 "IPMI Monitor admin password:",
                 validate=lambda x: len(x) >= 4 or "Password must be at least 4 characters",
                 style=custom_style
             ).ask()
-            
+
             # AI License (optional)
-            console.print("[dim]AI Insights provides intelligent diagnostics (optional)[/dim]")
+            console.print("\n[dim]AI Insights provides intelligent diagnostics (optional)[/dim]")
             has_ai = questionary.confirm(
                 "Do you have a CryptoLabs AI license?",
                 default=False,
                 style=custom_style
             ).ask()
-            
+
             if has_ai:
                 self.config.ipmi_monitor.ai_license_key = questionary.password(
                     "CryptoLabs License Key:",
                     style=custom_style
                 ).ask()
+        elif self.config.components.ipmi_monitor and self._detect_existing_ipmi():
+            # IPMI Monitor already installed - we'll just integrate with it
+            console.print("\n[bold]IPMI Monitor[/bold]")
+            console.print("[green]✓[/green] Using existing IPMI Monitor installation")
+            console.print("[dim]No additional configuration needed - we'll import your servers automatically[/dim]")
         
         # SSH Credentials (for worker deployment)
         console.print("\n[bold]SSH Access (for deploying to workers)[/bold]")
@@ -290,18 +297,18 @@ class FleetWizard:
             style=custom_style
         ).ask() or "22")
         
-        # BMC/IPMI Credentials (if IPMI Monitor enabled)
-        if self.config.components.ipmi_monitor:
+        # BMC/IPMI Credentials (only if IPMI Monitor enabled AND not already installed)
+        if self.config.components.ipmi_monitor and not self._detect_existing_ipmi():
             console.print("\n[bold]BMC/IPMI Access (for server management)[/bold]")
             console.print("[dim]Used to monitor server health via IPMI[/dim]")
             console.print("[dim]You can set per-server credentials later when adding servers[/dim]\n")
-            
+
             self.config.bmc.username = questionary.text(
                 "Default BMC username (for all servers):",
                 default="admin",
                 style=custom_style
             ).ask() or "admin"
-            
+
             self.config.bmc.password = questionary.password(
                 "Default BMC password (for all servers):",
                 style=custom_style
