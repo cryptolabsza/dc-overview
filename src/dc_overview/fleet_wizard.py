@@ -6,8 +6,10 @@ Ask once, deploy everywhere.
 
 import os
 import subprocess
+import shutil
+import sqlite3
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 import questionary
 from questionary import Style
@@ -17,7 +19,7 @@ from rich.table import Table
 from rich.prompt import Prompt
 
 from .fleet_config import (
-    FleetConfig, Server, SSLConfig, SSLMode, SSHCredentials, 
+    FleetConfig, Server, SSLConfig, SSLMode, SSHCredentials,
     BMCCredentials, AuthMethod, ComponentConfig, VastConfig,
     GrafanaConfig, IPMIMonitorConfig, get_local_ip
 )
@@ -99,20 +101,45 @@ class FleetWizard:
         ).ask()
     
     # ============ Step 1: Components ============
-    
+
+    def _detect_existing_ipmi(self) -> bool:
+        """Detect if IPMI Monitor is already installed."""
+        ipmi_config_dir = Path("/etc/ipmi-monitor")
+
+        if not ipmi_config_dir.exists():
+            return False
+
+        # Check for running container
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", "ipmi-monitor"],
+                capture_output=True,
+                timeout=5
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
     def _collect_components(self):
         """Ask which components to install."""
         console.print(Panel(
             "[bold]Step 1: Components to Install[/bold]",
             border_style="blue"
         ))
-        
+
         # Detect GPUs on this machine
         has_local_gpu = self._detect_local_gpus() > 0
-        
+
         if has_local_gpu:
             console.print(f"[dim]Detected GPUs on this machine[/dim]\n")
-        
+
+        # Detect existing IPMI Monitor installation
+        ipmi_already_installed = self._detect_existing_ipmi()
+
+        if ipmi_already_installed:
+            console.print(f"[bold green]✓ IPMI Monitor already installed[/bold green]")
+            console.print(f"[dim]We'll automatically integrate with your existing IPMI Monitor setup.[/dim]\n")
+
         components = questionary.checkbox(
             "Select components to install:",
             choices=[
@@ -122,9 +149,10 @@ class FleetWizard:
                     checked=True
                 ),
                 questionary.Choice(
-                    "IPMI Monitor (BMC/IPMI server monitoring)",
+                    "IPMI Monitor (BMC/IPMI server monitoring)" +
+                    (" - [Already Installed]" if ipmi_already_installed else ""),
                     value="ipmi_monitor",
-                    checked=False
+                    checked=ipmi_already_installed  # Auto-check if already installed
                 ),
                 questionary.Choice(
                     "Vast.ai Integration (Earnings & reliability metrics)",
@@ -292,7 +320,72 @@ class FleetWizard:
         console.print()
     
     # ============ Step 3: Servers ============
-    
+
+    def _import_ipmi_data(self) -> Tuple[List[Dict], List[Dict]]:
+        """Import servers and SSH keys from existing IPMI Monitor installation.
+
+        Returns:
+            Tuple of (servers, ssh_keys)
+        """
+        ipmi_config_dir = Path("/etc/ipmi-monitor")
+        servers = []
+        ssh_keys = []
+
+        if not ipmi_config_dir.exists():
+            return servers, ssh_keys
+
+        db_path = ipmi_config_dir / "data" / "ipmi_monitor.db"
+
+        if db_path.exists():
+            try:
+                conn = sqlite3.connect(str(db_path))
+                cursor = conn.cursor()
+
+                # Import servers
+                cursor.execute("""
+                    SELECT name, bmc_ip, server_ip, ssh_user, ssh_port
+                    FROM server
+                """)
+
+                for row in cursor.fetchall():
+                    servers.append({
+                        "name": row[0],
+                        "bmc_ip": row[1],
+                        "server_ip": row[2],
+                        "ssh_user": row[3] or "root",
+                        "ssh_port": row[4] or 22
+                    })
+
+                # Import SSH keys
+                cursor.execute("SELECT id, name, key_path FROM ssh_key")
+                for row in cursor.fetchall():
+                    ssh_keys.append({
+                        "id": row[0],
+                        "name": row[1],
+                        "path": row[2]
+                    })
+
+                conn.close()
+            except Exception as e:
+                console.print(f"[yellow]⚠[/yellow] Could not read IPMI Monitor database: {e}")
+                return servers, ssh_keys
+
+        # Copy SSH keys to DC Overview directory
+        ssh_keys_dir = ipmi_config_dir / "ssh_keys"
+        if ssh_keys_dir.exists():
+            dc_ssh_dir = Path("/etc/dc-overview/ssh_keys")
+            dc_ssh_dir.mkdir(parents=True, exist_ok=True)
+
+            for key_file in ssh_keys_dir.iterdir():
+                if key_file.is_file():
+                    try:
+                        shutil.copy2(key_file, dc_ssh_dir / key_file.name)
+                        os.chmod(dc_ssh_dir / key_file.name, 0o600)
+                    except Exception as e:
+                        console.print(f"[yellow]⚠[/yellow] Could not copy SSH key {key_file.name}: {e}")
+
+        return servers, ssh_keys
+
     def _collect_servers(self):
         """Collect list of servers to monitor."""
         console.print(Panel(
@@ -301,7 +394,53 @@ class FleetWizard:
             "We'll automatically install exporters on each one.",
             border_style="blue"
         ))
-        
+
+        # If IPMI Monitor is selected and already installed, offer to import
+        imported_servers = []
+        if self.config.components.ipmi_monitor and self._detect_existing_ipmi():
+            console.print("[bold green]✓ Detecting existing IPMI Monitor data...[/bold green]\n")
+
+            servers, ssh_keys = self._import_ipmi_data()
+
+            if servers:
+                console.print(f"[green]✓[/green] Found {len(servers)} servers in IPMI Monitor")
+                if ssh_keys:
+                    console.print(f"[green]✓[/green] Found {len(ssh_keys)} SSH keys")
+                console.print()
+
+                import_ipmi = questionary.confirm(
+                    f"Import {len(servers)} servers from IPMI Monitor?",
+                    default=True,
+                    style=custom_style
+                ).ask()
+
+                if import_ipmi:
+                    # Add imported servers to config
+                    for server_data in servers:
+                        server = Server(
+                            name=server_data["name"],
+                            server_ip=server_data["server_ip"],
+                            bmc_ip=server_data.get("bmc_ip"),
+                            ssh_user=server_data.get("ssh_user", self.config.ssh.username),
+                            ssh_port=server_data.get("ssh_port", self.config.ssh.port)
+                        )
+                        self.config.servers.append(server)
+
+                    imported_servers = servers
+                    console.print(f"[green]✓[/green] Imported {len(servers)} servers\n")
+
+        # If we have imported servers, ask if user wants to add more
+        if imported_servers:
+            add_more = questionary.confirm(
+                "Add more servers?",
+                default=False,
+                style=custom_style
+            ).ask()
+
+            if not add_more:
+                console.print()
+                return
+
         add_method = questionary.select(
             "How would you like to add servers?",
             choices=[
@@ -311,12 +450,12 @@ class FleetWizard:
             ],
             style=custom_style
         ).ask()
-        
+
         if add_method == "import":
             self._import_servers()
         elif add_method == "manual":
             self._add_servers_manual()
-        
+
         console.print()
     
     def _import_servers(self):
