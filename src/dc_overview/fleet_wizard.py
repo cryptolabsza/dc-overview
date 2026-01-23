@@ -352,21 +352,28 @@ class FleetWizard:
         ).ask() or "22")
         
         # BMC/IPMI Credentials (only if IPMI Monitor enabled AND not already installed)
-        if self.config.components.ipmi_monitor and not self._detect_existing_ipmi():
-            console.print("\n[bold]BMC/IPMI Access (for server management)[/bold]")
-            console.print("[dim]Used to monitor server health via IPMI[/dim]")
-            console.print("[dim]You can set per-server credentials later when adding servers[/dim]\n")
+        if self.config.components.ipmi_monitor:
+            if self._detect_existing_ipmi():
+                # IPMI Monitor already has BMC credentials configured
+                console.print("\n[bold]BMC/IPMI Access[/bold]")
+                console.print("[green]✓[/green] Using BMC credentials from existing IPMI Monitor")
+                console.print("[dim]BMC access already configured in IPMI Monitor[/dim]")
+            else:
+                # Setting up new IPMI Monitor - need BMC credentials
+                console.print("\n[bold]BMC/IPMI Access (for server management)[/bold]")
+                console.print("[dim]Used to monitor server health via IPMI[/dim]")
+                console.print("[dim]You can set per-server credentials later when adding servers[/dim]\n")
 
-            self.config.bmc.username = questionary.text(
-                "Default BMC username (for all servers):",
-                default="admin",
-                style=custom_style
-            ).ask() or "admin"
+                self.config.bmc.username = questionary.text(
+                    "Default BMC username (for all servers):",
+                    default="admin",
+                    style=custom_style
+                ).ask() or "admin"
 
-            self.config.bmc.password = questionary.password(
-                "Default BMC password (for all servers):",
-                style=custom_style
-            ).ask()
+                self.config.bmc.password = questionary.password(
+                    "Default BMC password (for all servers):",
+                    style=custom_style
+                ).ask()
         
         # Vast.ai API Key
         if self.config.components.vast_exporter:
