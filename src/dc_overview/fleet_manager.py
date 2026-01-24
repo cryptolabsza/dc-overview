@@ -727,6 +727,8 @@ scrape_configs:
         }
         
         # Wait for Grafana to be ready
+        console.print("[dim]Waiting for Grafana to start...[/dim]")
+        grafana_ready = False
         for i in range(max_wait // 2):
             try:
                 req = urllib.request.Request(
@@ -735,28 +737,41 @@ scrape_configs:
                 )
                 resp = urllib.request.urlopen(req, timeout=5)
                 if resp.status == 200:
+                    grafana_ready = True
+                    # Give it a few more seconds for datasource API
+                    time.sleep(3)
                     break
             except Exception:
                 pass
             time.sleep(2)
         
-        # Try to get existing Prometheus datasource
-        try:
-            req = urllib.request.Request(
-                f"{grafana_url}/api/datasources/name/Prometheus",
-                headers=headers
-            )
-            resp = urllib.request.urlopen(req, timeout=10)
-            data = json.loads(resp.read().decode())
-            return data.get("uid")
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                # Datasource doesn't exist, create it
-                pass
-            else:
-                return None
-        except Exception:
-            pass
+        if not grafana_ready:
+            console.print("[yellow]⚠[/yellow] Grafana not ready after waiting")
+            return None
+        
+        # Try to get existing Prometheus datasource (with retries)
+        for attempt in range(3):
+            try:
+                req = urllib.request.Request(
+                    f"{grafana_url}/api/datasources/name/Prometheus",
+                    headers=headers
+                )
+                resp = urllib.request.urlopen(req, timeout=10)
+                data = json.loads(resp.read().decode())
+                uid = data.get("uid")
+                if uid:
+                    return uid
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    # Datasource doesn't exist, create it
+                    break
+                elif e.code == 401:
+                    # Auth issue, wait and retry
+                    time.sleep(2)
+                    continue
+            except Exception:
+                time.sleep(2)
+                continue
         
         # Create Prometheus datasource
         try:
@@ -953,6 +968,25 @@ scrape_configs:
     def _deploy_ipmi_monitor(self):
         """Deploy IPMI Monitor service."""
         console.print("\n[bold]Step 7: Installing IPMI Monitor[/bold]\n")
+        
+        # Check if already installed
+        ipmi_config_dir = Path("/etc/ipmi-monitor")
+        if (ipmi_config_dir / "servers.yaml").exists():
+            console.print("[green]✓[/green] IPMI Monitor already installed")
+            console.print("[dim]Skipping installation - using existing configuration[/dim]")
+            return
+        
+        # Also check if the container is running
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", "ipmi-monitor"],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                console.print("[green]✓[/green] IPMI Monitor container already running")
+                return
+        except Exception:
+            pass
         
         # Install ipmi-monitor from pip
         if not self._install_ipmi_monitor_package():
@@ -1157,11 +1191,8 @@ WantedBy=multi-user.target
         modified = False
         
         # Services to add (only if not already present)
+        # Note: dc-overview is a CLI tool, not a web app - no route needed
         services_to_add = []
-        
-        # DC Overview route
-        if '/dc/' not in content:
-            services_to_add.append(('dc-overview', '/dc/', 'dc-overview', 5001))
         
         # Grafana route
         if '/grafana/' not in content:
@@ -1265,8 +1296,7 @@ WantedBy=multi-user.target
                 console.print(f"[yellow]⚠[/yellow] Could not reload proxy: {e}")
         
         domain = self.config.ssl.domain or "your-server"
-        console.print(f"\n  DC Overview: [cyan]https://{domain}/dc/[/cyan]")
-        console.print(f"  Grafana: [cyan]https://{domain}/grafana/[/cyan]")
+        console.print(f"\n  Grafana: [cyan]https://{domain}/grafana/[/cyan]")
         console.print(f"  Prometheus: [cyan]https://{domain}/prometheus/[/cyan]")
     
     def _update_api_services_endpoint(self, nginx_path: Path, content: str = None):
@@ -1278,10 +1308,10 @@ WantedBy=multi-user.target
         
         # Build the services JSON with all services
         # Check which containers are running
+        # Note: dc-overview is a CLI tool, not a running service
         services = {}
         containers_to_check = [
             ('ipmi-monitor', 'ipmi-monitor'),
-            ('dc-overview', 'dc-overview'),
             ('grafana', 'grafana'),
             ('prometheus', 'prometheus'),
         ]
