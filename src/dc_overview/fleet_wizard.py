@@ -476,10 +476,22 @@ class FleetWizard:
             except Exception as e:
                 console.print(f"[yellow]⚠[/yellow] Could not read servers.yaml: {e}")
 
-        # Try database if no servers from YAML
-        db_path = ipmi_config_dir / "data" / "ipmi_monitor.db"
-
-        if db_path.exists():
+        # Try database for SSH keys (always check, even if YAML loaded servers)
+        # Check multiple possible database locations
+        db_paths = [
+            ipmi_config_dir / "data" / "ipmi_monitor.db",
+            ipmi_config_dir / "ipmi_monitor.db",
+            Path("/var/lib/ipmi-monitor/ipmi_monitor.db"),
+        ]
+        
+        db_path = None
+        for p in db_paths:
+            if p.exists():
+                db_path = p
+                console.print(f"[dim]Found IPMI Monitor database: {db_path}[/dim]")
+                break
+        
+        if db_path:
             try:
                 conn = sqlite3.connect(str(db_path))
                 cursor = conn.cursor()
@@ -570,24 +582,36 @@ class FleetWizard:
                 # ipmi-monitor stores key_content in DB, we need to write to file
                 try:
                     cursor.execute("SELECT id, name, key_content FROM ssh_key")
-                    dc_ssh_dir = Path("/etc/dc-overview/ssh_keys")
-                    dc_ssh_dir.mkdir(parents=True, exist_ok=True)
+                    rows = cursor.fetchall()
+                    console.print(f"[dim]Found {len(rows)} SSH keys in database[/dim]")
                     
-                    for row in cursor.fetchall():
-                        key_id, key_name, key_content = row
-                        if key_content:
-                            # Write key content to file
-                            safe_name = key_name.replace(" ", "-").lower()
-                            key_file = dc_ssh_dir / f"{safe_name}.pem"
-                            key_file.write_text(key_content.strip() + "\n")
-                            os.chmod(key_file, 0o600)
-                            
-                            ssh_keys.append({
-                                "id": key_id,
-                                "name": key_name,
-                                "path": str(key_file)
-                            })
-                            console.print(f"[green]✓[/green] Imported SSH key: {key_name}")
+                    if rows:
+                        dc_ssh_dir = Path("/etc/dc-overview/ssh_keys")
+                        dc_ssh_dir.mkdir(parents=True, exist_ok=True)
+                        
+                        for row in rows:
+                            key_id, key_name, key_content = row
+                            if key_content:
+                                # Write key content to file - preserve exact format
+                                safe_name = key_name.replace(" ", "-").lower()
+                                key_file = dc_ssh_dir / f"{safe_name}.pem"
+                                
+                                # Normalize line endings and ensure proper format
+                                key_content_clean = key_content.replace('\r\n', '\n').strip()
+                                if not key_content_clean.endswith('\n'):
+                                    key_content_clean += '\n'
+                                
+                                key_file.write_text(key_content_clean)
+                                os.chmod(key_file, 0o600)
+                                
+                                ssh_keys.append({
+                                    "id": key_id,
+                                    "name": key_name,
+                                    "path": str(key_file)
+                                })
+                                console.print(f"[green]✓[/green] Imported SSH key: {key_name} -> {key_file}")
+                            else:
+                                console.print(f"[yellow]⚠[/yellow] SSH key '{key_name}' has no content")
                 except Exception as e:
                     console.print(f"[yellow]⚠[/yellow] Could not import SSH keys from database: {e}")
 
