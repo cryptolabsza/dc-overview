@@ -566,17 +566,30 @@ class FleetWizard:
                 except Exception as e:
                     console.print(f"[yellow]⚠[/yellow] Could not query server table: {e}")
 
-                # Import SSH keys
+                # Import SSH keys from database
+                # ipmi-monitor stores key_content in DB, we need to write to file
                 try:
-                    cursor.execute("SELECT id, name, key_path FROM ssh_key")
+                    cursor.execute("SELECT id, name, key_content FROM ssh_key")
+                    dc_ssh_dir = Path("/etc/dc-overview/ssh_keys")
+                    dc_ssh_dir.mkdir(parents=True, exist_ok=True)
+                    
                     for row in cursor.fetchall():
-                        ssh_keys.append({
-                            "id": row[0],
-                            "name": row[1],
-                            "path": row[2]
-                        })
+                        key_id, key_name, key_content = row
+                        if key_content:
+                            # Write key content to file
+                            safe_name = key_name.replace(" ", "-").lower()
+                            key_file = dc_ssh_dir / f"{safe_name}.pem"
+                            key_file.write_text(key_content.strip() + "\n")
+                            os.chmod(key_file, 0o600)
+                            
+                            ssh_keys.append({
+                                "id": key_id,
+                                "name": key_name,
+                                "path": str(key_file)
+                            })
+                            console.print(f"[green]✓[/green] Imported SSH key: {key_name}")
                 except Exception as e:
-                    console.print(f"[yellow]⚠[/yellow] Could not query ssh_key table: {e}")
+                    console.print(f"[yellow]⚠[/yellow] Could not import SSH keys from database: {e}")
 
                 conn.close()
             except Exception as e:
