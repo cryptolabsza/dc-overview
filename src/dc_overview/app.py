@@ -121,6 +121,12 @@ dc_gpu_total = Gauge('dc_overview_gpu_total', 'Total GPUs across all servers', r
 # AUTHENTICATION
 # =============================================================================
 
+# Proxy authentication headers (set by cryptolabs-proxy)
+PROXY_AUTH_HEADER_USER = 'X-Fleet-Auth-User'
+PROXY_AUTH_HEADER_ROLE = 'X-Fleet-Auth-Role'
+PROXY_AUTH_HEADER_TOKEN = 'X-Fleet-Auth-Token'
+PROXY_AUTH_HEADER_FLAG = 'X-Fleet-Authenticated'
+
 def get_setting(key, default=None):
     """Get a setting from database."""
     setting = AppSettings.query.filter_by(key=key).first()
@@ -136,8 +142,32 @@ def set_setting(key, value):
         db.session.add(setting)
     db.session.commit()
 
+def is_proxy_authenticated():
+    """
+    Check if request came through an authenticated proxy.
+    
+    When running behind cryptolabs-proxy with unified auth,
+    the proxy forwards authentication headers that we can trust.
+    """
+    # Check if the proxy auth flag is set
+    if request.headers.get(PROXY_AUTH_HEADER_FLAG) == 'true':
+        username = request.headers.get(PROXY_AUTH_HEADER_USER)
+        if username:
+            # Auto-authenticate the session
+            if not session.get('authenticated'):
+                session['authenticated'] = True
+                session['username'] = username
+                session['role'] = request.headers.get(PROXY_AUTH_HEADER_ROLE, 'admin')
+                session['auth_via'] = 'fleet_proxy'
+            return True
+    return False
+
 def check_auth():
-    """Check if user is authenticated."""
+    """Check if user is authenticated (via session or proxy)."""
+    # First check for proxy authentication
+    if is_proxy_authenticated():
+        return True
+    # Then check session
     return session.get('authenticated', False)
 
 def login_required(f):
@@ -150,6 +180,10 @@ def login_required(f):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
+
+def is_running_behind_proxy():
+    """Check if we're running behind the fleet proxy."""
+    return request.headers.get(PROXY_AUTH_HEADER_FLAG) == 'true'
 
 # =============================================================================
 # API ROUTES
