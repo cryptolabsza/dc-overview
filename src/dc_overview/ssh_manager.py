@@ -43,6 +43,95 @@ class SSHManager:
         """Check if SSH key pair already exists."""
         return self.key_path.exists() and self.pub_key_path.exists()
     
+    def validate_key(self, key_path: str = None) -> Tuple[bool, str]:
+        """
+        Validate that an SSH key file is properly formatted and usable.
+        
+        Args:
+            key_path: Path to SSH key file. Uses fleet key if not provided.
+        
+        Returns:
+            Tuple of (is_valid, message)
+        """
+        ssh_key = Path(key_path) if key_path else self.key_path
+        
+        if not ssh_key.exists():
+            return False, f"SSH key not found: {ssh_key}"
+        
+        # Check file permissions (should be 600 or more restrictive)
+        try:
+            mode = ssh_key.stat().st_mode & 0o777
+            if mode > 0o600:
+                # Try to fix permissions
+                try:
+                    os.chmod(ssh_key, 0o600)
+                except Exception:
+                    return False, f"SSH key has insecure permissions ({oct(mode)}). Should be 600."
+        except Exception as e:
+            return False, f"Cannot check key permissions: {e}"
+        
+        # Use ssh-keygen to validate the key format
+        cmd = [
+            "ssh-keygen",
+            "-l",  # Show fingerprint
+            "-f", str(ssh_key)
+        ]
+        
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            
+            if result.returncode == 0:
+                # Key is valid - extract fingerprint info
+                fingerprint = result.stdout.strip()
+                return True, f"Valid key: {fingerprint}"
+            else:
+                # Try to determine the specific error
+                error_msg = result.stderr.strip() or result.stdout.strip()
+                
+                if "invalid format" in error_msg.lower() or "is not a" in error_msg.lower():
+                    return False, f"SSH key is corrupted or invalid format: {error_msg}"
+                elif "error in libcrypto" in error_msg.lower():
+                    return False, "SSH key is corrupted (libcrypto error). The key file may be truncated or malformed."
+                else:
+                    return False, f"SSH key validation failed: {error_msg}"
+                    
+        except subprocess.TimeoutExpired:
+            return False, "SSH key validation timed out"
+        except FileNotFoundError:
+            return False, "ssh-keygen not found - cannot validate key"
+        except Exception as e:
+            return False, f"SSH key validation error: {e}"
+    
+    def validate_key_and_test_connection(
+        self,
+        key_path: str,
+        test_host: str,
+        username: str = "root",
+        port: int = 22,
+    ) -> Tuple[bool, str]:
+        """
+        Validate SSH key AND test it can connect to a host.
+        
+        Args:
+            key_path: Path to SSH key file
+            test_host: IP or hostname to test connection
+            username: SSH username
+            port: SSH port
+        
+        Returns:
+            Tuple of (success, message)
+        """
+        # First validate the key format
+        is_valid, msg = self.validate_key(key_path)
+        if not is_valid:
+            return False, msg
+        
+        # Now test actual connection
+        if self.test_connection(test_host, username, port, key_path):
+            return True, f"SSH key validated and connection to {test_host} successful"
+        else:
+            return False, f"SSH key is valid but cannot connect to {test_host}. Check if key is authorized on the server."
+    
     def generate_key(self, force: bool = False) -> Tuple[str, str]:
         """
         Generate SSH key pair for fleet management.

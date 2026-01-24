@@ -121,13 +121,68 @@ class DeployManager:
     
     # ============ SSH Key Management ============
     
+    def validate_ssh_key(self, key_path: Optional[Path] = None) -> Tuple[bool, str]:
+        """
+        Validate that an SSH key file is properly formatted and usable.
+        
+        Args:
+            key_path: Path to SSH key file. Uses deploy key if not provided.
+        
+        Returns:
+            Tuple of (is_valid, message)
+        """
+        ssh_key = key_path or self.ssh_key_path
+        
+        if not ssh_key.exists():
+            return False, f"SSH key not found: {ssh_key}"
+        
+        # Check file permissions
+        try:
+            mode = ssh_key.stat().st_mode & 0o777
+            if mode > 0o600:
+                try:
+                    os.chmod(ssh_key, 0o600)
+                except Exception:
+                    return False, f"SSH key has insecure permissions ({oct(mode)})"
+        except Exception as e:
+            return False, f"Cannot check key permissions: {e}"
+        
+        # Use ssh-keygen to validate the key format
+        cmd = ["ssh-keygen", "-l", "-f", str(ssh_key)]
+        
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            
+            if result.returncode == 0:
+                fingerprint = result.stdout.strip()
+                return True, f"Valid key: {fingerprint}"
+            else:
+                error_msg = result.stderr.strip() or result.stdout.strip()
+                if "error in libcrypto" in error_msg.lower():
+                    return False, "SSH key is corrupted (libcrypto error)"
+                return False, f"SSH key validation failed: {error_msg}"
+                    
+        except subprocess.TimeoutExpired:
+            return False, "SSH key validation timed out"
+        except FileNotFoundError:
+            return False, "ssh-keygen not found"
+        except Exception as e:
+            return False, f"SSH key validation error: {e}"
+    
     def generate_ssh_key(self) -> Tuple[str, str]:
         """Generate a new SSH key pair for deployment."""
         if self.ssh_key_path.exists():
-            console.print(f"[yellow]SSH key already exists:[/yellow] {self.ssh_key_path}")
-            if not Confirm.ask("Generate new key? (overwrites existing)", default=False):
-                pub_key = (self.ssh_key_path.with_suffix(".pub")).read_text().strip()
-                return str(self.ssh_key_path), pub_key
+            # Validate existing key before using it
+            is_valid, msg = self.validate_ssh_key()
+            if is_valid:
+                console.print(f"[green]✓[/green] Existing SSH key is valid: {self.ssh_key_path}")
+                if not Confirm.ask("Generate new key? (overwrites existing)", default=False):
+                    pub_key = (self.ssh_key_path.with_suffix(".pub")).read_text().strip()
+                    return str(self.ssh_key_path), pub_key
+            else:
+                console.print(f"[yellow]⚠[/yellow] Existing SSH key is invalid: {msg}")
+                if not Confirm.ask("Generate new key to replace it?", default=True):
+                    raise ValueError(f"Cannot use invalid SSH key: {msg}")
         
         console.print("[cyan]Generating SSH key pair...[/cyan]")
         

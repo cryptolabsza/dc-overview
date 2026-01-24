@@ -310,17 +310,95 @@ class FleetWizard:
                         has_complete_ipmi_ssh = True
 
         if has_complete_ipmi_ssh:
-            # We have everything from IPMI - just use it!
+            # We have everything from IPMI - validate the key first!
             console.print("\n[bold]SSH Access[/bold]")
-            console.print(f"[green]✓[/green] Using SSH credentials from IPMI Monitor")
-            console.print(f"[dim]Username: {ssh_username_default}[/dim]")
-            console.print(f"[dim]SSH Key: {ssh_key_path_default}[/dim]\n")
-
-            self.config.ssh.username = ssh_username_default
-            self.config.ssh.auth_method = AuthMethod.KEY
-            self.config.ssh.key_path = ssh_key_path_default
-            self.config.ssh_key_generated = True
-            # Skip all the auth method handling below
+            console.print(f"[dim]Validating SSH key from IPMI Monitor...[/dim]")
+            
+            # Validate the SSH key
+            from .ssh_manager import SSHManager
+            ssh_mgr = SSHManager(self.config_dir)
+            key_valid, key_msg = ssh_mgr.validate_key(ssh_key_path_default)
+            
+            if key_valid:
+                console.print(f"[green]✓[/green] SSH key validated")
+                console.print(f"[dim]Username: {ssh_username_default}[/dim]")
+                console.print(f"[dim]SSH Key: {ssh_key_path_default}[/dim]")
+                
+                # Test connection to first server if we have any
+                if servers:
+                    first_server = servers[0]
+                    test_ip = first_server.get('server_ip') or first_server.get('bmc_ip')
+                    if test_ip:
+                        console.print(f"[dim]Testing connection to {first_server.get('name', test_ip)}...[/dim]")
+                        if ssh_mgr.test_connection(test_ip, ssh_username_default, 22, ssh_key_path_default):
+                            console.print(f"[green]✓[/green] SSH connection test successful")
+                        else:
+                            console.print(f"[yellow]⚠[/yellow] Could not connect to {test_ip}")
+                            console.print(f"[dim]  The key may not be authorized on this server.[/dim]")
+                            console.print(f"[dim]  Deployment will attempt to use password fallback if needed.[/dim]")
+                
+                console.print()
+                self.config.ssh.username = ssh_username_default
+                self.config.ssh.auth_method = AuthMethod.KEY
+                self.config.ssh.key_path = ssh_key_path_default
+                self.config.ssh_key_generated = True
+            else:
+                # Key is invalid/corrupted
+                console.print(f"[red]✗[/red] SSH key validation failed")
+                console.print(f"[yellow]  {key_msg}[/yellow]")
+                console.print()
+                
+                # Ask user what to do
+                fix_action = questionary.select(
+                    "How would you like to proceed?",
+                    choices=[
+                        questionary.Choice("Use a different SSH key", value="different_key"),
+                        questionary.Choice("Use SSH password instead", value="password"),
+                        questionary.Choice("Generate a new SSH key", value="generate"),
+                    ],
+                    style=custom_style
+                ).ask()
+                
+                if fix_action == "different_key":
+                    new_key_path = questionary.text(
+                        "Path to SSH private key:",
+                        default=os.path.expanduser("~/.ssh/id_rsa"),
+                        style=custom_style
+                    ).ask()
+                    
+                    # Validate the new key
+                    key_valid, key_msg = ssh_mgr.validate_key(new_key_path)
+                    if key_valid:
+                        console.print(f"[green]✓[/green] SSH key validated")
+                        self.config.ssh.auth_method = AuthMethod.KEY
+                        self.config.ssh.key_path = new_key_path
+                        self.config.ssh_key_generated = True
+                    else:
+                        console.print(f"[red]✗[/red] {key_msg}")
+                        console.print("[yellow]Falling back to password authentication[/yellow]")
+                        self.config.ssh.auth_method = AuthMethod.PASSWORD
+                        self.config.ssh.password = questionary.password(
+                            "SSH password:",
+                            style=custom_style
+                        ).ask()
+                
+                elif fix_action == "password":
+                    self.config.ssh.auth_method = AuthMethod.PASSWORD
+                    self.config.ssh.password = questionary.password(
+                        "SSH password (for all workers):",
+                        style=custom_style
+                    ).ask()
+                
+                else:  # generate
+                    self.config.ssh.auth_method = AuthMethod.KEY
+                    console.print("[dim]A new SSH key will be generated and deployed to workers[/dim]")
+                    self.config.ssh.password = questionary.password(
+                        "SSH password (needed once to deploy the new key):",
+                        style=custom_style
+                    ).ask()
+                
+                self.config.ssh.username = ssh_username_default
+                has_complete_ipmi_ssh = False  # Fall through to normal handling if needed
         else:
             # Need to ask for SSH credentials
             console.print("\n[bold]SSH Access (for deploying to workers)[/bold]")
@@ -358,6 +436,9 @@ class FleetWizard:
                 self.config.ssh.auth_method = AuthMethod.KEY
                 # Use imported key path from IPMI or default to ~/.ssh/id_rsa
                 default_key = ssh_key_path_default or os.path.expanduser("~/.ssh/id_rsa")
+                
+                from .ssh_manager import SSHManager
+                ssh_mgr = SSHManager(self.config_dir)
 
                 # If we have a key from IPMI, allow just pressing Enter
                 if ssh_key_path_default:
@@ -368,7 +449,6 @@ class FleetWizard:
                     ).ask()
                     # Accept empty input if we have a default
                     self.config.ssh.key_path = key_input or default_key
-                    console.print(f"[dim]Using SSH key from IPMI Monitor: {self.config.ssh.key_path}[/dim]")
                 else:
                     self.config.ssh.key_path = questionary.text(
                         "Path to SSH private key (already authorized on workers):",
@@ -376,9 +456,42 @@ class FleetWizard:
                         validate=lambda x: Path(x).exists() or f"Key not found: {x}",
                         style=custom_style
                     ).ask()
-                    console.print("[dim]Will use existing key for SSH connections[/dim]")
-
-                self.config.ssh_key_generated = True  # Mark as already set up
+                
+                # Validate the SSH key
+                console.print(f"[dim]Validating SSH key...[/dim]")
+                key_valid, key_msg = ssh_mgr.validate_key(self.config.ssh.key_path)
+                
+                if key_valid:
+                    console.print(f"[green]✓[/green] SSH key validated")
+                    self.config.ssh_key_generated = True  # Mark as already set up
+                else:
+                    console.print(f"[red]✗[/red] SSH key validation failed: {key_msg}")
+                    
+                    # Offer alternatives
+                    retry = questionary.confirm(
+                        "Try a different key?",
+                        default=True,
+                        style=custom_style
+                    ).ask()
+                    
+                    if retry:
+                        new_key_path = questionary.text(
+                            "Path to SSH private key:",
+                            default=os.path.expanduser("~/.ssh/id_rsa"),
+                            style=custom_style
+                        ).ask()
+                        
+                        key_valid, key_msg = ssh_mgr.validate_key(new_key_path)
+                        if key_valid:
+                            console.print(f"[green]✓[/green] SSH key validated")
+                            self.config.ssh.key_path = new_key_path
+                            self.config.ssh_key_generated = True
+                        else:
+                            console.print(f"[red]✗[/red] {key_msg}")
+                            console.print("[yellow]⚠[/yellow] Proceeding anyway - deployment may fail")
+                            self.config.ssh_key_generated = True
+                    else:
+                        console.print("[yellow]⚠[/yellow] Proceeding with potentially invalid key")
             elif auth_method == "key":
                 self.config.ssh.auth_method = AuthMethod.KEY
                 console.print("[dim]A new SSH key will be generated and deployed to workers[/dim]")
