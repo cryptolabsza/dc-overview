@@ -1130,36 +1130,108 @@ WantedBy=multi-user.target
         )
     
     def _integrate_with_proxy(self):
-        """Integrate with existing cryptolabs-proxy - just ensure network connectivity."""
+        """Integrate with existing cryptolabs-proxy - add routes for dc-overview services."""
+        import re
+        
         console.print("\n[bold]Step 9: Integrating with CryptoLabs Proxy[/bold]\n")
         console.print("[green]✓[/green] Using existing CryptoLabs Proxy")
-        console.print("[dim]The proxy auto-detects running containers on the cryptolabs network.[/dim]\n")
+        console.print("[dim]Adding routes for DC Overview, Grafana, and Prometheus.[/dim]\n")
         
-        # Ensure dc-overview containers are on the cryptolabs network
-        containers = ["dc-overview", "prometheus", "grafana"]
+        # Find the existing nginx.conf
+        nginx_paths = [
+            Path("/etc/ipmi-monitor/nginx.conf"),
+            Path("/etc/cryptolabs-proxy/nginx.conf"),
+        ]
+        
+        nginx_path = None
+        for path in nginx_paths:
+            if path.exists():
+                nginx_path = path
+                break
+        
+        if not nginx_path:
+            console.print("[yellow]⚠[/yellow] Could not find proxy nginx config")
+            return
+        
+        content = nginx_path.read_text()
+        modified = False
+        
+        # Services to add (only if not already present)
+        services_to_add = []
+        
+        # DC Overview route
+        if '/dc/' not in content:
+            services_to_add.append(('dc-overview', '/dc/', 'dc-overview', 5001))
+        
+        # Grafana route
+        if '/grafana/' not in content:
+            services_to_add.append(('Grafana', '/grafana/', 'grafana', 3000))
+        
+        # Prometheus route
+        if '/prometheus/' not in content:
+            services_to_add.append(('Prometheus', '/prometheus/', 'prometheus', 9090))
+        
+        if not services_to_add:
+            console.print("[green]✓[/green] All service routes already configured")
+        else:
+            # Build location blocks for missing services
+            location_blocks = ""
+            for display_name, path, container, port in services_to_add:
+                location_blocks += f'''
+        # {display_name}
+        location {path} {{
+            proxy_pass http://{container}:{port}/;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Script-Name {path.rstrip('/')};
+            proxy_read_timeout 300s;
+            proxy_connect_timeout 10s;
+        }}
+'''
+            
+            # Find insertion point - before the root location / block
+            # Look for "location / {" that serves the landing page
+            root_location_pattern = r'(\s+# Fleet Management Landing Page.*?\n\s+location / \{)'
+            match = re.search(root_location_pattern, content, re.DOTALL)
+            
+            if match:
+                insert_pos = match.start()
+                new_content = content[:insert_pos] + location_blocks + content[insert_pos:]
+            else:
+                # Try simpler pattern - find last location block before closing braces
+                alt_pattern = r'(\s+location / \{[^}]+\})\s*\n\s*\}\s*\n\}'
+                match = re.search(alt_pattern, content, re.DOTALL)
+                if match:
+                    insert_pos = match.start()
+                    new_content = content[:insert_pos] + location_blocks + content[insert_pos:]
+                else:
+                    console.print("[yellow]⚠[/yellow] Could not find insertion point")
+                    console.print("[dim]Please add routes manually to nginx.conf[/dim]")
+                    return
+            
+            # Write updated config
+            nginx_path.write_text(new_content)
+            modified = True
+            
+            for display_name, path, _, _ in services_to_add:
+                console.print(f"[green]✓[/green] Added {path} route for {display_name}")
+        
+        # Ensure containers are on the cryptolabs network
         network = "cryptolabs"
+        containers = ["prometheus", "grafana"]
         
-        # Check if network exists
-        result = subprocess.run(
-            ["docker", "network", "inspect", network],
-            capture_output=True, text=True
-        )
-        
-        if result.returncode != 0:
-            console.print(f"[yellow]⚠[/yellow] Network '{network}' not found")
-            console.print("[dim]Creating cryptolabs network...[/dim]")
-            subprocess.run(["docker", "network", "create", network], capture_output=True)
-        
-        # Connect containers to the network (if not already)
         for container in containers:
             try:
-                # Check if container exists
                 result = subprocess.run(
                     ["docker", "inspect", container],
                     capture_output=True, text=True
                 )
                 if result.returncode == 0:
-                    # Connect to network (ignores if already connected)
                     subprocess.run(
                         ["docker", "network", "connect", network, container],
                         capture_output=True
@@ -1169,21 +1241,29 @@ WantedBy=multi-user.target
         
         console.print("[green]✓[/green] Containers connected to cryptolabs network")
         
-        # Reload the proxy to pick up new services
-        try:
-            result = subprocess.run(
-                ["docker", "exec", "cryptolabs-proxy", "nginx", "-s", "reload"],
-                capture_output=True, text=True, timeout=10
-            )
-            if result.returncode == 0:
-                console.print("[green]✓[/green] Proxy reloaded to detect new services")
-        except Exception:
-            pass
+        # Reload nginx in the proxy container
+        if modified or services_to_add:
+            try:
+                result = subprocess.run(
+                    ["docker", "exec", "cryptolabs-proxy", "nginx", "-t"],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0:
+                    subprocess.run(
+                        ["docker", "exec", "cryptolabs-proxy", "nginx", "-s", "reload"],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    console.print("[green]✓[/green] Proxy configuration reloaded")
+                else:
+                    console.print(f"[yellow]⚠[/yellow] Nginx config test failed: {result.stderr[:100]}")
+                    console.print("[dim]Run: docker exec cryptolabs-proxy nginx -t[/dim]")
+            except Exception as e:
+                console.print(f"[yellow]⚠[/yellow] Could not reload proxy: {e}")
         
         domain = self.config.ssl.domain or "your-server"
-        console.print(f"\n[dim]DC Overview available at: https://{domain}/dc/[/dim]")
-        console.print(f"[dim]Grafana available at: https://{domain}/grafana/[/dim]")
-        console.print(f"[dim]Prometheus available at: https://{domain}/prometheus/[/dim]")
+        console.print(f"\n  DC Overview: [cyan]https://{domain}/dc/[/cyan]")
+        console.print(f"  Grafana: [cyan]https://{domain}/grafana/[/cyan]")
+        console.print(f"  Prometheus: [cyan]https://{domain}/prometheus/[/cyan]")
     
     # ============ Completion ============
     
