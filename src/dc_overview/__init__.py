@@ -24,7 +24,7 @@ __git_branch__ = None
 __build_time__ = None
 
 def _load_build_info():
-    """Load build info from _build_info.py if available."""
+    """Load build info from _build_info.py if available, or detect from git."""
     global __git_commit__, __git_branch__, __build_time__
     try:
         from . import _build_info
@@ -32,7 +32,33 @@ def _load_build_info():
         __git_branch__ = getattr(_build_info, 'GIT_BRANCH', None)
         __build_time__ = getattr(_build_info, 'BUILD_TIME', None)
     except ImportError:
-        pass
+        # Try to detect from git if in development
+        try:
+            import subprocess
+            from pathlib import Path
+
+            # Check if we're in a git repo
+            pkg_dir = Path(__file__).parent
+            git_dir = pkg_dir.parent.parent / '.git'
+
+            if git_dir.exists():
+                # Get current branch
+                result = subprocess.run(
+                    ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+                    capture_output=True, text=True, timeout=2, cwd=pkg_dir
+                )
+                if result.returncode == 0:
+                    __git_branch__ = result.stdout.strip()
+
+                # Get current commit
+                result = subprocess.run(
+                    ['git', 'rev-parse', 'HEAD'],
+                    capture_output=True, text=True, timeout=2, cwd=pkg_dir
+                )
+                if result.returncode == 0:
+                    __git_commit__ = result.stdout.strip()
+        except Exception:
+            pass
 
 _load_build_info()
 
