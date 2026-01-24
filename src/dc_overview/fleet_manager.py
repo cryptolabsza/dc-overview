@@ -1173,7 +1173,11 @@ WantedBy=multi-user.target
         
         if not services_to_add:
             console.print("[green]✓[/green] All service routes already configured")
-        else:
+        
+        # Update /api/services endpoint to include all running services
+        self._update_api_services_endpoint(nginx_path, content if not services_to_add else None)
+        
+        if services_to_add:
             # Build location blocks for missing services
             location_blocks = ""
             for display_name, path, container, port in services_to_add:
@@ -1264,6 +1268,51 @@ WantedBy=multi-user.target
         console.print(f"\n  DC Overview: [cyan]https://{domain}/dc/[/cyan]")
         console.print(f"  Grafana: [cyan]https://{domain}/grafana/[/cyan]")
         console.print(f"  Prometheus: [cyan]https://{domain}/prometheus/[/cyan]")
+    
+    def _update_api_services_endpoint(self, nginx_path: Path, content: str = None):
+        """Update /api/services endpoint to include all running services."""
+        import re
+        
+        if content is None:
+            content = nginx_path.read_text()
+        
+        # Build the services JSON with all services
+        # Check which containers are running
+        services = {}
+        containers_to_check = [
+            ('ipmi-monitor', 'ipmi-monitor'),
+            ('dc-overview', 'dc-overview'),
+            ('grafana', 'grafana'),
+            ('prometheus', 'prometheus'),
+        ]
+        
+        for service_name, container_name in containers_to_check:
+            try:
+                result = subprocess.run(
+                    ["docker", "inspect", container_name, "--format", "{{.State.Running}}"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0 and result.stdout.strip() == "true":
+                    services[service_name] = {"running": True}
+            except Exception:
+                pass
+        
+        # Build JSON string (escape for nginx)
+        import json
+        services_json = json.dumps(services).replace('"', '\\"')
+        
+        # Find and replace the /api/services location block
+        api_services_pattern = r'(location /api/services \{[^}]+\})'
+        
+        new_api_services = f'''location /api/services {{
+            default_type application/json;
+            return 200 '{services_json}';
+        }}'''
+        
+        if re.search(api_services_pattern, content):
+            new_content = re.sub(api_services_pattern, new_api_services, content)
+            nginx_path.write_text(new_content)
+            console.print(f"[green]✓[/green] Updated /api/services with {len(services)} services")
     
     # ============ Completion ============
     
