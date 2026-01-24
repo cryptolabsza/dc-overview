@@ -17,14 +17,14 @@ console = Console()
 
 # Latest versions
 NODE_EXPORTER_VERSION = "1.7.0"
-DC_EXPORTER_VERSION = "1.0.0"
+DC_EXPORTER_RS_VERSION = "0.1.0"
 
 # Download URLs
 NODE_EXPORTER_URL = f"https://github.com/prometheus/node_exporter/releases/download/v{NODE_EXPORTER_VERSION}/node_exporter-{NODE_EXPORTER_VERSION}.linux-amd64.tar.gz"
 
-# DC Exporter - try pre-compiled binary first, fall back to source compilation
-DC_EXPORTER_BINARY_URL = f"https://github.com/cryptolabsza/dc-exporter/releases/download/v{DC_EXPORTER_VERSION}/dc-exporter-c"
-# Source is bundled with the package for compilation if binary unavailable
+# DC Exporter RS (Rust version) - preferred
+DC_EXPORTER_RS_URL = "https://github.com/cryptolabsza/dc-exporter-releases/releases/latest/download/dc-exporter-rs"
+DC_EXPORTER_RS_DEB_URL = f"https://github.com/cryptolabsza/dc-exporter-releases/releases/latest/download/dc-exporter-rs_{DC_EXPORTER_RS_VERSION}_amd64.deb"
 
 
 # Systemd service templates
@@ -62,37 +62,24 @@ WantedBy=multi-user.target
 """
 
 DC_EXPORTER_SERVICE = """[Unit]
-Description=DC Exporter - VRAM/Hotspot Temperature Metrics
-After=network.target
+Description=DC Exporter - GPU Metrics for Prometheus (Rust)
+Documentation=https://github.com/cryptolabsza/dc-exporter-rs
+After=network.target nvidia-persistenced.service
 
 [Service]
 Type=simple
-ExecStart=/opt/dc-exporter/run.sh
+ExecStart=/usr/local/bin/dc-exporter-rs --port 9835
 Restart=always
 RestartSec=5
-WorkingDirectory=/opt/dc-exporter
 
 [Install]
 WantedBy=multi-user.target
 """
 
+# Legacy run script (deprecated, kept for backwards compatibility)
 DC_EXPORTER_RUN_SCRIPT = '''#!/bin/bash
-cd /opt/dc-exporter
-
-# Kill any existing process on port 9835
-fuser -k 9835/tcp 2>/dev/null || true
-sleep 1
-
-# Run the collector in background loop to update metrics.txt
-(
-    while true; do
-        ./dc-exporter-c >/dev/null 2>&1 || true
-        sleep 10
-    done
-) &
-
-# Serve the metrics file via HTTP using the bundled Python server
-exec python3 /opt/dc-exporter/metrics_server.py
+# This script is deprecated. Use dc-exporter-rs instead.
+exec /usr/local/bin/dc-exporter-rs --port 9835
 '''
 
 DC_EXPORTER_CONFIG = """[agent]
@@ -272,17 +259,18 @@ class ExporterInstaller:
             return False
     
     def install_dc_exporter(self) -> bool:
-        """Install dc-exporter for VRAM/hotspot temperatures and GPU metrics.
+        """Install dc-exporter-rs (Rust version) for GPU metrics.
         
-        Provides DCGM-compatible metrics (DCGM_FI_*) plus additional metrics:
-        - DCXP_FI_DEV_VRAM_TEMP - VRAM temperature
-        - DCXP_FI_DEV_HOT_SPOT_TEMP - Hotspot temperature  
-        - DCXP_FI_DEV_CLOCKS_THROTTLE_REASON - Throttle status
-        - DCXP_AER_TOTAL_ERRORS - PCIe errors
+        Provides DCGM-compatible metrics (DCGM_FI_*) plus unique metrics:
+        - DCGM_FI_DEV_VRAM_TEMP - VRAM temperature
+        - DCGM_FI_DEV_HOT_SPOT_TEMP - Hotspot/Junction temperature  
+        - DCGM_FI_DEV_CLOCKS_THROTTLE_REASON - Throttle reasons
+        - GPU_AER_TOTAL_ERRORS - PCIe AER errors
+        - GPU_ERROR_STATE - GPU state (OK/Warning/Error/VM_Passthrough)
         
-        This replaces dcgm-exporter and works with VMs.
+        Downloads from: https://github.com/cryptolabsza/dc-exporter-releases
         """
-        console.print("\n[bold]Installing dc-exporter...[/bold]")
+        console.print("\n[bold]Installing dc-exporter-rs...[/bold]")
         
         try:
             with Progress(
@@ -290,63 +278,69 @@ class ExporterInstaller:
                 TextColumn("[progress.description]{task.description}"),
                 console=console
             ) as progress:
-                task = progress.add_task("Setting up dc-exporter...", total=None)
+                task = progress.add_task("Setting up dc-exporter-rs...", total=None)
                 
-                # Create installation directory
-                os.makedirs("/opt/dc-exporter", exist_ok=True)
+                # Create config directory
+                os.makedirs("/etc/dc-exporter", exist_ok=True)
                 
-                binary_installed = False
+                # Stop any existing old dc-exporter service
+                subprocess.run(["systemctl", "stop", "dc-exporter"], capture_output=True)
+                subprocess.run(["systemctl", "stop", "gddr6-metrics-exporter"], capture_output=True)
                 
-                # Method 1: Try to download pre-compiled binary
-                progress.update(task, description="Downloading pre-compiled binary...")
+                # Download dc-exporter-rs binary
+                progress.update(task, description="Downloading dc-exporter-rs...")
+                binary_path = "/usr/local/bin/dc-exporter-rs"
+                
                 try:
-                    urllib.request.urlretrieve(
-                        DC_EXPORTER_BINARY_URL, 
-                        "/opt/dc-exporter/dc-exporter-c"
-                    )
-                    subprocess.run(["chmod", "+x", "/opt/dc-exporter/dc-exporter-c"], check=True)
-                    
-                    # Test if binary works
-                    result = subprocess.run(
-                        ["/opt/dc-exporter/dc-exporter-c", "--version"],
-                        capture_output=True, timeout=5
-                    )
-                    binary_installed = True
-                    console.print("[dim]Using pre-compiled binary[/dim]")
-                except Exception:
-                    pass
-                
-                # Method 2: Try to compile from source
-                if not binary_installed:
-                    progress.update(task, description="Compiling from source...")
-                    binary_installed = self._compile_dc_exporter_from_source()
-                
-                if not binary_installed:
-                    console.print("[yellow]⚠[/yellow] dc-exporter binary not available")
-                    console.print("[dim]GPU metrics will be limited. Install manually or check dependencies.[/dim]")
-                    return False
-                
-                # Copy the metrics server Python script from package
-                progress.update(task, description="Installing metrics server...")
-                try:
-                    import dc_overview
-                    pkg_path = Path(dc_overview.__file__).parent / "dc_exporter" / "metrics_server.py"
-                    if pkg_path.exists():
-                        import shutil
-                        shutil.copy(pkg_path, "/opt/dc-exporter/metrics_server.py")
-                        subprocess.run(["chmod", "+x", "/opt/dc-exporter/metrics_server.py"], check=True)
-                    else:
-                        console.print("[yellow]⚠[/yellow] metrics_server.py not found in package")
+                    urllib.request.urlretrieve(DC_EXPORTER_RS_URL, binary_path)
+                    subprocess.run(["chmod", "+x", binary_path], check=True)
+                    console.print(f"[dim]Downloaded from {DC_EXPORTER_RS_URL}[/dim]")
                 except Exception as e:
-                    console.print(f"[yellow]⚠[/yellow] Could not copy metrics_server.py: {e}")
+                    console.print(f"[yellow]⚠[/yellow] Failed to download: {e}")
+                    console.print("[dim]Trying alternative method...[/dim]")
+                    
+                    # Try curl as fallback
+                    result = subprocess.run(
+                        ["curl", "-L", "-o", binary_path, DC_EXPORTER_RS_URL],
+                        capture_output=True
+                    )
+                    if result.returncode != 0:
+                        console.print("[red]✗[/red] Failed to download dc-exporter-rs")
+                        console.print(f"[dim]Download manually from: {DC_EXPORTER_RS_URL}[/dim]")
+                        return False
+                    subprocess.run(["chmod", "+x", binary_path], check=True)
                 
-                # Create the run script
-                progress.update(task, description="Creating run script...")
-                with open("/opt/dc-exporter/run.sh", "w") as f:
-                    f.write(DC_EXPORTER_RUN_SCRIPT)
-                subprocess.run(["chmod", "+x", "/opt/dc-exporter/run.sh"], check=True)
+                # Verify binary works
+                progress.update(task, description="Verifying binary...")
+                try:
+                    result = subprocess.run(
+                        [binary_path, "--version"],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if result.returncode == 0:
+                        version = result.stdout.strip().split('\n')[0] if result.stdout else "unknown"
+                        console.print(f"[dim]Version: {version}[/dim]")
+                    else:
+                        # Try --help as fallback
+                        result = subprocess.run(
+                            [binary_path, "--help"],
+                            capture_output=True, text=True, timeout=10
+                        )
+                except Exception as e:
+                    console.print(f"[yellow]⚠[/yellow] Could not verify binary: {e}")
                 
-                # Install service
+                # Remove old services and binaries
+                progress.update(task, description="Cleaning up old installations...")
+                # Remove old gddr6-metrics-exporter
+                subprocess.run(["systemctl", "disable", "gddr6-metrics-exporter"], capture_output=True)
+                subprocess.run(["rm", "-f", "/etc/systemd/system/gddr6-metrics-exporter.service"], capture_output=True)
+                # Remove old dc-exporter files
+                subprocess.run(["rm", "-rf", "/opt/dc-exporter"], capture_output=True)
+                subprocess.run(["rm", "-f", "/usr/local/bin/dc-exporter-c"], capture_output=True)
+                subprocess.run(["rm", "-f", "/usr/local/bin/dc-exporter-collector"], capture_output=True)
+                subprocess.run(["rm", "-f", "/usr/local/bin/dc-exporter-server"], capture_output=True)
+                
+                # Install systemd service
                 progress.update(task, description="Installing systemd service...")
                 with open("/etc/systemd/system/dc-exporter.service", "w") as f:
                     f.write(DC_EXPORTER_SERVICE)
@@ -354,13 +348,27 @@ class ExporterInstaller:
                 subprocess.run(["systemctl", "daemon-reload"], check=True)
                 subprocess.run(["systemctl", "enable", "dc-exporter"], check=True)
                 subprocess.run(["systemctl", "restart", "dc-exporter"], check=True)
+                
+                # Wait and verify service is running
+                progress.update(task, description="Verifying service...")
+                import time
+                time.sleep(2)
+                
+                result = subprocess.run(
+                    ["systemctl", "is-active", "dc-exporter"],
+                    capture_output=True, text=True
+                )
+                if result.stdout.strip() != "active":
+                    console.print("[yellow]⚠[/yellow] Service may not be running correctly")
+                    console.print("[dim]Check: journalctl -u dc-exporter -n 20[/dim]")
             
-            console.print("[green]✓[/green] dc-exporter installed (port 9835)")
-            console.print("[dim]  Provides: DCGM_FI_* + DCXP_FI_* metrics (VM-safe)[/dim]")
+            console.print("[green]✓[/green] dc-exporter-rs installed (port 9835)")
+            console.print("[dim]  Metrics: DCGM_FI_* + VRAM/Hotspot temps + Throttle reasons[/dim]")
+            console.print("[dim]  Verify: curl http://localhost:9835/metrics | head[/dim]")
             return True
             
         except Exception as e:
-            console.print(f"[red]✗[/red] Failed to install dc-exporter: {e}")
+            console.print(f"[red]✗[/red] Failed to install dc-exporter-rs: {e}")
             return False
     
     def _compile_dc_exporter_from_source(self) -> bool:

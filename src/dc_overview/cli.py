@@ -846,6 +846,223 @@ def setup_ssl(domain: str, email: str, letsencrypt: bool, site_name: str, ipmi: 
     )
 
 
+@click.command("reset")
+@click.option("--exporters", is_flag=True, help="Remove dc-exporter from workers")
+@click.option("--monitoring", is_flag=True, help="Remove Prometheus/Grafana containers")
+@click.option("--ipmi", is_flag=True, help="Remove IPMI Monitor")
+@click.option("--proxy", is_flag=True, help="Remove cryptolabs-proxy")
+@click.option("--all", "remove_all", is_flag=True, help="Remove everything")
+@click.option("--workers", "-w", multiple=True, help="Specific worker IPs (can be repeated)")
+@click.option("--ssh-key", default="~/.ssh/ubuntu_key", help="SSH key path")
+@click.option("--ssh-port", default=22, type=int, help="SSH port")
+@click.option("--force", "-f", is_flag=True, help="Skip confirmation prompts")
+def reset(exporters: bool, monitoring: bool, ipmi: bool, proxy: bool, 
+          remove_all: bool, workers: tuple, ssh_key: str, ssh_port: int, force: bool):
+    """
+    Reset/remove DC Overview components for re-testing.
+    
+    Useful for cleaning up a dev fleet before re-running quickstart.
+    
+    \b
+    COMPONENTS:
+        --exporters    Remove dc-exporter service from workers
+        --monitoring   Remove Prometheus + Grafana containers (local)
+        --ipmi         Remove IPMI Monitor container
+        --proxy        Remove cryptolabs-proxy container
+        --all          Remove ALL components
+    
+    \b
+    EXAMPLES:
+        # Remove exporters from specific workers
+        dc-overview reset --exporters -w 192.168.1.10 -w 192.168.1.11
+        
+        # Remove monitoring stack only (keep proxy/ipmi)
+        dc-overview reset --monitoring --exporters
+        
+        # Full reset (remove everything except proxy/ipmi)
+        dc-overview reset --exporters --monitoring
+        
+        # Nuclear option - remove everything
+        dc-overview reset --all --force
+    
+    \b
+    DEV FLEET EXAMPLE:
+        dc-overview reset --exporters --monitoring \\
+            -w root@41.193.204.66:101 -w root@41.193.204.66:103
+    """
+    from pathlib import Path
+    
+    if remove_all:
+        exporters = monitoring = True
+        # Note: ipmi and proxy are NOT included in --all by default
+        # They require explicit flags
+    
+    if not any([exporters, monitoring, ipmi, proxy]):
+        console.print("[yellow]No components selected.[/yellow]")
+        console.print("Use --exporters, --monitoring, --ipmi, --proxy, or --all")
+        console.print("\nRun [cyan]dc-overview reset --help[/cyan] for usage")
+        return
+    
+    # Summary of what will be removed
+    console.print(Panel.fit(
+        "[bold red]DC Overview Reset[/bold red]\n"
+        "[dim]This will remove selected components[/dim]",
+        border_style="red"
+    ))
+    
+    components = []
+    if exporters:
+        components.append("dc-exporter (on workers)")
+    if monitoring:
+        components.append("Prometheus + Grafana containers")
+    if ipmi:
+        components.append("IPMI Monitor container")
+    if proxy:
+        components.append("cryptolabs-proxy container")
+    
+    console.print("\n[bold]Components to remove:[/bold]")
+    for c in components:
+        console.print(f"  • {c}")
+    
+    if workers:
+        console.print(f"\n[bold]Target workers:[/bold]")
+        for w in workers:
+            console.print(f"  • {w}")
+    
+    if not force:
+        try:
+            import questionary
+            confirm = questionary.confirm(
+                "\nAre you sure you want to proceed?",
+                default=False
+            ).ask()
+            if not confirm:
+                console.print("[yellow]Cancelled.[/yellow]")
+                return
+        except ImportError:
+            # If questionary not available, require --force
+            console.print("[red]Error:[/red] Use --force to skip confirmation (questionary not installed)")
+            return
+    
+    console.print()
+    
+    # Expand SSH key path
+    ssh_key = os.path.expanduser(ssh_key)
+    
+    # Remove exporters from workers
+    if exporters and workers:
+        console.print("[bold]Removing dc-exporter from workers...[/bold]")
+        for worker in workers:
+            _remove_exporter_from_worker(worker, ssh_key, ssh_port)
+    elif exporters and not workers:
+        console.print("[yellow]⚠[/yellow] --exporters specified but no workers given (-w)")
+        console.print("  Use: [cyan]dc-overview reset --exporters -w <ip>[/cyan]")
+    
+    # Remove local containers
+    if monitoring:
+        console.print("\n[bold]Removing monitoring containers...[/bold]")
+        _remove_containers(["prometheus", "grafana", "dc-overview"])
+        # Also remove config
+        if DOCKER_CONFIG_DIR.exists():
+            import shutil
+            should_remove = force
+            if not force:
+                try:
+                    import questionary
+                    should_remove = questionary.confirm(f"Remove config directory {DOCKER_CONFIG_DIR}?").ask()
+                except ImportError:
+                    should_remove = True  # Default to yes if questionary not available
+            if should_remove:
+                shutil.rmtree(DOCKER_CONFIG_DIR, ignore_errors=True)
+                console.print(f"[green]✓[/green] Removed {DOCKER_CONFIG_DIR}")
+    
+    if ipmi:
+        console.print("\n[bold]Removing IPMI Monitor...[/bold]")
+        _remove_containers(["ipmi-monitor"])
+    
+    if proxy:
+        console.print("\n[bold]Removing cryptolabs-proxy...[/bold]")
+        _remove_containers(["cryptolabs-proxy"])
+    
+    console.print("\n[green]✓[/green] Reset complete!")
+    console.print("  Re-run: [cyan]sudo dc-overview quickstart[/cyan]")
+
+
+def _remove_exporter_from_worker(worker: str, ssh_key: str, default_port: int):
+    """Remove dc-exporter from a remote worker."""
+    import subprocess
+    
+    # Parse worker string: [user@]host[:port]
+    user = "root"
+    host = worker
+    port = default_port
+    
+    if "@" in worker:
+        user, host = worker.split("@", 1)
+    if ":" in host:
+        host, port_str = host.rsplit(":", 1)
+        port = int(port_str)
+    
+    console.print(f"  → {user}@{host}:{port}", end=" ")
+    
+    ssh_opts = [
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "ConnectTimeout=10",
+        "-o", "BatchMode=yes",
+    ]
+    if os.path.exists(ssh_key):
+        ssh_opts.extend(["-i", ssh_key])
+    
+    # Commands to remove dc-exporter
+    remove_cmd = """
+        systemctl stop dc-exporter 2>/dev/null || true
+        systemctl disable dc-exporter 2>/dev/null || true
+        rm -f /etc/systemd/system/dc-exporter.service
+        rm -f /usr/local/bin/dc-exporter-rs
+        rm -f /usr/local/bin/dc-exporter
+        rm -rf /etc/dc-exporter
+        systemctl daemon-reload
+        echo "REMOVED"
+    """
+    
+    try:
+        result = subprocess.run(
+            ["ssh"] + ssh_opts + ["-p", str(port), f"{user}@{host}", remove_cmd],
+            capture_output=True, text=True, timeout=30
+        )
+        if "REMOVED" in result.stdout:
+            console.print("[green]✓[/green]")
+        else:
+            console.print(f"[yellow]⚠[/yellow] {result.stderr.strip()[:50]}")
+    except subprocess.TimeoutExpired:
+        console.print("[red]timeout[/red]")
+    except Exception as e:
+        console.print(f"[red]error: {e}[/red]")
+
+
+def _remove_containers(container_names: list):
+    """Remove Docker containers by name."""
+    import subprocess
+    
+    for name in container_names:
+        try:
+            # Check if container exists
+            result = subprocess.run(
+                ["docker", "inspect", name],
+                capture_output=True
+            )
+            if result.returncode != 0:
+                console.print(f"  {name}: [dim]not found[/dim]")
+                continue
+            
+            # Stop and remove
+            subprocess.run(["docker", "stop", name], capture_output=True)
+            subprocess.run(["docker", "rm", name], capture_output=True)
+            console.print(f"  {name}: [green]removed[/green]")
+        except Exception as e:
+            console.print(f"  {name}: [red]error - {e}[/red]")
+
+
 @click.command("serve")
 @click.option("--host", default="0.0.0.0", help="Host to bind to")
 @click.option("--port", "-p", default=5001, help="Port to run on")
@@ -905,6 +1122,7 @@ main.add_command(generate_compose)
 main.add_command(deploy)
 main.add_command(setup_ssl)
 main.add_command(serve)
+main.add_command(reset)
 
 
 if __name__ == "__main__":
