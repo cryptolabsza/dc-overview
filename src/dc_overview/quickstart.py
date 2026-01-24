@@ -487,51 +487,92 @@ def detect_ipmi_monitor() -> Optional[Dict]:
     }
 
 
-def import_ipmi_config(ipmi_config: Dict) -> tuple:
-    """Import SSH keys and servers from IPMI Monitor.
+def import_ipmi_config(ipmi_config: Dict) -> Dict:
+    """Import SSH keys, servers, and credentials from IPMI Monitor.
     
     Returns:
-        Tuple of (ssh_keys, servers)
+        Dict with: ssh_keys, servers, default_ssh_user, default_ssh_key_path
     """
     import sqlite3
     
-    ssh_keys = []
-    servers = []
+    result = {
+        "ssh_keys": [],
+        "servers": [],
+        "default_ssh_user": "root",
+        "default_ssh_key_path": None,
+        "default_ssh_key_id": None,
+    }
     
     db_path = ipmi_config.get("db_path")
     
     if db_path and db_path.exists():
         try:
             conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
-            # Import servers (for Prometheus targets)
-            cursor.execute("""
-                SELECT name, bmc_ip, server_ip, ssh_user, ssh_port
-                FROM server
-            """)
-            
+            # Get default SSH settings from system_settings
+            cursor.execute("SELECT key, value FROM system_settings WHERE key IN ('ssh_user', 'default_ssh_key_id')")
             for row in cursor.fetchall():
-                servers.append({
-                    "name": row[0],
-                    "bmc_ip": row[1],
-                    "server_ip": row[2],
-                    "ssh_user": row[3] or "root",
-                    "ssh_port": row[4] or 22
-                })
+                if row['key'] == 'ssh_user' and row['value']:
+                    result["default_ssh_user"] = row['value']
+                elif row['key'] == 'default_ssh_key_id' and row['value']:
+                    result["default_ssh_key_id"] = int(row['value'])
             
             # Import SSH keys
             cursor.execute("SELECT id, name, key_path FROM ssh_key")
             for row in cursor.fetchall():
-                ssh_keys.append({
-                    "id": row[0],
-                    "name": row[1],
-                    "path": row[2]
-                })
+                key_info = {
+                    "id": row['id'],
+                    "name": row['name'],
+                    "path": row['key_path']
+                }
+                result["ssh_keys"].append(key_info)
+                
+                # If this is the default key, store the path
+                if result["default_ssh_key_id"] and row['id'] == result["default_ssh_key_id"]:
+                    result["default_ssh_key_path"] = row['key_path']
+            
+            # Import servers with their SSH config
+            cursor.execute("""
+                SELECT s.id, s.name, s.bmc_ip, s.server_ip, 
+                       COALESCE(sc.ssh_user, ?) as ssh_user,
+                       COALESCE(s.ssh_port, 22) as ssh_port,
+                       sc.ssh_key_id,
+                       sc.ssh_pass
+                FROM server s
+                LEFT JOIN server_config sc ON s.bmc_ip = sc.bmc_ip
+            """, (result["default_ssh_user"],))
+            
+            for row in cursor.fetchall():
+                server = {
+                    "name": row['name'],
+                    "bmc_ip": row['bmc_ip'],
+                    "server_ip": row['server_ip'],
+                    "ssh_user": row['ssh_user'] or result["default_ssh_user"],
+                    "ssh_port": row['ssh_port'] or 22,
+                }
+                
+                # Get SSH key path if key_id is set
+                ssh_key_id = row['ssh_key_id'] or result["default_ssh_key_id"]
+                if ssh_key_id:
+                    for key in result["ssh_keys"]:
+                        if key["id"] == ssh_key_id:
+                            server["ssh_key_path"] = key["path"]
+                            break
+                
+                # Store password if available (less preferred than key)
+                if row['ssh_pass']:
+                    server["ssh_password"] = row['ssh_pass']
+                
+                result["servers"].append(server)
             
             conn.close()
-            console.print(f"[green]✓[/green] Imported {len(servers)} servers from IPMI Monitor")
-            console.print(f"[green]✓[/green] Imported {len(ssh_keys)} SSH keys from IPMI Monitor")
+            console.print(f"[green]✓[/green] Imported {len(result['servers'])} servers from IPMI Monitor")
+            console.print(f"[green]✓[/green] Imported {len(result['ssh_keys'])} SSH keys")
+            if result["default_ssh_key_path"]:
+                console.print(f"[green]✓[/green] Default SSH key: {result['default_ssh_key_path']}")
+                
         except Exception as e:
             console.print(f"[yellow]⚠[/yellow] Could not import from IPMI Monitor: {e}")
     
@@ -543,12 +584,25 @@ def import_ipmi_config(ipmi_config: Dict) -> tuple:
         
         for key_file in ssh_keys_dir.iterdir():
             if key_file.is_file():
-                shutil.copy2(key_file, dc_ssh_dir / key_file.name)
-                os.chmod(dc_ssh_dir / key_file.name, 0o600)
+                dest = dc_ssh_dir / key_file.name
+                shutil.copy2(key_file, dest)
+                os.chmod(dest, 0o600)
+                
+                # Update key paths to point to copied location
+                for key in result["ssh_keys"]:
+                    if key["path"] and Path(key["path"]).name == key_file.name:
+                        key["copied_path"] = str(dest)
         
         console.print(f"[green]✓[/green] SSH keys copied to /etc/dc-overview/ssh_keys/")
+        
+        # Update default key path if it was copied
+        if result["default_ssh_key_path"]:
+            default_key_name = Path(result["default_ssh_key_path"]).name
+            copied_path = dc_ssh_dir / default_key_name
+            if copied_path.exists():
+                result["default_ssh_key_path"] = str(copied_path)
     
-    return ssh_keys, servers
+    return result
 
 
 def detect_existing_proxy() -> Optional[Dict]:
@@ -661,32 +715,34 @@ def setup_master_docker():
     # ===========================================================================
     ipmi_config = detect_ipmi_monitor()
     existing_proxy = detect_existing_proxy()
+    imported_data = None
     imported_servers = []
     imported_ssh_keys = []
+    default_ssh_key_path = None
+    default_ssh_user = "root"
     ipmi_enabled = False
     
-    # If IPMI Monitor exists, offer to import its data
+    # If IPMI Monitor exists, auto-import its data
     if ipmi_config:
         console.print("\n[bold green]✓ IPMI Monitor Detected![/bold green]")
-        console.print("[dim]Found existing IPMI Monitor installation with servers and SSH keys.[/dim]\n")
+        console.print("[dim]Automatically importing servers and SSH credentials.[/dim]\n")
         
-        import_data = questionary.confirm(
-            "Import servers and SSH keys from IPMI Monitor?",
-            default=True,
-            style=custom_style
-        ).ask()
+        imported_data = import_ipmi_config(ipmi_config)
+        imported_servers = imported_data.get("servers", [])
+        imported_ssh_keys = imported_data.get("ssh_keys", [])
+        default_ssh_key_path = imported_data.get("default_ssh_key_path")
+        default_ssh_user = imported_data.get("default_ssh_user", "root")
+        ipmi_enabled = True
         
-        if import_data:
-            imported_ssh_keys, imported_servers = import_ipmi_config(ipmi_config)
-            ipmi_enabled = True
-            
-            if imported_servers:
-                console.print(f"\n[cyan]Servers available for monitoring:[/cyan]")
-                for srv in imported_servers[:10]:  # Show first 10
-                    ip = srv.get('server_ip') or srv.get('bmc_ip')
-                    console.print(f"  • {srv['name']} ({ip})")
-                if len(imported_servers) > 10:
-                    console.print(f"  ... and {len(imported_servers) - 10} more")
+        if imported_servers:
+            console.print(f"\n[cyan]Servers imported for GPU monitoring:[/cyan]")
+            for srv in imported_servers[:10]:  # Show first 10
+                ip = srv.get('server_ip') or srv.get('bmc_ip')
+                has_ssh = "✓ SSH" if srv.get('ssh_key_path') or srv.get('ssh_password') else ""
+                console.print(f"  • {srv['name']} ({ip}) {has_ssh}")
+            if len(imported_servers) > 10:
+                console.print(f"  ... and {len(imported_servers) - 10} more")
+            console.print()
     
     # If proxy already running, skip proxy setup
     if existing_proxy and existing_proxy.get("running"):
@@ -986,43 +1042,29 @@ providers:
     # ===========================================================================
     # INSTALL EXPORTERS ON IMPORTED SERVERS
     # ===========================================================================
-    if imported_servers and imported_ssh_keys:
+    if imported_servers:
         console.print("\n[bold]GPU Worker Exporter Installation[/bold]")
         console.print(f"[dim]Found {len(imported_servers)} servers from IPMI Monitor.[/dim]")
         console.print("[dim]DC-exporter provides GPU VRAM temps, hotspot temps, power, utilization.[/dim]\n")
         
-        install_exporters = questionary.confirm(
+        # Check if we have SSH credentials for any server
+        has_credentials = any(
+            srv.get('ssh_key_path') or srv.get('ssh_password') or default_ssh_key_path
+            for srv in imported_servers
+        )
+        
+        if has_credentials:
+            console.print("[green]✓[/green] SSH credentials available from IPMI Monitor")
+            if default_ssh_key_path:
+                console.print(f"[dim]  Default SSH key: {default_ssh_key_path}[/dim]")
+        
+        install_exporters_flag = questionary.confirm(
             f"Install dc-exporter on {len(imported_servers)} servers?",
             default=True,
             style=custom_style
         ).ask()
         
-        if install_exporters:
-            # Find the SSH key to use
-            ssh_key_path = None
-            if imported_ssh_keys:
-                # Use first available key
-                for key in imported_ssh_keys:
-                    key_path = Path(key.get('path', ''))
-                    if key_path.exists():
-                        ssh_key_path = str(key_path)
-                        break
-                    # Try in dc-overview ssh_keys dir
-                    dc_key = config_dir / "ssh_keys" / key_path.name
-                    if dc_key.exists():
-                        ssh_key_path = str(dc_key)
-                        break
-            
-            if not ssh_key_path:
-                console.print("[yellow]⚠[/yellow] No SSH key found, will try password auth")
-                ssh_password = questionary.password(
-                    "SSH password for workers:",
-                    style=custom_style
-                ).ask()
-            else:
-                ssh_password = None
-                console.print(f"[dim]Using SSH key: {ssh_key_path}[/dim]")
-            
+        if install_exporters_flag:
             # Install on each server
             success_count = 0
             fail_count = 0
@@ -1030,11 +1072,22 @@ providers:
             for srv in imported_servers:
                 ip = srv.get('server_ip') or srv.get('bmc_ip')
                 name = srv.get('name', ip)
-                ssh_user = srv.get('ssh_user', 'root')
+                ssh_user = srv.get('ssh_user') or default_ssh_user
                 ssh_port = srv.get('ssh_port', 22)
                 
                 if not ip:
                     continue
+                
+                # Use server-specific SSH credentials, fallback to defaults
+                srv_key_path = srv.get('ssh_key_path') or default_ssh_key_path
+                srv_password = srv.get('ssh_password')
+                
+                # Check if key path exists, try copied location
+                if srv_key_path and not Path(srv_key_path).exists():
+                    # Try in dc-overview ssh_keys dir
+                    dc_key = config_dir / "ssh_keys" / Path(srv_key_path).name
+                    if dc_key.exists():
+                        srv_key_path = str(dc_key)
                 
                 console.print(f"  Installing on {name} ({ip})...", end=" ")
                 
@@ -1044,12 +1097,18 @@ providers:
                     success_count += 1
                     continue
                 
+                # Skip if no credentials
+                if not srv_key_path and not srv_password:
+                    console.print("[yellow]⚠ no SSH credentials[/yellow]")
+                    fail_count += 1
+                    continue
+                
                 # Try to install
                 success = install_exporters_remote(
                     ip=ip,
                     user=ssh_user,
-                    password=ssh_password,
-                    key_path=ssh_key_path,
+                    password=srv_password,
+                    key_path=srv_key_path,
                     port=ssh_port
                 )
                 

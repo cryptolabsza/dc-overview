@@ -83,6 +83,7 @@ dc_overview = [
     "dashboards/*.json",
     "dc_exporter/*.c",
     "dc_exporter/*.py",
+    "_build_info.py",
 ]
 
 [tool.black]

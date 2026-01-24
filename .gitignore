@@ -1,2 +1,12 @@
 .env
 __pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Auto-generated build info
+src/dc_overview/_build_info.py
+_build_info.py
