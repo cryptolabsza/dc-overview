@@ -280,7 +280,7 @@ class FleetWizard:
             self.config.ssh.auth_method = AuthMethod.KEY
             self.config.ssh.key_path = ssh_key_path_default
             self.config.ssh_key_generated = True
-            auth_method = "existing_key"  # Set for later logic
+            # Skip all the auth method handling below
         else:
             # Need to ask for SSH credentials
             console.print("\n[bold]SSH Access (for deploying to workers)[/bold]")
@@ -339,19 +339,19 @@ class FleetWizard:
                     console.print("[dim]Will use existing key for SSH connections[/dim]")
 
                 self.config.ssh_key_generated = True  # Mark as already set up
-        elif auth_method == "key":
-            self.config.ssh.auth_method = AuthMethod.KEY
-            console.print("[dim]A new SSH key will be generated and deployed to workers[/dim]")
-            self.config.ssh.password = questionary.password(
-                "SSH password (needed once to deploy the new key):",
-                style=custom_style
-            ).ask()
-        else:
-            self.config.ssh.auth_method = AuthMethod.PASSWORD
-            self.config.ssh.password = questionary.password(
-                "SSH password (for all workers):",
-                style=custom_style
-            ).ask()
+            elif auth_method == "key":
+                self.config.ssh.auth_method = AuthMethod.KEY
+                console.print("[dim]A new SSH key will be generated and deployed to workers[/dim]")
+                self.config.ssh.password = questionary.password(
+                    "SSH password (needed once to deploy the new key):",
+                    style=custom_style
+                ).ask()
+            else:
+                self.config.ssh.auth_method = AuthMethod.PASSWORD
+                self.config.ssh.password = questionary.password(
+                    "SSH password (for all workers):",
+                    style=custom_style
+                ).ask()
         
         self.config.ssh.port = int(questionary.text(
             "SSH port (for internal network):",
