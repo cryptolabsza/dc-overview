@@ -259,6 +259,23 @@ providers:
             return f"""version: '3.8'
 
 services:
+  dc-overview:
+    image: ghcr.io/cryptolabsza/dc-overview:latest
+    container_name: dc-overview
+    restart: unless-stopped
+    environment:
+      - DC_OVERVIEW_PORT=5001
+      - APPLICATION_ROOT=/dc
+      - GRAFANA_URL=http://grafana:3000
+      - PROMETHEUS_URL=http://prometheus:9090
+    volumes:
+      - dc-data:/data
+      - ./ssh_keys:/etc/dc-overview/ssh_keys:ro
+    networks:
+      - cryptolabs
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
@@ -277,6 +294,8 @@ services:
       - "host.docker.internal:host-gateway"
     networks:
       - cryptolabs
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
 
   grafana:
     image: grafana/grafana:latest
@@ -296,8 +315,11 @@ services:
       - prometheus
     networks:
       - cryptolabs
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
 
 volumes:
+  dc-data:
   prometheus-data:
   grafana-data:
 
@@ -1191,8 +1213,11 @@ WantedBy=multi-user.target
         modified = False
         
         # Services to add (only if not already present)
-        # Note: dc-overview is a CLI tool, not a web app - no route needed
         services_to_add = []
+        
+        # DC Overview route (server management web UI)
+        if '/dc/' not in content:
+            services_to_add.append(('DC Overview', '/dc/', 'dc-overview', 5001))
         
         # Grafana route
         if '/grafana/' not in content:
@@ -1296,7 +1321,8 @@ WantedBy=multi-user.target
                 console.print(f"[yellow]⚠[/yellow] Could not reload proxy: {e}")
         
         domain = self.config.ssl.domain or "your-server"
-        console.print(f"\n  Grafana: [cyan]https://{domain}/grafana/[/cyan]")
+        console.print(f"\n  DC Overview: [cyan]https://{domain}/dc/[/cyan]")
+        console.print(f"  Grafana: [cyan]https://{domain}/grafana/[/cyan]")
         console.print(f"  Prometheus: [cyan]https://{domain}/prometheus/[/cyan]")
     
     def _update_api_services_endpoint(self, nginx_path: Path, content: str = None):
@@ -1308,10 +1334,10 @@ WantedBy=multi-user.target
         
         # Build the services JSON with all services
         # Check which containers are running
-        # Note: dc-overview is a CLI tool, not a running service
         services = {}
         containers_to_check = [
             ('ipmi-monitor', 'ipmi-monitor'),
+            ('dc-overview', 'dc-overview'),
             ('grafana', 'grafana'),
             ('prometheus', 'prometheus'),
         ]

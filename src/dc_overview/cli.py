@@ -846,6 +846,48 @@ def setup_ssl(domain: str, email: str, letsencrypt: bool, site_name: str, ipmi: 
     )
 
 
+@click.command("serve")
+@click.option("--host", default="0.0.0.0", help="Host to bind to")
+@click.option("--port", "-p", default=5001, help="Port to run on")
+@click.option("--debug", is_flag=True, help="Enable debug mode")
+def serve(host: str, port: int, debug: bool):
+    """
+    Start the DC Overview web interface.
+    
+    This runs the Flask application that provides:
+    - Server management (add/remove servers)
+    - Prometheus target management  
+    - Exporter deployment to workers
+    - Monitoring status dashboard
+    
+    \b
+    EXAMPLE:
+        dc-overview serve                    # Run on port 5001
+        dc-overview serve -p 8080            # Run on port 8080
+        sudo dc-overview serve               # Run as root for SSH access
+    
+    \b
+    ACCESS:
+        Web UI: http://localhost:5001/
+        API: http://localhost:5001/api/
+    """
+    from .app import app, init_db
+    
+    console.print(Panel(
+        f"[bold green]DC Overview Web Interface[/bold green]\n\n"
+        f"Running on: [cyan]http://{host}:{port}/[/cyan]\n"
+        f"Press Ctrl+C to stop",
+        title="DC Overview",
+        border_style="green"
+    ))
+    
+    # Initialize database
+    with app.app_context():
+        init_db()
+    
+    app.run(host=host, port=port, debug=debug)
+
+
 # Register commands
 main.add_command(quickstart)
 main.add_command(add_machine)
@@ -862,6 +904,7 @@ main.add_command(list_targets)
 main.add_command(generate_compose)
 main.add_command(deploy)
 main.add_command(setup_ssl)
+main.add_command(serve)
 
 
 if __name__ == "__main__":
