@@ -86,8 +86,11 @@ class FleetManager:
             if self.config.components.vast_exporter:
                 self._deploy_vast_exporter()
             
-            # Step 9: SSL/Reverse Proxy
-            self._setup_reverse_proxy()
+            # Step 9: Proxy Integration (skip if using existing cryptolabs-proxy)
+            if not getattr(self.config.ssl, 'use_existing_proxy', False):
+                self._setup_reverse_proxy()
+            else:
+                self._integrate_with_proxy()
             
             # Done!
             self._show_completion()
@@ -237,6 +240,9 @@ providers:
     
     def _generate_docker_compose(self) -> str:
         """Generate docker-compose.yml content."""
+        # Check if using existing proxy (cryptolabs network)
+        use_existing_proxy = getattr(self.config.ssl, 'use_existing_proxy', False)
+        
         # Determine the ROOT_URL based on domain and external port
         external_port = self.config.ssl.external_port
         domain = self.config.ssl.domain or "%(domain)s"
@@ -247,7 +253,61 @@ providers:
         else:
             root_url = f"%(protocol)s://{domain}/grafana/"
         
-        return f"""version: '3.8'
+        # When using existing proxy, don't expose ports (proxy handles routing)
+        # and use cryptolabs network
+        if use_existing_proxy:
+            return f"""version: '3.8'
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./recording_rules.yml:/etc/prometheus/recording_rules.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time={self.config.prometheus.retention_days}d"
+      - "--web.enable-lifecycle"
+      - "--web.external-url=/prometheus/"
+      - "--web.route-prefix=/prometheus/"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cryptolabs
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD={self.config.grafana.admin_password}
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-piechart-panel
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL={root_url}
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    depends_on:
+      - prometheus
+    networks:
+      - cryptolabs
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  cryptolabs:
+    external: true
+"""
+        else:
+            # Standalone mode - expose ports directly
+            return f"""version: '3.8'
 
 services:
   prometheus:
@@ -1069,97 +1129,61 @@ WantedBy=multi-user.target
             use_letsencrypt=self.config.ssl.mode == SSLMode.LETSENCRYPT,
         )
     
-    def _update_existing_proxy(self):
-        """Update existing cryptolabs-proxy to add dc-overview routes."""
-        import re
+    def _integrate_with_proxy(self):
+        """Integrate with existing cryptolabs-proxy - just ensure network connectivity."""
+        console.print("\n[bold]Step 9: Integrating with CryptoLabs Proxy[/bold]\n")
+        console.print("[green]✓[/green] Using existing CryptoLabs Proxy")
+        console.print("[dim]The proxy auto-detects running containers on the cryptolabs network.[/dim]\n")
         
-        console.print("[bold green]✓ Using Existing CryptoLabs Proxy[/bold green]")
-        console.print("[dim]Adding DC Overview routes to existing proxy configuration.[/dim]\n")
+        # Ensure dc-overview containers are on the cryptolabs network
+        containers = ["dc-overview", "prometheus", "grafana"]
+        network = "cryptolabs"
         
-        # Find nginx config (could be in ipmi-monitor or cryptolabs-proxy dir)
-        nginx_paths = [
-            Path("/etc/ipmi-monitor/nginx.conf"),
-            Path("/etc/cryptolabs-proxy/nginx.conf"),
-        ]
+        # Check if network exists
+        result = subprocess.run(
+            ["docker", "network", "inspect", network],
+            capture_output=True, text=True
+        )
         
-        nginx_path = None
-        for path in nginx_paths:
-            if path.exists():
-                nginx_path = path
-                break
+        if result.returncode != 0:
+            console.print(f"[yellow]⚠[/yellow] Network '{network}' not found")
+            console.print("[dim]Creating cryptolabs network...[/dim]")
+            subprocess.run(["docker", "network", "create", network], capture_output=True)
         
-        if not nginx_path:
-            console.print("[yellow]⚠[/yellow] Could not find existing nginx config")
-            console.print("[dim]Proxy routes may need to be added manually.[/dim]")
-            return
+        # Connect containers to the network (if not already)
+        for container in containers:
+            try:
+                # Check if container exists
+                result = subprocess.run(
+                    ["docker", "inspect", container],
+                    capture_output=True, text=True
+                )
+                if result.returncode == 0:
+                    # Connect to network (ignores if already connected)
+                    subprocess.run(
+                        ["docker", "network", "connect", network, container],
+                        capture_output=True
+                    )
+            except Exception:
+                pass
         
-        # Read existing config
-        content = nginx_path.read_text()
+        console.print("[green]✓[/green] Containers connected to cryptolabs network")
         
-        # Check if /dc/ route already exists
-        if '/dc/' in content:
-            console.print("[green]✓[/green] DC Overview route already configured in proxy")
-            return
-        
-        # Add DC Overview location block
-        # DC Overview runs on port 5001 by default
-        dc_port = 5001
-        dc_location = f'''
-        # DC Overview - GPU Datacenter Monitoring
-        location /dc/ {{
-            proxy_pass http://127.0.0.1:{dc_port}/;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
-        }}
-'''
-        
-        # Find insertion point - after /ipmi/ or /grafana/ location, or before root location
-        # Try to insert after /ipmi/ block
-        ipmi_pattern = r'(location\s+/ipmi/\s*\{[^}]+\})'
-        match = re.search(ipmi_pattern, content, re.DOTALL)
-        
-        if match:
-            insert_pos = match.end()
-            new_content = content[:insert_pos] + dc_location + content[insert_pos:]
-        else:
-            # Try to insert before the root location /
-            root_pattern = r'(\s+location\s+/\s*\{)'
-            match = re.search(root_pattern, content)
-            if match:
-                insert_pos = match.start()
-                new_content = content[:insert_pos] + dc_location + content[insert_pos:]
-            else:
-                console.print("[yellow]⚠[/yellow] Could not find insertion point in nginx.conf")
-                console.print("[dim]Please add /dc/ location block manually.[/dim]")
-                return
-        
-        # Write updated config
-        nginx_path.write_text(new_content)
-        console.print(f"[green]✓[/green] Added /dc/ route to {nginx_path}")
-        
-        # Reload nginx in the proxy container
+        # Reload the proxy to pick up new services
         try:
             result = subprocess.run(
                 ["docker", "exec", "cryptolabs-proxy", "nginx", "-s", "reload"],
                 capture_output=True, text=True, timeout=10
             )
             if result.returncode == 0:
-                console.print("[green]✓[/green] Proxy configuration reloaded")
-            else:
-                # Try restarting the container
-                subprocess.run(["docker", "restart", "cryptolabs-proxy"], capture_output=True)
-                console.print("[green]✓[/green] Proxy container restarted")
-        except Exception as e:
-            console.print(f"[yellow]⚠[/yellow] Could not reload proxy: {e}")
-            console.print("[dim]Run: docker restart cryptolabs-proxy[/dim]")
+                console.print("[green]✓[/green] Proxy reloaded to detect new services")
+        except Exception:
+            pass
         
         domain = self.config.ssl.domain or "your-server"
-        console.print(f"\n[dim]DC Overview will be available at: https://{domain}/dc/[/dim]")
+        console.print(f"\n[dim]DC Overview available at: https://{domain}/dc/[/dim]")
+        console.print(f"[dim]Grafana available at: https://{domain}/grafana/[/dim]")
+        console.print(f"[dim]Prometheus available at: https://{domain}/prometheus/[/dim]")
     
     # ============ Completion ============
     
