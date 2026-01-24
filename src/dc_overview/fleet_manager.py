@@ -256,9 +256,7 @@ providers:
         # When using existing proxy, don't expose ports (proxy handles routing)
         # and use cryptolabs network
         if use_existing_proxy:
-            return f"""version: '3.8'
-
-services:
+            return f"""services:
   dc-overview:
     image: ghcr.io/cryptolabsza/dc-overview:latest
     container_name: dc-overview
@@ -329,9 +327,7 @@ networks:
 """
         else:
             # Standalone mode - expose ports directly
-            return f"""version: '3.8'
-
-services:
+            return f"""services:
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
