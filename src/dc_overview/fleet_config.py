@@ -33,6 +33,7 @@ class SSLConfig:
     cert_path: Optional[str] = None
     key_path: Optional[str] = None
     external_port: int = 443  # External HTTPS port (e.g., 8443 if router maps 8443->443)
+    use_existing_proxy: bool = False  # True if cryptolabs-proxy already running
 
 
 @dataclass

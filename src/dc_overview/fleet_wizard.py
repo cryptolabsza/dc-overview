@@ -53,6 +53,8 @@ class FleetWizard:
         self.config.master_ip = get_local_ip()
         # Cache for IPMI data import (to avoid reading database multiple times)
         self._ipmi_data_cache: Optional[Tuple[List[Dict], List[Dict]]] = None
+        # Cache for existing proxy detection
+        self._existing_proxy: Optional[Dict] = None
     
     def run(self) -> FleetConfig:
         """Run the complete wizard and return configuration."""
@@ -121,6 +123,44 @@ class FleetWizard:
             return result.returncode == 0
         except Exception:
             return False
+    
+    def _detect_existing_proxy(self) -> Optional[Dict]:
+        """Detect if cryptolabs-proxy is already running and get its config."""
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", "cryptolabs-proxy", "--format", "{{.State.Status}}"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip() == "running":
+                config = {"running": True}
+                
+                # Try to get domain from nginx config
+                nginx_conf = Path("/etc/ipmi-monitor/nginx.conf")
+                if nginx_conf.exists():
+                    import re
+                    content = nginx_conf.read_text()
+                    match = re.search(r'server_name\s+([^;]+);', content)
+                    if match:
+                        domain = match.group(1).strip()
+                        # Filter out placeholder values
+                        if domain and domain not in ('_', 'localhost', ''):
+                            config["domain"] = domain
+                    
+                    # Check SSL mode
+                    if '/etc/letsencrypt/' in content:
+                        config["ssl_mode"] = "letsencrypt"
+                    elif '/etc/nginx/ssl/' in content or 'ssl_certificate' in content:
+                        config["ssl_mode"] = "self_signed"
+                
+                # Check if SSL certs exist
+                ssl_dir = Path("/etc/ipmi-monitor/ssl")
+                if ssl_dir.exists():
+                    config["ssl_dir"] = str(ssl_dir)
+                
+                return config
+        except Exception:
+            pass
+        return None
 
     def _collect_components(self):
         """Ask which components to install."""
@@ -860,6 +900,32 @@ class FleetWizard:
             "Set up secure access to your dashboards.",
             border_style="blue"
         ))
+        
+        # Check for existing cryptolabs-proxy
+        self._existing_proxy = self._detect_existing_proxy()
+        
+        if self._existing_proxy and self._existing_proxy.get("running"):
+            console.print("[bold green]✓ CryptoLabs Proxy Already Running![/bold green]")
+            console.print("[dim]DC Overview will be added to your existing proxy configuration.[/dim]\n")
+            
+            # Show detected config
+            if self._existing_proxy.get("domain"):
+                console.print(f"  Domain: [cyan]{self._existing_proxy['domain']}[/cyan]")
+                self.config.ssl.domain = self._existing_proxy["domain"]
+            
+            ssl_mode = self._existing_proxy.get("ssl_mode", "self_signed")
+            if ssl_mode == "letsencrypt":
+                console.print("  SSL: [cyan]Let's Encrypt[/cyan]")
+                self.config.ssl.mode = SSLMode.LETSENCRYPT
+            else:
+                console.print("  SSL: [cyan]Self-signed certificate[/cyan]")
+                self.config.ssl.mode = SSLMode.SELF_SIGNED
+            
+            self.config.ssl.external_port = 443
+            self.config.ssl.use_existing_proxy = True
+            console.print("\n[dim]No additional SSL configuration needed.[/dim]")
+            console.print()
+            return
         
         has_domain = questionary.confirm(
             "Do you have a domain name pointing to this server?",
