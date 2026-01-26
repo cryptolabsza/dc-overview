@@ -1,1 +1,295 @@
-{"annotations": {"list": [{"builtIn": 1, "datasource": {"type": "prometheus", "uid": "prometheus"}, "enable": true, "hide": true, "iconColor": "rgba(0, 211, 255, 1)", "name": "Annotations & Alerts", "type": "dashboard"}]}, "description": "GPU Fleet Overview - Latest values for up to 8 GPUs per server", "editable": true, "fiscalYearStartMonth": 0, "graphTooltip": 0, "id": null, "links": [], "panels": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "custom": {"align": "auto", "cellOptions": {"mode": "gradient", "type": "color-background"}, "filterable": false, "inspect": false, "minWidth": 60}, "decimals": 0, "mappings": [{"options": {"from": 0, "result": {"color": "blue", "index": 0}, "to": 50}, "type": "range"}, {"options": {"from": 50, "result": {"color": "green", "index": 1}, "to": 70}, "type": "range"}, {"options": {"from": 70, "result": {"color": "yellow", "index": 2}, "to": 85}, "type": "range"}, {"options": {"from": 85, "result": {"color": "orange", "index": 3}, "to": 95}, "type": "range"}, {"options": {"from": 95, "result": {"color": "red", "index": 4}, "to": 200}, "type": "range"}], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 70}, {"color": "orange", "value": 85}, {"color": "red", "value": 95}]}, "unit": "celsius"}, "overrides": [{"matcher": {"id": "byName", "options": "Hostname"}, "properties": [{"id": "custom.width", "value": 100}]}, {"matcher": {"id": "byName", "options": "Model"}, "properties": [{"id": "custom.width", "value": 150}]}, {"matcher": {"id": "byName", "options": "GPU#"}, "properties": [{"id": "custom.width", "value": 50}]}, {"matcher": {"id": "byName", "options": "Power"}, "properties": [{"id": "unit", "value": "watt"}]}, {"matcher": {"id": "byName", "options": "Util"}, "properties": [{"id": "unit", "value": "percent"}]}, {"matcher": {"id": "byName", "options": "Mem%"}, "properties": [{"id": "unit", "value": "percent"}]}, {"matcher": {"id": "byName", "options": "Fan"}, "properties": [{"id": "unit", "value": "percent"}]}, {"matcher": {"id": "byName", "options": "MemUsed"}, "properties": [{"id": "unit", "value": "decmbytes"}]}, {"matcher": {"id": "byName", "options": "MemFree"}, "properties": [{"id": "unit", "value": "decmbytes"}]}, {"matcher": {"id": "byName", "options": "State"}, "properties": [{"id": "mappings", "value": [{"options": {"0": {"color": "blue", "index": 0, "text": "OK"}}, "type": "value"}, {"options": {"1": {"color": "green", "index": 1, "text": "OK"}}, "type": "value"}, {"options": {"2": {"color": "red", "index": 2, "text": "Error"}}, "type": "value"}, {"options": {"3": {"color": "purple", "index": 3, "text": "VM"}}, "type": "value"}]}]}]}, "gridPos": {"h": 12, "w": 24, "x": 0, "y": 0}, "id": 1, "options": {"cellHeight": "sm", "footer": {"enablePagination": false, "show": false}, "showHeader": true, "sortBy": [{"desc": false, "displayName": "Hostname"}]}, "pluginVersion": "11.1.0", "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_GPU_TEMP", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "Temp"}, {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_POWER_USAGE", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "Power"}, {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_GPU_UTIL", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "Util"}, {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_MEM_COPY_UTIL", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "MemUtil"}, {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_FAN_SPEED", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "Fan"}, {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_FB_USED", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "MemUsed"}, {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_FB_FREE", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "MemFree"}, {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "GPU_ERROR_STATE", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "State"}], "title": "GPU Fleet Overview", "transformations": [{"id": "merge", "options": {}}, {"id": "organize", "options": {"excludeByName": {"DCGM_FI_DRIVER_VERSION": true, "Time": true, "Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true, "Time 5": true, "Time 6": true, "Time 7": true, "Time 8": true, "UUID": true, "__name__": true, "__name__ 1": true, "__name__ 2": true, "__name__ 3": true, "__name__ 4": true, "__name__ 5": true, "__name__ 6": true, "__name__ 7": true, "__name__ 8": true, "device": true, "job": true, "pci_bus_id": true}, "indexByName": {"Hostname": 0, "Value #Fan": 7, "Value #MemFree": 9, "Value #MemUsed": 8, "Value #MemUtil": 6, "Value #Power": 4, "Value #State": 10, "Value #Temp": 3, "Value #Util": 5, "gpu": 1, "modelName": 2}, "renameByName": {"Hostname": "Host", "Value #Fan": "Fan", "Value #MemFree": "MemFree", "Value #MemUsed": "MemUsed", "Value #MemUtil": "Mem%", "Value #Power": "Power", "Value #State": "State", "Value #Temp": "Temp", "Value #Util": "Util", "gpu": "GPU", "modelName": "Model"}}}, {"id": "filterByValue", "options": {"filters": [{"config": {"id": "isNotNull", "options": {}}, "fieldName": "Temp"}], "match": "any", "type": "include"}}], "type": "table"}, {"collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 12}, "id": 2, "panels": [], "title": "Summary Statistics", "type": "row"}, {"datasource": {"type": "prometheus", "uid": "prometheus"}, "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "unit": "short"}, "overrides": []}, "gridPos": {"h": 4, "w": 4, "x": 0, "y": 13}, "id": 3, "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["sum"], "fields": "", "values": false}, "textMode": "auto"}, "pluginVersion": "11.1.0", "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_GPU_COUNT{type=\"nvml\"}", "instant": true, "legendFormat": "{{Hostname}}", "range": true, "refId": "A"}], "title": "Total GPUs", "type": "stat"}, {"datasource": {"type": "prometheus", "uid": "prometheus"}, "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "mappings": [{"options": {"0": {"color": "red", "index": 0, "text": "Unavailable"}}, "type": "value"}, {"options": {"1": {"color": "green", "index": 1, "text": "Available"}}, "type": "value"}], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}, "unit": "short"}, "overrides": []}, "gridPos": {"h": 4, "w": 4, "x": 4, "y": 13}, "id": 4, "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["sum"], "fields": "", "values": false}, "textMode": "auto"}, "pluginVersion": "11.1.0", "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_GPU_AVAILABLE", "instant": true, "legendFormat": "{{Hostname}}", "range": true, "refId": "A"}], "title": "Hosts Available", "type": "stat"}, {"datasource": {"type": "prometheus", "uid": "prometheus"}, "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "decimals": 1, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 70}, {"color": "orange", "value": 80}, {"color": "red", "value": 90}]}, "unit": "celsius"}, "overrides": []}, "gridPos": {"h": 4, "w": 4, "x": 8, "y": 13}, "id": 5, "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["mean"], "fields": "", "values": false}, "textMode": "auto"}, "pluginVersion": "11.1.0", "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "avg(DCGM_FI_DEV_GPU_TEMP)", "instant": true, "legendFormat": "Avg Temp", "range": true, "refId": "A"}], "title": "Avg Temperature", "type": "stat"}, {"datasource": {"type": "prometheus", "uid": "prometheus"}, "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "decimals": 0, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "unit": "watt"}, "overrides": []}, "gridPos": {"h": 4, "w": 4, "x": 12, "y": 13}, "id": 6, "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["sum"], "fields": "", "values": false}, "textMode": "auto"}, "pluginVersion": "11.1.0", "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "sum(DCGM_FI_DEV_POWER_USAGE)", "instant": true, "legendFormat": "Total Power", "range": true, "refId": "A"}], "title": "Total Power", "type": "stat"}, {"datasource": {"type": "prometheus", "uid": "prometheus"}, "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "decimals": 0, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}, {"color": "green", "value": 50}]}, "unit": "percent"}, "overrides": []}, "gridPos": {"h": 4, "w": 4, "x": 16, "y": 13}, "id": 7, "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["mean"], "fields": "", "values": false}, "textMode": "auto"}, "pluginVersion": "11.1.0", "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "avg(DCGM_FI_DEV_GPU_UTIL)", "instant": true, "legendFormat": "Avg Util", "range": true, "refId": "A"}], "title": "Avg Utilization", "type": "stat"}, {"datasource": {"type": "prometheus", "uid": "prometheus"}, "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "decimals": 0, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}, "unit": "short"}, "overrides": []}, "gridPos": {"h": 4, "w": 4, "x": 20, "y": 13}, "id": 8, "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["sum"], "fields": "", "values": false}, "textMode": "auto"}, "pluginVersion": "11.1.0", "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "sum(GPU_AER_TOTAL_ERRORS)", "instant": true, "legendFormat": "PCIe Errors", "range": true, "refId": "A"}], "title": "PCIe Errors", "type": "stat"}, {"collapsed": true, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 17}, "id": 9, "panels": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "custom": {"align": "auto", "cellOptions": {"mode": "gradient", "type": "color-background"}, "filterable": false, "inspect": false}, "mappings": [{"options": {"0": {"color": "green", "index": 0, "text": "OK"}}, "type": "value"}, {"options": {"1": {"color": "yellow", "index": 1, "text": "Active"}}, "type": "value"}], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}]}}, "overrides": []}, "gridPos": {"h": 8, "w": 24, "x": 0, "y": 18}, "id": 109, "options": {"cellHeight": "sm", "footer": {"show": false}, "showHeader": true}, "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_CLOCKS_THROTTLE_REASON", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "A"}], "title": "Clock Throttle Reasons", "transformations": [{"id": "organize", "options": {"excludeByName": {"DCGM_FI_DRIVER_VERSION": true, "Time": true, "UUID": true, "__name__": true, "device": true, "job": true, "pci_bus_id": true}, "renameByName": {"Hostname": "Host", "gpu": "GPU", "modelName": "Model", "reason": "Reason"}}}, {"id": "filterByValue", "options": {"filters": [{"config": {"id": "greater", "options": {"value": 0}}, "fieldName": "Value"}], "match": "any", "type": "include"}}], "type": "table"}], "title": "Throttle Reasons (Click to expand)", "type": "row"}], "preload": false, "refresh": "10s", "schemaVersion": 42, "tags": ["Prometheuse", "Nvidia", "Linux"], "templating": {"list": [{"baseFilters": [], "datasource": {"type": "prometheus", "uid": "prometheus"}, "filters": [{"key": "Hostname", "operator": "!=", "value": ""}], "name": "Filters", "type": "adhoc"}]}, "time": {"from": "now-10s", "to": "now"}, "timepicker": {}, "timezone": "", "title": "DC Overview", "uid": "dc-overview-main", "version": 2, "weekStart": ""}
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {"align": "center", "cellOptions": {"type": "color-text"}, "filterable": false, "inspect": false},
+          "decimals": 0,
+          "mappings": [{"options": {"0": {"color": "text", "index": 0, "text": "-"}}, "type": "value"}],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 70}, {"color": "red", "value": 85}]},
+          "unit": "celsius"
+        },
+        "overrides": [{"matcher": {"id": "byName", "options": "Hostname"}, "properties": [{"id": "custom.width", "value": 120}]}]
+      },
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"showHeader": true, "cellHeight": "sm", "footer": {"show": false}, "sortBy": [{"displayName": "Hostname"}]},
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"0\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"1\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "B", "hide": false},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"2\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "C", "hide": false},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"3\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "D", "hide": false},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"4\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "E", "hide": false},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"5\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "F", "hide": false},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"6\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "G", "hide": false},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"7\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "H", "hide": false}
+      ],
+      "title": "🌡️ GPU Temperatures",
+      "transformations": [
+        {"id": "merge", "options": {}},
+        {"id": "organize", "options": {"excludeByName": {"Time": true, "UUID": true, "DCGM_FI_DRIVER_VERSION": true, "__name__": true, "device": true, "instance": true, "job": true, "modelName": true, "pci_bus_id": true}, "indexByName": {}, "renameByName": {"Value #A": "GPU0", "Value #B": "GPU1", "Value #C": "GPU2", "Value #D": "GPU3", "Value #E": "GPU4", "Value #F": "GPU5", "Value #G": "GPU6", "Value #H": "GPU7"}}}
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {"align": "center", "cellOptions": {"type": "color-text"}, "filterable": false, "inspect": false},
+          "decimals": 0,
+          "mappings": [{"options": {"0": {"color": "text", "index": 0, "text": "-"}}, "type": "value"}],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 85}, {"color": "red", "value": 95}]},
+          "unit": "celsius"
+        },
+        "overrides": [{"matcher": {"id": "byName", "options": "Hostname"}, "properties": [{"id": "custom.width", "value": 120}]}]
+      },
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 6},
+      "id": 2,
+      "options": {"showHeader": true, "cellHeight": "sm", "footer": {"show": false}, "sortBy": [{"displayName": "Hostname"}]},
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_FI_DEV_VRAM_TEMP{gpu=\"0\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_FI_DEV_VRAM_TEMP{gpu=\"1\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "B"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_FI_DEV_VRAM_TEMP{gpu=\"2\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "C"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_FI_DEV_VRAM_TEMP{gpu=\"3\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "D"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_FI_DEV_VRAM_TEMP{gpu=\"4\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "E"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_FI_DEV_VRAM_TEMP{gpu=\"5\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "F"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_FI_DEV_VRAM_TEMP{gpu=\"6\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "G"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_FI_DEV_VRAM_TEMP{gpu=\"7\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "H"}
+      ],
+      "title": "🔥 VRAM Temperatures",
+      "transformations": [
+        {"id": "merge", "options": {}},
+        {"id": "organize", "options": {"excludeByName": {"Time": true, "UUID": true, "DCXP_FI_DRIVER_VERSION": true, "__name__": true, "device": true, "instance": true, "job": true, "modelName": true, "pci_bus_id": true}, "indexByName": {}, "renameByName": {"Value #A": "GPU0", "Value #B": "GPU1", "Value #C": "GPU2", "Value #D": "GPU3", "Value #E": "GPU4", "Value #F": "GPU5", "Value #G": "GPU6", "Value #H": "GPU7"}}}
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {"align": "center", "cellOptions": {"type": "color-text"}, "filterable": false, "inspect": false},
+          "decimals": 0,
+          "mappings": [{"options": {"0": {"color": "text", "index": 0, "text": "-"}}, "type": "value"}],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 90}, {"color": "red", "value": 100}]},
+          "unit": "celsius"
+        },
+        "overrides": [{"matcher": {"id": "byName", "options": "Hostname"}, "properties": [{"id": "custom.width", "value": 120}]}]
+      },
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 12},
+      "id": 3,
+      "options": {"showHeader": true, "cellHeight": "sm", "footer": {"show": false}, "sortBy": [{"displayName": "Hostname"}]},
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_FI_DEV_HOT_SPOT_TEMP{gpu=\"0\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_FI_DEV_HOT_SPOT_TEMP{gpu=\"1\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "B"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_FI_DEV_HOT_SPOT_TEMP{gpu=\"2\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "C"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_FI_DEV_HOT_SPOT_TEMP{gpu=\"3\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "D"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_FI_DEV_HOT_SPOT_TEMP{gpu=\"4\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "E"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_FI_DEV_HOT_SPOT_TEMP{gpu=\"5\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "F"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_FI_DEV_HOT_SPOT_TEMP{gpu=\"6\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "G"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_FI_DEV_HOT_SPOT_TEMP{gpu=\"7\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "H"}
+      ],
+      "title": "🔥 Hotspot Temperatures",
+      "transformations": [
+        {"id": "merge", "options": {}},
+        {"id": "organize", "options": {"excludeByName": {"Time": true, "UUID": true, "DCXP_FI_DRIVER_VERSION": true, "__name__": true, "device": true, "instance": true, "job": true, "modelName": true, "pci_bus_id": true}, "indexByName": {}, "renameByName": {"Value #A": "GPU0", "Value #B": "GPU1", "Value #C": "GPU2", "Value #D": "GPU3", "Value #E": "GPU4", "Value #F": "GPU5", "Value #G": "GPU6", "Value #H": "GPU7"}}}
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {"align": "center", "cellOptions": {"type": "color-text"}, "filterable": false, "inspect": false},
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 300}, {"color": "red", "value": 400}]},
+          "unit": "watt"
+        },
+        "overrides": [{"matcher": {"id": "byName", "options": "Hostname"}, "properties": [{"id": "custom.width", "value": 120}]}]
+      },
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 18},
+      "id": 4,
+      "options": {"showHeader": true, "cellHeight": "sm", "footer": {"show": false}, "sortBy": [{"displayName": "Hostname"}]},
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"0\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"1\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "B"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"2\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "C"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"3\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "D"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"4\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "E"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"5\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "F"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"6\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "G"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"7\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "H"}
+      ],
+      "title": "⚡ Power Usage",
+      "transformations": [
+        {"id": "merge", "options": {}},
+        {"id": "organize", "options": {"excludeByName": {"Time": true, "UUID": true, "DCGM_FI_DRIVER_VERSION": true, "__name__": true, "device": true, "instance": true, "job": true, "modelName": true, "pci_bus_id": true}, "indexByName": {}, "renameByName": {"Value #A": "GPU0", "Value #B": "GPU1", "Value #C": "GPU2", "Value #D": "GPU3", "Value #E": "GPU4", "Value #F": "GPU5", "Value #G": "GPU6", "Value #H": "GPU7"}}}
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {"align": "center", "cellOptions": {"type": "color-text"}, "filterable": false, "inspect": false},
+          "decimals": 0,
+          "mappings": [{"options": {"0": {"color": "text", "index": 0, "text": "-"}}, "type": "value"}],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 80}, {"color": "red", "value": 95}]},
+          "unit": "percent"
+        },
+        "overrides": [{"matcher": {"id": "byName", "options": "Hostname"}, "properties": [{"id": "custom.width", "value": 120}]}]
+      },
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 24},
+      "id": 5,
+      "options": {"showHeader": true, "cellHeight": "sm", "footer": {"show": false}, "sortBy": [{"displayName": "Hostname"}]},
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"0\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"1\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "B"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"2\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "C"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"3\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "D"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"4\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "E"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"5\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "F"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"6\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "G"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"7\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "H"}
+      ],
+      "title": "🌀 Fan Speed",
+      "transformations": [
+        {"id": "merge", "options": {}},
+        {"id": "organize", "options": {"excludeByName": {"Time": true, "UUID": true, "DCGM_FI_DRIVER_VERSION": true, "__name__": true, "device": true, "instance": true, "job": true, "modelName": true, "pci_bus_id": true}, "indexByName": {}, "renameByName": {"Value #A": "GPU0", "Value #B": "GPU1", "Value #C": "GPU2", "Value #D": "GPU3", "Value #E": "GPU4", "Value #F": "GPU5", "Value #G": "GPU6", "Value #H": "GPU7"}}}
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {"align": "center", "cellOptions": {"type": "color-text"}, "filterable": false, "inspect": false},
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+          "unit": "hertz"
+        },
+        "overrides": [{"matcher": {"id": "byName", "options": "Hostname"}, "properties": [{"id": "custom.width", "value": 120}]}]
+      },
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 30},
+      "id": 6,
+      "options": {"showHeader": true, "cellHeight": "sm", "footer": {"show": false}, "sortBy": [{"displayName": "Hostname"}]},
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_SM_CLOCK{gpu=\"0\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_SM_CLOCK{gpu=\"1\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "B"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_SM_CLOCK{gpu=\"2\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "C"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_SM_CLOCK{gpu=\"3\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "D"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_SM_CLOCK{gpu=\"4\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "E"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_SM_CLOCK{gpu=\"5\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "F"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_SM_CLOCK{gpu=\"6\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "G"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCGM_FI_DEV_SM_CLOCK{gpu=\"7\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "H"}
+      ],
+      "title": "📊 SM Clock (MHz)",
+      "transformations": [
+        {"id": "merge", "options": {}},
+        {"id": "organize", "options": {"excludeByName": {"Time": true, "UUID": true, "DCGM_FI_DRIVER_VERSION": true, "__name__": true, "device": true, "instance": true, "job": true, "modelName": true, "pci_bus_id": true}, "indexByName": {}, "renameByName": {"Value #A": "GPU0", "Value #B": "GPU1", "Value #C": "GPU2", "Value #D": "GPU3", "Value #E": "GPU4", "Value #F": "GPU5", "Value #G": "GPU6", "Value #H": "GPU7"}}}
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {"align": "center", "cellOptions": {"type": "color-text"}, "filterable": false, "inspect": false},
+          "decimals": 0,
+          "mappings": [{"options": {"0": {"color": "dark-red", "index": 0, "text": "⚠️ ERROR"}}, "type": "value"}],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]},
+          "unit": "none"
+        },
+        "overrides": [{"matcher": {"id": "byName", "options": "Hostname"}, "properties": [{"id": "custom.width", "value": 120}]}]
+      },
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 36},
+      "id": 7,
+      "options": {"showHeader": true, "cellHeight": "sm", "footer": {"show": false}, "sortBy": [{"displayName": "Hostname"}]},
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_GPU_STATE{gpu=\"0\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_GPU_STATE{gpu=\"1\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "B"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_GPU_STATE{gpu=\"2\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "C"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_GPU_STATE{gpu=\"3\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "D"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_GPU_STATE{gpu=\"4\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "E"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_GPU_STATE{gpu=\"5\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "F"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_GPU_STATE{gpu=\"6\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "G"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_GPU_STATE{gpu=\"7\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "H"}
+      ],
+      "title": "🖥️ GPU State (1=OK, 0=Error)",
+      "transformations": [
+        {"id": "merge", "options": {}},
+        {"id": "organize", "options": {"excludeByName": {"Time": true, "UUID": true, "DCXP_FI_DRIVER_VERSION": true, "__name__": true, "device": true, "instance": true, "job": true, "modelName": true, "pci_bus_id": true}, "indexByName": {}, "renameByName": {"Value #A": "GPU0", "Value #B": "GPU1", "Value #C": "GPU2", "Value #D": "GPU3", "Value #E": "GPU4", "Value #F": "GPU5", "Value #G": "GPU6", "Value #H": "GPU7"}}}
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "custom": {"align": "center", "cellOptions": {"type": "color-text"}, "filterable": false, "inspect": false},
+          "decimals": 0,
+          "mappings": [{"options": {"0": {"color": "green", "index": 0, "text": "0"}}, "type": "value"}],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 10}]},
+          "unit": "none"
+        },
+        "overrides": [{"matcher": {"id": "byName", "options": "Hostname"}, "properties": [{"id": "custom.width", "value": 120}]}]
+      },
+      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 42},
+      "id": 8,
+      "options": {"showHeader": true, "cellHeight": "sm", "footer": {"show": false}, "sortBy": [{"displayName": "Hostname"}]},
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_AER_TOTAL_ERRORS{gpu=\"0\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_AER_TOTAL_ERRORS{gpu=\"1\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "B"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_AER_TOTAL_ERRORS{gpu=\"2\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "C"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_AER_TOTAL_ERRORS{gpu=\"3\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "D"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_AER_TOTAL_ERRORS{gpu=\"4\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "E"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_AER_TOTAL_ERRORS{gpu=\"5\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "F"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_AER_TOTAL_ERRORS{gpu=\"6\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "G"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "editorMode": "code", "expr": "DCXP_AER_TOTAL_ERRORS{gpu=\"7\"}", "format": "table", "instant": true, "legendFormat": "__auto", "refId": "H"}
+      ],
+      "title": "⚠️ PCIe AER Errors",
+      "transformations": [
+        {"id": "merge", "options": {}},
+        {"id": "organize", "options": {"excludeByName": {"Time": true, "UUID": true, "DCXP_FI_DRIVER_VERSION": true, "__name__": true, "device": true, "instance": true, "job": true, "modelName": true, "pci_bus_id": true}, "indexByName": {}, "renameByName": {"Value #A": "GPU0", "Value #B": "GPU1", "Value #C": "GPU2", "Value #D": "GPU3", "Value #E": "GPU4", "Value #F": "GPU5", "Value #G": "GPU6", "Value #H": "GPU7"}}}
+      ],
+      "type": "table"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["gpu", "datacenter", "dc-overview"],
+  "templating": {"list": []},
+  "time": {"from": "now-5m", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "DC Overview",
+  "uid": "dc-overview",
+  "version": 1,
+  "weekStart": ""
+}
