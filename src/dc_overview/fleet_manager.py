@@ -1354,6 +1354,8 @@ echo "Exporters installed successfully"
                 "http://127.0.0.1:5001/api/servers",
                 "-H", "Content-Type: application/json",
                 "-H", "X-Fleet-Authenticated: true",
+                "-H", "X-Fleet-Auth-User: admin",
+                "-H", "X-Fleet-Auth-Role: admin",
                 "-d", data
             ], capture_output=True, text=True)
             
