@@ -222,6 +222,9 @@ providers:
 """
         (grafana_dir / "provisioning" / "dashboards" / "default.yml").write_text(dashboard_config)
         
+        # Ensure cryptolabs network exists before starting services
+        subprocess.run(["docker", "network", "create", "cryptolabs"], capture_output=True)
+        
         # Start services
         with Progress(SpinnerColumn(), TextColumn("Starting services..."), console=console) as progress:
             progress.add_task("", total=None)
@@ -327,7 +330,8 @@ networks:
     external: true
 """
         else:
-            # Standalone mode - expose ports directly
+            # Fresh install - use cryptolabs network (proxy will be deployed later)
+            # Create the network first since docker-compose will use external: true
             return f"""services:
   prometheus:
     image: prom/prometheus:latest
@@ -346,7 +350,7 @@ networks:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      - monitoring
+      - cryptolabs
 
   grafana:
     image: grafana/grafana:latest
@@ -360,22 +364,26 @@ networks:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     environment:
       - GF_SECURITY_ADMIN_PASSWORD={self.config.grafana.admin_password}
-      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-piechart-panel
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_SERVER_ROOT_URL={root_url}
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_AUTH_PROXY_ENABLED=true
+      - GF_AUTH_PROXY_HEADER_NAME=X-WEBAUTH-USER
+      - GF_AUTH_PROXY_AUTO_SIGN_UP=true
     depends_on:
       - prometheus
     networks:
-      - monitoring
+      - cryptolabs
 
 volumes:
   prometheus-data:
   grafana-data:
 
 networks:
-  monitoring:
-    driver: bridge
+  cryptolabs:
+    name: cryptolabs
 """
     
     def _generate_prometheus_config(self) -> str:
