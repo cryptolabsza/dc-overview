@@ -960,20 +960,13 @@ class FleetWizard:
         console.print(f"\n[green]✓[/green] Added {len(self.config.servers)} servers")
     
     def _add_servers_manual(self):
-        """Add servers one by one."""
+        """Add servers one by one with SSH connection test and hostname auto-detection."""
         has_ipmi = self.config.components.ipmi_monitor
         
         while True:
             console.print()
-            name = questionary.text(
-                f"Server name (e.g., gpu-{len(self.config.servers)+1:02d}):",
-                default=f"server-{len(self.config.servers)+1:02d}",
-                style=custom_style
-            ).ask()
             
-            if not name:
-                break
-            
+            # First ask for IP
             server_ip = questionary.text(
                 "Server IP (for SSH/exporters):",
                 validate=lambda x: self._looks_like_ip(x) or "Invalid IP format",
@@ -982,6 +975,34 @@ class FleetWizard:
             
             if not server_ip:
                 break
+            
+            # Test SSH connection and get hostname
+            console.print(f"[dim]Testing SSH connection to {server_ip}...[/dim]")
+            hostname = self._get_remote_hostname(server_ip)
+            
+            if hostname:
+                console.print(f"[green]✓[/green] SSH connection successful!")
+                console.print(f"[dim]  Detected hostname: {hostname}[/dim]")
+                
+                # Ask if user wants to use detected hostname or override
+                name = questionary.text(
+                    f"Server name (detected: {hostname}):",
+                    default=hostname,
+                    style=custom_style
+                ).ask()
+            else:
+                console.print(f"[yellow]⚠[/yellow] Could not connect via SSH to get hostname")
+                console.print(f"[dim]  Check SSH credentials or the server may be offline[/dim]")
+                
+                # Ask for name manually
+                name = questionary.text(
+                    f"Server name (e.g., gpu-{len(self.config.servers)+1:02d}):",
+                    default=f"server-{len(self.config.servers)+1:02d}",
+                    style=custom_style
+                ).ask()
+            
+            if not name:
+                name = f"server-{len(self.config.servers)+1:02d}"
             
             bmc_ip = None
             bmc_user = None
@@ -1024,10 +1045,42 @@ class FleetWizard:
                 bmc_user=bmc_user,
                 bmc_password=bmc_password,
             )
-            console.print(f"[green]✓[/green] Added: {name}")
+            console.print(f"[green]✓[/green] Added: {name} ({server_ip})")
             
             if not questionary.confirm("Add another server?", default=True, style=custom_style).ask():
                 break
+    
+    def _get_remote_hostname(self, server_ip: str) -> Optional[str]:
+        """Get hostname from remote server via SSH."""
+        import subprocess
+        
+        try:
+            # Build SSH command
+            cmd = [
+                'ssh', '-o', 'ConnectTimeout=5', '-o', 'StrictHostKeyChecking=no',
+                '-o', 'BatchMode=yes',
+                '-p', str(self.config.ssh.port)
+            ]
+            
+            # Add key if available
+            if self.config.ssh.key_path:
+                cmd.extend(['-i', self.config.ssh.key_path])
+            
+            cmd.extend([
+                f'{self.config.ssh.username}@{server_ip}',
+                'hostname'
+            ])
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            
+            if result.returncode == 0:
+                hostname = result.stdout.strip()
+                if hostname:
+                    return hostname
+        except Exception:
+            pass
+        
+        return None
     
     def _looks_like_ip(self, s: str) -> bool:
         """Check if string looks like an IP address."""
