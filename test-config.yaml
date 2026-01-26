@@ -51,3 +51,7 @@ servers:
 # Grafana password
 grafana:
   admin_password: Test1234
+
+# IPMI Monitor password
+ipmi_monitor:
+  admin_password: Test1234
