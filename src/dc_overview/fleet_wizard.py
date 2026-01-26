@@ -1018,25 +1018,16 @@ class FleetWizard:
                 if bmc_ip and not self._looks_like_ip(bmc_ip):
                     bmc_ip = None
                 
-                # Ask for per-server BMC credentials if different from default
+                # Test BMC connection and collect credentials
                 if bmc_ip:
-                    use_custom_bmc = questionary.confirm(
-                        f"Use different BMC credentials for {name}? (default: {self.config.bmc.username})",
-                        default=False,
-                        style=custom_style
-                    ).ask()
+                    bmc_user, bmc_password = self._collect_and_test_bmc_credentials(
+                        name=name,
+                        bmc_ip=bmc_ip
+                    )
                     
-                    if use_custom_bmc:
-                        bmc_user = questionary.text(
-                            f"BMC username for {name}:",
-                            default=self.config.bmc.username,
-                            style=custom_style
-                        ).ask()
-                        
-                        bmc_password = questionary.password(
-                            f"BMC password for {name}:",
-                            style=custom_style
-                        ).ask()
+                    # If user cancelled BMC setup, clear BMC IP
+                    if bmc_user is None and bmc_password is None:
+                        bmc_ip = None
             
             self.config.add_server(
                 name=name,
@@ -1049,6 +1040,126 @@ class FleetWizard:
             
             if not questionary.confirm("Add another server?", default=True, style=custom_style).ask():
                 break
+    
+    def _collect_and_test_bmc_credentials(self, name: str, bmc_ip: str) -> Tuple[Optional[str], Optional[str]]:
+        """Collect BMC credentials and test connection, allowing retry on failure."""
+        # Check if using custom credentials or default
+        use_custom_bmc = questionary.confirm(
+            f"Use different BMC credentials for {name}? (default: {self.config.bmc.username})",
+            default=False,
+            style=custom_style
+        ).ask()
+        
+        if use_custom_bmc:
+            bmc_user = questionary.text(
+                f"BMC username for {name}:",
+                default=self.config.bmc.username,
+                style=custom_style
+            ).ask()
+            
+            bmc_password = questionary.password(
+                f"BMC password for {name}:",
+                style=custom_style
+            ).ask()
+        else:
+            # Use default credentials
+            bmc_user = None  # Will use default
+            bmc_password = None  # Will use default
+        
+        # Get actual credentials for testing
+        test_user = bmc_user or self.config.bmc.username
+        test_password = bmc_password or self.config.bmc.password
+        
+        # Test BMC connection
+        while True:
+            console.print(f"[dim]Testing BMC/IPMI connection to {bmc_ip}...[/dim]")
+            bmc_ok, bmc_error = self._test_bmc_connection(bmc_ip, test_user, test_password)
+            
+            if bmc_ok:
+                console.print(f"[green]✓[/green] BMC connection successful!")
+                return bmc_user, bmc_password
+            else:
+                console.print(f"[red]✗[/red] BMC connection failed: {bmc_error}")
+                
+                # Ask what to do
+                action = questionary.select(
+                    "What would you like to do?",
+                    choices=[
+                        "Edit BMC credentials",
+                        "Edit BMC IP address", 
+                        "Skip BMC for this server",
+                        "Add anyway (ignore error)"
+                    ],
+                    style=custom_style
+                ).ask()
+                
+                if action == "Edit BMC credentials":
+                    bmc_user = questionary.text(
+                        f"BMC username for {name}:",
+                        default=test_user,
+                        style=custom_style
+                    ).ask()
+                    
+                    bmc_password = questionary.password(
+                        f"BMC password for {name}:",
+                        style=custom_style
+                    ).ask()
+                    
+                    test_user = bmc_user
+                    test_password = bmc_password
+                    # Loop back to test again
+                    
+                elif action == "Edit BMC IP address":
+                    new_bmc_ip = questionary.text(
+                        f"BMC IP for {name}:",
+                        default=bmc_ip,
+                        style=custom_style
+                    ).ask()
+                    
+                    if new_bmc_ip and self._looks_like_ip(new_bmc_ip):
+                        bmc_ip = new_bmc_ip
+                    # Loop back to test again
+                    
+                elif action == "Skip BMC for this server":
+                    console.print(f"[dim]Skipping BMC for {name}[/dim]")
+                    return None, None
+                    
+                else:  # Add anyway
+                    console.print(f"[yellow]⚠[/yellow] Adding server with untested BMC credentials")
+                    return bmc_user, bmc_password
+    
+    def _test_bmc_connection(self, bmc_ip: str, username: str, password: str) -> Tuple[bool, Optional[str]]:
+        """Test BMC/IPMI connection using ipmitool."""
+        import subprocess
+        import shutil
+        
+        # Check if ipmitool is available
+        if not shutil.which("ipmitool"):
+            return False, "ipmitool not installed"
+        
+        try:
+            result = subprocess.run(
+                ["ipmitool", "-I", "lanplus", "-H", bmc_ip, "-U", username, "-P", password, "chassis", "status"],
+                capture_output=True,
+                text=True,
+                timeout=15
+            )
+            
+            if result.returncode == 0:
+                return True, None
+            else:
+                error = result.stderr.strip() if result.stderr else "Connection failed"
+                # Clean up common error messages
+                if "Unable to establish" in error or "Error" in error:
+                    return False, "Cannot connect - check IP/credentials"
+                if "authentication" in error.lower():
+                    return False, "Authentication failed - check username/password"
+                return False, error
+                
+        except subprocess.TimeoutExpired:
+            return False, "Connection timed out"
+        except Exception as e:
+            return False, str(e)
     
     def _get_remote_hostname(self, server_ip: str) -> Optional[str]:
         """Get hostname from remote server via SSH."""
