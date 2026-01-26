@@ -47,8 +47,9 @@ NODE_EXPORTER_URL = f"https://github.com/prometheus/node_exporter/releases/downl
 
 # DC Exporter RS (Rust version) - preferred
 # Using dc-exporter-releases repo for public binary distribution
+# Note: Both main and dev branches use the same 'latest' release URL since
+# dc-exporter-releases doesn't have separate dev releases
 DC_EXPORTER_RS_URL = "https://github.com/cryptolabsza/dc-exporter-releases/releases/latest/download/dc-exporter-rs"
-DC_EXPORTER_RS_URL_DEV = "https://github.com/cryptolabsza/dc-exporter-releases/releases/download/dev-latest/dc-exporter-rs"
 DC_EXPORTER_RS_DEB_URL = f"https://github.com/cryptolabsza/dc-exporter-releases/releases/latest/download/dc-exporter-rs_{DC_EXPORTER_RS_VERSION}_amd64.deb"
 
 
@@ -852,12 +853,10 @@ def get_exporter_download_url(exporter: str, version: str = None, branch: str = 
     if exporter == 'node_exporter':
         return f"https://github.com/prometheus/node_exporter/releases/download/v{version}/node_exporter-{version}.linux-amd64.tar.gz"
     elif exporter == 'dc_exporter':
-        # dc-exporter-rs: use dev-latest for dev branch, latest for main
-        if branch == 'dev':
-            return "https://github.com/cryptolabsza/dc-exporter-releases/releases/download/dev-latest/dc-exporter-rs"
-        else:
-            # For main branch, use latest release
-            return "https://github.com/cryptolabsza/dc-exporter-releases/releases/latest/download/dc-exporter-rs"
+        # dc-exporter-rs: always use 'latest' download URL since dc-exporter-releases
+        # repo uses tagged releases (v0.2.1, etc.) not branch-specific releases
+        # The 'latest' endpoint automatically serves the newest stable release
+        return "https://github.com/cryptolabsza/dc-exporter-releases/releases/latest/download/dc-exporter-rs"
     elif exporter == 'dcgm_exporter':
         # Docker image, return image tag
         return f"nvidia/dcgm-exporter:{version}-ubuntu22.04"
