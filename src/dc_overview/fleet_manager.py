@@ -695,12 +695,12 @@ echo "Exporters installed successfully"
                 }]
             })
         
-        # Add IPMI Monitor if enabled
+        # Add IPMI Monitor if enabled (runs as container on cryptolabs network)
         if self.config.components.ipmi_monitor:
             scrape_configs.append({
                 "job_name": "ipmi-monitor",
                 "static_configs": [{
-                    "targets": ["host.docker.internal:5000"],
+                    "targets": ["ipmi-monitor:5000"],
                     "labels": {"instance": "ipmi-monitor"}
                 }],
                 "metrics_path": "/metrics"
@@ -1040,17 +1040,10 @@ echo "Exporters installed successfully"
     # ============ Step 7: IPMI Monitor ============
     
     def _deploy_ipmi_monitor(self):
-        """Deploy IPMI Monitor service."""
+        """Deploy IPMI Monitor as a Docker container on the cryptolabs network."""
         console.print("\n[bold]Step 7: Installing IPMI Monitor[/bold]\n")
         
-        # Check if already installed
-        ipmi_config_dir = Path("/etc/ipmi-monitor")
-        if (ipmi_config_dir / "servers.yaml").exists():
-            console.print("[green]✓[/green] IPMI Monitor already installed")
-            console.print("[dim]Skipping installation - using existing configuration[/dim]")
-            return
-        
-        # Also check if the container is running
+        # Check if container is already running
         try:
             result = subprocess.run(
                 ["docker", "inspect", "ipmi-monitor"],
@@ -1062,35 +1055,11 @@ echo "Exporters installed successfully"
         except Exception:
             pass
         
-        # Install ipmi-monitor from pip
-        if not self._install_ipmi_monitor_package():
-            console.print("[yellow]⚠[/yellow] IPMI Monitor package installation failed")
-            console.print("[dim]You can install manually: pip3 install ipmi-monitor[/dim]")
-            return
-        
-        # Create IPMI Monitor config directory
+        # Create config directory
         ipmi_config_dir = Path("/etc/ipmi-monitor")
         ipmi_config_dir.mkdir(parents=True, exist_ok=True)
         
-        # Write config
-        ipmi_config = {
-            "web": {
-                "port": self.config.ipmi_monitor.port,
-                "host": "127.0.0.1"  # Bind to localhost only
-            },
-            "database": "/var/lib/ipmi-monitor/ipmi_monitor.db"
-        }
-        
-        if self.config.ipmi_monitor.ai_license_key:
-            ipmi_config["ai"] = {
-                "enabled": True,
-                "license_key": self.config.ipmi_monitor.ai_license_key
-            }
-        
-        with open(ipmi_config_dir / "config.yaml", "w") as f:
-            yaml.dump(ipmi_config, f)
-        
-        # Write servers config
+        # Build servers config for IPMI Monitor
         servers = []
         for server in self.config.servers:
             if server.bmc_ip:
@@ -1103,90 +1072,73 @@ echo "Exporters installed successfully"
                     "server_ip": server.server_ip,
                 })
         
+        # Write servers.yaml config
         if servers:
             with open(ipmi_config_dir / "servers.yaml", "w") as f:
                 yaml.dump({"servers": servers}, f)
             os.chmod(ipmi_config_dir / "servers.yaml", 0o600)
+        else:
+            # Create empty servers file so container starts
+            with open(ipmi_config_dir / "servers.yaml", "w") as f:
+                yaml.dump({"servers": []}, f)
         
-        # Create data directory
-        Path("/var/lib/ipmi-monitor").mkdir(parents=True, exist_ok=True)
+        # Pull latest image
+        console.print("[dim]Pulling ipmi-monitor image...[/dim]")
+        subprocess.run(
+            ["docker", "pull", "ghcr.io/cryptolabsza/ipmi-monitor:dev"],
+            capture_output=True
+        )
         
-        # Install systemd service
-        service_content = """[Unit]
-Description=IPMI Monitor - Server Health Monitoring
-After=network.target
-
-[Service]
-Type=simple
-User=root
-ExecStart=/usr/local/bin/ipmi-monitor daemon
-WorkingDirectory=/etc/ipmi-monitor
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-"""
-        Path("/etc/systemd/system/ipmi-monitor.service").write_text(service_content)
+        # Remove old container if exists
+        subprocess.run(["docker", "rm", "-f", "ipmi-monitor"], capture_output=True)
         
-        # Start service
-        subprocess.run(["systemctl", "daemon-reload"], capture_output=True)
-        subprocess.run(["systemctl", "enable", "ipmi-monitor"], capture_output=True)
-        subprocess.run(["systemctl", "start", "ipmi-monitor"], capture_output=True)
+        # Get admin password (use fleet admin or IPMI monitor specific)
+        admin_pass = self.config.ipmi_monitor.admin_password or self.config.fleet_admin_pass or "changeme"
         
-        console.print(f"[green]✓[/green] IPMI Monitor running on port {self.config.ipmi_monitor.port}")
+        # Build environment variables
+        env_vars = [
+            "-e", "APP_NAME=IPMI Monitor",
+            "-e", f"ADMIN_USER={self.config.fleet_admin_user or 'admin'}",
+            "-e", f"ADMIN_PASS={admin_pass}",
+            "-e", f"SECRET_KEY={os.urandom(32).hex()}",
+            "-e", "POLL_INTERVAL=300",
+        ]
         
-        if servers:
-            console.print(f"[dim]  Configured {len(servers)} servers for IPMI monitoring[/dim]")
-    
-    def _install_ipmi_monitor_package(self) -> bool:
-        """Install ipmi-monitor package via pip with proper error handling."""
-        try:
-            console.print("[dim]Installing ipmi-monitor package...[/dim]")
-            
-            # Install from GitHub dev branch to get development version with tag
-            # TODO: Change to PyPI once dev branch is validated and pushed to main
-            install_cmd = [
-                "pip3", "install", 
-                "git+https://github.com/cryptolabsza/ipmi-monitor.git@dev",
-                "--break-system-packages", "-q", "--force-reinstall"
-            ]
-            
-            result = subprocess.run(
-                install_cmd,
-                capture_output=True,
-                text=True,
-                timeout=180
-            )
-            
-            if result.returncode == 0:
-                console.print("[green]✓[/green] ipmi-monitor installed via pip (dev)")
-                return True
-            
-            # If failed due to dependency conflicts, try with --ignore-installed
-            if "Cannot uninstall" in result.stderr or "blinker" in result.stderr.lower():
-                console.print("[dim]Retrying with --ignore-installed...[/dim]")
-                install_cmd.extend(["--ignore-installed", "blinker"])
-                result = subprocess.run(
-                    install_cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=180
-                )
-                
-                if result.returncode == 0:
-                    console.print("[green]✓[/green] ipmi-monitor installed via pip (dev)")
-                    return True
-            
-            console.print(f"[yellow]⚠[/yellow] pip install failed: {result.stderr[:100]}")
-            return False
-            
-        except subprocess.TimeoutExpired:
-            console.print("[yellow]⚠[/yellow] pip install timed out")
-            return False
-        except Exception as e:
-            console.print(f"[yellow]⚠[/yellow] Error installing ipmi-monitor: {e}")
-            return False
+        # Add default BMC credentials if configured
+        if self.config.bmc_defaults:
+            env_vars.extend([
+                "-e", f"IPMI_USER={self.config.bmc_defaults.username}",
+                "-e", f"IPMI_PASS={self.config.bmc_defaults.password}",
+            ])
+        
+        # Add AI license key if configured
+        if self.config.ipmi_monitor.ai_license_key:
+            env_vars.extend([
+                "-e", "AI_SERVICE_URL=https://ipmi-ai.cryptolabs.co.za",
+                "-e", f"AI_LICENSE_KEY={self.config.ipmi_monitor.ai_license_key}",
+            ])
+        
+        # Run container on cryptolabs network
+        docker_cmd = [
+            "docker", "run", "-d",
+            "--name", "ipmi-monitor",
+            "--restart", "unless-stopped",
+            "--network", "cryptolabs",
+            "-v", "ipmi-monitor-data:/app/data",
+            "-v", f"{ipmi_config_dir}/servers.yaml:/app/config/servers.yaml:ro",
+            "--label", "com.centurylinklabs.watchtower.enable=true",
+        ] + env_vars + [
+            "ghcr.io/cryptolabsza/ipmi-monitor:dev"
+        ]
+        
+        result = subprocess.run(docker_cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            console.print("[green]✓[/green] IPMI Monitor container started")
+            if servers:
+                console.print(f"[dim]  Configured {len(servers)} servers for IPMI monitoring[/dim]")
+        else:
+            console.print(f"[yellow]⚠[/yellow] Failed to start IPMI Monitor: {result.stderr[:100]}")
     
     # ============ Step 8: Vast.ai Exporter ============
     
