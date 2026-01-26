@@ -1307,8 +1307,6 @@ echo "Exporters installed successfully"
     def _populate_dc_overview_servers(self):
         """Populate dc-overview database with configured servers via API."""
         import time
-        import urllib.request
-        import urllib.error
         import json
         
         if not self.config.servers:
@@ -1316,50 +1314,52 @@ echo "Exporters installed successfully"
             
         console.print("[dim]Populating Server Manager with configured servers...[/dim]")
         
-        # Wait for dc-overview to be ready
-        max_retries = 10
+        # Wait for dc-overview container to be healthy
+        max_retries = 30
         for i in range(max_retries):
-            try:
-                req = urllib.request.Request("http://127.0.0.1:5001/api/health")
-                req.add_header("X-Fleet-Authenticated", "true")
-                urllib.request.urlopen(req, timeout=2)
+            result = subprocess.run(
+                ["docker", "inspect", "--format", "{{.State.Health.Status}}", "dc-overview"],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0 and result.stdout.strip() == "healthy":
                 break
-            except:
-                time.sleep(1)
+            time.sleep(1)
+        else:
+            console.print("[yellow]⚠[/yellow] dc-overview container not healthy, skipping server population")
+            return
         
-        # Add each server via API
+        # Add each server via docker exec curl
         added = 0
         for server in self.config.servers:
-            try:
-                data = json.dumps({
-                    "name": server.name,
-                    "server_ip": server.server_ip,
-                    "ssh_user": self.config.ssh.username,
-                    "ssh_port": self.config.ssh.port,
-                }).encode('utf-8')
-                
-                req = urllib.request.Request(
-                    "http://127.0.0.1:5001/api/servers",
-                    data=data,
-                    headers={
-                        "Content-Type": "application/json",
-                        "X-Fleet-Authenticated": "true",
-                        "X-Fleet-Auth-User": "admin",
-                        "X-Fleet-Auth-Role": "admin",
-                    },
-                    method="POST"
-                )
-                
-                urllib.request.urlopen(req, timeout=5)
-                added += 1
-            except urllib.error.HTTPError as e:
-                if e.code == 409:
-                    # Server already exists, skip
-                    pass
-                else:
-                    console.print(f"[yellow]⚠[/yellow] Failed to add {server.name}: {e}")
-            except Exception as e:
-                console.print(f"[yellow]⚠[/yellow] Failed to add {server.name}: {e}")
+            data = json.dumps({
+                "name": server.name,
+                "server_ip": server.server_ip,
+                "ssh_user": self.config.ssh.username,
+                "ssh_port": self.config.ssh.port,
+            })
+            
+            result = subprocess.run([
+                "docker", "exec", "dc-overview",
+                "curl", "-s", "-X", "POST",
+                "http://127.0.0.1:5001/api/servers",
+                "-H", "Content-Type: application/json",
+                "-H", "X-Fleet-Authenticated: true",
+                "-d", data
+            ], capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                try:
+                    response = json.loads(result.stdout)
+                    if "id" in response:
+                        added += 1
+                    elif "error" in response and "already exists" in response["error"]:
+                        pass  # Server already exists, skip
+                    else:
+                        console.print(f"[yellow]⚠[/yellow] Failed to add {server.name}: {response.get('error', 'Unknown error')}")
+                except:
+                    console.print(f"[yellow]⚠[/yellow] Failed to add {server.name}: {result.stdout[:100]}")
+            else:
+                console.print(f"[yellow]⚠[/yellow] Failed to add {server.name}: {result.stderr[:100]}")
         
         if added > 0:
             console.print(f"[green]✓[/green] Added {added} servers to Server Manager")
