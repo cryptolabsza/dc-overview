@@ -18,6 +18,7 @@ import subprocess
 import threading
 import time
 import json
+import yaml
 import os
 import socket
 import secrets
@@ -69,10 +70,26 @@ class Server(db.Model):
     ssh_port = db.Column(db.Integer, default=22)
     ssh_key_id = db.Column(db.Integer, db.ForeignKey('ssh_key.id'), nullable=True)
     
-    # Exporter status
+    # Exporter installation status
     node_exporter_installed = db.Column(db.Boolean, default=False)
     dc_exporter_installed = db.Column(db.Boolean, default=False)
     dcgm_exporter_installed = db.Column(db.Boolean, default=False)
+    
+    # Exporter enabled state (controls Prometheus scraping)
+    node_exporter_enabled = db.Column(db.Boolean, default=True)
+    dc_exporter_enabled = db.Column(db.Boolean, default=True)
+    dcgm_exporter_enabled = db.Column(db.Boolean, default=False)
+    
+    # Exporter version tracking
+    node_exporter_version = db.Column(db.String(50), nullable=True)
+    dc_exporter_version = db.Column(db.String(50), nullable=True)
+    dcgm_exporter_version = db.Column(db.String(50), nullable=True)
+    
+    # Auto-update preferences
+    node_exporter_auto_update = db.Column(db.Boolean, default=True)
+    dc_exporter_auto_update = db.Column(db.Boolean, default=True)
+    dcgm_exporter_auto_update = db.Column(db.Boolean, default=False)
+    exporter_update_branch = db.Column(db.String(20), default='main')  # 'main' or 'dev'
     
     # Monitoring status
     last_seen = db.Column(db.DateTime, nullable=True)
@@ -210,9 +227,23 @@ def api_servers():
         'server_ip': s.server_ip,
         'status': s.status,
         'gpu_count': s.gpu_count,
+        # Installation status
         'node_exporter': s.node_exporter_installed,
         'dc_exporter': s.dc_exporter_installed,
         'dcgm_exporter': s.dcgm_exporter_installed,
+        # Enabled status (for Prometheus scraping)
+        'node_exporter_enabled': s.node_exporter_enabled,
+        'dc_exporter_enabled': s.dc_exporter_enabled,
+        'dcgm_exporter_enabled': s.dcgm_exporter_enabled,
+        # Version info
+        'node_exporter_version': s.node_exporter_version,
+        'dc_exporter_version': s.dc_exporter_version,
+        'dcgm_exporter_version': s.dcgm_exporter_version,
+        # Auto-update settings
+        'node_exporter_auto_update': s.node_exporter_auto_update,
+        'dc_exporter_auto_update': s.dc_exporter_auto_update,
+        'dcgm_exporter_auto_update': s.dcgm_exporter_auto_update,
+        'exporter_update_branch': s.exporter_update_branch,
         'last_seen': s.last_seen.isoformat() if s.last_seen else None
     } for s in servers])
 
@@ -264,6 +295,8 @@ def api_delete_server(server_id):
 @login_required
 def api_check_server(server_id):
     """Check server connectivity and exporter status."""
+    from .exporters import get_exporter_version, check_for_updates, get_latest_exporter_version
+    
     server = Server.query.get_or_404(server_id)
     
     results = {
@@ -291,9 +324,87 @@ def api_check_server(server_id):
         server.gpu_count = gpu_count
         results['gpu_count'] = gpu_count
     
+    # Detect exporter versions
+    ssh_key_path = server.ssh_key.key_path if server.ssh_key else None
+    
+    if server.node_exporter_installed:
+        version = get_exporter_version(server.server_ip, 'node_exporter', server.ssh_user, server.ssh_port, ssh_key_path)
+        if version:
+            server.node_exporter_version = version
+            results['node_exporter']['version'] = version
+    
+    if server.dc_exporter_installed:
+        version = get_exporter_version(server.server_ip, 'dc_exporter', server.ssh_user, server.ssh_port, ssh_key_path)
+        if version:
+            server.dc_exporter_version = version
+            results['dc_exporter']['version'] = version
+    
+    if server.dcgm_exporter_installed:
+        version = get_exporter_version(server.server_ip, 'dcgm_exporter', server.ssh_user, server.ssh_port, ssh_key_path)
+        if version:
+            server.dcgm_exporter_version = version
+            results['dcgm_exporter']['version'] = version
+    
     db.session.commit()
     
+    # Check for auto-updates (async, non-blocking)
+    results['auto_updates'] = check_and_apply_auto_updates(server)
+    
     return jsonify(results)
+
+
+def check_and_apply_auto_updates(server):
+    """Check and apply auto-updates for exporters that have auto-update enabled."""
+    from .exporters import check_for_updates
+    
+    updates_applied = []
+    
+    try:
+        ssh_key_path = server.ssh_key.key_path if server.ssh_key else None
+        update_info = check_for_updates(
+            server.server_ip,
+            server.ssh_user,
+            server.ssh_port,
+            ssh_key_path,
+            server.exporter_update_branch or 'main'
+        )
+        
+        # Check each exporter for auto-update
+        exporters_to_check = [
+            ('node_exporter', server.node_exporter_auto_update, server.node_exporter_installed),
+            ('dc_exporter', server.dc_exporter_auto_update, server.dc_exporter_installed),
+            ('dcgm_exporter', server.dcgm_exporter_auto_update, server.dcgm_exporter_installed),
+        ]
+        
+        for exporter, auto_update, installed in exporters_to_check:
+            if auto_update and installed:
+                exp_info = update_info.get(exporter, {})
+                if exp_info.get('update_available'):
+                    # Apply update
+                    latest_version = exp_info.get('latest')
+                    success = update_exporter_remote(server, exporter, latest_version, server.exporter_update_branch or 'main')
+                    if success:
+                        # Update version in database
+                        if exporter == 'node_exporter':
+                            server.node_exporter_version = latest_version
+                        elif exporter == 'dc_exporter':
+                            server.dc_exporter_version = latest_version
+                        elif exporter == 'dcgm_exporter':
+                            server.dcgm_exporter_version = latest_version
+                        
+                        updates_applied.append({
+                            'exporter': exporter,
+                            'from_version': exp_info.get('installed'),
+                            'to_version': latest_version
+                        })
+        
+        if updates_applied:
+            db.session.commit()
+            
+    except Exception:
+        pass  # Non-critical operation
+    
+    return updates_applied
 
 
 def get_gpu_count_from_exporter(server_ip):
@@ -358,6 +469,351 @@ def api_remove_exporters(server_id):
     update_prometheus_targets()
     
     return jsonify(results)
+
+# =============================================================================
+# EXPORTER MANAGEMENT API
+# =============================================================================
+
+@app.route('/api/servers/<int:server_id>/exporters/versions')
+@login_required
+def api_get_exporter_versions(server_id):
+    """Get versions of all exporters on a server."""
+    from .exporters import get_all_exporter_versions, check_for_updates
+    
+    server = Server.query.get_or_404(server_id)
+    
+    # Get SSH key path if available
+    ssh_key_path = server.ssh_key.key_path if server.ssh_key else None
+    
+    # Get installed versions
+    versions = get_all_exporter_versions(
+        server.server_ip,
+        server.ssh_user,
+        server.ssh_port,
+        ssh_key_path
+    )
+    
+    # Check for updates
+    updates = check_for_updates(
+        server.server_ip,
+        server.ssh_user,
+        server.ssh_port,
+        ssh_key_path,
+        server.exporter_update_branch
+    )
+    
+    # Update version info in database
+    if versions.get('node_exporter'):
+        server.node_exporter_version = versions['node_exporter']
+    if versions.get('dc_exporter'):
+        server.dc_exporter_version = versions['dc_exporter']
+    if versions.get('dcgm_exporter'):
+        server.dcgm_exporter_version = versions['dcgm_exporter']
+    
+    db.session.commit()
+    
+    return jsonify({
+        'server_id': server_id,
+        'server_name': server.name,
+        'versions': versions,
+        'updates': updates
+    })
+
+
+@app.route('/api/servers/<int:server_id>/exporters/<exporter>/toggle', methods=['POST'])
+@login_required
+def api_toggle_exporter(server_id, exporter):
+    """Enable or disable an exporter on a server."""
+    server = Server.query.get_or_404(server_id)
+    
+    if exporter not in ['node_exporter', 'dc_exporter', 'dcgm_exporter']:
+        return jsonify({'error': f'Unknown exporter: {exporter}'}), 400
+    
+    data = request.json or {}
+    enabled = data.get('enabled')
+    
+    # If enabled not specified, toggle current state
+    if enabled is None:
+        if exporter == 'node_exporter':
+            enabled = not server.node_exporter_enabled
+        elif exporter == 'dc_exporter':
+            enabled = not server.dc_exporter_enabled
+        elif exporter == 'dcgm_exporter':
+            enabled = not server.dcgm_exporter_enabled
+    
+    # Control the service via SSH
+    success = toggle_exporter_service(server, exporter, enabled)
+    
+    if success:
+        # Update database
+        if exporter == 'node_exporter':
+            server.node_exporter_enabled = enabled
+        elif exporter == 'dc_exporter':
+            server.dc_exporter_enabled = enabled
+        elif exporter == 'dcgm_exporter':
+            server.dcgm_exporter_enabled = enabled
+        
+        db.session.commit()
+        
+        # Update Prometheus targets
+        update_prometheus_targets()
+        
+        return jsonify({
+            'success': True,
+            'exporter': exporter,
+            'enabled': enabled,
+            'message': f'{exporter} {"enabled" if enabled else "disabled"}'
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to {"start" if enabled else "stop"} {exporter}'
+        }), 500
+
+
+@app.route('/api/servers/<int:server_id>/exporters/<exporter>/update', methods=['POST'])
+@login_required
+def api_update_exporter(server_id, exporter):
+    """Update an exporter to the latest version."""
+    from .exporters import get_latest_exporter_version, get_exporter_download_url
+    
+    server = Server.query.get_or_404(server_id)
+    
+    if exporter not in ['node_exporter', 'dc_exporter', 'dcgm_exporter']:
+        return jsonify({'error': f'Unknown exporter: {exporter}'}), 400
+    
+    data = request.json or {}
+    branch = data.get('branch', server.exporter_update_branch or 'main')
+    
+    # Get latest version
+    latest_version = get_latest_exporter_version(exporter, branch)
+    if not latest_version:
+        return jsonify({'error': 'Could not determine latest version'}), 500
+    
+    # Update the exporter
+    success = update_exporter_remote(server, exporter, latest_version, branch)
+    
+    if success:
+        # Update version in database
+        if exporter == 'node_exporter':
+            server.node_exporter_version = latest_version
+        elif exporter == 'dc_exporter':
+            server.dc_exporter_version = latest_version
+        elif exporter == 'dcgm_exporter':
+            server.dcgm_exporter_version = latest_version
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'exporter': exporter,
+            'version': latest_version,
+            'message': f'{exporter} updated to {latest_version}'
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to update {exporter}'
+        }), 500
+
+
+@app.route('/api/servers/<int:server_id>/exporters/settings', methods=['POST'])
+@login_required
+def api_update_exporter_settings(server_id):
+    """Update exporter settings (auto-update, branch)."""
+    server = Server.query.get_or_404(server_id)
+    data = request.json or {}
+    
+    # Update auto-update settings
+    if 'node_exporter_auto_update' in data:
+        server.node_exporter_auto_update = bool(data['node_exporter_auto_update'])
+    if 'dc_exporter_auto_update' in data:
+        server.dc_exporter_auto_update = bool(data['dc_exporter_auto_update'])
+    if 'dcgm_exporter_auto_update' in data:
+        server.dcgm_exporter_auto_update = bool(data['dcgm_exporter_auto_update'])
+    
+    # Update branch preference
+    if 'exporter_update_branch' in data:
+        branch = data['exporter_update_branch']
+        if branch in ['main', 'dev']:
+            server.exporter_update_branch = branch
+    
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'settings': {
+            'node_exporter_auto_update': server.node_exporter_auto_update,
+            'dc_exporter_auto_update': server.dc_exporter_auto_update,
+            'dcgm_exporter_auto_update': server.dcgm_exporter_auto_update,
+            'exporter_update_branch': server.exporter_update_branch
+        }
+    })
+
+
+@app.route('/api/exporters/updates')
+@login_required
+def api_check_all_updates():
+    """Check all servers for exporter updates."""
+    from .exporters import get_all_latest_versions, get_exporter_version
+    
+    servers = Server.query.all()
+    latest = get_all_latest_versions('main')  # Get main branch versions
+    
+    updates = []
+    for server in servers:
+        server_updates = {
+            'server_id': server.id,
+            'server_name': server.name,
+            'exporters': {}
+        }
+        
+        ssh_key_path = server.ssh_key.key_path if server.ssh_key else None
+        
+        for exporter, latest_ver in latest.items():
+            # Get installed attribute name
+            installed_attr = f'{exporter}_installed'
+            version_attr = f'{exporter}_version'
+            
+            is_installed = getattr(server, installed_attr, False)
+            current_ver = getattr(server, version_attr, None)
+            
+            if is_installed and latest_ver:
+                # Check if update available
+                update_available = False
+                if current_ver and current_ver not in ('running', 'unknown'):
+                    try:
+                        curr_parts = [int(x) for x in current_ver.split('.')[:3]]
+                        lat_parts = [int(x) for x in latest_ver.split('.')[:3]]
+                        update_available = lat_parts > curr_parts
+                    except ValueError:
+                        update_available = current_ver != latest_ver
+                
+                if update_available:
+                    server_updates['exporters'][exporter] = {
+                        'installed': current_ver,
+                        'latest': latest_ver
+                    }
+        
+        if server_updates['exporters']:
+            updates.append(server_updates)
+    
+    return jsonify({
+        'updates_available': len(updates) > 0,
+        'servers': updates,
+        'latest_versions': latest
+    })
+
+
+def toggle_exporter_service(server, exporter: str, enabled: bool) -> bool:
+    """Start or stop an exporter service on a remote server via SSH."""
+    service_names = {
+        'node_exporter': 'node_exporter',
+        'dc_exporter': 'dc-exporter',
+        'dcgm_exporter': 'dcgm-exporter'  # Docker container
+    }
+    
+    service = service_names.get(exporter)
+    if not service:
+        return False
+    
+    try:
+        ssh_cmd = [
+            'ssh',
+            '-o', 'ConnectTimeout=10',
+            '-o', 'StrictHostKeyChecking=no',
+            '-o', 'BatchMode=yes',
+            '-p', str(server.ssh_port)
+        ]
+        
+        if server.ssh_key:
+            ssh_cmd.extend(['-i', server.ssh_key.key_path])
+        
+        ssh_cmd.append(f'{server.ssh_user}@{server.server_ip}')
+        
+        if exporter == 'dcgm_exporter':
+            # Docker container
+            if enabled:
+                ssh_cmd.append(f"docker start {service} 2>/dev/null || echo 'not found'")
+            else:
+                ssh_cmd.append(f"docker stop {service} 2>/dev/null || echo 'not found'")
+        else:
+            # Systemd service
+            action = 'start' if enabled else 'stop'
+            ssh_cmd.append(f"systemctl {action} {service}")
+        
+        result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=30)
+        return result.returncode == 0
+        
+    except Exception:
+        return False
+
+
+def update_exporter_remote(server, exporter: str, version: str, branch: str = 'main') -> bool:
+    """Update an exporter on a remote server to a specific version."""
+    from .exporters import get_exporter_download_url
+    
+    download_url = get_exporter_download_url(exporter, version, branch)
+    if not download_url:
+        return False
+    
+    try:
+        ssh_cmd = [
+            'ssh',
+            '-o', 'ConnectTimeout=10',
+            '-o', 'StrictHostKeyChecking=no',
+            '-o', 'BatchMode=yes',
+            '-p', str(server.ssh_port)
+        ]
+        
+        if server.ssh_key:
+            ssh_cmd.extend(['-i', server.ssh_key.key_path])
+        
+        ssh_cmd.append(f'{server.ssh_user}@{server.server_ip}')
+        
+        if exporter == 'node_exporter':
+            # Download, extract, and replace binary
+            update_script = f'''
+cd /tmp &&
+curl -sL "{download_url}" -o node_exporter.tar.gz &&
+tar xzf node_exporter.tar.gz &&
+systemctl stop node_exporter &&
+cp node_exporter-*/node_exporter /usr/local/bin/ &&
+chmod +x /usr/local/bin/node_exporter &&
+systemctl start node_exporter &&
+rm -rf node_exporter* &&
+echo "OK"
+'''
+            ssh_cmd.append(update_script)
+            
+        elif exporter == 'dc_exporter':
+            # Download binary directly
+            update_script = f'''
+systemctl stop dc-exporter 2>/dev/null || true
+curl -sL "{download_url}" -o /usr/local/bin/dc-exporter-rs &&
+chmod +x /usr/local/bin/dc-exporter-rs &&
+systemctl start dc-exporter &&
+echo "OK"
+'''
+            ssh_cmd.append(update_script)
+            
+        elif exporter == 'dcgm_exporter':
+            # Update Docker image
+            update_script = f'''
+docker stop dcgm-exporter 2>/dev/null || true
+docker rm dcgm-exporter 2>/dev/null || true
+docker pull {download_url} &&
+docker run -d --name dcgm-exporter --gpus all -p 9400:9400 --restart unless-stopped {download_url} &&
+echo "OK"
+'''
+            ssh_cmd.append(update_script)
+        
+        result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=120)
+        return 'OK' in result.stdout
+        
+    except Exception:
+        return False
+
 
 @app.route('/api/prometheus/targets')
 @login_required
@@ -436,9 +892,98 @@ def api_ssh_keys():
     return jsonify([{
         'id': k.id,
         'name': k.name,
+        'key_path': k.key_path,
         'fingerprint': k.fingerprint,
         'created_at': k.created_at.isoformat()
     } for k in keys])
+
+
+@app.route('/api/ssh-keys', methods=['POST'])
+@login_required
+def api_add_ssh_key():
+    """Add a new SSH key."""
+    data = request.json
+    
+    if not data.get('name') or not data.get('key_path'):
+        return jsonify({'error': 'name and key_path required'}), 400
+    
+    # Check for duplicate name
+    existing = SSHKey.query.filter_by(name=data['name']).first()
+    if existing:
+        return jsonify({'error': 'SSH key with this name already exists', 'id': existing.id}), 409
+    
+    # Calculate fingerprint if we can access the key
+    fingerprint = data.get('fingerprint')
+    if not fingerprint:
+        try:
+            result = subprocess.run(
+                ['ssh-keygen', '-lf', data['key_path']],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                # Format: 2048 SHA256:xyz... comment (RSA)
+                fingerprint = result.stdout.split()[1] if result.stdout else None
+        except Exception:
+            pass
+    
+    key = SSHKey(
+        name=data['name'],
+        key_path=data['key_path'],
+        fingerprint=fingerprint
+    )
+    db.session.add(key)
+    db.session.commit()
+    
+    return jsonify({
+        'id': key.id,
+        'name': key.name,
+        'key_path': key.key_path,
+        'fingerprint': key.fingerprint
+    }), 201
+
+
+@app.route('/api/ssh-keys/<int:key_id>', methods=['DELETE'])
+@login_required
+def api_delete_ssh_key(key_id):
+    """Delete an SSH key."""
+    key = SSHKey.query.get_or_404(key_id)
+    
+    # Check if any servers are using this key
+    servers_using = Server.query.filter_by(ssh_key_id=key_id).count()
+    if servers_using > 0:
+        return jsonify({'error': f'SSH key is in use by {servers_using} server(s)'}), 400
+    
+    db.session.delete(key)
+    db.session.commit()
+    
+    return jsonify({'success': True})
+
+
+@app.route('/api/servers/<int:server_id>/ssh-key', methods=['POST'])
+@login_required
+def api_set_server_ssh_key(server_id):
+    """Set the SSH key for a server."""
+    server = Server.query.get_or_404(server_id)
+    data = request.json or {}
+    
+    key_id = data.get('ssh_key_id')
+    
+    if key_id:
+        # Verify the key exists
+        key = SSHKey.query.get(key_id)
+        if not key:
+            return jsonify({'error': 'SSH key not found'}), 404
+        server.ssh_key_id = key_id
+    else:
+        server.ssh_key_id = None
+    
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'server_id': server.id,
+        'ssh_key_id': server.ssh_key_id
+    })
 
 @app.route('/metrics')
 def prometheus_metrics():
@@ -609,19 +1154,20 @@ EOF
             """
         elif exporter_name == 'dc_exporter':
             script = """
-            wget -q https://github.com/cryptolabsza/dc-exporter/releases/latest/download/dc-exporter-collector -O /usr/local/bin/dc-exporter-collector
-            wget -q https://github.com/cryptolabsza/dc-exporter/releases/latest/download/dc-exporter-server -O /usr/local/bin/dc-exporter-server
-            chmod +x /usr/local/bin/dc-exporter-collector /usr/local/bin/dc-exporter-server
-            mkdir -p /etc/dc-exporter
+            # Download dc-exporter-rs (Rust version)
+            curl -L https://github.com/cryptolabsza/dc-exporter-releases/releases/latest/download/dc-exporter-rs -o /usr/local/bin/dc-exporter-rs
+            chmod +x /usr/local/bin/dc-exporter-rs
+            
+            # Create systemd service
             cat > /etc/systemd/system/dc-exporter.service << 'EOF'
 [Unit]
-Description=DC Exporter - GPU VRAM Temperature Monitor
-After=network.target
+Description=DC Exporter - GPU Metrics for Prometheus (Rust)
+Documentation=https://github.com/cryptolabsza/dc-exporter-rs
+After=network.target nvidia-persistenced.service
 
 [Service]
 Type=simple
-WorkingDirectory=/etc/dc-exporter
-ExecStart=/bin/bash -c "/usr/local/bin/dc-exporter-collector --no-console & /usr/local/bin/dc-exporter-server"
+ExecStart=/usr/local/bin/dc-exporter-rs --port 9835
 Restart=always
 RestartSec=5
 
@@ -701,32 +1247,101 @@ def remove_exporter_remote(server, exporter_name):
         return False
 
 def update_prometheus_targets():
-    """Update Prometheus targets file for file-based service discovery."""
+    """Update Prometheus targets file for file-based service discovery.
+    
+    Only includes exporters that are both installed AND enabled.
+    """
     try:
         targets_file = Path(DATA_DIR) / 'prometheus_targets.json'
         servers = Server.query.all()
         targets = []
         
         for server in servers:
-            if server.node_exporter_installed:
+            # Only include exporters that are BOTH installed AND enabled
+            if server.node_exporter_installed and server.node_exporter_enabled:
                 targets.append({
                     'targets': [f"{server.server_ip}:9100"],
                     'labels': {'instance': server.name, 'job': 'node-exporter'}
                 })
-            if server.dc_exporter_installed:
+            if server.dc_exporter_installed and server.dc_exporter_enabled:
                 targets.append({
                     'targets': [f"{server.server_ip}:9835"],
                     'labels': {'instance': server.name, 'job': 'dc-exporter'}
                 })
-            if server.dcgm_exporter_installed:
+            if server.dcgm_exporter_installed and server.dcgm_exporter_enabled:
                 targets.append({
                     'targets': [f"{server.server_ip}:9400"],
                     'labels': {'instance': server.name, 'job': 'dcgm-exporter'}
                 })
         
         targets_file.write_text(json.dumps(targets, indent=2))
+        
+        # Also update the main prometheus.yml if it exists
+        prometheus_yml = Path('/etc/dc-overview/prometheus.yml')
+        if prometheus_yml.exists():
+            update_prometheus_yml_targets(servers)
+            
     except Exception:
         pass  # Non-critical operation
+
+
+def update_prometheus_yml_targets(servers):
+    """Update the prometheus.yml scrape targets to match enabled exporters."""
+    import yaml
+    
+    prometheus_yml = Path('/etc/dc-overview/prometheus.yml')
+    if not prometheus_yml.exists():
+        return
+    
+    try:
+        with open(prometheus_yml, 'r') as f:
+            config = yaml.safe_load(f)
+        
+        if not config or 'scrape_configs' not in config:
+            return
+        
+        # Update each server's scrape config
+        for server in servers:
+            # Find or update the server's job
+            for scrape_config in config['scrape_configs']:
+                if scrape_config.get('job_name') == server.name:
+                    # Build targets list based on enabled exporters
+                    targets = []
+                    if server.node_exporter_installed and server.node_exporter_enabled:
+                        targets.append(f"{server.server_ip}:9100")
+                    if server.dc_exporter_installed and server.dc_exporter_enabled:
+                        targets.append(f"{server.server_ip}:9835")
+                    if server.dcgm_exporter_installed and server.dcgm_exporter_enabled:
+                        targets.append(f"{server.server_ip}:9400")
+                    
+                    if targets and scrape_config.get('static_configs'):
+                        scrape_config['static_configs'][0]['targets'] = targets
+                    break
+        
+        # Write updated config
+        with open(prometheus_yml, 'w') as f:
+            yaml.dump(config, f, default_flow_style=False)
+        
+        # Reload Prometheus config
+        reload_prometheus()
+        
+    except Exception:
+        pass
+
+
+def reload_prometheus():
+    """Reload Prometheus configuration."""
+    try:
+        # Try Docker container first
+        subprocess.run(['docker', 'exec', 'prometheus', 'kill', '-HUP', '1'],
+                      capture_output=True, timeout=10)
+    except Exception:
+        try:
+            # Try systemd service
+            subprocess.run(['systemctl', 'reload', 'prometheus'],
+                          capture_output=True, timeout=10)
+        except Exception:
+            pass
 
 # =============================================================================
 # HTML TEMPLATES
@@ -852,11 +1467,38 @@ DASHBOARD_TEMPLATE = """
     <title>Server Manager - Dashboard</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     """ + BASE_STYLE + """
+    <style>
+        .exporter-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-right: 4px;
+        }
+        .exporter-badge.enabled {
+            background: rgba(74, 222, 128, 0.2);
+            color: var(--accent-green);
+        }
+        .exporter-badge.disabled {
+            background: rgba(100, 100, 100, 0.2);
+            color: #888;
+        }
+        .exporter-badge.not-installed {
+            background: rgba(239, 68, 68, 0.1);
+            color: #666;
+        }
+        .version-tag {
+            font-size: 10px;
+            color: var(--text-secondary);
+            font-family: monospace;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🖥️ Server Manager</h1>
+            <h1>Server Manager</h1>
             <div class="nav">
                 <a href="/" class="active">Dashboard</a>
                 <a href="/servers">Servers</a>
@@ -905,9 +1547,15 @@ DASHBOARD_TEMPLATE = """
                         </td>
                         <td>{{ server.gpu_count }}</td>
                         <td>
-                            {% if server.node_exporter_installed %}✓ node {% endif %}
-                            {% if server.dc_exporter_installed %}✓ dc {% endif %}
-                            {% if server.dcgm_exporter_installed %}✓ dcgm {% endif %}
+                            <span class="exporter-badge {% if server.node_exporter_installed and server.node_exporter_enabled %}enabled{% elif server.node_exporter_installed %}disabled{% else %}not-installed{% endif %}">
+                                node{% if server.node_exporter_version %} <span class="version-tag">{{ server.node_exporter_version }}</span>{% endif %}
+                            </span>
+                            <span class="exporter-badge {% if server.dc_exporter_installed and server.dc_exporter_enabled %}enabled{% elif server.dc_exporter_installed %}disabled{% else %}not-installed{% endif %}">
+                                dc{% if server.dc_exporter_version %} <span class="version-tag">{{ server.dc_exporter_version }}</span>{% endif %}
+                            </span>
+                            <span class="exporter-badge {% if server.dcgm_exporter_installed and server.dcgm_exporter_enabled %}enabled{% elif server.dcgm_exporter_installed %}disabled{% else %}not-installed{% endif %}">
+                                dcgm{% if server.dcgm_exporter_version %} <span class="version-tag">{{ server.dcgm_exporter_version }}</span>{% endif %}
+                            </span>
                         </td>
                         <td>{{ server.last_seen.strftime('%Y-%m-%d %H:%M') if server.last_seen else '—' }}</td>
                     </tr>
@@ -930,11 +1578,156 @@ SERVERS_TEMPLATE = """
     <title>Server Manager - Servers</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     """ + BASE_STYLE + """
+    <style>
+        .exporter-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px;
+            margin: 8px 0;
+        }
+        .exporter-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .exporter-name {
+            font-weight: bold;
+            color: var(--text-primary);
+        }
+        .toggle-switch {
+            position: relative;
+            width: 44px;
+            height: 24px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #444;
+            transition: .3s;
+            border-radius: 24px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+        }
+        input:checked + .toggle-slider {
+            background-color: var(--accent-green);
+        }
+        input:checked + .toggle-slider:before {
+            transform: translateX(20px);
+        }
+        .version-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .version-badge {
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: var(--bg-card);
+            font-family: monospace;
+        }
+        .update-badge {
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: var(--accent-yellow);
+            color: #000;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .update-badge:hover {
+            background: #e5ac00;
+        }
+        .auto-update-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .auto-update-row input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+        }
+        .branch-select {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .server-detail-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 24px;
+            cursor: pointer;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        .status-enabled { background: var(--accent-green); }
+        .status-disabled { background: #666; }
+        .status-not-installed { background: var(--accent-red); }
+    </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🖥️ Server Manager</h1>
+            <h1>Server Manager</h1>
             <div class="nav">
                 <a href="/">Dashboard</a>
                 <a href="/servers" class="active">Servers</a>
@@ -965,7 +1758,10 @@ SERVERS_TEMPLATE = """
         </div>
         
         <div class="card">
-            <h2>Managed Servers</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h2>Managed Servers</h2>
+                <button class="btn btn-secondary" onclick="checkAllUpdates()">Check for Updates</button>
+            </div>
             <table>
                 <thead>
                     <tr>
@@ -983,15 +1779,13 @@ SERVERS_TEMPLATE = """
                         <td>{{ server.server_ip }}</td>
                         <td>{{ server.ssh_user }}@:{{ server.ssh_port }}</td>
                         <td class="exporter-status">
-                            {% if server.node_exporter_installed %}✓ node {% endif %}
-                            {% if server.dc_exporter_installed %}✓ dc {% endif %}
-                            {% if server.dcgm_exporter_installed %}✓ dcgm {% endif %}
-                            {% if not server.node_exporter_installed and not server.dc_exporter_installed %}—{% endif %}
+                            <span class="status-indicator {% if server.node_exporter_installed and server.node_exporter_enabled %}status-enabled{% elif server.node_exporter_installed %}status-disabled{% else %}status-not-installed{% endif %}"></span>node
+                            <span class="status-indicator {% if server.dc_exporter_installed and server.dc_exporter_enabled %}status-enabled{% elif server.dc_exporter_installed %}status-disabled{% else %}status-not-installed{% endif %}" style="margin-left:8px"></span>dc
+                            <span class="status-indicator {% if server.dcgm_exporter_installed and server.dcgm_exporter_enabled %}status-enabled{% elif server.dcgm_exporter_installed %}status-disabled{% else %}status-not-installed{% endif %}" style="margin-left:8px"></span>dcgm
                         </td>
                         <td>
+                            <button class="btn btn-secondary" onclick="openServerDetail({{ server.id }}, '{{ server.name }}')">Manage</button>
                             <button class="btn btn-secondary" onclick="checkServer({{ server.id }})">Check</button>
-                            <button class="btn btn-secondary" onclick="installExporters({{ server.id }})">Install</button>
-                            <button class="btn btn-warning" onclick="removeExporters({{ server.id }})">Remove</button>
                             <button class="btn btn-danger" onclick="deleteServer({{ server.id }})">Delete</button>
                         </td>
                     </tr>
@@ -1003,11 +1797,26 @@ SERVERS_TEMPLATE = """
         <p class="version">Server Manager v{{ version }}</p>
     </div>
     
+    <!-- Server Detail Modal -->
+    <div id="serverDetailModal" class="server-detail-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalServerName">Server Details</h2>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div id="modalContent">
+                <!-- Dynamic content -->
+            </div>
+        </div>
+    </div>
+    
     <script>
     // Get base path for API calls (handles /dc/ subpath)
     const basePath = window.location.pathname.endsWith('/servers') 
         ? window.location.pathname.replace('/servers', '') 
         : window.location.pathname.replace(/\/$/, '');
+    
+    let currentServerId = null;
     
     document.getElementById('addServerForm').onsubmit = async (e) => {
         e.preventDefault();
@@ -1032,6 +1841,158 @@ SERVERS_TEMPLATE = """
         }
     };
     
+    async function openServerDetail(id, name) {
+        currentServerId = id;
+        document.getElementById('modalServerName').textContent = name + ' - Exporter Management';
+        document.getElementById('serverDetailModal').style.display = 'flex';
+        document.getElementById('modalContent').innerHTML = '<p>Loading...</p>';
+        
+        // Fetch exporter versions
+        const response = await fetch(`${basePath}/api/servers/${id}/exporters/versions`);
+        const data = await response.json();
+        
+        renderExporterManagement(data);
+    }
+    
+    function renderExporterManagement(data) {
+        const exporters = [
+            { key: 'node_exporter', name: 'Node Exporter', port: 9100 },
+            { key: 'dc_exporter', name: 'DC Exporter', port: 9835 },
+            { key: 'dcgm_exporter', name: 'DCGM Exporter', port: 9400 }
+        ];
+        
+        let html = '';
+        
+        for (const exp of exporters) {
+            const version = data.versions[exp.key];
+            const updateInfo = data.updates[exp.key];
+            const hasUpdate = updateInfo && updateInfo.update_available;
+            
+            html += `
+            <div class="exporter-card" data-exporter="${exp.key}">
+                <div class="exporter-header">
+                    <span class="exporter-name">${exp.name} <small style="color:var(--text-secondary)">(port ${exp.port})</small></span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" ${version ? 'checked' : ''} onchange="toggleExporter('${exp.key}', this.checked)">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="version-info">
+                    <span>Version:</span>
+                    <span class="version-badge">${version || 'Not installed'}</span>
+                    ${hasUpdate ? `<span class="update-badge" onclick="updateExporter('${exp.key}')">Update to ${updateInfo.latest}</span>` : ''}
+                </div>
+                <div class="auto-update-row">
+                    <input type="checkbox" id="auto-${exp.key}" onchange="updateAutoSetting('${exp.key}', this.checked)">
+                    <label for="auto-${exp.key}">Auto-update</label>
+                </div>
+            </div>
+            `;
+        }
+        
+        html += `
+        <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <label>Update Branch:</label>
+                <select class="branch-select" id="branchSelect" onchange="updateBranch(this.value)">
+                    <option value="main">main (stable)</option>
+                    <option value="dev">dev (latest)</option>
+                </select>
+            </div>
+            <div style="margin-top: 15px; display: flex; gap: 10px;">
+                <button class="btn btn-secondary" onclick="installExporters(currentServerId)">Install All</button>
+                <button class="btn btn-warning" onclick="removeExporters(currentServerId)">Remove All</button>
+            </div>
+        </div>
+        `;
+        
+        document.getElementById('modalContent').innerHTML = html;
+    }
+    
+    function closeModal() {
+        document.getElementById('serverDetailModal').style.display = 'none';
+        currentServerId = null;
+    }
+    
+    async function toggleExporter(exporter, enabled) {
+        const response = await fetch(`${basePath}/api/servers/${currentServerId}/exporters/${exporter}/toggle`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({enabled})
+        });
+        
+        const result = await response.json();
+        if (!result.success) {
+            alert('Failed to toggle exporter: ' + (result.error || 'Unknown error'));
+            // Reload to reset state
+            openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
+        }
+    }
+    
+    async function updateExporter(exporter) {
+        if (!confirm(`Update ${exporter} to latest version?`)) return;
+        
+        const branch = document.getElementById('branchSelect').value;
+        
+        const response = await fetch(`${basePath}/api/servers/${currentServerId}/exporters/${exporter}/update`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({branch})
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            alert(`${exporter} updated to ${result.version}`);
+            openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
+        } else {
+            alert('Update failed: ' + (result.error || 'Unknown error'));
+        }
+    }
+    
+    async function updateAutoSetting(exporter, enabled) {
+        const data = {};
+        data[`${exporter}_auto_update`] = enabled;
+        
+        await fetch(`${basePath}/api/servers/${currentServerId}/exporters/settings`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+    }
+    
+    async function updateBranch(branch) {
+        await fetch(`${basePath}/api/servers/${currentServerId}/exporters/settings`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({exporter_update_branch: branch})
+        });
+    }
+    
+    async function checkAllUpdates() {
+        const btn = event.target;
+        btn.textContent = 'Checking...';
+        btn.disabled = true;
+        
+        const response = await fetch(`${basePath}/api/exporters/updates`);
+        const result = await response.json();
+        
+        btn.textContent = 'Check for Updates';
+        btn.disabled = false;
+        
+        if (result.updates_available) {
+            let msg = 'Updates available:\\n\\n';
+            for (const server of result.servers) {
+                msg += `${server.server_name}:\\n`;
+                for (const [exp, info] of Object.entries(server.exporters)) {
+                    msg += `  - ${exp}: ${info.installed} -> ${info.latest}\\n`;
+                }
+            }
+            alert(msg);
+        } else {
+            alert('All exporters are up to date!');
+        }
+    }
+    
     async function checkServer(id) {
         const btn = event.target;
         btn.textContent = 'Checking...';
@@ -1051,10 +2012,6 @@ DCGM Exporter: ${result.dcgm_exporter.running ? 'Running' : 'Not running'}`);
     async function installExporters(id) {
         if (!confirm('Install node_exporter and dc-exporter on this server?')) return;
         
-        const btn = event.target;
-        btn.textContent = 'Installing...';
-        btn.disabled = true;
-        
         const response = await fetch(`${basePath}/api/servers/${id}/install-exporters`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -1070,10 +2027,6 @@ dc_exporter: ${result.dc_exporter}`);
     
     async function removeExporters(id) {
         if (!confirm('Remove exporters from this server?')) return;
-        
-        const btn = event.target;
-        btn.textContent = 'Removing...';
-        btn.disabled = true;
         
         const response = await fetch(`${basePath}/api/servers/${id}/remove-exporters`, {
             method: 'POST',
@@ -1094,6 +2047,11 @@ dc_exporter: ${result.dc_exporter}`);
         await fetch(`${basePath}/api/servers/${id}`, {method: 'DELETE'});
         location.reload();
     }
+    
+    // Close modal when clicking outside
+    document.getElementById('serverDetailModal').addEventListener('click', function(e) {
+        if (e.target === this) closeModal();
+    });
     </script>
 </body></html>
 """
@@ -1108,7 +2066,7 @@ SETTINGS_TEMPLATE = """
 <body>
     <div class="container">
         <div class="header">
-            <h1>🖥️ Server Manager</h1>
+            <h1>Server Manager</h1>
             <div class="nav">
                 <a href="/">Dashboard</a>
                 <a href="/servers">Servers</a>
@@ -1134,14 +2092,17 @@ SETTINGS_TEMPLATE = """
             {% if ssh_keys %}
             <table>
                 <thead>
-                    <tr><th>Name</th><th>Fingerprint</th><th>Created</th></tr>
+                    <tr><th>Name</th><th>Path</th><th>Fingerprint</th><th>Actions</th></tr>
                 </thead>
-                <tbody>
+                <tbody id="sshKeysTable">
                     {% for key in ssh_keys %}
-                    <tr>
+                    <tr data-id="{{ key.id }}">
                         <td>{{ key.name }}</td>
+                        <td style="font-family: monospace; font-size: 0.85rem;">{{ key.key_path }}</td>
                         <td style="font-family: monospace; font-size: 0.85rem;">{{ key.fingerprint or '—' }}</td>
-                        <td>{{ key.created_at.strftime('%Y-%m-%d') }}</td>
+                        <td>
+                            <button class="btn btn-danger btn-sm" onclick="deleteSSHKey({{ key.id }})">Delete</button>
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -1149,6 +2110,23 @@ SETTINGS_TEMPLATE = """
             {% else %}
             <p style="color: var(--text-secondary);">No SSH keys configured.</p>
             {% endif %}
+            
+            <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
+                <h3>Add SSH Key</h3>
+                <form id="addSSHKeyForm">
+                    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 15px;">
+                        <div class="form-group">
+                            <label>Key Name</label>
+                            <input type="text" name="name" placeholder="my-ssh-key" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Key Path (inside container)</label>
+                            <input type="text" name="key_path" placeholder="/etc/dc-overview/ssh_keys/id_rsa" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Add SSH Key</button>
+                </form>
+            </div>
         </div>
         
         <div class="card">
@@ -1156,6 +2134,7 @@ SETTINGS_TEMPLATE = """
             <table>
                 <tr><td><code>/api/health</code></td><td>Health check</td></tr>
                 <tr><td><code>/api/servers</code></td><td>List/manage servers</td></tr>
+                <tr><td><code>/api/ssh-keys</code></td><td>List/manage SSH keys</td></tr>
                 <tr><td><code>/api/prometheus/targets.json</code></td><td>Prometheus file_sd targets</td></tr>
                 <tr><td><code>/metrics</code></td><td>Prometheus metrics</td></tr>
             </table>
@@ -1163,6 +2142,47 @@ SETTINGS_TEMPLATE = """
         
         <p class="version">Server Manager v{{ version }}</p>
     </div>
+    
+    <script>
+    const basePath = window.location.pathname.endsWith('/settings') 
+        ? window.location.pathname.replace('/settings', '') 
+        : window.location.pathname.replace(/\/$/, '');
+    
+    document.getElementById('addSSHKeyForm').onsubmit = async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const data = {
+            name: form.name.value,
+            key_path: form.key_path.value
+        };
+        
+        const response = await fetch(`${basePath}/api/ssh-keys`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        
+        if (response.ok) {
+            location.reload();
+        } else {
+            const result = await response.json();
+            alert(result.error || 'Failed to add SSH key');
+        }
+    };
+    
+    async function deleteSSHKey(id) {
+        if (!confirm('Delete this SSH key?')) return;
+        
+        const response = await fetch(`${basePath}/api/ssh-keys/${id}`, {method: 'DELETE'});
+        
+        if (response.ok) {
+            location.reload();
+        } else {
+            const result = await response.json();
+            alert(result.error || 'Failed to delete SSH key');
+        }
+    }
+    </script>
 </body></html>
 """
 

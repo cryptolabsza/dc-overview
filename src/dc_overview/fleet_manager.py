@@ -1138,6 +1138,13 @@ echo "Exporters installed successfully"
                 "-e", f"AI_LICENSE_KEY={self.config.ipmi_monitor.ai_license_key}",
             ])
         
+        # Prepare SSH keys mount if available
+        ssh_keys_dir = self.config.deploy_path / "ssh_keys"
+        ssh_keys_mount = []
+        if ssh_keys_dir.exists() and any(ssh_keys_dir.iterdir()):
+            ssh_keys_mount = ["-v", f"{ssh_keys_dir}:/app/ssh_keys:ro"]
+            console.print("[dim]  Mounting shared SSH keys for ipmi-monitor[/dim]")
+        
         # Run container on cryptolabs network
         docker_cmd = [
             "docker", "run", "-d",
@@ -1146,6 +1153,7 @@ echo "Exporters installed successfully"
             "--network", "cryptolabs",
             "-v", "ipmi-monitor-data:/app/data",
             "-v", f"{ipmi_config_dir}/servers.yaml:/app/config/servers.yaml:ro",
+        ] + ssh_keys_mount + [
             "--label", "com.centurylinklabs.watchtower.enable=true",
         ] + env_vars + [
             "ghcr.io/cryptolabsza/ipmi-monitor:dev"
@@ -1320,6 +1328,7 @@ echo "Exporters installed successfully"
         """Populate dc-overview database with configured servers via API."""
         import time
         import json
+        import shutil
         
         if not self.config.servers:
             return
@@ -1340,7 +1349,12 @@ echo "Exporters installed successfully"
             console.print("[yellow]⚠[/yellow] dc-overview container not healthy, skipping server population")
             return
         
-        # Add each server via docker exec curl
+        # Step 1: Set up SSH key if configured
+        ssh_key_id = None
+        if self.config.ssh.key_path:
+            ssh_key_id = self._setup_dc_overview_ssh_key()
+        
+        # Step 2: Add each server via docker exec curl
         added = 0
         for server in self.config.servers:
             data = json.dumps({
@@ -1361,22 +1375,105 @@ echo "Exporters installed successfully"
                 "-d", data
             ], capture_output=True, text=True)
             
+            server_id = None
             if result.returncode == 0:
                 try:
                     response = json.loads(result.stdout)
                     if "id" in response:
+                        server_id = response["id"]
                         added += 1
                     elif "error" in response and "already exists" in response["error"]:
-                        pass  # Server already exists, skip
+                        # Get existing server ID for SSH key assignment
+                        server_id = response.get("id")
                     else:
                         console.print(f"[yellow]⚠[/yellow] Failed to add {server.name}: {response.get('error', 'Unknown error')}")
                 except:
                     console.print(f"[yellow]⚠[/yellow] Failed to add {server.name}: {result.stdout[:100]}")
             else:
                 console.print(f"[yellow]⚠[/yellow] Failed to add {server.name}: {result.stderr[:100]}")
+            
+            # Step 3: Associate SSH key with server if we have both
+            if server_id and ssh_key_id:
+                self._set_server_ssh_key(server_id, ssh_key_id)
         
         if added > 0:
             console.print(f"[green]✓[/green] Added {added} servers to Server Manager")
+    
+    def _setup_dc_overview_ssh_key(self) -> int:
+        """Copy SSH key to dc-overview volume and register it in the database."""
+        import json
+        import shutil
+        
+        if not self.config.ssh.key_path:
+            return None
+        
+        # Create ssh_keys directory in deploy path
+        ssh_keys_dir = self.config.deploy_path / "ssh_keys"
+        ssh_keys_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Copy the private key
+        key_name = "fleet_key"
+        dest_key_path = ssh_keys_dir / key_name
+        
+        try:
+            shutil.copy2(self.config.ssh.key_path, dest_key_path)
+            os.chmod(dest_key_path, 0o600)
+        except Exception as e:
+            console.print(f"[yellow]⚠[/yellow] Failed to copy SSH key: {e}")
+            return None
+        
+        # The path inside the container (as per docker-compose volume mount)
+        container_key_path = f"/etc/dc-overview/ssh_keys/{key_name}"
+        
+        # Register the SSH key in dc-overview database
+        data = json.dumps({
+            "name": "Fleet SSH Key",
+            "key_path": container_key_path,
+        })
+        
+        result = subprocess.run([
+            "docker", "exec", "dc-overview",
+            "curl", "-s", "-X", "POST",
+            "http://127.0.0.1:5001/api/ssh-keys",
+            "-H", "Content-Type: application/json",
+            "-H", "X-Fleet-Authenticated: true",
+            "-H", "X-Fleet-Auth-User: admin",
+            "-H", "X-Fleet-Auth-Role: admin",
+            "-d", data
+        ], capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            try:
+                response = json.loads(result.stdout)
+                if "id" in response:
+                    console.print(f"[green]✓[/green] SSH key registered in Server Manager")
+                    return response["id"]
+                elif "error" in response:
+                    # Key might already exist
+                    if "already exists" in response.get("error", ""):
+                        return response.get("id")
+                    console.print(f"[yellow]⚠[/yellow] Failed to register SSH key: {response.get('error')}")
+            except:
+                console.print(f"[yellow]⚠[/yellow] Failed to register SSH key: {result.stdout[:100]}")
+        
+        return None
+    
+    def _set_server_ssh_key(self, server_id: int, ssh_key_id: int):
+        """Associate an SSH key with a server in dc-overview."""
+        import json
+        
+        data = json.dumps({"ssh_key_id": ssh_key_id})
+        
+        subprocess.run([
+            "docker", "exec", "dc-overview",
+            "curl", "-s", "-X", "POST",
+            f"http://127.0.0.1:5001/api/servers/{server_id}/ssh-key",
+            "-H", "Content-Type: application/json",
+            "-H", "X-Fleet-Authenticated: true",
+            "-H", "X-Fleet-Auth-User: admin",
+            "-H", "X-Fleet-Auth-Role: admin",
+            "-d", data
+        ], capture_output=True, text=True)
     
     def _generate_self_signed_cert(self, domain: str, ssl_dir: Path):
         """Generate self-signed SSL certificate."""

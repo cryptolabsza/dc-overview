@@ -1,29 +1,54 @@
 """
 DC Overview Exporter Installer - Install Prometheus exporters as systemd services
+
+Includes:
+- Version detection from metrics endpoints and SSH
+- GitHub release checking for updates
+- Remote installation and update via SSH
 """
 
 import os
+import re
+import json
 import subprocess
 import urllib.request
+import urllib.error
 import tarfile
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any, Tuple
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
 console = Console()
 
-# Latest versions
+# Latest versions (defaults, will be overridden by GitHub releases)
 NODE_EXPORTER_VERSION = "1.7.0"
 DC_EXPORTER_RS_VERSION = "0.1.0"
+DCGM_EXPORTER_VERSION = "3.3.5-3.4.1"
+
+# GitHub repositories for each exporter
+EXPORTER_REPOS = {
+    'node_exporter': 'prometheus/node_exporter',
+    'dc_exporter': 'cryptolabsza/dc-exporter-releases',
+    'dcgm_exporter': 'NVIDIA/dcgm-exporter'
+}
+
+# Exporter ports
+EXPORTER_PORTS = {
+    'node_exporter': 9100,
+    'dc_exporter': 9835,
+    'dcgm_exporter': 9400
+}
 
 # Download URLs
 NODE_EXPORTER_URL = f"https://github.com/prometheus/node_exporter/releases/download/v{NODE_EXPORTER_VERSION}/node_exporter-{NODE_EXPORTER_VERSION}.linux-amd64.tar.gz"
 
 # DC Exporter RS (Rust version) - preferred
+# Using dc-exporter-releases repo for public binary distribution
 DC_EXPORTER_RS_URL = "https://github.com/cryptolabsza/dc-exporter-releases/releases/latest/download/dc-exporter-rs"
+DC_EXPORTER_RS_URL_DEV = "https://github.com/cryptolabsza/dc-exporter-releases/releases/download/dev-latest/dc-exporter-rs"
 DC_EXPORTER_RS_DEB_URL = f"https://github.com/cryptolabsza/dc-exporter-releases/releases/latest/download/dc-exporter-rs_{DC_EXPORTER_RS_VERSION}_amd64.deb"
 
 
@@ -268,7 +293,7 @@ class ExporterInstaller:
         - GPU_AER_TOTAL_ERRORS - PCIe AER errors
         - GPU_ERROR_STATE - GPU state (OK/Warning/Error/VM_Passthrough)
         
-        Downloads from: https://github.com/cryptolabsza/dc-exporter-releases
+        Downloads from: https://github.com/cryptolabsza/dc-exporter-rs
         """
         console.print("\n[bold]Installing dc-exporter-rs...[/bold]")
         
@@ -489,3 +514,352 @@ class ExporterInstaller:
                 }
         
         return status
+
+
+# =============================================================================
+# VERSION DETECTION FUNCTIONS
+# =============================================================================
+
+def get_version_from_metrics(server_ip: str, exporter: str, timeout: int = 5) -> Optional[str]:
+    """
+    Get exporter version from its metrics endpoint.
+    
+    Args:
+        server_ip: IP address of the server
+        exporter: One of 'node_exporter', 'dc_exporter', 'dcgm_exporter'
+        timeout: Request timeout in seconds
+        
+    Returns:
+        Version string or None if not available
+    """
+    port = EXPORTER_PORTS.get(exporter)
+    if not port:
+        return None
+    
+    try:
+        url = f"http://{server_ip}:{port}/metrics"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            metrics = response.read().decode('utf-8')
+            
+            if exporter == 'node_exporter':
+                # Parse: node_exporter_build_info{...version="1.7.0"...}
+                match = re.search(r'node_exporter_build_info\{[^}]*version="([^"]+)"', metrics)
+                if match:
+                    return match.group(1)
+                    
+            elif exporter == 'dc_exporter':
+                # Parse: DCXP_BUILD_INFO or look for version in any metric
+                match = re.search(r'dc_exporter_build_info\{[^}]*version="([^"]+)"', metrics)
+                if match:
+                    return match.group(1)
+                # Try to find version in any DCXP metric
+                match = re.search(r'DCXP_VERSION\{[^}]*\}\s+([0-9.]+)', metrics)
+                if match:
+                    return match.group(1)
+                # Check if metrics are present (exporter is working)
+                if 'DCXP_GPU_SUPPORTED' in metrics or 'DCXP_FI_DEV' in metrics:
+                    return "running"  # Version unknown but exporter is active
+                    
+            elif exporter == 'dcgm_exporter':
+                # Parse: dcgm_exporter_build_info{...version="3.3.5-3.4.1"...}
+                match = re.search(r'dcgm_exporter_build_info\{[^}]*version="([^"]+)"', metrics)
+                if match:
+                    return match.group(1)
+                # Check if DCGM metrics present
+                if 'DCGM_FI_' in metrics:
+                    return "running"
+                    
+    except Exception:
+        pass
+    
+    return None
+
+
+def get_version_from_ssh(server_ip: str, exporter: str, ssh_user: str = 'root',
+                         ssh_port: int = 22, ssh_key_path: Optional[str] = None,
+                         timeout: int = 10) -> Optional[str]:
+    """
+    Get exporter version by running --version on the remote server via SSH.
+    
+    Args:
+        server_ip: IP address of the server
+        exporter: One of 'node_exporter', 'dc_exporter', 'dcgm_exporter'
+        ssh_user: SSH username
+        ssh_port: SSH port
+        ssh_key_path: Path to SSH key (optional)
+        timeout: Command timeout
+        
+    Returns:
+        Version string or None if not available
+    """
+    binary_paths = {
+        'node_exporter': '/usr/local/bin/node_exporter',
+        'dc_exporter': '/usr/local/bin/dc-exporter-rs',
+        'dcgm_exporter': None  # Docker-based, use docker inspect
+    }
+    
+    binary = binary_paths.get(exporter)
+    
+    try:
+        ssh_cmd = [
+            'ssh',
+            '-o', 'ConnectTimeout=5',
+            '-o', 'StrictHostKeyChecking=no',
+            '-o', 'BatchMode=yes',
+            '-p', str(ssh_port)
+        ]
+        
+        if ssh_key_path:
+            ssh_cmd.extend(['-i', ssh_key_path])
+        
+        ssh_cmd.append(f'{ssh_user}@{server_ip}')
+        
+        if exporter == 'dcgm_exporter':
+            # For Docker-based dcgm-exporter, get image tag
+            ssh_cmd.append("docker inspect dcgm-exporter --format '{{.Config.Image}}' 2>/dev/null || echo ''")
+        else:
+            ssh_cmd.append(f"{binary} --version 2>/dev/null || echo ''")
+        
+        result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=timeout)
+        
+        if result.returncode == 0 and result.stdout.strip():
+            output = result.stdout.strip()
+            
+            if exporter == 'node_exporter':
+                # Parse: node_exporter, version 1.7.0 (branch: ...)
+                match = re.search(r'version\s+([0-9.]+)', output)
+                if match:
+                    return match.group(1)
+                    
+            elif exporter == 'dc_exporter':
+                # Parse: dc-exporter-rs 0.1.0 or similar
+                match = re.search(r'([0-9]+\.[0-9]+\.[0-9]+)', output)
+                if match:
+                    return match.group(1)
+                    
+            elif exporter == 'dcgm_exporter':
+                # Parse Docker image tag: nvidia/dcgm-exporter:3.3.5-3.4.1-ubuntu22.04
+                match = re.search(r':([0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.[0-9]+\.[0-9]+)', output)
+                if match:
+                    return match.group(1)
+                    
+    except Exception:
+        pass
+    
+    return None
+
+
+def get_exporter_version(server_ip: str, exporter: str, ssh_user: str = 'root',
+                        ssh_port: int = 22, ssh_key_path: Optional[str] = None) -> Optional[str]:
+    """
+    Get exporter version, trying metrics endpoint first then SSH fallback.
+    
+    Args:
+        server_ip: IP address of the server
+        exporter: One of 'node_exporter', 'dc_exporter', 'dcgm_exporter'
+        ssh_user: SSH username
+        ssh_port: SSH port
+        ssh_key_path: Path to SSH key (optional)
+        
+    Returns:
+        Version string or None if not available
+    """
+    # Try metrics endpoint first (faster, doesn't require SSH)
+    version = get_version_from_metrics(server_ip, exporter)
+    if version and version != "running":
+        return version
+    
+    # Fall back to SSH
+    version = get_version_from_ssh(server_ip, exporter, ssh_user, ssh_port, ssh_key_path)
+    if version:
+        return version
+    
+    # If metrics showed "running" but we couldn't get version
+    if version == "running":
+        return "unknown"
+    
+    return None
+
+
+def get_all_exporter_versions(server_ip: str, ssh_user: str = 'root',
+                              ssh_port: int = 22, ssh_key_path: Optional[str] = None) -> Dict[str, Optional[str]]:
+    """
+    Get versions of all exporters on a server.
+    
+    Returns:
+        Dictionary mapping exporter name to version (or None if not installed)
+    """
+    return {
+        'node_exporter': get_exporter_version(server_ip, 'node_exporter', ssh_user, ssh_port, ssh_key_path),
+        'dc_exporter': get_exporter_version(server_ip, 'dc_exporter', ssh_user, ssh_port, ssh_key_path),
+        'dcgm_exporter': get_exporter_version(server_ip, 'dcgm_exporter', ssh_user, ssh_port, ssh_key_path),
+    }
+
+
+# =============================================================================
+# GITHUB RELEASE FUNCTIONS
+# =============================================================================
+
+def get_latest_github_release(repo: str, branch: str = 'main') -> Optional[Dict[str, Any]]:
+    """
+    Get the latest release from a GitHub repository.
+    
+    Args:
+        repo: GitHub repository in 'owner/repo' format
+        branch: Branch to check ('main' or 'dev') - affects pre-release filtering
+        
+    Returns:
+        Dictionary with 'version', 'tag', 'url', 'published_at' or None
+    """
+    try:
+        # GitHub API for releases
+        url = f"https://api.github.com/repos/{repo}/releases"
+        req = urllib.request.Request(url)
+        req.add_header('Accept', 'application/vnd.github.v3+json')
+        req.add_header('User-Agent', 'dc-overview')
+        
+        with urllib.request.urlopen(req, timeout=10) as response:
+            releases = json.loads(response.read().decode('utf-8'))
+            
+            if not releases:
+                return None
+            
+            for release in releases:
+                # Skip pre-releases unless using dev branch
+                if release.get('prerelease') and branch == 'main':
+                    continue
+                
+                tag = release.get('tag_name', '')
+                version = tag.lstrip('v')
+                
+                return {
+                    'version': version,
+                    'tag': tag,
+                    'url': release.get('html_url'),
+                    'published_at': release.get('published_at'),
+                    'prerelease': release.get('prerelease', False),
+                    'assets': release.get('assets', [])
+                }
+                
+    except Exception:
+        pass
+    
+    return None
+
+
+def get_latest_exporter_version(exporter: str, branch: str = 'main') -> Optional[str]:
+    """
+    Get the latest available version for an exporter from GitHub.
+    
+    Args:
+        exporter: One of 'node_exporter', 'dc_exporter', 'dcgm_exporter'
+        branch: Branch to check ('main' or 'dev')
+        
+    Returns:
+        Version string or None
+    """
+    repo = EXPORTER_REPOS.get(exporter)
+    if not repo:
+        return None
+    
+    release = get_latest_github_release(repo, branch)
+    if release:
+        return release.get('version')
+    
+    return None
+
+
+def get_all_latest_versions(branch: str = 'main') -> Dict[str, Optional[str]]:
+    """
+    Get the latest available versions for all exporters.
+    
+    Args:
+        branch: Branch to check ('main' or 'dev')
+        
+    Returns:
+        Dictionary mapping exporter name to latest version
+    """
+    return {
+        'node_exporter': get_latest_exporter_version('node_exporter', branch),
+        'dc_exporter': get_latest_exporter_version('dc_exporter', branch),
+        'dcgm_exporter': get_latest_exporter_version('dcgm_exporter', branch),
+    }
+
+
+def check_for_updates(server_ip: str, ssh_user: str = 'root', ssh_port: int = 22,
+                     ssh_key_path: Optional[str] = None, branch: str = 'main') -> Dict[str, Dict[str, Any]]:
+    """
+    Check if any exporters on a server have updates available.
+    
+    Returns:
+        Dictionary with update info per exporter:
+        {
+            'node_exporter': {
+                'installed': '1.6.0',
+                'latest': '1.7.0',
+                'update_available': True
+            },
+            ...
+        }
+    """
+    installed = get_all_exporter_versions(server_ip, ssh_user, ssh_port, ssh_key_path)
+    latest = get_all_latest_versions(branch)
+    
+    result = {}
+    for exporter in EXPORTER_REPOS.keys():
+        inst_ver = installed.get(exporter)
+        lat_ver = latest.get(exporter)
+        
+        update_available = False
+        if inst_ver and lat_ver and inst_ver not in ('running', 'unknown'):
+            # Simple version comparison (works for semver)
+            try:
+                inst_parts = [int(x) for x in inst_ver.split('.')[:3]]
+                lat_parts = [int(x) for x in lat_ver.split('.')[:3]]
+                update_available = lat_parts > inst_parts
+            except ValueError:
+                # Non-numeric version parts, do string comparison
+                update_available = lat_ver != inst_ver
+        
+        result[exporter] = {
+            'installed': inst_ver,
+            'latest': lat_ver,
+            'update_available': update_available
+        }
+    
+    return result
+
+
+def get_exporter_download_url(exporter: str, version: str = None, branch: str = 'main') -> Optional[str]:
+    """
+    Get the download URL for an exporter binary.
+    
+    Args:
+        exporter: One of 'node_exporter', 'dc_exporter', 'dcgm_exporter'
+        version: Specific version (or None for latest)
+        branch: Branch ('main' or 'dev')
+        
+    Returns:
+        Download URL or None
+    """
+    if not version:
+        version = get_latest_exporter_version(exporter, branch)
+    
+    if not version:
+        return None
+    
+    if exporter == 'node_exporter':
+        return f"https://github.com/prometheus/node_exporter/releases/download/v{version}/node_exporter-{version}.linux-amd64.tar.gz"
+    elif exporter == 'dc_exporter':
+        # dc-exporter-rs: use dev-latest for dev branch, latest for main
+        if branch == 'dev':
+            return "https://github.com/cryptolabsza/dc-exporter-releases/releases/download/dev-latest/dc-exporter-rs"
+        else:
+            # For main branch, use latest release
+            return "https://github.com/cryptolabsza/dc-exporter-releases/releases/latest/download/dc-exporter-rs"
+    elif exporter == 'dcgm_exporter':
+        # Docker image, return image tag
+        return f"nvidia/dcgm-exporter:{version}-ubuntu22.04"
+    
+    return None
