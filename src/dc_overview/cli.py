@@ -681,7 +681,9 @@ def deploy_vast(api_key: str, status: bool):
 
 @click.command()
 @click.option("--legacy", is_flag=True, help="Use legacy quickstart (single machine)")
-def quickstart(legacy: bool):
+@click.option("--config", "-c", "config_file", type=click.Path(exists=True), help="YAML config file for automated setup")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompts (use with --config)")
+def quickstart(legacy: bool, config_file: str, yes: bool):
     """
     ⚡ One-command setup - does everything!
     
@@ -706,16 +708,18 @@ def quickstart(legacy: bool):
         - Domain + SSL configuration
     
     \b
-    EXAMPLE:
-        sudo dc-overview quickstart
+    EXAMPLES:
+        sudo dc-overview quickstart                    # Interactive setup
+        sudo dc-overview quickstart -c config.yaml    # Automated from config file
+        sudo dc-overview quickstart -c config.yaml -y # Skip confirmations
     """
     if legacy:
         run_quickstart()
     else:
-        run_fleet_quickstart()
+        run_fleet_quickstart(config_file, yes)
 
 
-def run_fleet_quickstart():
+def run_fleet_quickstart(config_file: str = None, auto_confirm: bool = False):
     """Run the new unified fleet quickstart."""
     if os.geteuid() != 0:
         console.print("[red]Error:[/red] This command requires root privileges.")
@@ -723,8 +727,31 @@ def run_fleet_quickstart():
         sys.exit(1)
     
     try:
-        # Step 1: Collect all configuration upfront
-        config = run_fleet_wizard()
+        if config_file:
+            # Load configuration from file
+            config = load_config_from_file(config_file)
+            
+            if not auto_confirm:
+                # Show config summary and confirm
+                console.print(Panel.fit(
+                    f"[bold cyan]Configuration from {config_file}[/bold cyan]",
+                    border_style="cyan"
+                ))
+                console.print(f"  Site: {config.site_name}")
+                console.print(f"  Domain: {config.ssl.domain}")
+                console.print(f"  Servers: {len(config.servers)}")
+                console.print(f"  Components: DC Overview" + 
+                             (", IPMI Monitor" if config.components.ipmi_monitor else "") +
+                             (", Vast.ai" if config.components.vast_exporter else ""))
+                console.print()
+                
+                import questionary
+                if not questionary.confirm("Proceed with deployment?", default=True).ask():
+                    console.print("[yellow]Setup cancelled.[/yellow]")
+                    return
+        else:
+            # Step 1: Collect all configuration upfront via wizard
+            config = run_fleet_wizard()
         
         # Step 2: Deploy everything using collected config
         success = deploy_fleet(config)
@@ -735,6 +762,80 @@ def run_fleet_quickstart():
     except KeyboardInterrupt:
         console.print("\n[yellow]Setup cancelled.[/yellow]")
         sys.exit(1)
+
+
+def load_config_from_file(config_file: str) -> FleetConfig:
+    """Load FleetConfig from a YAML file."""
+    import yaml
+    from .fleet_config import FleetConfig, SSLConfig, SSHCredentials, BMCCredentials, Server
+    from .fleet_config import ComponentConfig, GrafanaConfig, VastConfig, IPMIMonitorConfig
+    from .fleet_config import SSLMode, AuthMethod
+    
+    with open(config_file, 'r') as f:
+        data = yaml.safe_load(f)
+    
+    config = FleetConfig()
+    
+    # Site info
+    config.site_name = data.get('site_name', 'DC Overview')
+    
+    # Fleet admin credentials
+    config.fleet_admin_user = data.get('fleet_admin_user', 'admin')
+    config.fleet_admin_pass = data.get('fleet_admin_pass')
+    
+    # SSH configuration
+    ssh = data.get('ssh', {})
+    config.ssh.username = ssh.get('username', 'root')
+    config.ssh.key_path = ssh.get('key_path')
+    config.ssh.password = ssh.get('password')
+    config.ssh.port = ssh.get('port', 22)
+    if ssh.get('key_path'):
+        config.ssh.auth_method = AuthMethod.KEY
+    
+    # BMC configuration
+    bmc = data.get('bmc', {})
+    config.bmc.username = bmc.get('username', 'ADMIN')
+    config.bmc.password = bmc.get('password')
+    
+    # SSL configuration
+    ssl = data.get('ssl', {})
+    config.ssl.domain = ssl.get('domain')
+    config.ssl.email = ssl.get('email')
+    ssl_mode = ssl.get('mode', 'self_signed')
+    config.ssl.mode = SSLMode.LETSENCRYPT if ssl_mode == 'letsencrypt' else SSLMode.SELF_SIGNED
+    
+    # Components
+    components = data.get('components', {})
+    config.components.dc_overview = components.get('dc_overview', True)
+    config.components.ipmi_monitor = components.get('ipmi_monitor', False)
+    config.components.vast_exporter = components.get('vast_exporter', False)
+    
+    # Vast.ai
+    vast = data.get('vast', {})
+    config.vast.enabled = config.components.vast_exporter
+    config.vast.api_key = vast.get('api_key')
+    
+    # Grafana
+    grafana = data.get('grafana', {})
+    config.grafana.admin_password = grafana.get('admin_password', 'admin')
+    
+    # IPMI Monitor
+    ipmi = data.get('ipmi_monitor', {})
+    config.ipmi_monitor.enabled = config.components.ipmi_monitor
+    config.ipmi_monitor.admin_password = ipmi.get('admin_password')
+    
+    # Servers
+    for srv in data.get('servers', []):
+        config.add_server(
+            name=srv.get('name', f"server-{len(config.servers)+1}"),
+            server_ip=srv.get('server_ip'),
+            bmc_ip=srv.get('bmc_ip'),
+            bmc_user=srv.get('bmc_user'),
+            bmc_password=srv.get('bmc_password'),
+        )
+    
+    console.print(f"[green]✓[/green] Loaded configuration from {config_file}")
+    return config
 
 
 @click.command("add-machine")
