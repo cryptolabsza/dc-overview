@@ -122,6 +122,10 @@ class FleetConfig:
     # Site info
     site_name: str = "DC Overview"
     
+    # Fleet Management credentials (unified login)
+    fleet_admin_user: str = "admin"
+    fleet_admin_pass: Optional[str] = None
+    
     # Components
     components: ComponentConfig = field(default_factory=ComponentConfig)
     
@@ -274,6 +278,8 @@ class FleetConfig:
     def _get_secrets(self) -> Dict[str, Any]:
         """Get secrets for separate storage."""
         secrets = {
+            "fleet_admin_user": self.fleet_admin_user,
+            "fleet_admin_pass": self.fleet_admin_pass,
             "ssh_password": self.ssh.password,
             "bmc_password": self.bmc.password,
             "grafana_password": self.grafana.admin_password,
@@ -366,6 +372,8 @@ class FleetConfig:
             with open(secrets_path) as f:
                 secrets = yaml.safe_load(f) or {}
             
+            config.fleet_admin_user = secrets.get("fleet_admin_user", "admin")
+            config.fleet_admin_pass = secrets.get("fleet_admin_pass")
             config.ssh.password = secrets.get("ssh_password")
             config.bmc.password = secrets.get("bmc_password")
             config.grafana.admin_password = secrets.get("grafana_password", "admin")

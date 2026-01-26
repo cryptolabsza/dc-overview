@@ -249,6 +249,28 @@ class FleetWizard:
             style=custom_style
         ).ask() or "My GPU Farm"
         
+        # Fleet Management Credentials (for unified login)
+        console.print("\n[bold]Fleet Management Login[/bold]")
+        console.print("[dim]These credentials will be used to access all services (Fleet Management, Grafana, etc.)[/dim]\n")
+        
+        self.config.fleet_admin_user = questionary.text(
+            "Fleet admin username:",
+            default="admin",
+            style=custom_style
+        ).ask() or "admin"
+        
+        self.config.fleet_admin_pass = questionary.password(
+            "Fleet admin password:",
+            validate=lambda x: len(x) >= 4 or "Password must be at least 4 characters",
+            style=custom_style
+        ).ask()
+        
+        if not self.config.fleet_admin_pass:
+            # Generate a random password if none provided
+            import secrets
+            self.config.fleet_admin_pass = secrets.token_urlsafe(12)
+            console.print(f"[dim]Generated password: {self.config.fleet_admin_pass}[/dim]")
+        
         # Grafana password
         console.print("\n[bold]Grafana Dashboard[/bold]")
         self.config.grafana.admin_password = questionary.password(
