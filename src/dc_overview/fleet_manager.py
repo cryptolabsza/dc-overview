@@ -1066,6 +1066,7 @@ echo "Exporters installed successfully"
         
         # Build servers config for IPMI Monitor
         # Note: ipmi-monitor expects 'ipmi_user' and 'ipmi_pass' (not bmc_user/bmc_password)
+        # Also: ipmi-monitor's parser expects each server to START with '- name:' 
         servers = []
         for server in self.config.servers:
             if server.bmc_ip:
@@ -1078,10 +1079,18 @@ echo "Exporters installed successfully"
                     "server_ip": server.server_ip,
                 })
         
-        # Write servers.yaml config
+        # Write servers.yaml config with specific format (name must be first key)
         if servers:
+            yaml_lines = ["servers:"]
+            for srv in servers:
+                # Ensure 'name' is first as ipmi-monitor parser requires '- name:' to start
+                yaml_lines.append(f"  - name: {srv['name']}")
+                yaml_lines.append(f"    bmc_ip: {srv['bmc_ip']}")
+                yaml_lines.append(f"    ipmi_user: {srv['ipmi_user']}")
+                yaml_lines.append(f"    ipmi_pass: {srv['ipmi_pass']}")
+                yaml_lines.append(f"    server_ip: {srv['server_ip']}")
             with open(ipmi_config_dir / "servers.yaml", "w") as f:
-                yaml.dump({"servers": servers}, f)
+                f.write("\n".join(yaml_lines) + "\n")
             os.chmod(ipmi_config_dir / "servers.yaml", 0o600)
         else:
             # Create empty servers file so container starts
