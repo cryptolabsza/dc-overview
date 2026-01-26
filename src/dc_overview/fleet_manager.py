@@ -1222,29 +1222,23 @@ WantedBy=multi-user.target
         self._deploy_cryptolabs_proxy()
     
     def _deploy_cryptolabs_proxy(self):
-        """Deploy the cryptolabs-proxy Docker container."""
+        """Deploy the cryptolabs-proxy Docker container.
+        
+        The proxy handles its own nginx configuration internally.
+        We just need to provide SSL certs and auth credentials.
+        """
         import secrets as secrets_module
         
         domain = self.config.ssl.domain or "localhost"
         
-        # Create proxy config directory
-        proxy_dir = Path("/etc/cryptolabs-proxy")
-        proxy_dir.mkdir(parents=True, exist_ok=True)
-        (proxy_dir / "ssl").mkdir(exist_ok=True)
-        
-        # Create .env file for proxy
-        auth_secret = secrets_module.token_hex(32)
-        env_content = f"""FLEET_ADMIN_USER={self.config.fleet_admin_user}
-FLEET_ADMIN_PASS={self.config.fleet_admin_pass}
-AUTH_SECRET_KEY={auth_secret}
-"""
-        (proxy_dir / ".env").write_text(env_content)
-        os.chmod(proxy_dir / ".env", 0o600)
+        # Create directory for SSL certs
+        ssl_dir = Path("/etc/cryptolabs-proxy/ssl")
+        ssl_dir.mkdir(parents=True, exist_ok=True)
         
         # Ensure cryptolabs network exists
         subprocess.run(["docker", "network", "create", "cryptolabs"], capture_output=True)
         
-        # Handle SSL certificate - determine which to use BEFORE generating nginx.conf
+        # Handle SSL certificate
         use_letsencrypt = False
         if self.config.ssl.mode == SSLMode.LETSENCRYPT:
             console.print("[dim]Obtaining Let's Encrypt certificate...[/dim]")
@@ -1253,22 +1247,18 @@ AUTH_SECRET_KEY={auth_secret}
                 use_letsencrypt = True
             else:
                 console.print("[yellow]⚠[/yellow] Could not obtain Let's Encrypt cert, using self-signed")
-                self._generate_self_signed_cert(domain, proxy_dir / "ssl")
+                self._generate_self_signed_cert(domain, ssl_dir)
         else:
-            self._generate_self_signed_cert(domain, proxy_dir / "ssl")
+            self._generate_self_signed_cert(domain, ssl_dir)
         
-        # Generate nginx.conf with correct SSL paths
-        nginx_config = self._generate_proxy_nginx_config(domain, use_letsencrypt)
-        (proxy_dir / "nginx.conf").write_text(nginx_config)
-        
-        # Deploy dc-overview container
+        # Deploy dc-overview container first
         self._deploy_dc_overview_container()
         
         # Connect existing containers to cryptolabs network
         for container in ["prometheus", "grafana"]:
             subprocess.run(["docker", "network", "connect", "cryptolabs", container], capture_output=True)
         
-        # Pull and start proxy container
+        # Pull proxy image
         console.print("[dim]Pulling cryptolabs-proxy image...[/dim]")
         subprocess.run(["docker", "pull", "ghcr.io/cryptolabsza/cryptolabs-proxy:dev"], 
                       capture_output=True, timeout=120)
@@ -1276,14 +1266,18 @@ AUTH_SECRET_KEY={auth_secret}
         # Remove existing proxy container if any
         subprocess.run(["docker", "rm", "-f", "cryptolabs-proxy"], capture_output=True)
         
-        # Start proxy
+        # Generate auth secret
+        auth_secret = secrets_module.token_hex(32)
+        
+        # Start proxy - no nginx.conf override, use built-in config
         cmd = [
             "docker", "run", "-d",
             "--name", "cryptolabs-proxy",
             "--restart", "unless-stopped",
             "-p", "80:80", "-p", "443:443",
-            "--env-file", str(proxy_dir / ".env"),
-            "-v", f"{proxy_dir}/nginx.conf:/etc/nginx/nginx.conf:ro",
+            "-e", f"FLEET_ADMIN_USER={self.config.fleet_admin_user}",
+            "-e", f"FLEET_ADMIN_PASS={self.config.fleet_admin_pass}",
+            "-e", f"AUTH_SECRET_KEY={auth_secret}",
             "-v", "/var/run/docker.sock:/var/run/docker.sock:ro",
             "-v", "fleet-auth-data:/data/auth",
             "--network", "cryptolabs",
@@ -1291,9 +1285,11 @@ AUTH_SECRET_KEY={auth_secret}
         
         # Add SSL volume based on what was actually obtained
         if use_letsencrypt:
-            cmd.extend(["-v", "/etc/letsencrypt:/etc/letsencrypt:ro"])
+            # Mount Let's Encrypt certs to the path the proxy expects
+            cmd.extend(["-v", "/etc/letsencrypt/live/{}/fullchain.pem:/etc/nginx/ssl/server.crt:ro".format(domain)])
+            cmd.extend(["-v", "/etc/letsencrypt/live/{}/privkey.pem:/etc/nginx/ssl/server.key:ro".format(domain)])
         else:
-            cmd.extend(["-v", f"{proxy_dir}/ssl:/etc/nginx/ssl:ro"])
+            cmd.extend(["-v", f"{ssl_dir}:/etc/nginx/ssl:ro"])
         
         cmd.append("ghcr.io/cryptolabsza/cryptolabs-proxy:dev")
         
@@ -1337,148 +1333,6 @@ AUTH_SECRET_KEY={auth_secret}
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0:
             console.print("[green]✓[/green] DC Overview (Server Manager) container started")
-    
-    def _generate_proxy_nginx_config(self, domain: str, use_letsencrypt: bool = False) -> str:
-        """Generate nginx.conf for the proxy."""
-        if use_letsencrypt:
-            ssl_cert = f"/etc/letsencrypt/live/{domain}/fullchain.pem"
-            ssl_key = f"/etc/letsencrypt/live/{domain}/privkey.pem"
-        else:
-            ssl_cert = "/etc/nginx/ssl/server.crt"
-            ssl_key = "/etc/nginx/ssl/server.key"
-        
-        return f'''worker_processes auto;
-error_log /var/log/nginx/error.log warn;
-pid /var/run/nginx.pid;
-
-events {{
-    worker_connections 1024;
-}}
-
-http {{
-    include /etc/nginx/mime.types;
-    default_type application/octet-stream;
-    sendfile on;
-    keepalive_timeout 65;
-    client_max_body_size 100M;
-    
-    upstream auth_server {{
-        server 127.0.0.1:8081;
-    }}
-    
-    upstream health_api {{
-        server 127.0.0.1:8080;
-    }}
-
-    server {{
-        listen 80;
-        server_name {domain};
-        location /.well-known/acme-challenge/ {{
-            root /var/www/certbot;
-        }}
-        location / {{
-            return 301 https://$host$request_uri;
-        }}
-    }}
-    
-    server {{
-        listen 443 ssl;
-        server_name {domain};
-        
-        ssl_certificate {ssl_cert};
-        ssl_certificate_key {ssl_key};
-        ssl_protocols TLSv1.2 TLSv1.3;
-        
-        location = /_auth_check {{
-            internal;
-            proxy_pass http://auth_server/auth/check;
-            proxy_pass_request_body off;
-            proxy_set_header Content-Length "";
-            proxy_set_header X-Original-URI $request_uri;
-            proxy_set_header Cookie $http_cookie;
-        }}
-        
-        location @login_redirect {{
-            return 302 /auth/login?next=$request_uri;
-        }}
-        
-        location /auth/ {{
-            proxy_pass http://auth_server/auth/;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-Proto $scheme;
-        }}
-        
-        location /api/health {{
-            proxy_pass http://health_api/api/health;
-        }}
-        
-        location /api/services {{
-            proxy_pass http://health_api/api/services;
-        }}
-        
-        location /api/build-info {{
-            proxy_pass http://health_api/api/build-info;
-        }}
-        
-        location / {{
-            auth_request /_auth_check;
-            auth_request_set $auth_user $upstream_http_x_fleet_auth_user;
-            auth_request_set $auth_role $upstream_http_x_fleet_auth_role;
-            error_page 401 = @login_redirect;
-            root /usr/share/nginx/html;
-            index index.html;
-            try_files $uri $uri/ /index.html;
-        }}
-        
-        location /dc/ {{
-            auth_request /_auth_check;
-            auth_request_set $auth_user $upstream_http_x_fleet_auth_user;
-            auth_request_set $auth_role $upstream_http_x_fleet_auth_role;
-            error_page 401 = @login_redirect;
-            
-            proxy_pass http://dc-overview:5001/;
-            proxy_http_version 1.1;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_set_header X-Fleet-Auth-User $auth_user;
-            proxy_set_header X-Fleet-Auth-Role $auth_role;
-            proxy_set_header X-Fleet-Authenticated "true";
-            proxy_read_timeout 300s;
-        }}
-        
-        location /servers {{
-            return 301 /dc/servers;
-        }}
-        
-        location /grafana/ {{
-            auth_request /_auth_check;
-            auth_request_set $auth_user $upstream_http_x_fleet_auth_user;
-            error_page 401 = @login_redirect;
-            
-            proxy_pass http://grafana:3000;
-            proxy_http_version 1.1;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_set_header X-WEBAUTH-USER $auth_user;
-            proxy_read_timeout 300s;
-        }}
-        
-        location /prometheus/ {{
-            auth_request /_auth_check;
-            error_page 401 = @login_redirect;
-            
-            proxy_pass http://prometheus:9090/prometheus/;
-            proxy_http_version 1.1;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_read_timeout 300s;
-        }}
-    }}
-}}
-'''
     
     def _generate_self_signed_cert(self, domain: str, ssl_dir: Path):
         """Generate self-signed SSL certificate."""
