@@ -1426,7 +1426,7 @@ http {{
             auth_request_set $auth_user $upstream_http_x_fleet_auth_user;
             auth_request_set $auth_role $upstream_http_x_fleet_auth_role;
             error_page 401 = @login_redirect;
-            root /var/www/html;
+            root /usr/share/nginx/html;
             index index.html;
             try_files $uri $uri/ /index.html;
         }}
