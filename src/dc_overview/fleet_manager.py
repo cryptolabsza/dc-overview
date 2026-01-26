@@ -1296,6 +1296,68 @@ echo "Exporters installed successfully"
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0:
             console.print("[green]✓[/green] DC Overview (Server Manager) container started")
+            # Populate servers after container starts
+            self._populate_dc_overview_servers()
+    
+    def _populate_dc_overview_servers(self):
+        """Populate dc-overview database with configured servers via API."""
+        import time
+        import urllib.request
+        import urllib.error
+        import json
+        
+        if not self.config.servers:
+            return
+            
+        console.print("[dim]Populating Server Manager with configured servers...[/dim]")
+        
+        # Wait for dc-overview to be ready
+        max_retries = 10
+        for i in range(max_retries):
+            try:
+                req = urllib.request.Request("http://127.0.0.1:5001/api/health")
+                req.add_header("X-Fleet-Authenticated", "true")
+                urllib.request.urlopen(req, timeout=2)
+                break
+            except:
+                time.sleep(1)
+        
+        # Add each server via API
+        added = 0
+        for server in self.config.servers:
+            try:
+                data = json.dumps({
+                    "name": server.name,
+                    "server_ip": server.server_ip,
+                    "ssh_user": self.config.ssh.username,
+                    "ssh_port": self.config.ssh.port,
+                }).encode('utf-8')
+                
+                req = urllib.request.Request(
+                    "http://127.0.0.1:5001/api/servers",
+                    data=data,
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Fleet-Authenticated": "true",
+                        "X-Fleet-Auth-User": "admin",
+                        "X-Fleet-Auth-Role": "admin",
+                    },
+                    method="POST"
+                )
+                
+                urllib.request.urlopen(req, timeout=5)
+                added += 1
+            except urllib.error.HTTPError as e:
+                if e.code == 409:
+                    # Server already exists, skip
+                    pass
+                else:
+                    console.print(f"[yellow]⚠[/yellow] Failed to add {server.name}: {e}")
+            except Exception as e:
+                console.print(f"[yellow]⚠[/yellow] Failed to add {server.name}: {e}")
+        
+        if added > 0:
+            console.print(f"[green]✓[/green] Added {added} servers to Server Manager")
     
     def _generate_self_signed_cert(self, domain: str, ssl_dir: Path):
         """Generate self-signed SSL certificate."""
