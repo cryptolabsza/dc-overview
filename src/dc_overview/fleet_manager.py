@@ -1215,9 +1215,20 @@ WantedBy=multi-user.target
         if '/dc/' not in content:
             services_to_add.append(('DC Overview', '/dc/', 'dc-overview', 5001))
         
-        # DC Overview servers page shortcut
+        # Add /servers shortcut redirect (if not already present)
         if 'location /servers' not in content:
-            services_to_add.append(('DC Servers', '/servers', 'dc-overview', 5001))
+            # Insert redirect before /dc/ location
+            redirect_block = '''
+        # Servers shortcut - redirect to DC Overview
+        location /servers {
+            return 301 /dc/servers;
+        }
+'''
+            dc_pattern = r'(location /dc/)'
+            if re.search(dc_pattern, content):
+                content = re.sub(dc_pattern, redirect_block + r'\n        \1', content)
+                nginx_path.write_text(content)
+                console.print(f"[green]✓[/green] Added /servers redirect")
         
         # Grafana route
         if '/grafana/' not in content:
