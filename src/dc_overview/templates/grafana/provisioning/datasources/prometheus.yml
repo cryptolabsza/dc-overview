@@ -7,9 +7,10 @@ datasources:
   - name: Prometheus
     type: prometheus
     access: proxy
-    url: http://prometheus:9090
+    url: http://prometheus:9090/prometheus
     isDefault: true
     editable: false
+    uid: prometheus
     jsonData:
       timeInterval: "15s"
       httpMethod: POST

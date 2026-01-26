@@ -90,9 +90,10 @@ datasources:
   - name: Prometheus
     type: prometheus
     access: proxy
-    url: http://prometheus:9090
+    url: http://prometheus:9090/prometheus
     isDefault: true
     editable: true
+    uid: prometheus
 """
 
 GRAFANA_DASHBOARD_PROVISIONING = """apiVersion: 1

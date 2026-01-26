@@ -196,14 +196,15 @@ class FleetManager:
         (grafana_dir / "provisioning" / "dashboards").mkdir(parents=True, exist_ok=True)
         (grafana_dir / "dashboards").mkdir(parents=True, exist_ok=True)
         
-        # Datasource config
+        # Datasource config (with /prometheus/ path for proxy setup)
         datasource_config = """apiVersion: 1
 datasources:
   - name: Prometheus
     type: prometheus
     access: proxy
-    url: http://prometheus:9090
+    url: http://prometheus:9090/prometheus
     isDefault: true
+    uid: prometheus
 """
         (grafana_dir / "provisioning" / "datasources" / "prometheus.yml").write_text(datasource_config)
         

@@ -980,9 +980,10 @@ datasources:
   - name: Prometheus
     type: prometheus
     access: proxy
-    url: http://prometheus:9090
+    url: http://prometheus:9090/prometheus
     isDefault: true
     editable: false
+    uid: prometheus
 """
         (config_dir / "grafana" / "provisioning" / "datasources" / "prometheus.yml").write_text(datasource_config)
         
