@@ -116,10 +116,11 @@ http {
 {% endif %}
 
         # ===========================================================================
-        # Grafana at /grafana/
+        # Grafana at /grafana/ (configured with GF_SERVER_SERVE_FROM_SUB_PATH=true)
         # ===========================================================================
         location /grafana/ {
-            proxy_pass http://grafana:3000/;
+            # No trailing slash - preserve /grafana/ prefix for Grafana
+            proxy_pass http://grafana:3000;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";

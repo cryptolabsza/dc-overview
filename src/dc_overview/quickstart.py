@@ -647,18 +647,34 @@ def update_existing_nginx_config(nginx_path: Path, dc_port: int = 5001):
         console.print("[dim]  /dc/ route already exists in nginx config[/dim]")
         return
     
-    # DC Overview location block to add
+    # DC Overview location block to add (with unified auth)
     dc_location = f'''
-        # DC Overview - GPU Datacenter Monitoring
+        # DC Overview - GPU Datacenter Monitoring (requires auth)
         location /dc/ {{
+            auth_request /_auth_check;
+            auth_request_set $auth_user $upstream_http_x_fleet_auth_user;
+            auth_request_set $auth_role $upstream_http_x_fleet_auth_role;
+            auth_request_set $auth_token $upstream_http_x_fleet_auth_token;
+            error_page 401 = @login_redirect;
+
             proxy_pass http://dc-overview:{dc_port}/;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Script-Name /dc;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";
+
+            # Forward Fleet auth headers to backend
+            proxy_set_header X-Fleet-Auth-User $auth_user;
+            proxy_set_header X-Fleet-Auth-Role $auth_role;
+            proxy_set_header X-Fleet-Auth-Token $auth_token;
+            proxy_set_header X-Fleet-Authenticated "true";
+
+            proxy_read_timeout 300s;
+            proxy_connect_timeout 10s;
         }}
 '''
     

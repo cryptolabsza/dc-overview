@@ -1215,6 +1215,10 @@ WantedBy=multi-user.target
         if '/dc/' not in content:
             services_to_add.append(('DC Overview', '/dc/', 'dc-overview', 5001))
         
+        # DC Overview servers page shortcut
+        if 'location /servers' not in content:
+            services_to_add.append(('DC Servers', '/servers', 'dc-overview', 5001))
+        
         # Grafana route
         if '/grafana/' not in content:
             services_to_add.append(('Grafana', '/grafana/', 'grafana', 3000))
@@ -1230,13 +1234,28 @@ WantedBy=multi-user.target
         self._update_api_services_endpoint(nginx_path, content if not services_to_add else None)
         
         if services_to_add:
-            # Build location blocks for missing services
+            # Build location blocks for missing services with unified auth
             location_blocks = ""
             for display_name, path, container, port in services_to_add:
+                # Grafana needs special handling - no trailing slash to preserve subpath
+                if container == 'grafana':
+                    proxy_pass = f"http://{container}:{port}"
+                elif container == 'prometheus':
+                    # Prometheus needs the subpath passed to it
+                    proxy_pass = f"http://{container}:{port}/prometheus/"
+                else:
+                    proxy_pass = f"http://{container}:{port}/"
+                
                 location_blocks += f'''
-        # {display_name}
+        # {display_name} (requires auth)
         location {path} {{
-            proxy_pass http://{container}:{port}/;
+            auth_request /_auth_check;
+            auth_request_set $auth_user $upstream_http_x_fleet_auth_user;
+            auth_request_set $auth_role $upstream_http_x_fleet_auth_role;
+            auth_request_set $auth_token $upstream_http_x_fleet_auth_token;
+            error_page 401 = @login_redirect;
+
+            proxy_pass {proxy_pass};
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";
@@ -1245,6 +1264,13 @@ WantedBy=multi-user.target
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_set_header X-Script-Name {path.rstrip('/')};
+            
+            # Forward Fleet auth headers to backend
+            proxy_set_header X-Fleet-Auth-User $auth_user;
+            proxy_set_header X-Fleet-Auth-Role $auth_role;
+            proxy_set_header X-Fleet-Auth-Token $auth_token;
+            proxy_set_header X-Fleet-Authenticated "true";
+
             proxy_read_timeout 300s;
             proxy_connect_timeout 10s;
         }}
