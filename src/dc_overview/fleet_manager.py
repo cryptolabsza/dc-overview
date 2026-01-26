@@ -352,6 +352,8 @@ networks:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time={self.config.prometheus.retention_days}d"
       - "--web.enable-lifecycle"
+      - "--web.external-url=/prometheus/"
+      - "--web.route-prefix=/"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
