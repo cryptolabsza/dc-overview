@@ -80,7 +80,12 @@ class FleetManager:
             
             # Step 7: IPMI Monitor (if enabled)
             if self.config.components.ipmi_monitor:
-                self._deploy_ipmi_monitor()
+                try:
+                    self._deploy_ipmi_monitor()
+                except Exception as e:
+                    console.print(f"[red]IPMI Monitor deployment failed:[/red] {e}")
+                    import traceback
+                    traceback.print_exc()
             
             # Step 8: Vast.ai exporter (if enabled)
             if self.config.components.vast_exporter:
