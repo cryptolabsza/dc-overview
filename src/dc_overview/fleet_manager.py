@@ -1139,7 +1139,7 @@ echo "Exporters installed successfully"
             ])
         
         # Prepare SSH keys mount if available
-        ssh_keys_dir = self.config.deploy_path / "ssh_keys"
+        ssh_keys_dir = self.config.config_dir / "ssh_keys"
         ssh_keys_mount = []
         if ssh_keys_dir.exists() and any(ssh_keys_dir.iterdir()):
             ssh_keys_mount = ["-v", f"{ssh_keys_dir}:/app/ssh_keys:ro"]
@@ -1314,7 +1314,13 @@ echo "Exporters installed successfully"
             "-e", "DC_OVERVIEW_PORT=5001",
             "-v", "dc-overview-data:/data",
             "-v", f"{self.config.config_dir}:/etc/dc-overview:ro",
+            "--health-cmd", "curl -f http://127.0.0.1:5001/api/health || exit 1",
+            "--health-interval", "10s",
+            "--health-timeout", "5s",
+            "--health-retries", "3",
+            "--health-start-period", "10s",
             "--network", "cryptolabs",
+            "--label", "com.centurylinklabs.watchtower.enable=true",
             "ghcr.io/cryptolabsza/dc-overview:dev"
         ]
         
@@ -1407,8 +1413,8 @@ echo "Exporters installed successfully"
         if not self.config.ssh.key_path:
             return None
         
-        # Create ssh_keys directory in deploy path
-        ssh_keys_dir = self.config.deploy_path / "ssh_keys"
+        # Create ssh_keys directory in config path
+        ssh_keys_dir = self.config.config_dir / "ssh_keys"
         ssh_keys_dir.mkdir(parents=True, exist_ok=True)
         
         # Copy the private key
@@ -1418,6 +1424,14 @@ echo "Exporters installed successfully"
         try:
             shutil.copy2(self.config.ssh.key_path, dest_key_path)
             os.chmod(dest_key_path, 0o600)
+            # Set ownership to uid 1000 (dcuser in the container)
+            # This allows the dc-overview container to read the key
+            try:
+                os.chown(dest_key_path, 1000, 1000)
+            except (OSError, PermissionError):
+                # If we can't chown (e.g., not running as root), that's OK
+                # The container might still work if running as root or with proper mounts
+                pass
         except Exception as e:
             console.print(f"[yellow]⚠[/yellow] Failed to copy SSH key: {e}")
             return None
