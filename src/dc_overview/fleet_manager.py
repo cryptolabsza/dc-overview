@@ -1065,6 +1065,7 @@ echo "Exporters installed successfully"
         ipmi_config_dir.mkdir(parents=True, exist_ok=True)
         
         # Build servers config for IPMI Monitor
+        # Note: ipmi-monitor expects 'ipmi_user' and 'ipmi_pass' (not bmc_user/bmc_password)
         servers = []
         for server in self.config.servers:
             if server.bmc_ip:
@@ -1072,8 +1073,8 @@ echo "Exporters installed successfully"
                 servers.append({
                     "name": server.name,
                     "bmc_ip": server.bmc_ip,
-                    "bmc_user": bmc_creds.username,
-                    "bmc_password": bmc_creds.password,
+                    "ipmi_user": bmc_creds.username,
+                    "ipmi_pass": bmc_creds.password,
                     "server_ip": server.server_ip,
                 })
         
