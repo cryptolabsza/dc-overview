@@ -285,9 +285,35 @@ def api_check_server(server_id):
     else:
         server.status = 'offline'
     
+    # Get GPU count from dc-exporter metrics
+    gpu_count = get_gpu_count_from_exporter(server.server_ip)
+    if gpu_count is not None:
+        server.gpu_count = gpu_count
+        results['gpu_count'] = gpu_count
+    
     db.session.commit()
     
     return jsonify(results)
+
+
+def get_gpu_count_from_exporter(server_ip):
+    """Query dc-exporter to get GPU count."""
+    import urllib.request
+    import urllib.error
+    
+    try:
+        url = f"http://{server_ip}:9835/metrics"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=5) as response:
+            metrics = response.read().decode('utf-8')
+            # Count unique GPU entries from DCXP_GPU_SUPPORTED metric
+            gpu_count = 0
+            for line in metrics.split('\n'):
+                if line.startswith('DCXP_GPU_SUPPORTED{'):
+                    gpu_count += 1
+            return gpu_count
+    except:
+        return None
 
 @app.route('/api/servers/<int:server_id>/install-exporters', methods=['POST'])
 @login_required
