@@ -1165,8 +1165,91 @@ echo "Exporters installed successfully"
             console.print("[green]✓[/green] IPMI Monitor container started")
             if servers:
                 console.print(f"[dim]  Configured {len(servers)} servers for IPMI monitoring[/dim]")
+            
+            # Wait for container to be healthy and import SSH key
+            time.sleep(3)
+            self._import_ssh_key_to_ipmi_monitor()
         else:
             console.print(f"[yellow]⚠[/yellow] Failed to start IPMI Monitor: {result.stderr[:100]}")
+    
+    def _import_ssh_key_to_ipmi_monitor(self):
+        """Import the fleet SSH key into IPMI Monitor's database."""
+        ssh_keys_dir = self.config.config_dir / "ssh_keys"
+        fleet_key_path = ssh_keys_dir / "fleet_key"
+        
+        if not fleet_key_path.exists():
+            console.print("[dim]  No SSH key to import into IPMI Monitor[/dim]")
+            return
+        
+        try:
+            # Read the key content
+            with open(fleet_key_path, 'r') as f:
+                key_content = f.read().strip()
+            
+            # Get fingerprint
+            try:
+                result = subprocess.run(
+                    ['ssh-keygen', '-lf', str(fleet_key_path)],
+                    capture_output=True, text=True, timeout=5
+                )
+                fingerprint = result.stdout.split()[1] if result.returncode == 0 else "unknown"
+            except Exception:
+                fingerprint = "unknown"
+            
+            # Import into IPMI Monitor database via docker exec
+            import_script = f'''
+import sqlite3
+from datetime import datetime
+import sys
+
+key_content = """{key_content}"""
+fingerprint = "{fingerprint}"
+db_path = "/app/data/ipmi_events.db"
+
+try:
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    
+    # Check if Fleet SSH Key already exists
+    c.execute("SELECT id FROM ssh_key WHERE name = ?", ("Fleet SSH Key",))
+    existing = c.fetchone()
+    
+    if existing:
+        print(f"Fleet SSH Key already exists with ID {{existing[0]}}", file=sys.stderr)
+        key_id = existing[0]
+    else:
+        c.execute("""
+            INSERT INTO ssh_key (name, key_content, fingerprint, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, ("Fleet SSH Key", key_content, fingerprint, datetime.utcnow().isoformat(), datetime.utcnow().isoformat()))
+        conn.commit()
+        key_id = c.lastrowid
+        print(f"Imported Fleet SSH Key with ID: {{key_id}}", file=sys.stderr)
+    
+    # Set as default SSH key
+    c.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)", 
+              ("default_ssh_key_id", str(key_id)))
+    c.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)", 
+              ("ssh_user", "root"))
+    conn.commit()
+    print("Set as default SSH key", file=sys.stderr)
+    conn.close()
+except Exception as e:
+    print(f"Error: {{e}}", file=sys.stderr)
+'''
+            
+            result = subprocess.run(
+                ['docker', 'exec', 'ipmi-monitor', 'python3', '-c', import_script],
+                capture_output=True, text=True, timeout=30
+            )
+            
+            if "Imported" in result.stderr or "already exists" in result.stderr:
+                console.print("[green]✓[/green] SSH key imported into IPMI Monitor")
+            else:
+                console.print(f"[yellow]⚠[/yellow] SSH key import: {result.stderr[:100]}")
+                
+        except Exception as e:
+            console.print(f"[yellow]⚠[/yellow] Failed to import SSH key to IPMI Monitor: {e}")
     
     # ============ Step 8: Vast.ai Exporter ============
     
