@@ -788,7 +788,7 @@ BASE_STYLE = """
 LOGIN_TEMPLATE = """
 <!DOCTYPE html>
 <html><head>
-    <title>DC Overview - Login</title>
+    <title>Server Manager - Login</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     """ + BASE_STYLE + """
 </head>
@@ -796,7 +796,7 @@ LOGIN_TEMPLATE = """
     <div class="container" style="max-width: 400px; margin-top: 100px;">
         <div class="card">
             <h2 style="text-align: center; margin-bottom: 20px;">
-                📊 DC Overview
+                🖥️ Server Manager
             </h2>
             {% if first_run %}
             <p style="color: var(--accent-yellow); margin-bottom: 20px; text-align: center;">
@@ -823,14 +823,14 @@ LOGIN_TEMPLATE = """
 DASHBOARD_TEMPLATE = """
 <!DOCTYPE html>
 <html><head>
-    <title>DC Overview - Dashboard</title>
+    <title>Server Manager - Dashboard</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     """ + BASE_STYLE + """
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>📊 DC Overview</h1>
+            <h1>🖥️ Server Manager</h1>
             <div class="nav">
                 <a href="/" class="active">Dashboard</a>
                 <a href="/servers">Servers</a>
@@ -903,7 +903,7 @@ DASHBOARD_TEMPLATE = """
             </div>
         </div>
         
-        <p class="version">DC Overview v{{ version }}</p>
+        <p class="version">Server Manager v{{ version }}</p>
     </div>
 </body></html>
 """
@@ -911,14 +911,14 @@ DASHBOARD_TEMPLATE = """
 SERVERS_TEMPLATE = """
 <!DOCTYPE html>
 <html><head>
-    <title>DC Overview - Servers</title>
+    <title>Server Manager - Servers</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     """ + BASE_STYLE + """
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>📊 DC Overview</h1>
+            <h1>🖥️ Server Manager</h1>
             <div class="nav">
                 <a href="/">Dashboard</a>
                 <a href="/servers" class="active">Servers</a>
@@ -984,7 +984,7 @@ SERVERS_TEMPLATE = """
             </table>
         </div>
         
-        <p class="version">DC Overview v{{ version }}</p>
+        <p class="version">Server Manager v{{ version }}</p>
     </div>
     
     <script>
@@ -1085,14 +1085,14 @@ dc_exporter: ${result.dc_exporter}`);
 SETTINGS_TEMPLATE = """
 <!DOCTYPE html>
 <html><head>
-    <title>DC Overview - Settings</title>
+    <title>Server Manager - Settings</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     """ + BASE_STYLE + """
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>📊 DC Overview</h1>
+            <h1>🖥️ Server Manager</h1>
             <div class="nav">
                 <a href="/">Dashboard</a>
                 <a href="/servers">Servers</a>
@@ -1145,7 +1145,7 @@ SETTINGS_TEMPLATE = """
             </table>
         </div>
         
-        <p class="version">DC Overview v{{ version }}</p>
+        <p class="version">Server Manager v{{ version }}</p>
     </div>
 </body></html>
 """
