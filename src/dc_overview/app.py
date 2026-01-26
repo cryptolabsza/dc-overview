@@ -861,7 +861,6 @@ DASHBOARD_TEMPLATE = """
                 <a href="/" class="active">Dashboard</a>
                 <a href="/servers">Servers</a>
                 <a href="/settings">Settings</a>
-                <a href="{{ grafana_url }}" target="_blank">Grafana ↗</a>
                 <a href="/logout">Logout</a>
             </div>
         </div>
@@ -918,15 +917,6 @@ DASHBOARD_TEMPLATE = """
             {% else %}
             <p style="color: var(--text-secondary);">No servers configured. <a href="/servers" style="color: var(--accent-cyan);">Add servers →</a></p>
             {% endif %}
-        </div>
-        
-        <div class="card">
-            <h2>Quick Links</h2>
-            <div style="display: flex; gap: 15px; flex-wrap: wrap;">
-                <a href="{{ grafana_url }}" target="_blank" class="btn btn-primary">📈 Open Grafana</a>
-                <a href="{{ prometheus_url }}/targets" target="_blank" class="btn btn-secondary">🔍 Prometheus Targets</a>
-                <a href="/api/prometheus/targets.json" target="_blank" class="btn btn-secondary">📋 Targets JSON</a>
-            </div>
         </div>
         
         <p class="version">Server Manager v{{ version }}</p>
