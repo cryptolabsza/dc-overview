@@ -823,6 +823,7 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     ipmi = data.get('ipmi_monitor', {})
     config.ipmi_monitor.enabled = config.components.ipmi_monitor
     config.ipmi_monitor.admin_password = ipmi.get('admin_password')
+    config.ipmi_monitor.ai_license_key = ipmi.get('ai_license_key')
     
     # Servers
     for srv in data.get('servers', []):
