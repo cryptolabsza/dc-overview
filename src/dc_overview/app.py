@@ -305,6 +305,34 @@ def api_install_exporters(server_id):
     
     return jsonify(results)
 
+@app.route('/api/servers/<int:server_id>/remove-exporters', methods=['POST'])
+@login_required
+def api_remove_exporters(server_id):
+    """Remove exporters from a remote server."""
+    server = Server.query.get_or_404(server_id)
+    data = request.json or {}
+    
+    exporters = data.get('exporters', ['node_exporter', 'dc_exporter'])
+    
+    results = {}
+    for exporter in exporters:
+        success = remove_exporter_remote(server, exporter)
+        results[exporter] = 'removed' if success else 'failed'
+        
+        # Update server record
+        if success:
+            if exporter == 'node_exporter':
+                server.node_exporter_installed = False
+            elif exporter == 'dc_exporter':
+                server.dc_exporter_installed = False
+            elif exporter == 'dcgm_exporter':
+                server.dcgm_exporter_installed = False
+    
+    db.session.commit()
+    update_prometheus_targets()
+    
+    return jsonify(results)
+
 @app.route('/api/prometheus/targets')
 @login_required
 def api_prometheus_targets():
@@ -596,6 +624,56 @@ EOF
     except Exception:
         return False
 
+def remove_exporter_remote(server, exporter_name):
+    """Remove an exporter from a remote server via SSH."""
+    try:
+        if exporter_name == 'node_exporter':
+            script = """
+            systemctl stop node_exporter 2>/dev/null || true
+            systemctl disable node_exporter 2>/dev/null || true
+            rm -f /etc/systemd/system/node_exporter.service
+            rm -f /usr/local/bin/node_exporter
+            systemctl daemon-reload
+            echo "node_exporter removed"
+            """
+        elif exporter_name == 'dc_exporter':
+            script = """
+            systemctl stop dc-exporter 2>/dev/null || true
+            systemctl disable dc-exporter 2>/dev/null || true
+            rm -f /etc/systemd/system/dc-exporter.service
+            rm -f /usr/local/bin/dc-exporter-collector
+            rm -f /usr/local/bin/dc-exporter-server
+            rm -rf /etc/dc-exporter
+            systemctl daemon-reload
+            echo "dc-exporter removed"
+            """
+        elif exporter_name == 'dcgm_exporter':
+            script = """
+            systemctl stop dcgm-exporter 2>/dev/null || true
+            systemctl disable dcgm-exporter 2>/dev/null || true
+            rm -f /etc/systemd/system/dcgm-exporter.service
+            systemctl daemon-reload
+            docker rm -f dcgm-exporter 2>/dev/null || true
+            echo "dcgm-exporter removed"
+            """
+        else:
+            return False
+        
+        cmd = [
+            'ssh', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=no',
+            '-p', str(server.ssh_port)
+        ]
+        
+        if server.ssh_key:
+            cmd.extend(['-i', server.ssh_key.key_path])
+        
+        cmd.extend([f'{server.ssh_user}@{server.server_ip}', f'bash -c "{script}"'])
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        return result.returncode == 0
+    except Exception:
+        return False
+
 def update_prometheus_targets():
     """Update Prometheus targets file for file-based service discovery."""
     try:
@@ -684,6 +762,7 @@ BASE_STYLE = """
     .btn-primary { background: var(--accent-cyan); color: #000; }
     .btn-primary:hover { transform: scale(1.05); }
     .btn-secondary { background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); }
+    .btn-warning { background: var(--accent-yellow); color: #000; }
     .btn-danger { background: var(--accent-red); color: #fff; }
     table { width: 100%; border-collapse: collapse; }
     th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border-color); }
@@ -896,6 +975,7 @@ SERVERS_TEMPLATE = """
                         <td>
                             <button class="btn btn-secondary" onclick="checkServer({{ server.id }})">Check</button>
                             <button class="btn btn-secondary" onclick="installExporters({{ server.id }})">Install</button>
+                            <button class="btn btn-warning" onclick="removeExporters({{ server.id }})">Remove</button>
                             <button class="btn btn-danger" onclick="deleteServer({{ server.id }})">Delete</button>
                         </td>
                     </tr>
@@ -908,6 +988,11 @@ SERVERS_TEMPLATE = """
     </div>
     
     <script>
+    // Get base path for API calls (handles /dc/ subpath)
+    const basePath = window.location.pathname.endsWith('/servers') 
+        ? window.location.pathname.replace('/servers', '') 
+        : window.location.pathname.replace(/\/$/, '');
+    
     document.getElementById('addServerForm').onsubmit = async (e) => {
         e.preventDefault();
         const form = e.target;
@@ -917,7 +1002,7 @@ SERVERS_TEMPLATE = """
             ssh_user: form.ssh_user.value
         };
         
-        const response = await fetch('/api/servers', {
+        const response = await fetch(`${basePath}/api/servers`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(data)
@@ -936,7 +1021,7 @@ SERVERS_TEMPLATE = """
         btn.textContent = 'Checking...';
         btn.disabled = true;
         
-        const response = await fetch(`/api/servers/${id}/check`);
+        const response = await fetch(`${basePath}/api/servers/${id}/check`);
         const result = await response.json();
         
         alert(`SSH: ${result.ssh.connected ? 'OK' : 'Failed'}
@@ -954,7 +1039,27 @@ DCGM Exporter: ${result.dcgm_exporter.running ? 'Running' : 'Not running'}`);
         btn.textContent = 'Installing...';
         btn.disabled = true;
         
-        const response = await fetch(`/api/servers/${id}/install-exporters`, {
+        const response = await fetch(`${basePath}/api/servers/${id}/install-exporters`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({exporters: ['node_exporter', 'dc_exporter']})
+        });
+        
+        const result = await response.json();
+        alert(`node_exporter: ${result.node_exporter}
+dc_exporter: ${result.dc_exporter}`);
+        
+        location.reload();
+    }
+    
+    async function removeExporters(id) {
+        if (!confirm('Remove exporters from this server?')) return;
+        
+        const btn = event.target;
+        btn.textContent = 'Removing...';
+        btn.disabled = true;
+        
+        const response = await fetch(`${basePath}/api/servers/${id}/remove-exporters`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({exporters: ['node_exporter', 'dc_exporter']})
@@ -970,7 +1075,7 @@ dc_exporter: ${result.dc_exporter}`);
     async function deleteServer(id) {
         if (!confirm('Remove this server from monitoring?')) return;
         
-        await fetch(`/api/servers/${id}`, {method: 'DELETE'});
+        await fetch(`${basePath}/api/servers/${id}`, {method: 'DELETE'});
         location.reload();
     }
     </script>
