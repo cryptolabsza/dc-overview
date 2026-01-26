@@ -202,7 +202,7 @@ datasources:
   - name: Prometheus
     type: prometheus
     access: proxy
-    url: http://prometheus:9090/prometheus
+    url: http://prometheus:9090
     isDefault: true
     uid: prometheus
 """
@@ -1241,28 +1241,32 @@ AUTH_SECRET_KEY={auth_secret}
         (proxy_dir / ".env").write_text(env_content)
         os.chmod(proxy_dir / ".env", 0o600)
         
-        # Generate nginx.conf
-        nginx_config = self._generate_proxy_nginx_config(domain)
-        (proxy_dir / "nginx.conf").write_text(nginx_config)
-        
         # Ensure cryptolabs network exists
         subprocess.run(["docker", "network", "create", "cryptolabs"], capture_output=True)
         
-        # Connect existing containers to network
-        for container in ["prometheus", "grafana", "dc-overview"]:
-            subprocess.run(["docker", "network", "connect", "cryptolabs", container], capture_output=True)
-        
-        # Handle SSL certificate
+        # Handle SSL certificate - determine which to use BEFORE generating nginx.conf
+        use_letsencrypt = False
         if self.config.ssl.mode == SSLMode.LETSENCRYPT:
-            # Get Let's Encrypt certificate
             console.print("[dim]Obtaining Let's Encrypt certificate...[/dim]")
             cert_result = self._obtain_letsencrypt_cert(domain, self.config.ssl.email)
-            if not cert_result:
+            if cert_result:
+                use_letsencrypt = True
+            else:
                 console.print("[yellow]⚠[/yellow] Could not obtain Let's Encrypt cert, using self-signed")
                 self._generate_self_signed_cert(domain, proxy_dir / "ssl")
         else:
-            # Generate self-signed certificate
             self._generate_self_signed_cert(domain, proxy_dir / "ssl")
+        
+        # Generate nginx.conf with correct SSL paths
+        nginx_config = self._generate_proxy_nginx_config(domain, use_letsencrypt)
+        (proxy_dir / "nginx.conf").write_text(nginx_config)
+        
+        # Deploy dc-overview container
+        self._deploy_dc_overview_container()
+        
+        # Connect existing containers to cryptolabs network
+        for container in ["prometheus", "grafana"]:
+            subprocess.run(["docker", "network", "connect", "cryptolabs", container], capture_output=True)
         
         # Pull and start proxy container
         console.print("[dim]Pulling cryptolabs-proxy image...[/dim]")
@@ -1285,8 +1289,8 @@ AUTH_SECRET_KEY={auth_secret}
             "--network", "cryptolabs",
         ]
         
-        # Add SSL volume based on mode
-        if self.config.ssl.mode == SSLMode.LETSENCRYPT:
+        # Add SSL volume based on what was actually obtained
+        if use_letsencrypt:
             cmd.extend(["-v", "/etc/letsencrypt:/etc/letsencrypt:ro"])
         else:
             cmd.extend(["-v", f"{proxy_dir}/ssl:/etc/nginx/ssl:ro"])
@@ -1305,10 +1309,43 @@ AUTH_SECRET_KEY={auth_secret}
         else:
             console.print(f"[red]✗[/red] Failed to start proxy: {result.stderr[:200]}")
     
-    def _generate_proxy_nginx_config(self, domain: str) -> str:
+    def _deploy_dc_overview_container(self):
+        """Deploy dc-overview container on cryptolabs network."""
+        import secrets as secrets_module
+        
+        # Remove existing container if any
+        subprocess.run(["docker", "rm", "-f", "dc-overview"], capture_output=True)
+        
+        # Pull latest image
+        subprocess.run(["docker", "pull", "ghcr.io/cryptolabsza/dc-overview:dev"], 
+                      capture_output=True, timeout=120)
+        
+        # Start dc-overview container
+        flask_secret = secrets_module.token_hex(16)
+        cmd = [
+            "docker", "run", "-d",
+            "--name", "dc-overview",
+            "--restart", "unless-stopped",
+            "-e", f"FLASK_SECRET_KEY={flask_secret}",
+            "-e", "DC_OVERVIEW_PORT=5001",
+            "-v", "dc-overview-data:/data",
+            "-v", f"{self.config.config_dir}:/etc/dc-overview:ro",
+            "--network", "cryptolabs",
+            "ghcr.io/cryptolabsza/dc-overview:dev"
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            console.print("[green]✓[/green] DC Overview (Server Manager) container started")
+    
+    def _generate_proxy_nginx_config(self, domain: str, use_letsencrypt: bool = False) -> str:
         """Generate nginx.conf for the proxy."""
-        ssl_cert = "/etc/letsencrypt/live/{}/fullchain.pem".format(domain) if self.config.ssl.mode == SSLMode.LETSENCRYPT else "/etc/nginx/ssl/server.crt"
-        ssl_key = "/etc/letsencrypt/live/{}/privkey.pem".format(domain) if self.config.ssl.mode == SSLMode.LETSENCRYPT else "/etc/nginx/ssl/server.key"
+        if use_letsencrypt:
+            ssl_cert = f"/etc/letsencrypt/live/{domain}/fullchain.pem"
+            ssl_key = f"/etc/letsencrypt/live/{domain}/privkey.pem"
+        else:
+            ssl_cert = "/etc/nginx/ssl/server.crt"
+            ssl_key = "/etc/nginx/ssl/server.key"
         
         return f'''worker_processes auto;
 error_log /var/log/nginx/error.log warn;

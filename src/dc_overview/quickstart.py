@@ -980,7 +980,7 @@ datasources:
   - name: Prometheus
     type: prometheus
     access: proxy
-    url: http://prometheus:9090/prometheus
+    url: http://prometheus:9090
     isDefault: true
     editable: false
     uid: prometheus
