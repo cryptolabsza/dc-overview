@@ -383,7 +383,7 @@ volumes:
 
 networks:
   cryptolabs:
-    name: cryptolabs
+    external: true
 """
     
     def _generate_prometheus_config(self) -> str:
@@ -1082,6 +1082,9 @@ echo "Exporters installed successfully"
             with open(ipmi_config_dir / "servers.yaml", "w") as f:
                 yaml.dump({"servers": []}, f)
         
+        # Ensure cryptolabs network exists
+        subprocess.run(["docker", "network", "create", "cryptolabs"], capture_output=True)
+        
         # Pull latest image
         console.print("[dim]Pulling ipmi-monitor image...[/dim]")
         subprocess.run(
@@ -1105,10 +1108,10 @@ echo "Exporters installed successfully"
         ]
         
         # Add default BMC credentials if configured
-        if self.config.bmc_defaults:
+        if self.config.bmc and self.config.bmc.password:
             env_vars.extend([
-                "-e", f"IPMI_USER={self.config.bmc_defaults.username}",
-                "-e", f"IPMI_PASS={self.config.bmc_defaults.password}",
+                "-e", f"IPMI_USER={self.config.bmc.username}",
+                "-e", f"IPMI_PASS={self.config.bmc.password}",
             ])
         
         # Add AI license key if configured
