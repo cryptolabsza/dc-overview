@@ -1044,9 +1044,9 @@ echo "Exporters installed successfully"
                     "github_url": f"{base_url}/Node_Exporter_Full.json",
                 },
                 {
-                    "name": "NVIDIA DCGM Exporter",
-                    "local_file": "NVIDIA_DCGM_Exporter.json",
-                    "github_url": f"{base_url}/NVIDIA_DCGM_Exporter.json",
+                    "name": "DC Exporter Details",
+                    "local_file": "DC_Exporter_Details.json",
+                    "github_url": f"{base_url}/DC_Exporter_Details.json",
                 },
             ])
         
