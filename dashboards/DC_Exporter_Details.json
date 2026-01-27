@@ -1325,10 +1325,10 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "DCXP_GPU_COUNT",
+          "expr": "DCGM_FI_DEV_GPU_TEMP",
           "format": "table",
           "legendFormat": "__auto",
-          "range": true,
+          "instant": true,
           "refId": "A"
         }
       ],
@@ -1357,6 +1357,10 @@
               "pci_bus_id": {
                 "aggregations": [],
                 "operation": "groupby"
+              },
+              "DCGM_FI_DRIVER_VERSION": {
+                "aggregations": [],
+                "operation": "groupby"
               }
             }
           }
@@ -1365,19 +1369,23 @@
           "id": "organize",
           "options": {
             "excludeByName": {
-              "Value (lastNotNull)": true
+              "Value (lastNotNull)": false
             },
             "indexByName": {
               "Hostname": 0,
               "gpu": 1,
               "modelName": 2,
-              "pci_bus_id": 3
+              "pci_bus_id": 3,
+              "DCGM_FI_DRIVER_VERSION": 4,
+              "Value (lastNotNull)": 5
             },
             "renameByName": {
               "Hostname": "Host",
               "gpu": "GPU",
               "modelName": "Model",
-              "pci_bus_id": "PCIe Bus"
+              "pci_bus_id": "PCIe Bus",
+              "DCGM_FI_DRIVER_VERSION": "Driver",
+              "Value (lastNotNull)": "Temp °C"
             }
           }
         }
