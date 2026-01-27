@@ -1311,9 +1311,9 @@ def configure_grafana(password: str):
             "github_url": "https://raw.githubusercontent.com/jjziets/DCMontoring/main/Node%20Exporter%20Full-1684242153326.json",
         },
         {
-            "name": "NVIDIA DCGM Exporter",
-            "local_file": "NVIDIA DCGM Exporter.json",
-            "github_url": "https://raw.githubusercontent.com/jjziets/DCMontoring/main/NVIDIA%20DCGM%20Exporter-1684242180498.json",
+            "name": "DC Exporter Details",
+            "local_file": "DC_Exporter_Details.json",
+            "github_url": "https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/dashboards/DC_Exporter_Details.json",
         },
         {
             "name": "Vast Dashboard",

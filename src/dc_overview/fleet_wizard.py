@@ -1425,7 +1425,7 @@ class FleetWizard:
         if self.config.components.dc_overview:
             dash_table.add_row("DC Overview (main dashboard)")
             dash_table.add_row("Node Exporter Full (CPU/RAM/disk)")
-            dash_table.add_row("NVIDIA DCGM Exporter (GPU metrics)")
+            dash_table.add_row("DC Exporter Details (GPU metrics)")
         
         if self.config.components.ipmi_monitor:
             dash_table.add_row("IPMI Monitor (server health)")

@@ -2008,7 +2008,7 @@ except Exception as e:
         console.print("[bold]Installed Dashboards:[/bold]")
         console.print("  • DC Overview (main dashboard)")
         console.print("  • Node Exporter Full (CPU/RAM/disk)")
-        console.print("  • NVIDIA DCGM Exporter (GPU metrics)")
+        console.print("  • DC Exporter Details (GPU metrics)")
         if self.config.components.vast_exporter:
             console.print("  • Vast Dashboard (earnings/reliability)")
         if self.config.components.ipmi_monitor:
