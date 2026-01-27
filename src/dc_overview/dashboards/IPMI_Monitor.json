@@ -5,7 +5,7 @@
         "builtIn": 1,
         "datasource": {
           "type": "grafana",
-          "uid": "ffamzhijdn1fke"
+          "uid": "prometheus"
         },
         "enable": true,
         "hide": true,
@@ -36,7 +36,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -85,7 +85,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "ipmi_total_servers",
           "legendFormat": "",
@@ -98,7 +98,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -147,7 +147,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "ipmi_reachable_servers",
           "legendFormat": "",
@@ -160,7 +160,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -214,7 +214,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "ipmi_total_critical_events_24h",
           "legendFormat": "",
@@ -227,7 +227,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -280,7 +280,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "ipmi_total_warning_events_24h",
           "legendFormat": "",
@@ -293,7 +293,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -343,7 +343,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "expr": "time() - ipmi_last_collection_timestamp",
@@ -357,7 +357,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -407,7 +407,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "sum(ipmi_power_watts)",
           "instant": true,
@@ -422,7 +422,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -697,7 +697,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "expr": "ipmi_server_reachable",
@@ -709,7 +709,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "ipmi_events_critical_24h",
           "format": "table",
@@ -720,7 +720,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "ipmi_events_warning_24h",
           "format": "table",
@@ -731,7 +731,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "ipmi_events_info_24h",
           "format": "table",
@@ -742,7 +742,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "ipmi_events_total",
           "format": "table",
@@ -753,7 +753,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "ipmi_power_watts",
           "format": "table",
@@ -764,7 +764,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "max by (server_name) (ipmi_temperature_celsius{sensor_name=~\".*CPU.*\"})",
           "format": "table",
@@ -854,7 +854,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -964,7 +964,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "ipmi_reachable_servers",
           "legendFormat": "Reachable",
@@ -973,7 +973,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "ipmi_total_servers - ipmi_reachable_servers",
           "legendFormat": "Unreachable",
@@ -986,7 +986,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -1096,7 +1096,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "ipmi_total_critical_events_24h",
           "legendFormat": "Critical",
@@ -1105,7 +1105,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "ipmi_total_warning_events_24h",
           "legendFormat": "Warning",
@@ -1131,7 +1131,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -1222,7 +1222,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "ipmi_temperature_celsius{sensor_name=~\".*CPU.*|.*Temp.*\"}",
           "legendFormat": "{{server_name}} - {{sensor_name}}",
@@ -1235,7 +1235,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -1293,7 +1293,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "ipmi_temperature_celsius{sensor_name=~\".*CPU.*\"}",
           "instant": true,
@@ -1321,7 +1321,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -1404,7 +1404,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "ipmi_fan_speed_rpm",
           "legendFormat": "{{server_name}} - {{sensor_name}}",
@@ -1417,7 +1417,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -1475,7 +1475,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "avg by (server_name) (ipmi_fan_speed_rpm)",
           "instant": true,
@@ -1503,7 +1503,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -1586,7 +1586,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "ipmi_power_watts",
           "legendFormat": "{{server_name}}",
@@ -1599,7 +1599,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -1679,7 +1679,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "sum(ipmi_power_watts)",
           "legendFormat": "Total Power",
@@ -1705,7 +1705,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -1789,7 +1789,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "ipmi_voltage_volts{sensor_name=~\".*12V.*|.*5V.*|.*3.3V.*\"}",
           "legendFormat": "{{server_name}} - {{sensor_name}}",
@@ -1815,7 +1815,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -1866,7 +1866,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "expr": "ipmi_server_reachable",
           "legendFormat": "{{server_name}}",
@@ -1895,7 +1895,7 @@
         "current": {
           "selected": true,
           "text": "Prometheus",
-          "value": "ffamzhijdn1fke"
+          "value": "prometheus"
         },
         "includeAll": false,
         "label": "Data Source",
