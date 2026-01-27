@@ -1207,6 +1207,94 @@ def serve(host: str, port: int, debug: bool):
     app.run(host=host, port=port, debug=debug)
 
 
+@click.command("refresh-dashboards")
+@click.option("--branch", "-b", default=None, help="GitHub branch to fetch from (default: uses DASHBOARD_BRANCH env or 'main')")
+def refresh_dashboards(branch: str):
+    """
+    Refresh Grafana dashboards from GitHub.
+    
+    Re-imports all dashboards with latest versions from GitHub.
+    Useful for testing dashboard changes without full reinstall.
+    
+    \b
+    Examples:
+        dc-overview refresh-dashboards                  # Uses DASHBOARD_BRANCH env or 'main'
+        dc-overview refresh-dashboards --branch dev    # Fetch from dev branch
+        DASHBOARD_BRANCH=dev dc-overview refresh-dashboards
+    """
+    import base64
+    import json
+    import urllib.request
+    
+    if branch:
+        os.environ['DASHBOARD_BRANCH'] = branch
+    
+    branch_name = os.environ.get('DASHBOARD_BRANCH', 'main')
+    console.print(f"\n[bold]Refreshing Dashboards from GitHub ({branch_name} branch)[/bold]\n")
+    
+    # Load config to get Grafana password
+    config_path = DOCKER_CONFIG_DIR / "fleet-config.yaml"
+    if not config_path.exists():
+        console.print("[red]✗[/red] Fleet config not found. Run quickstart first.")
+        return
+    
+    try:
+        config = FleetConfig.load(config_path)
+    except Exception as e:
+        console.print(f"[red]✗[/red] Failed to load config: {e}")
+        return
+    
+    from .fleet_manager import FleetManager
+    manager = FleetManager(config)
+    
+    # Wait for Grafana and get datasource UID
+    grafana_url = "http://localhost:3000"
+    auth = f"admin:{config.grafana.admin_password}"
+    auth_header = base64.b64encode(auth.encode()).decode()
+    
+    console.print("[dim]Connecting to Grafana...[/dim]")
+    prometheus_uid = manager._wait_for_grafana_and_get_datasource_uid(grafana_url, auth_header)
+    
+    if not prometheus_uid:
+        console.print("[red]✗[/red] Could not connect to Grafana or get Prometheus datasource")
+        return
+    
+    console.print(f"[dim]Prometheus datasource UID: {prometheus_uid}[/dim]")
+    
+    dashboards = manager._get_dashboard_list()
+    grafana_dash_dir = config.config_dir / "grafana" / "dashboards"
+    
+    imported = 0
+    for dashboard in dashboards:
+        name = dashboard["name"]
+        console.print(f"  {name}...", end=" ")
+        
+        dashboard_json = manager._get_dashboard_json(dashboard)
+        if not dashboard_json:
+            console.print("[yellow]not found[/yellow]")
+            continue
+        
+        try:
+            # Parse and fix datasources
+            dash_obj = json.loads(dashboard_json)
+            dash_obj = manager._fix_dashboard_datasources(dash_obj, prometheus_uid)
+            
+            # Remove id to avoid conflicts
+            if "id" in dash_obj:
+                dash_obj["id"] = None
+            
+            # Write to file
+            output_path = grafana_dash_dir / dashboard["local_file"]
+            output_path.write_text(json.dumps(dash_obj, indent=2))
+            console.print("[green]✓[/green]")
+            imported += 1
+        except Exception as e:
+            console.print(f"[red]error: {str(e)[:50]}[/red]")
+    
+    console.print(f"\n[green]✓[/green] Refreshed {imported} dashboards")
+    console.print("[dim]Grafana will auto-reload dashboards within 30 seconds[/dim]")
+
+
 # Register commands
 main.add_command(quickstart)
 main.add_command(add_machine)
@@ -1225,6 +1313,7 @@ main.add_command(deploy)
 main.add_command(setup_ssl)
 main.add_command(serve)
 main.add_command(reset)
+main.add_command(refresh_dashboards)
 
 
 if __name__ == "__main__":

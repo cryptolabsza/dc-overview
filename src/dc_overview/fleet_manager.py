@@ -1010,26 +1010,43 @@ echo "Exporters installed successfully"
         
         return fixed
     
+    def _get_dashboard_branch(self) -> str:
+        """Get the GitHub branch to fetch dashboards from.
+        
+        Environment variable DASHBOARD_BRANCH controls this:
+        - 'dev' or 'development': fetch from dev branch (for testing)
+        - 'main' or unset: fetch from main branch (default)
+        - Any other value: use as branch name
+        """
+        branch = os.environ.get('DASHBOARD_BRANCH', 'main').lower()
+        if branch in ('dev', 'development'):
+            return 'dev'
+        elif branch in ('main', 'master', ''):
+            return 'main'
+        return branch
+    
     def _get_dashboard_list(self) -> List[Dict[str, Any]]:
         """Get list of dashboards to install based on enabled components."""
         dashboards = []
+        branch = self._get_dashboard_branch()
+        base_url = f"https://raw.githubusercontent.com/cryptolabsza/dc-overview/{branch}/dashboards"
         
         if self.config.components.dc_overview:
             dashboards.extend([
                 {
                     "name": "DC Overview",
                     "local_file": "DC_Overview.json",
-                    "github_url": "https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/dashboards/DC_Overview.json",
+                    "github_url": f"{base_url}/DC_Overview.json",
                 },
                 {
                     "name": "Node Exporter Full",
                     "local_file": "Node_Exporter_Full.json",
-                    "github_url": "https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/dashboards/Node_Exporter_Full.json",
+                    "github_url": f"{base_url}/Node_Exporter_Full.json",
                 },
                 {
                     "name": "NVIDIA DCGM Exporter",
                     "local_file": "NVIDIA_DCGM_Exporter.json",
-                    "github_url": "https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/dashboards/NVIDIA_DCGM_Exporter.json",
+                    "github_url": f"{base_url}/NVIDIA_DCGM_Exporter.json",
                 },
             ])
         
@@ -1037,21 +1054,38 @@ echo "Exporters installed successfully"
             dashboards.append({
                 "name": "Vast Dashboard",
                 "local_file": "Vast_Dashboard.json",
-                "github_url": "https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/dashboards/Vast_Dashboard.json",
+                "github_url": f"{base_url}/Vast_Dashboard.json",
             })
         
         if self.config.components.ipmi_monitor:
             dashboards.append({
                 "name": "IPMI Monitor",
                 "local_file": "IPMI_Monitor.json",
-                "github_url": "https://raw.githubusercontent.com/cryptolabsza/dc-overview/main/dashboards/IPMI_Monitor.json",
+                "github_url": f"{base_url}/IPMI_Monitor.json",
             })
         
         return dashboards
     
     def _get_dashboard_json(self, dashboard: Dict[str, Any]) -> Optional[str]:
-        """Get dashboard JSON from local file or GitHub."""
-        # Try local file first
+        """Get dashboard JSON from GitHub or local file.
+        
+        When DASHBOARD_BRANCH is set (dev mode), fetch from GitHub first
+        to ensure you get the latest changes. Otherwise, prefer local files.
+        """
+        branch = self._get_dashboard_branch()
+        fetch_from_github_first = branch != 'main'
+        
+        if fetch_from_github_first:
+            # Dev mode: try GitHub first to get latest changes
+            github_url = dashboard.get("github_url")
+            if github_url:
+                try:
+                    console.print(f"[dim]  Fetching from GitHub ({branch} branch)...[/dim]")
+                    return urllib.request.urlopen(github_url, timeout=30).read().decode('utf-8')
+                except Exception as e:
+                    console.print(f"[dim]  GitHub fetch failed: {e}, trying local...[/dim]")
+        
+        # Try local file
         try:
             import dc_overview
             pkg_path = Path(dc_overview.__file__).parent / "dashboards"
@@ -1061,13 +1095,14 @@ echo "Exporters installed successfully"
         except Exception:
             pass
         
-        # Fall back to GitHub
-        github_url = dashboard.get("github_url")
-        if github_url:
-            try:
-                return urllib.request.urlopen(github_url, timeout=30).read().decode('utf-8')
-            except Exception:
-                pass
+        # Fall back to GitHub (for production when local doesn't exist)
+        if not fetch_from_github_first:
+            github_url = dashboard.get("github_url")
+            if github_url:
+                try:
+                    return urllib.request.urlopen(github_url, timeout=30).read().decode('utf-8')
+                except Exception:
+                    pass
         
         return None
     
