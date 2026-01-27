@@ -149,7 +149,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:hotspot_temp:celsius{gpu=\"0\"}",
+          "expr": "DCGM_FI_DEV_HOT_SPOT_TEMP{gpu=\"0\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -162,7 +162,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:hotspot_temp:celsius{gpu=\"1\"}",
+          "expr": "DCGM_FI_DEV_HOT_SPOT_TEMP{gpu=\"1\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -175,7 +175,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:hotspot_temp:celsius{gpu=\"2\"}",
+          "expr": "DCGM_FI_DEV_HOT_SPOT_TEMP{gpu=\"2\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -188,7 +188,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:hotspot_temp:celsius{gpu=\"3\"}",
+          "expr": "DCGM_FI_DEV_HOT_SPOT_TEMP{gpu=\"3\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -201,7 +201,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:hotspot_temp:celsius{gpu=\"4\"}",
+          "expr": "DCGM_FI_DEV_HOT_SPOT_TEMP{gpu=\"4\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -214,7 +214,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:hotspot_temp:celsius{gpu=\"5\"}",
+          "expr": "DCGM_FI_DEV_HOT_SPOT_TEMP{gpu=\"5\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -227,7 +227,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:hotspot_temp:celsius{gpu=\"6\"}",
+          "expr": "DCGM_FI_DEV_HOT_SPOT_TEMP{gpu=\"6\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -240,7 +240,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:hotspot_temp:celsius{gpu=\"7\"}",
+          "expr": "DCGM_FI_DEV_HOT_SPOT_TEMP{gpu=\"7\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -618,7 +618,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:fan_speed:percent{gpu=\"0\"}",
+          "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"0\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -631,7 +631,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:fan_speed:percent{gpu=\"1\"}",
+          "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"1\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -644,7 +644,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:fan_speed:percent{gpu=\"2\"}",
+          "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"2\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -657,7 +657,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:fan_speed:percent{gpu=\"3\"}",
+          "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"3\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -670,7 +670,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:fan_speed:percent{gpu=\"4\"}",
+          "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"4\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -683,7 +683,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:fan_speed:percent{gpu=\"5\"}",
+          "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"5\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -696,7 +696,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:fan_speed:percent{gpu=\"6\"}",
+          "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"6\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -709,7 +709,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:fan_speed:percent{gpu=\"7\"}",
+          "expr": "DCGM_FI_DEV_FAN_SPEED{gpu=\"7\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -1087,7 +1087,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:power_usage:watts{gpu=\"0\"}",
+          "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"0\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -1100,7 +1100,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:power_usage:watts{gpu=\"1\"}",
+          "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"1\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -1113,7 +1113,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:power_usage:watts{gpu=\"2\"}",
+          "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"2\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -1126,7 +1126,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:power_usage:watts{gpu=\"3\"}",
+          "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"3\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -1139,7 +1139,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:power_usage:watts{gpu=\"4\"}",
+          "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"4\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -1152,7 +1152,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:power_usage:watts{gpu=\"5\"}",
+          "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"5\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -1165,7 +1165,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:power_usage:watts{gpu=\"6\"}",
+          "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"6\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -1178,7 +1178,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:power_usage:watts{gpu=\"7\"}",
+          "expr": "DCGM_FI_DEV_POWER_USAGE{gpu=\"7\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -1556,7 +1556,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:core_temp:celsius{gpu=\"0\"}",
+          "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"0\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -1569,7 +1569,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:core_temp:celsius{gpu=\"1\"}",
+          "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"1\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -1582,7 +1582,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:core_temp:celsius{gpu=\"2\"}",
+          "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"2\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -1595,7 +1595,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:core_temp:celsius{gpu=\"3\"}",
+          "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"3\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -1608,7 +1608,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:core_temp:celsius{gpu=\"4\"}",
+          "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"4\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -1621,7 +1621,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:core_temp:celsius{gpu=\"5\"}",
+          "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"5\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -1634,7 +1634,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:core_temp:celsius{gpu=\"6\"}",
+          "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"6\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -1647,7 +1647,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:core_temp:celsius{gpu=\"7\"}",
+          "expr": "DCGM_FI_DEV_GPU_TEMP{gpu=\"7\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2025,7 +2025,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:memory_temp:celsius{gpu=\"0\"}",
+          "expr": "DCGM_FI_DEV_VRAM_TEMP{gpu=\"0\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2038,7 +2038,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:memory_temp:celsius{gpu=\"1\"}",
+          "expr": "DCGM_FI_DEV_VRAM_TEMP{gpu=\"1\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2051,7 +2051,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:memory_temp:celsius{gpu=\"2\"}",
+          "expr": "DCGM_FI_DEV_VRAM_TEMP{gpu=\"2\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2064,7 +2064,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:memory_temp:celsius{gpu=\"3\"}",
+          "expr": "DCGM_FI_DEV_VRAM_TEMP{gpu=\"3\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2077,7 +2077,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:memory_temp:celsius{gpu=\"4\"}",
+          "expr": "DCGM_FI_DEV_VRAM_TEMP{gpu=\"4\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2090,7 +2090,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:memory_temp:celsius{gpu=\"5\"}",
+          "expr": "DCGM_FI_DEV_VRAM_TEMP{gpu=\"5\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2103,7 +2103,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:memory_temp:celsius{gpu=\"6\"}",
+          "expr": "DCGM_FI_DEV_VRAM_TEMP{gpu=\"6\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2116,7 +2116,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:memory_temp:celsius{gpu=\"7\"}",
+          "expr": "DCGM_FI_DEV_VRAM_TEMP{gpu=\"7\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2472,7 +2472,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"0\"}",
+          "expr": "DCGM_FI_DEV_CLOCKS_THROTTLE_REASON{reason=\"SwThermalSlowdown\", gpu=\"0\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2485,7 +2485,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"1\"}",
+          "expr": "DCGM_FI_DEV_CLOCKS_THROTTLE_REASON{reason=\"SwThermalSlowdown\", gpu=\"1\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2498,7 +2498,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"2\"}",
+          "expr": "DCGM_FI_DEV_CLOCKS_THROTTLE_REASON{reason=\"SwThermalSlowdown\", gpu=\"2\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2511,7 +2511,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"3\"}",
+          "expr": "DCGM_FI_DEV_CLOCKS_THROTTLE_REASON{reason=\"SwThermalSlowdown\", gpu=\"3\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2524,7 +2524,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"4\"} ",
+          "expr": "DCGM_FI_DEV_CLOCKS_THROTTLE_REASON{reason=\"SwThermalSlowdown\", gpu=\"4\"} ",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2537,7 +2537,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"5\"}",
+          "expr": "DCGM_FI_DEV_CLOCKS_THROTTLE_REASON{reason=\"SwThermalSlowdown\", gpu=\"5\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2550,7 +2550,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"6\"}",
+          "expr": "DCGM_FI_DEV_CLOCKS_THROTTLE_REASON{reason=\"SwThermalSlowdown\", gpu=\"6\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2563,7 +2563,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:throttle_reason:bool{reason=\"SwThermalSlowdown\", gpu=\"7\"}",
+          "expr": "DCGM_FI_DEV_CLOCKS_THROTTLE_REASON{reason=\"SwThermalSlowdown\", gpu=\"7\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2941,7 +2941,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:aer_errors:total{gpu=\"0\"}",
+          "expr": "GPU_AER_TOTAL_ERRORS{gpu=\"0\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2954,7 +2954,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:aer_errors:total{gpu=\"1\"}",
+          "expr": "GPU_AER_TOTAL_ERRORS{gpu=\"1\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2967,7 +2967,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:aer_errors:total{gpu=\"2\"}",
+          "expr": "GPU_AER_TOTAL_ERRORS{gpu=\"2\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2980,7 +2980,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:aer_errors:total{gpu=\"3\"}",
+          "expr": "GPU_AER_TOTAL_ERRORS{gpu=\"3\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2993,7 +2993,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:aer_errors:total{gpu=\"4\"}",
+          "expr": "GPU_AER_TOTAL_ERRORS{gpu=\"4\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3006,7 +3006,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:aer_errors:total{gpu=\"5\"}",
+          "expr": "GPU_AER_TOTAL_ERRORS{gpu=\"5\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3019,7 +3019,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:aer_errors:total{gpu=\"6\"}",
+          "expr": "GPU_AER_TOTAL_ERRORS{gpu=\"6\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3032,7 +3032,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:aer_errors:total{gpu=\"7\"}",
+          "expr": "GPU_AER_TOTAL_ERRORS{gpu=\"7\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3540,7 +3540,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:error_state:status{gpu=\"0\"}",
+          "expr": "GPU_ERROR_STATE{gpu=\"0\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3553,7 +3553,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:error_state:status{gpu=\"1\"}",
+          "expr": "GPU_ERROR_STATE{gpu=\"1\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3566,7 +3566,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:error_state:status{gpu=\"2\"}",
+          "expr": "GPU_ERROR_STATE{gpu=\"2\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3579,7 +3579,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:error_state:status{gpu=\"3\"}",
+          "expr": "GPU_ERROR_STATE{gpu=\"3\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3592,7 +3592,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:error_state:status{gpu=\"4\"} ",
+          "expr": "GPU_ERROR_STATE{gpu=\"4\"} ",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3605,7 +3605,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:error_state:status{gpu=\"5\"}",
+          "expr": "GPU_ERROR_STATE{gpu=\"5\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3618,7 +3618,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:error_state:status{gpu=\"6\"}",
+          "expr": "GPU_ERROR_STATE{gpu=\"6\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3631,7 +3631,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:error_state:status{gpu=\"7\"}",
+          "expr": "GPU_ERROR_STATE{gpu=\"7\"}",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3991,7 +3991,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "count(gpu:memory_used:bytes / 1024 / 1024) by (Hostname)",
+          "expr": "count(DCGM_FI_DEV_FB_USED / 1024 / 1024) by (Hostname)",
           "format": "table",
           "instant": false,
           "range": true,
@@ -4003,7 +4003,7 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "gpu:sm_clock:mhz{Hostname=~\".+\"}",
+          "expr": "DCGM_FI_DEV_SM_CLOCK{Hostname=~\".+\"}",
           "format": "table",
           "hide": false,
           "instant": false,
