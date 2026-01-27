@@ -2641,7 +2641,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "avg by(job)(node_hwmon_temp_celsius{sensor=\"temp1\"})",
+          "expr": "avg by(job)(node_thermal_zone_temp{type=\"x86_pkg_temp\"})",
           "format": "table",
           "hide": false,
           "instant": false,
@@ -2890,7 +2890,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "vastai_machine_gpu_occupancy{gpu=\"0\"}",
+          "expr": "vastai_machine_gpu_occupancy{gpu=\"0\"} or (count by (Hostname) (DCGM_FI_DEV_GPU_TEMP{gpu=\"0\"}) * 0 - 1)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2903,7 +2903,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "vastai_machine_gpu_occupancy{gpu=\"1\"}",
+          "expr": "vastai_machine_gpu_occupancy{gpu=\"1\"} or (count by (Hostname) (DCGM_FI_DEV_GPU_TEMP{gpu=\"1\"}) * 0 - 1)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2916,7 +2916,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "vastai_machine_gpu_occupancy{gpu=\"2\"}",
+          "expr": "vastai_machine_gpu_occupancy{gpu=\"2\"} or (count by (Hostname) (DCGM_FI_DEV_GPU_TEMP{gpu=\"2\"}) * 0 - 1)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2929,7 +2929,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "vastai_machine_gpu_occupancy{gpu=\"3\"}",
+          "expr": "vastai_machine_gpu_occupancy{gpu=\"3\"} or (count by (Hostname) (DCGM_FI_DEV_GPU_TEMP{gpu=\"3\"}) * 0 - 1)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2942,7 +2942,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "vastai_machine_gpu_occupancy{gpu=\"4\"} ",
+          "expr": "vastai_machine_gpu_occupancy{gpu=\"4\"} or (count by (Hostname) (DCGM_FI_DEV_GPU_TEMP{gpu=\"4\"}) * 0 - 1)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2955,7 +2955,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "vastai_machine_gpu_occupancy{gpu=\"5\"}",
+          "expr": "vastai_machine_gpu_occupancy{gpu=\"5\"} or (count by (Hostname) (DCGM_FI_DEV_GPU_TEMP{gpu=\"5\"}) * 0 - 1)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2968,7 +2968,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "vastai_machine_gpu_occupancy{gpu=\"6\"}",
+          "expr": "vastai_machine_gpu_occupancy{gpu=\"6\"} or (count by (Hostname) (DCGM_FI_DEV_GPU_TEMP{gpu=\"6\"}) * 0 - 1)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2981,25 +2981,12 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "vastai_machine_gpu_occupancy{gpu=\"7\"}",
+          "expr": "vastai_machine_gpu_occupancy{gpu=\"7\"} or (count by (Hostname) (DCGM_FI_DEV_GPU_TEMP{gpu=\"7\"}) * 0 - 1)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
           "range": true,
           "refId": "H"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "count by (Hostname) (DCGM_FI_DEV_GPU_TEMP) * 0 - 1",
-          "format": "table",
-          "hide": false,
-          "legendFormat": "__auto",
-          "range": true,
-          "refId": "Base"
         }
       ],
       "timeFrom": "5s",
@@ -3159,11 +3146,7 @@
               "Hostname 7": true,
               "Hostname 8": true,
               "gpu": true,
-              "__name__": true,
-              "Value #Base": true,
-              "Time 9": true,
-              "instance 9": true,
-              "job 9": true
+              "__name__": true
             },
             "includeByName": {},
             "indexByName": {
