@@ -2765,10 +2765,33 @@
           "mappings": [
             {
               "options": {
+                "match": "null",
+                "result": {
+                  "color": "gray",
+                  "index": 0,
+                  "text": "U"
+                }
+              },
+              "type": "special"
+            },
+            {
+              "options": {
+                "from": -999,
+                "result": {
+                  "color": "gray",
+                  "index": 1,
+                  "text": "U"
+                },
+                "to": -1
+              },
+              "type": "range"
+            },
+            {
+              "options": {
                 "from": 0,
                 "result": {
                   "color": "transparent",
-                  "index": 0,
+                  "index": 2,
                   "text": "Idle"
                 },
                 "to": 0
@@ -2780,7 +2803,7 @@
                 "from": 1,
                 "result": {
                   "color": "blue",
-                  "index": 1,
+                  "index": 3,
                   "text": "I"
                 },
                 "to": 1
@@ -2792,7 +2815,7 @@
                 "from": 2,
                 "result": {
                   "color": "green",
-                  "index": 2,
+                  "index": 4,
                   "text": "D"
                 },
                 "to": 2
@@ -2804,7 +2827,7 @@
                 "from": 3,
                 "result": {
                   "color": "orange",
-                  "index": 3,
+                  "index": 5,
                   "text": "R"
                 },
                 "to": 3
@@ -2964,6 +2987,19 @@
           "legendFormat": "__auto",
           "range": true,
           "refId": "H"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "count by (Hostname) (DCGM_FI_DEV_GPU_TEMP) * 0 - 1",
+          "format": "table",
+          "hide": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "Base"
         }
       ],
       "timeFrom": "5s",
@@ -3123,7 +3159,11 @@
               "Hostname 7": true,
               "Hostname 8": true,
               "gpu": true,
-              "__name__": true
+              "__name__": true,
+              "Value #Base": true,
+              "Time 9": true,
+              "instance 9": true,
+              "job 9": true
             },
             "includeByName": {},
             "indexByName": {
