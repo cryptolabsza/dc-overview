@@ -1396,7 +1396,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (job) (irate(node_cpu_seconds_total{mode=\"system\"}[$__rate_interval])) / on(job) group_left sum by (job)((irate(node_cpu_seconds_total{}[$__rate_interval]))) * $CPU_Max_Power * count by (job)(node_cpu_temperature{package=~\"[0-9]+\"}) + sum by (job) (DCGM_FI_DEV_POWER_USAGE) + $BasePower",
+          "expr": "(sum by (job) (rate(node_cpu_seconds_total{mode!=\"idle\"}[$__rate_interval])) / sum by (job) (rate(node_cpu_seconds_total[$__rate_interval]))) * $CPU_Max_Power + sum by (job) (DCGM_FI_DEV_POWER_USAGE) + $BasePower",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -2641,7 +2641,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "avg by(instance)(node_cpu_temperature{})",
+          "expr": "avg by(job)(node_hwmon_temp_celsius{sensor=\"temp1\"})",
           "format": "table",
           "hide": false,
           "instant": false,
