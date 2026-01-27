@@ -28,6 +28,60 @@ from .ssh_manager import SSHManager
 
 console = Console()
 
+# Docker network configuration - use fixed subnet and IPs for security
+DOCKER_NETWORK_NAME = "cryptolabs"
+DOCKER_NETWORK_SUBNET = "172.30.0.0/16"
+DOCKER_NETWORK_GATEWAY = "172.30.0.1"
+# Static IPs for trusted services (proxy must have fixed IP for auth trust)
+PROXY_STATIC_IP = "172.30.0.2"
+DC_OVERVIEW_STATIC_IP = "172.30.0.3"
+
+
+def _ensure_docker_network():
+    """Ensure the cryptolabs Docker network exists with the correct subnet.
+    
+    Uses a fixed subnet so containers can be assigned static IPs for security.
+    This allows services to trust only specific proxy IPs rather than entire ranges.
+    """
+    # Check if network exists
+    result = subprocess.run(
+        ["docker", "network", "inspect", DOCKER_NETWORK_NAME],
+        capture_output=True, text=True
+    )
+    
+    if result.returncode == 0:
+        # Network exists - check if it has the right subnet
+        try:
+            network_info = json.loads(result.stdout)
+            if network_info:
+                existing_subnet = network_info[0].get("IPAM", {}).get("Config", [{}])[0].get("Subnet", "")
+                if existing_subnet == DOCKER_NETWORK_SUBNET:
+                    return True  # Network already configured correctly
+                # Network exists but with wrong subnet - we can't change it without recreating
+                # This is fine for existing deployments, they'll use the old subnet
+                console.print(f"[dim]Network {DOCKER_NETWORK_NAME} exists with subnet {existing_subnet}[/dim]")
+                return True
+        except (json.JSONDecodeError, IndexError, KeyError):
+            pass
+        return True  # Network exists, use as-is
+    
+    # Create network with specific subnet
+    result = subprocess.run(
+        ["docker", "network", "create",
+         "--subnet", DOCKER_NETWORK_SUBNET,
+         "--gateway", DOCKER_NETWORK_GATEWAY,
+         DOCKER_NETWORK_NAME],
+        capture_output=True, text=True
+    )
+    
+    if result.returncode == 0:
+        console.print(f"[green]✓[/green] Created Docker network {DOCKER_NETWORK_NAME} with subnet {DOCKER_NETWORK_SUBNET}")
+        return True
+    else:
+        # Fallback - create without specific subnet
+        subprocess.run(["docker", "network", "create", DOCKER_NETWORK_NAME], capture_output=True)
+        return True
+
 
 class FleetManager:
     """
@@ -1164,8 +1218,8 @@ echo "Exporters installed successfully"
             with open(ipmi_config_dir / "servers.yaml", "w") as f:
                 yaml.dump({"servers": []}, f)
         
-        # Ensure cryptolabs network exists
-        subprocess.run(["docker", "network", "create", "cryptolabs"], capture_output=True)
+        # Ensure cryptolabs network exists with correct subnet
+        _ensure_docker_network()
         
         # Pull latest image
         console.print("[dim]Pulling ipmi-monitor image...[/dim]")
@@ -1202,6 +1256,11 @@ echo "Exporters installed successfully"
                 "-e", "AI_SERVICE_URL=https://ipmi-ai.cryptolabs.co.za",
                 "-e", f"AI_LICENSE_KEY={self.config.ipmi_monitor.ai_license_key}",
             ])
+        
+        # Security: Only trust the proxy's static IP for X-Fleet-* header authentication
+        env_vars.extend([
+            "-e", f"TRUSTED_PROXY_IPS={PROXY_STATIC_IP}",
+        ])
         
         # Prepare SSH keys mount if available
         ssh_keys_dir = self.config.config_dir / "ssh_keys"
@@ -1454,8 +1513,8 @@ except Exception as e:
         ssl_dir = Path("/etc/cryptolabs-proxy/ssl")
         ssl_dir.mkdir(parents=True, exist_ok=True)
         
-        # Ensure cryptolabs network exists
-        subprocess.run(["docker", "network", "create", "cryptolabs"], capture_output=True)
+        # Ensure cryptolabs network exists with correct subnet
+        _ensure_docker_network()
         
         # Handle SSL certificate
         use_letsencrypt = False
@@ -1489,6 +1548,7 @@ except Exception as e:
         auth_secret = secrets_module.token_hex(32)
         
         # Start proxy - no nginx.conf override, use built-in config
+        # Use static IP so downstream services can trust only this specific IP
         cmd = [
             "docker", "run", "-d",
             "--name", "cryptolabs-proxy",
@@ -1499,7 +1559,8 @@ except Exception as e:
             "-e", f"AUTH_SECRET_KEY={auth_secret}",
             "-v", "/var/run/docker.sock:/var/run/docker.sock:ro",
             "-v", "fleet-auth-data:/data/auth",
-            "--network", "cryptolabs",
+            "--network", DOCKER_NETWORK_NAME,
+            "--ip", PROXY_STATIC_IP,
         ]
         
         # Add SSL volume based on what was actually obtained
@@ -1835,7 +1896,10 @@ except Exception as e:
             # Remove existing proxy
             subprocess.run(["docker", "rm", "-f", "cryptolabs-proxy"], capture_output=True)
             
-            # Recreate proxy with correct configuration
+            # Ensure network exists with correct subnet before recreating proxy
+            _ensure_docker_network()
+            
+            # Recreate proxy with correct configuration and static IP for security
             cmd = [
                 "docker", "run", "-d",
                 "--name", "cryptolabs-proxy",
@@ -1846,7 +1910,8 @@ except Exception as e:
                 "-e", f"AUTH_SECRET_KEY={auth_secret}",
                 "-v", "/var/run/docker.sock:/var/run/docker.sock:ro",
                 "-v", "cryptolabs-proxy-data:/data",
-                "--network", "cryptolabs",
+                "--network", DOCKER_NETWORK_NAME,
+                "--ip", PROXY_STATIC_IP,
                 "--label", "com.centurylinklabs.watchtower.enable=true",
             ] + ssl_mounts + [
                 "ghcr.io/cryptolabsza/cryptolabs-proxy:dev"
