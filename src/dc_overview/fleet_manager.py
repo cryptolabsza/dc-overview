@@ -32,9 +32,30 @@ console = Console()
 DOCKER_NETWORK_NAME = "cryptolabs"
 DOCKER_NETWORK_SUBNET = "172.30.0.0/16"
 DOCKER_NETWORK_GATEWAY = "172.30.0.1"
-# Static IPs for trusted services (proxy must have fixed IP for auth trust)
-PROXY_STATIC_IP = "172.30.0.2"
-DC_OVERVIEW_STATIC_IP = "172.30.0.3"
+
+# Static IPs for all services - proxy IP is trusted by downstream services
+STATIC_IPS = {
+    "cryptolabs-proxy": "172.30.0.2",
+    "dc-overview": "172.30.0.3",
+    "prometheus": "172.30.0.4",
+    "grafana": "172.30.0.5",
+    "ipmi-monitor": "172.30.0.6",
+    "vast-exporter": "172.30.0.7",
+    "server-manager": "172.30.0.8",
+}
+PROXY_STATIC_IP = STATIC_IPS["cryptolabs-proxy"]
+
+# Default UFW ports to allow
+DEFAULT_UFW_PORTS = {
+    22: "SSH",
+    80: "HTTP",
+    443: "HTTPS",
+    100: "SSH (port 100)",
+    101: "SSH (port 101)", 
+    103: "SSH (port 103)",
+    9100: "Node Exporter",
+    9400: "DC Exporter",
+}
 
 
 def _ensure_docker_network():
@@ -311,8 +332,8 @@ providers:
 """
         (grafana_dir / "provisioning" / "dashboards" / "default.yml").write_text(dashboard_config)
         
-        # Ensure cryptolabs network exists before starting services
-        subprocess.run(["docker", "network", "create", "cryptolabs"], capture_output=True)
+        # Ensure cryptolabs network exists with correct subnet before starting services
+        _ensure_docker_network()
         
         # Start services
         with Progress(SpinnerColumn(), TextColumn("Starting services..."), console=console) as progress:
@@ -347,7 +368,7 @@ providers:
             root_url = f"%(protocol)s://{domain}/grafana/"
         
         # When using existing proxy, don't expose ports (proxy handles routing)
-        # and use cryptolabs network
+        # and use cryptolabs network with static IPs
         if use_existing_proxy:
             return f"""services:
   dc-overview:
@@ -359,11 +380,13 @@ providers:
       - APPLICATION_ROOT=/dc
       - GRAFANA_URL=http://grafana:3000
       - PROMETHEUS_URL=http://prometheus:9090
+      - TRUSTED_PROXY_IPS={PROXY_STATIC_IP}
     volumes:
       - dc-data:/data
       - ./ssh_keys:/etc/dc-overview/ssh_keys:ro
     networks:
-      - cryptolabs
+      cryptolabs:
+        ipv4_address: {STATIC_IPS['dc-overview']}
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
@@ -384,7 +407,8 @@ providers:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      - cryptolabs
+      cryptolabs:
+        ipv4_address: {STATIC_IPS['prometheus']}
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
@@ -402,10 +426,14 @@ providers:
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_SERVER_ROOT_URL={root_url}
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_AUTH_PROXY_ENABLED=true
+      - GF_AUTH_PROXY_HEADER_NAME=X-WEBAUTH-USER
+      - GF_AUTH_PROXY_AUTO_SIGN_UP=true
     depends_on:
       - prometheus
     networks:
-      - cryptolabs
+      cryptolabs:
+        ipv4_address: {STATIC_IPS['grafana']}
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
@@ -419,15 +447,15 @@ networks:
     external: true
 """
         else:
-            # Fresh install - use cryptolabs network (proxy will be deployed later)
-            # Create the network first since docker-compose will use external: true
+            # Fresh install - use cryptolabs network with static IPs
+            # Proxy will be deployed later and will get its static IP
             return f"""services:
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
     restart: unless-stopped
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./recording_rules.yml:/etc/prometheus/recording_rules.yml:ro
@@ -441,14 +469,15 @@ networks:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      - cryptolabs
+      cryptolabs:
+        ipv4_address: {STATIC_IPS['prometheus']}
 
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
@@ -466,7 +495,8 @@ networks:
     depends_on:
       - prometheus
     networks:
-      - cryptolabs
+      cryptolabs:
+        ipv4_address: {STATIC_IPS['grafana']}
 
 volumes:
   prometheus-data:
@@ -1269,12 +1299,13 @@ echo "Exporters installed successfully"
             ssh_keys_mount = ["-v", f"{ssh_keys_dir}:/app/ssh_keys:ro"]
             console.print("[dim]  Mounting shared SSH keys for ipmi-monitor[/dim]")
         
-        # Run container on cryptolabs network
+        # Run container on cryptolabs network with static IP for security
         docker_cmd = [
             "docker", "run", "-d",
             "--name", "ipmi-monitor",
             "--restart", "unless-stopped",
-            "--network", "cryptolabs",
+            "--network", DOCKER_NETWORK_NAME,
+            "--ip", STATIC_IPS["ipmi-monitor"],
             "-v", "ipmi-monitor-data:/app/data",
             "-v", f"{ipmi_config_dir}/servers.yaml:/app/config/servers.yaml:ro",
         ] + ssh_keys_mount + [
@@ -2032,27 +2063,73 @@ except Exception as e:
             console.print("[green]✓[/green] UFW firewall already active")
             return
         
+        # Build list of ports to allow
+        ssh_port = getattr(self.config.ssh, 'port', 22) or 22
+        
+        ports_to_allow = {
+            ssh_port: "SSH (primary)",
+            80: "HTTP (redirect to HTTPS)",
+            443: "HTTPS (proxy)",
+        }
+        
+        # Add any custom SSH ports from config
+        if hasattr(self.config, 'additional_ssh_ports'):
+            for port in self.config.additional_ssh_ports:
+                ports_to_allow[port] = f"SSH (port {port})"
+        
+        # Check if common alternative SSH ports might be in use (100, 101, 103)
+        for alt_port in [100, 101, 103]:
+            if alt_port != ssh_port:
+                # Check if something is listening on this port
+                check_result = subprocess.run(
+                    ["ss", "-tlnp", f"sport = :{alt_port}"],
+                    capture_output=True, text=True
+                )
+                if f":{alt_port}" in check_result.stdout:
+                    ports_to_allow[alt_port] = f"SSH (port {alt_port})"
+        
+        # Show ports to be allowed and ask for confirmation
+        console.print("[bold]UFW Firewall Configuration[/bold]")
+        console.print()
+        console.print("The following ports will be [green]ALLOWED[/green] through the firewall:")
+        console.print()
+        
+        port_table = Table(show_header=True, header_style="bold")
+        port_table.add_column("Port", style="cyan", justify="right")
+        port_table.add_column("Service")
+        port_table.add_column("Status", justify="center")
+        
+        for port, service in sorted(ports_to_allow.items()):
+            port_table.add_row(str(port), service, "[green]ALLOW[/green]")
+        
+        port_table.add_row("*", "All other incoming", "[red]DENY[/red]")
+        console.print(port_table)
+        console.print()
+        
+        console.print("[dim]Internal services (Prometheus :9090, Grafana :3000, exporters) will")
+        console.print("only be accessible through the HTTPS proxy, not directly.[/dim]")
+        console.print()
+        
+        # Check if non-interactive mode (auto-confirm)
+        auto_confirm = getattr(self.config, 'auto_confirm', False)
+        
+        if not auto_confirm:
+            from rich.prompt import Confirm
+            if not Confirm.ask("Enable UFW firewall with these rules?", default=True):
+                console.print("[yellow]⚠[/yellow] Skipping firewall configuration")
+                console.print("[dim]You can enable UFW manually later: ufw enable[/dim]")
+                return
+        
+        console.print()
         console.print("[dim]Configuring UFW firewall rules...[/dim]")
         
         # Set default policies
         subprocess.run(["ufw", "default", "deny", "incoming"], capture_output=True)
         subprocess.run(["ufw", "default", "allow", "outgoing"], capture_output=True)
         
-        # Allow SSH (critical - don't lock yourself out!)
-        ssh_port = getattr(self.config.ssh, 'port', 22) or 22
-        subprocess.run(["ufw", "allow", str(ssh_port)], capture_output=True)
-        console.print(f"[green]✓[/green] Allowed SSH on port {ssh_port}")
-        
-        # Allow HTTP/HTTPS for the proxy
-        subprocess.run(["ufw", "allow", "80/tcp"], capture_output=True)
-        subprocess.run(["ufw", "allow", "443/tcp"], capture_output=True)
-        console.print("[green]✓[/green] Allowed HTTP (80) and HTTPS (443)")
-        
-        # Allow Prometheus from internal network only (if needed for external scraping)
-        # By default, keep it internal only
-        
-        # Allow metrics ports only from localhost/docker (internal only)
-        # These remain blocked from external access by default
+        # Allow configured ports
+        for port in sorted(ports_to_allow.keys()):
+            subprocess.run(["ufw", "allow", str(port)], capture_output=True)
         
         # Enable UFW (non-interactive)
         result = subprocess.run(
@@ -2063,14 +2140,10 @@ except Exception as e:
         if result.returncode == 0:
             console.print("[green]✓[/green] UFW firewall enabled")
             console.print()
-            console.print("[bold]Firewall Rules:[/bold]")
-            console.print("  • SSH (port %d): [green]ALLOWED[/green]" % ssh_port)
-            console.print("  • HTTP (port 80): [green]ALLOWED[/green]")
-            console.print("  • HTTPS (port 443): [green]ALLOWED[/green]")
+            console.print("[bold]Active Firewall Rules:[/bold]")
+            for port, service in sorted(ports_to_allow.items()):
+                console.print(f"  • {service} (port {port}): [green]ALLOWED[/green]")
             console.print("  • All other incoming: [red]DENIED[/red]")
-            console.print()
-            console.print("[dim]Note: Internal services (Prometheus, Grafana, exporters) are")
-            console.print("accessible only through the HTTPS proxy for security.[/dim]")
         else:
             console.print(f"[yellow]⚠[/yellow] Failed to enable UFW: {result.stderr[:100]}")
     
