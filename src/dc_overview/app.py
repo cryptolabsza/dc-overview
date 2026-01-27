@@ -1634,6 +1634,36 @@ DASHBOARD_TEMPLATE = """
         
         <p class="version">Server Manager v{{ version }}</p>
     </div>
+    <script>
+    // Get base path for API calls
+    const basePath = window.location.pathname.replace(/\/$/, '');
+    
+    // Check user permissions and adjust UI
+    async function checkUserPermissions() {
+        try {
+            const response = await fetch(`${basePath}/api/auth/status`);
+            const data = await response.json();
+            const permissions = data.permissions || {};
+            
+            // Hide Settings link for non-admin users
+            if (!permissions.can_admin) {
+                document.querySelectorAll('.nav a').forEach(link => {
+                    if (link.textContent.includes('Settings')) link.style.display = 'none';
+                });
+            }
+            
+            // Show role indicator
+            const roleIndicator = document.createElement('span');
+            roleIndicator.style.cssText = 'background: var(--bg-card); padding: 4px 10px; border-radius: 4px; font-size: 12px; margin-left: 10px;';
+            roleIndicator.textContent = data.role || 'unknown';
+            const nav = document.querySelector('.nav');
+            if (nav) nav.appendChild(roleIndicator);
+        } catch (e) {
+            console.error('Failed to check permissions:', e);
+        }
+    }
+    document.addEventListener('DOMContentLoaded', checkUserPermissions);
+    </script>
 </body></html>
 """
 
@@ -1882,6 +1912,49 @@ SERVERS_TEMPLATE = """
         : window.location.pathname.replace(/\/$/, '');
     
     let currentServerId = null;
+    let userPermissions = { can_read: false, can_write: false, can_admin: false };
+    
+    // Check user permissions and adjust UI
+    async function checkUserPermissions() {
+        try {
+            const response = await fetch(`${basePath}/api/auth/status`);
+            const data = await response.json();
+            userPermissions = data.permissions || { can_read: false, can_write: false, can_admin: false };
+            
+            // Hide "Add Server" form for readonly users
+            const addServerCard = document.querySelector('.card:has(#addServerForm)');
+            if (addServerCard && !userPermissions.can_write) {
+                addServerCard.style.display = 'none';
+            }
+            
+            // Hide delete buttons for readonly users
+            if (!userPermissions.can_write) {
+                document.querySelectorAll('.btn-danger').forEach(btn => {
+                    if (btn.textContent.includes('Delete')) btn.style.display = 'none';
+                });
+            }
+            
+            // Hide Settings link for non-admin users
+            if (!userPermissions.can_admin) {
+                document.querySelectorAll('.nav a').forEach(link => {
+                    if (link.textContent.includes('Settings')) link.style.display = 'none';
+                });
+            }
+            
+            // Show role indicator
+            const roleIndicator = document.createElement('span');
+            roleIndicator.className = 'role-badge';
+            roleIndicator.style.cssText = 'background: var(--bg-card); padding: 4px 10px; border-radius: 4px; font-size: 12px; margin-left: 10px;';
+            roleIndicator.textContent = data.role || 'unknown';
+            const nav = document.querySelector('.nav');
+            if (nav) nav.appendChild(roleIndicator);
+        } catch (e) {
+            console.error('Failed to check permissions:', e);
+        }
+    }
+    
+    // Run permission check on load
+    document.addEventListener('DOMContentLoaded', checkUserPermissions);
     
     document.getElementById('addServerForm').onsubmit = async (e) => {
         e.preventDefault();
@@ -1926,7 +1999,15 @@ SERVERS_TEMPLATE = """
             { key: 'dcgm_exporter', name: 'DCGM Exporter', port: 9400 }
         ];
         
+        const canWrite = userPermissions.can_write;
         let html = '';
+        
+        // Show read-only notice for readonly users
+        if (!canWrite) {
+            html += `<div style="background: var(--accent-yellow); color: #000; padding: 10px; border-radius: 8px; margin-bottom: 15px;">
+                <strong>Read-only mode:</strong> You don't have permission to modify exporters.
+            </div>`;
+        }
         
         for (const exp of exporters) {
             const version = data.versions[exp.key];
@@ -1938,17 +2019,18 @@ SERVERS_TEMPLATE = """
                 <div class="exporter-header">
                     <span class="exporter-name">${exp.name} <small style="color:var(--text-secondary)">(port ${exp.port})</small></span>
                     <label class="toggle-switch">
-                        <input type="checkbox" ${version ? 'checked' : ''} onchange="toggleExporter('${exp.key}', this.checked)">
-                        <span class="toggle-slider"></span>
+                        <input type="checkbox" ${version ? 'checked' : ''} ${canWrite ? '' : 'disabled'} onchange="toggleExporter('${exp.key}', this.checked)">
+                        <span class="toggle-slider" style="${canWrite ? '' : 'opacity: 0.5; cursor: not-allowed;'}"></span>
                     </label>
                 </div>
                 <div class="version-info">
                     <span>Version:</span>
                     <span class="version-badge">${version || 'Not installed'}</span>
-                    ${hasUpdate ? `<span class="update-badge" onclick="updateExporter('${exp.key}')">Update to ${updateInfo.latest}</span>` : ''}
+                    ${hasUpdate && canWrite ? `<span class="update-badge" onclick="updateExporter('${exp.key}')">Update to ${updateInfo.latest}</span>` : ''}
+                    ${hasUpdate && !canWrite ? `<span style="color: var(--accent-yellow); font-size: 11px;">Update available: ${updateInfo.latest}</span>` : ''}
                 </div>
                 <div class="auto-update-row">
-                    <input type="checkbox" id="auto-${exp.key}" onchange="updateAutoSetting('${exp.key}', this.checked)">
+                    <input type="checkbox" id="auto-${exp.key}" ${canWrite ? '' : 'disabled'} onchange="updateAutoSetting('${exp.key}', this.checked)">
                     <label for="auto-${exp.key}">Auto-update</label>
                 </div>
             </div>
@@ -1959,15 +2041,17 @@ SERVERS_TEMPLATE = """
         <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
             <div style="display: flex; align-items: center; gap: 12px;">
                 <label>Update Branch:</label>
-                <select class="branch-select" id="branchSelect" onchange="updateBranch(this.value)">
+                <select class="branch-select" id="branchSelect" ${canWrite ? '' : 'disabled'} onchange="updateBranch(this.value)">
                     <option value="main">main (stable)</option>
                     <option value="dev">dev (latest)</option>
                 </select>
             </div>
+            ${canWrite ? `
             <div style="margin-top: 15px; display: flex; gap: 10px;">
                 <button class="btn btn-secondary" onclick="installExporters(currentServerId)">Install All</button>
                 <button class="btn btn-warning" onclick="removeExporters(currentServerId)">Remove All</button>
             </div>
+            ` : ''}
         </div>
         `;
         
