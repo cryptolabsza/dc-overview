@@ -3411,7 +3411,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Current error state for GPU (2 for error, 1 for no error, 0 unknown state)",
+      "description": "Current error state for GPU (0=Unknown, 1=No Error, 2=Error, 3=VM Passthrough)",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -3436,9 +3436,9 @@
               "options": {
                 "from": 0,
                 "result": {
-                  "color": "green",
+                  "color": "blue",
                   "index": 0,
-                  "text": "OK"
+                  "text": "Unknown"
                 },
                 "to": 0
               },
@@ -3448,9 +3448,9 @@
               "options": {
                 "from": 1,
                 "result": {
-                  "color": "yellow",
+                  "color": "green",
                   "index": 1,
-                  "text": "Warning"
+                  "text": "No Error"
                 },
                 "to": 1
               },
@@ -3472,9 +3472,9 @@
               "options": {
                 "from": 3,
                 "result": {
-                  "color": "blue",
+                  "color": "purple",
                   "index": 3,
-                  "text": "VM"
+                  "text": "VM Passthrough"
                 },
                 "to": 3
               },
