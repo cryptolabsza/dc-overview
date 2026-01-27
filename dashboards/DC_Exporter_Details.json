@@ -1186,19 +1186,24 @@
             {
               "options": {
                 "0": {
-                  "color": "green",
+                  "color": "blue",
                   "index": 0,
-                  "text": "OK"
+                  "text": "Unknown"
                 },
                 "1": {
-                  "color": "yellow",
+                  "color": "green",
                   "index": 1,
-                  "text": "Warning"
+                  "text": "No Error"
                 },
                 "2": {
                   "color": "red",
                   "index": 2,
                   "text": "Error"
+                },
+                "3": {
+                  "color": "purple",
+                  "index": 3,
+                  "text": "VM Passthrough"
                 }
               },
               "type": "value"
@@ -1208,16 +1213,20 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "blue",
                 "value": null
               },
               {
-                "color": "yellow",
+                "color": "green",
                 "value": 1
               },
               {
                 "color": "red",
                 "value": 2
+              },
+              {
+                "color": "purple",
+                "value": 3
               }
             ]
           }
