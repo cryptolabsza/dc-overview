@@ -1050,6 +1050,139 @@ def api_set_server_ssh_key(server_id):
         'ssh_key_id': server.ssh_key_id
     })
 
+# =============================================================================
+# GRAFANA ROLE SYNC
+# =============================================================================
+
+GRAFANA_ROLE_MAP = {
+    'admin': 'Admin',
+    'readwrite': 'Editor', 
+    'readonly': 'Viewer'
+}
+
+@app.route('/api/grafana/sync-role', methods=['POST'])
+@login_required
+def api_grafana_sync_role():
+    """Sync current user's role to Grafana via API."""
+    import requests
+    
+    username = session.get('username')
+    role = session.get('role', 'readonly')
+    grafana_role = GRAFANA_ROLE_MAP.get(role, 'Viewer')
+    
+    try:
+        # Get Grafana admin credentials from environment
+        grafana_password = os.environ.get('GRAFANA_PASSWORD', 'admin')
+        
+        # Find user in Grafana
+        search_resp = requests.get(
+            f"{GRAFANA_URL}/api/users/lookup?loginOrEmail={username}",
+            auth=('admin', grafana_password),
+            timeout=5
+        )
+        
+        if search_resp.status_code == 200:
+            user_data = search_resp.json()
+            user_id = user_data.get('id')
+            
+            # Update user's org role
+            update_resp = requests.patch(
+                f"{GRAFANA_URL}/api/org/users/{user_id}",
+                json={'role': grafana_role},
+                auth=('admin', grafana_password),
+                timeout=5
+            )
+            
+            if update_resp.status_code == 200:
+                return jsonify({
+                    'success': True,
+                    'username': username,
+                    'grafana_role': grafana_role,
+                    'message': f'User role synced to Grafana as {grafana_role}'
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to update Grafana role: {update_resp.text}'
+                }), 500
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'User not found in Grafana (may need to login first)',
+                'details': search_resp.text
+            }), 404
+            
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to connect to Grafana: {str(e)}'
+        }), 500
+
+@app.route('/api/grafana/sync-all-roles', methods=['POST'])
+@admin_required
+def api_grafana_sync_all_roles():
+    """Sync all Fleet users to Grafana (admin only)."""
+    import requests
+    
+    try:
+        grafana_password = os.environ.get('GRAFANA_PASSWORD', 'admin')
+        
+        # Get all users from Grafana
+        users_resp = requests.get(
+            f"{GRAFANA_URL}/api/users",
+            auth=('admin', grafana_password),
+            timeout=10
+        )
+        
+        if users_resp.status_code != 200:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to get Grafana users: {users_resp.text}'
+            }), 500
+        
+        grafana_users = users_resp.json()
+        synced = []
+        errors = []
+        
+        # For each Grafana user, try to get their Fleet role and sync
+        # This is a placeholder - in production, you'd query the proxy's user database
+        for user in grafana_users:
+            username = user.get('login')
+            if username == 'admin':
+                continue  # Skip built-in admin
+            
+            # Default to Viewer for users not in Fleet
+            grafana_role = 'Viewer'
+            
+            try:
+                update_resp = requests.patch(
+                    f"{GRAFANA_URL}/api/org/users/{user['id']}",
+                    json={'role': grafana_role},
+                    auth=('admin', grafana_password),
+                    timeout=5
+                )
+                
+                if update_resp.status_code == 200:
+                    synced.append({'username': username, 'role': grafana_role})
+                else:
+                    errors.append({'username': username, 'error': update_resp.text})
+            except Exception as e:
+                errors.append({'username': username, 'error': str(e)})
+        
+        return jsonify({
+            'success': True,
+            'synced': synced,
+            'errors': errors,
+            'total_synced': len(synced),
+            'total_errors': len(errors)
+        })
+        
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to connect to Grafana: {str(e)}'
+        }), 500
+
 @app.route('/metrics')
 def prometheus_metrics():
     """Prometheus metrics endpoint."""

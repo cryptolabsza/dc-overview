@@ -89,13 +89,17 @@ services:
       - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s{{ ':' ~ external_port if external_port and external_port != 443 else '' }}/grafana/
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
       # Proxy authentication - allows Fleet Management to pass auth headers
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
-      - GF_AUTH_DISABLE_LOGIN_FORM=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
       - GF_AUTH_PROXY_ENABLED=true
-      - GF_AUTH_PROXY_HEADER_NAME=X-Fleet-Auth-User
+      - GF_AUTH_PROXY_HEADER_NAME=X-WEBAUTH-USER
       - GF_AUTH_PROXY_HEADER_PROPERTY=username
       - GF_AUTH_PROXY_AUTO_SIGN_UP=true
+      # Role sync from proxy - maps X-WEBAUTH-ROLE header to Grafana roles
+      - GF_AUTH_PROXY_HEADERS=Role:X-WEBAUTH-ROLE
+      - GF_AUTH_PROXY_ENABLE_LOGIN_TOKEN=false
+      # Sync user role on each request (requires Grafana 9.4+)
+      - GF_AUTH_PROXY_SYNC_TTL=60
 {% endif %}
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-piechart-panel
