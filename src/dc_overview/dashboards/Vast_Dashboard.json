@@ -2890,7 +2890,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "vastai_machine_gpu_occupancy{gpu=\"0\"} or ((count by (Hostname) (DCGM_FI_DEV_GPU_TEMP{gpu=\"0\"}) * 0 - 1) unless on(Hostname) vastai_machine_gpu_occupancy{gpu=\"0\"})",
+          "expr": "vastai_machine_gpu_occupancy{gpu=\"0\"} or ((DCGM_FI_DEV_GPU_TEMP{gpu=\"0\"} * 0 - 1) and on(Hostname) label_replace(vast_machine_Listed, \"Hostname\", \"$1\", \"hostname\", \"(.*)\") unless on(Hostname) vastai_machine_gpu_occupancy{gpu=\"0\"})",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2903,7 +2903,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "vastai_machine_gpu_occupancy{gpu=\"1\"} or ((count by (Hostname) (DCGM_FI_DEV_GPU_TEMP{gpu=\"1\"}) * 0 - 1) unless on(Hostname) vastai_machine_gpu_occupancy{gpu=\"1\"})",
+          "expr": "vastai_machine_gpu_occupancy{gpu=\"1\"} or ((DCGM_FI_DEV_GPU_TEMP{gpu=\"1\"} * 0 - 1) and on(Hostname) label_replace(vast_machine_Listed, \"Hostname\", \"$1\", \"hostname\", \"(.*)\") unless on(Hostname) vastai_machine_gpu_occupancy{gpu=\"1\"})",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2916,7 +2916,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "vastai_machine_gpu_occupancy{gpu=\"2\"} or ((count by (Hostname) (DCGM_FI_DEV_GPU_TEMP{gpu=\"2\"}) * 0 - 1) unless on(Hostname) vastai_machine_gpu_occupancy{gpu=\"2\"})",
+          "expr": "vastai_machine_gpu_occupancy{gpu=\"2\"} or ((DCGM_FI_DEV_GPU_TEMP{gpu=\"2\"} * 0 - 1) and on(Hostname) label_replace(vast_machine_Listed, \"Hostname\", \"$1\", \"hostname\", \"(.*)\") unless on(Hostname) vastai_machine_gpu_occupancy{gpu=\"2\"})",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2929,7 +2929,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "vastai_machine_gpu_occupancy{gpu=\"3\"} or ((count by (Hostname) (DCGM_FI_DEV_GPU_TEMP{gpu=\"3\"}) * 0 - 1) unless on(Hostname) vastai_machine_gpu_occupancy{gpu=\"3\"})",
+          "expr": "vastai_machine_gpu_occupancy{gpu=\"3\"} or ((DCGM_FI_DEV_GPU_TEMP{gpu=\"3\"} * 0 - 1) and on(Hostname) label_replace(vast_machine_Listed, \"Hostname\", \"$1\", \"hostname\", \"(.*)\") unless on(Hostname) vastai_machine_gpu_occupancy{gpu=\"3\"})",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2942,7 +2942,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "vastai_machine_gpu_occupancy{gpu=\"4\"} or ((count by (Hostname) (DCGM_FI_DEV_GPU_TEMP{gpu=\"4\"}) * 0 - 1) unless on(Hostname) vastai_machine_gpu_occupancy{gpu=\"4\"})",
+          "expr": "vastai_machine_gpu_occupancy{gpu=\"4\"} or ((DCGM_FI_DEV_GPU_TEMP{gpu=\"4\"} * 0 - 1) and on(Hostname) label_replace(vast_machine_Listed, \"Hostname\", \"$1\", \"hostname\", \"(.*)\") unless on(Hostname) vastai_machine_gpu_occupancy{gpu=\"4\"})",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2955,7 +2955,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "vastai_machine_gpu_occupancy{gpu=\"5\"} or ((count by (Hostname) (DCGM_FI_DEV_GPU_TEMP{gpu=\"5\"}) * 0 - 1) unless on(Hostname) vastai_machine_gpu_occupancy{gpu=\"5\"})",
+          "expr": "vastai_machine_gpu_occupancy{gpu=\"5\"} or ((DCGM_FI_DEV_GPU_TEMP{gpu=\"5\"} * 0 - 1) and on(Hostname) label_replace(vast_machine_Listed, \"Hostname\", \"$1\", \"hostname\", \"(.*)\") unless on(Hostname) vastai_machine_gpu_occupancy{gpu=\"5\"})",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2968,7 +2968,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "vastai_machine_gpu_occupancy{gpu=\"6\"} or ((count by (Hostname) (DCGM_FI_DEV_GPU_TEMP{gpu=\"6\"}) * 0 - 1) unless on(Hostname) vastai_machine_gpu_occupancy{gpu=\"6\"})",
+          "expr": "vastai_machine_gpu_occupancy{gpu=\"6\"} or ((DCGM_FI_DEV_GPU_TEMP{gpu=\"6\"} * 0 - 1) and on(Hostname) label_replace(vast_machine_Listed, \"Hostname\", \"$1\", \"hostname\", \"(.*)\") unless on(Hostname) vastai_machine_gpu_occupancy{gpu=\"6\"})",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -2981,7 +2981,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "vastai_machine_gpu_occupancy{gpu=\"7\"} or ((count by (Hostname) (DCGM_FI_DEV_GPU_TEMP{gpu=\"7\"}) * 0 - 1) unless on(Hostname) vastai_machine_gpu_occupancy{gpu=\"7\"})",
+          "expr": "vastai_machine_gpu_occupancy{gpu=\"7\"} or ((DCGM_FI_DEV_GPU_TEMP{gpu=\"7\"} * 0 - 1) and on(Hostname) label_replace(vast_machine_Listed, \"Hostname\", \"$1\", \"hostname\", \"(.*)\") unless on(Hostname) vastai_machine_gpu_occupancy{gpu=\"7\"})",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
