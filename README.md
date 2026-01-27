@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Docker](https://img.shields.io/badge/Docker-ghcr.io-blue)](https://github.com/cryptolabsza/dc-overview/pkgs/container/dc-overview)
 
-**Complete GPU datacenter monitoring suite.** Deploy Prometheus, Grafana, and GPU monitoring with a single command. Integrates seamlessly with [IPMI Monitor](https://github.com/cryptolabsza/ipmi-monitor).
+**Complete GPU datacenter monitoring suite.** Deploy Prometheus, Grafana, and GPU monitoring with a single command. Features unified authentication through Fleet Management and seamless integration with [IPMI Monitor](https://github.com/cryptolabsza/ipmi-monitor).
 
 ![Dashboard](docs/images/grafana-overview.png)
 
@@ -12,77 +12,14 @@
 
 | Component | Description | Port |
 |-----------|-------------|------|
-| **DC Overview** | Web UI for managing workers | 5001 |
+| **cryptolabs-proxy** | Unified HTTPS reverse proxy with Fleet authentication | 443 |
+| **DC Overview** | Server Manager web UI for managing workers | 5001 |
 | **Prometheus** | Time-series metrics database | 9090 |
 | **Grafana** | Dashboards and alerting | 3000 |
-| **node_exporter** | CPU, RAM, disk metrics | 9100 |
-| **dc-exporter** | GPU VRAM temps, hotspot, power | 9835 |
+| **IPMI Monitor** | BMC/IPMI server health monitoring (optional) | 5000 |
+| **node_exporter** | CPU, RAM, disk metrics (on workers) | 9100 |
+| **dc-exporter** | GPU VRAM temps, hotspot, power (on workers) | 9835 |
 | **vastai-exporter** | Vast.ai earnings (optional) | 8622 |
-| **cryptolabs-proxy** | HTTPS reverse proxy | 443 |
-
----
-
-## Quick Start
-
-### One Command Setup
-
-```bash
-# Install
-pipx install dc-overview
-
-# Run quickstart (does everything)
-sudo dc-overview quickstart
-```
-
-The quickstart wizard will:
-1. **Detect existing ipmi-monitor** and import servers/SSH keys
-2. **Set up Docker containers** (dc-overview, prometheus, grafana)
-3. **Configure HTTPS proxy** (cryptolabs-proxy)
-4. **Install exporters** on GPU workers via SSH
-
-### If IPMI Monitor Already Installed
-
-DC Overview automatically detects your existing setup:
-
-```
-✓ IPMI Monitor Detected!
-Found existing IPMI Monitor installation with servers and SSH keys.
-
-Import servers and SSH keys from IPMI Monitor? [Y/n]
-
-✓ Imported 12 servers from IPMI Monitor
-✓ Imported 2 SSH keys from IPMI Monitor
-✓ CryptoLabs Proxy Already Running!
-
-Install dc-exporter on 12 servers? [Y/n]
-  Installing on gpu-01 (192.168.1.101)... ✓
-  Installing on gpu-02 (192.168.1.102)... ✓
-  ...
-```
-
----
-
-## CLI Commands
-
-```bash
-# Setup & Status
-dc-overview quickstart        # One-command setup wizard
-dc-overview status            # Show container and exporter status
-
-# Docker Container Management
-dc-overview logs [-f]         # View container logs
-dc-overview stop              # Stop all containers
-dc-overview start             # Start all containers
-dc-overview restart           # Restart containers
-dc-overview upgrade           # Pull latest images and restart
-
-# Worker Management
-dc-overview install-exporters # Install exporters on current machine
-dc-overview add-machine IP    # Add a worker to monitor
-
-# SSL/Proxy
-dc-overview setup-ssl         # Configure HTTPS reverse proxy
-```
 
 ---
 
@@ -90,12 +27,19 @@ dc-overview setup-ssl         # Configure HTTPS reverse proxy
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     MASTER SERVER (Docker)                       │
-│  ┌─────────────┐  ┌───────────┐  ┌─────────┐  ┌──────────────┐ │
-│  │ dc-overview │  │prometheus │  │ grafana │  │cryptolabs-   │ │
-│  │   :5001     │  │   :9090   │  │  :3000  │  │proxy :443    │ │
-│  └─────────────┘  └───────────┘  └─────────┘  └──────────────┘ │
+│                    cryptolabs-proxy (Port 443)                   │
+│              Unified Authentication & Reverse Proxy              │
+│         Roles: admin | readwrite | readonly                      │
 └─────────────────────────────────────────────────────────────────┘
+                              │
+          ┌───────────────────┼───────────────────┬───────────────┐
+          ▼                   ▼                   ▼               ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────┐ ┌─────────────┐
+│  dc-overview    │ │    Grafana      │ │ Prometheus  │ │ipmi-monitor │
+│  (Server Mgr)   │ │   Dashboards    │ │   Metrics   │ │ BMC Health  │
+│  /dc/           │ │  /grafana/      │ │/prometheus/ │ │   /ipmi/    │
+│  :5001          │ │    :3000        │ │   :9090     │ │   :5000     │
+└─────────────────┘ └─────────────────┘ └─────────────┘ └─────────────┘
                               │
         ┌─────────────────────┼─────────────────────┐
         ▼                     ▼                     ▼
@@ -109,35 +53,204 @@ dc-overview setup-ssl         # Configure HTTPS reverse proxy
 │  │  :9835   │ │     │  │  :9835   │ │     │  │  :9835   │ │
 │  └──────────┘ │     │  └──────────┘ │     │  └──────────┘ │
 └───────────────┘     └───────────────┘     └───────────────┘
-(Native services)     (Native services)     (Native services)
+   (systemd)             (systemd)             (systemd)
 ```
 
-**Master**: Docker containers for easy management and updates  
-**Workers**: Native systemd services for maximum GPU compatibility (required for Vast.ai, RunPod, etc.)
+**Master Server**: Docker containers on `cryptolabs` network for easy management  
+**Workers**: Native systemd services for GPU compatibility (Vast.ai, RunPod, etc.)
 
 ---
 
-## Installation Options
+## Quick Start
 
-### Ubuntu 24.04+ / Python 3.12+
+### One Command Setup
+
 ```bash
-sudo apt install pipx -y
+# Install
 pipx install dc-overview
-pipx ensurepath && source ~/.bashrc
+
+# Run quickstart with config file
+sudo dc-overview quickstart -c config.yaml -y
+```
+
+### Interactive Setup
+
+```bash
 sudo dc-overview quickstart
 ```
 
-### Ubuntu 22.04 / Python 3.10
-```bash
-pip install dc-overview
-sudo dc-overview quickstart
+The Fleet Wizard collects all configuration upfront:
+1. **Components** - DC Overview, IPMI Monitor, Vast.ai exporter
+2. **Credentials** - Fleet admin, Grafana, SSH, BMC/IPMI
+3. **Servers** - Import from IPMI Monitor or enter manually
+4. **SSL** - Let's Encrypt or self-signed
+
+Then deploys everything automatically without further prompts.
+
+---
+
+## Configuration File
+
+Create a YAML config for automated deployments:
+
+```yaml
+# fleet-config.yaml
+site_name: My Datacenter
+
+# Fleet Management Login (unified auth)
+fleet_admin_user: admin
+fleet_admin_pass: SecurePassword123
+
+# SSH Access (for all servers)
+ssh:
+  username: root
+  key_path: /root/.ssh/id_rsa
+  port: 22
+
+# BMC/IPMI Access (default for all servers)
+bmc:
+  username: admin
+  password: BMCPassword
+
+# SSL Configuration
+ssl:
+  mode: letsencrypt  # or: self_signed
+  domain: dc.example.com
+  email: admin@example.com
+
+# Components to install
+components:
+  dc_overview: true
+  ipmi_monitor: true
+  vast_exporter: false
+
+# Vast.ai API Key (optional)
+vast:
+  api_key: your-api-key-here
+
+# Servers to monitor
+servers:
+  - name: gpu-01
+    server_ip: 192.168.1.101
+    bmc_ip: 192.168.1.201
+
+  - name: gpu-02
+    server_ip: 192.168.1.102
+    bmc_ip: 192.168.1.202
+
+# Grafana password
+grafana:
+  admin_password: GrafanaPass123
 ```
 
-### From GitHub (Development)
+Deploy with:
 ```bash
-pipx install "git+https://github.com/cryptolabsza/dc-overview.git@dev"
-sudo dc-overview quickstart
+sudo dc-overview quickstart -c fleet-config.yaml -y
 ```
+
+---
+
+## User Permissions & Authentication
+
+### Fleet Authentication
+
+All services authenticate through `cryptolabs-proxy` with unified credentials:
+
+| Role | DC Overview | Grafana | IPMI Monitor |
+|------|-------------|---------|--------------|
+| `admin` | Full access | Admin | Full access |
+| `readwrite` | Edit servers | Editor | Edit servers |
+| `readonly` | View only | Viewer | View only |
+
+### How It Works
+
+1. User logs into Fleet Management landing page (`https://domain/`)
+2. Proxy sets authentication headers on all requests:
+   - `X-Fleet-Authenticated: true`
+   - `X-Fleet-Auth-User: <username>`
+   - `X-Fleet-Auth-Role: <admin|readwrite|readonly>`
+3. Sub-services read headers and auto-authenticate users
+
+### Grafana Role Sync
+
+Grafana roles are synced via API endpoint:
+```bash
+# Sync current user's Fleet role to Grafana
+curl -X POST https://domain/dc/api/grafana/sync-role \
+  -H "X-Fleet-Auth-User: admin" \
+  -H "X-Fleet-Auth-Role: admin"
+```
+
+---
+
+## CLI Commands
+
+```bash
+# Setup & Deployment
+dc-overview quickstart              # Interactive setup wizard
+dc-overview quickstart -c FILE -y   # Deploy from config file
+
+# Container Management
+dc-overview status                  # Show container status
+dc-overview logs [-f] [SERVICE]     # View logs
+dc-overview stop                    # Stop all containers
+dc-overview start                   # Start all containers
+dc-overview restart                 # Restart containers
+dc-overview upgrade                 # Pull latest images and restart
+
+# Worker Management
+dc-overview install-exporters       # Install exporters locally
+dc-overview add-machine IP          # Add a worker to monitor
+
+# SSL/Proxy
+dc-overview setup-ssl               # Configure HTTPS
+```
+
+---
+
+## Development Workflow
+
+### GitHub Actions
+
+The repository uses GitHub Actions for CI/CD:
+
+| Workflow | Trigger | Output |
+|----------|---------|--------|
+| `docker-build.yml` | Push to `main`, `dev`, tags | `ghcr.io/cryptolabsza/dc-overview:dev` |
+| `publish.yml` | GitHub Release | PyPI package |
+
+### Dev Branch Images
+
+Push to `dev` branch automatically builds Docker images:
+- `ghcr.io/cryptolabsza/dc-overview:dev`
+- `ghcr.io/cryptolabsza/dc-overview:develop`
+- `ghcr.io/cryptolabsza/dc-overview:sha-<commit>`
+
+### Testing Dev Builds
+
+```bash
+# Install from dev branch
+pip install git+https://github.com/cryptolabsza/dc-overview.git@dev --break-system-packages
+
+# Run quickstart
+dc-overview quickstart -c /path/to/test-config.yaml -y
+```
+
+---
+
+## Deployment Flow
+
+The `quickstart` command executes these steps:
+
+1. **Prerequisites** - Install Docker, nginx, ipmitool, certbot
+2. **SSH Keys** - Generate fleet key and deploy to workers
+3. **Core Services** - Start Prometheus & Grafana containers
+4. **Exporters** - Install node_exporter and dc-exporter on workers via SSH
+5. **Prometheus Config** - Configure scrape targets
+6. **Dashboards** - Import Grafana dashboards
+7. **IPMI Monitor** - Deploy if enabled
+8. **Vast.ai Exporter** - Deploy if enabled
+9. **Reverse Proxy** - Configure cryptolabs-proxy with SSL
 
 ---
 
@@ -145,12 +258,13 @@ sudo dc-overview quickstart
 
 After setup, access your monitoring at:
 
-| Service | Direct | Via Proxy |
-|---------|--------|-----------|
-| DC Overview | `http://IP:5001` | `https://IP/dc/` |
-| Grafana | `http://IP:3000` | `https://IP/grafana/` |
-| Prometheus | `http://IP:9090` | `https://IP/prometheus/` |
-| Landing Page | - | `https://IP/` |
+| Service | URL | Description |
+|---------|-----|-------------|
+| Fleet Landing | `https://domain/` | Unified login & service links |
+| DC Overview | `https://domain/dc/` | Server management |
+| Grafana | `https://domain/grafana/` | Dashboards |
+| Prometheus | `https://domain/prometheus/` | Metrics queries |
+| IPMI Monitor | `https://domain/ipmi/` | BMC health (if enabled) |
 
 ---
 
@@ -158,7 +272,8 @@ After setup, access your monitoring at:
 
 | Service | Port | Description |
 |---------|------|-------------|
-| dc-overview | 5001 | Web UI (configurable) |
+| cryptolabs-proxy | 443 | HTTPS reverse proxy |
+| dc-overview | 5001 | Server Manager |
 | ipmi-monitor | 5000 | BMC/IPMI monitoring |
 | grafana | 3000 | Dashboards |
 | prometheus | 9090 | Metrics database |
@@ -166,56 +281,27 @@ After setup, access your monitoring at:
 | dc-exporter | 9835 | GPU metrics |
 | dcgm-exporter | 9400 | NVIDIA DCGM |
 | vastai-exporter | 8622 | Vast.ai earnings |
-| runpod-exporter | 8623 | RunPod (planned) |
-| hivefleet-exporter | 8624 | HiveFleet (planned) |
 
 ---
 
 ## Integration with IPMI Monitor
 
-DC Overview and IPMI Monitor work together:
+DC Overview and IPMI Monitor share infrastructure:
 
 ```bash
-# Install both on the same master server
-pipx install ipmi-monitor
-sudo ipmi-monitor quickstart
-
-pipx install dc-overview  
-sudo dc-overview quickstart  # Automatically imports from ipmi-monitor
+# If IPMI Monitor is already installed, quickstart detects it:
+✓ IPMI Monitor Detected!
+✓ CryptoLabs Proxy Already Running!
+✓ Imported 12 servers from IPMI Monitor
+✓ Imported SSH keys from IPMI Monitor
 ```
 
-Both share:
-- **cryptolabs-proxy** (unified HTTPS reverse proxy)
-- **Server list** (imported from ipmi-monitor)
-- **SSH keys** (copied to dc-overview)
-- **Watchtower** (auto-updates for both)
-
----
-
-## Manual Worker Setup
-
-If automatic SSH deployment fails, install exporters manually on GPU workers:
-
-```bash
-# On each GPU worker
-pip install dc-overview
-sudo dc-overview install-exporters
-```
-
-Or install individually:
-
-```bash
-# Node Exporter (system metrics)
-wget https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz
-tar xzf node_exporter-*.tar.gz
-sudo cp node_exporter-*/node_exporter /usr/local/bin/
-sudo systemctl enable --now node_exporter
-
-# DC Exporter (GPU metrics)
-wget https://github.com/cryptolabsza/dc-exporter/releases/latest/download/dc-exporter-collector -O /usr/local/bin/dc-exporter
-chmod +x /usr/local/bin/dc-exporter
-sudo systemctl enable --now dc-exporter
-```
+Shared components:
+- **cryptolabs-proxy** - Unified authentication
+- **cryptolabs** Docker network - Service communication
+- **Server list** - Imported automatically
+- **SSH keys** - Shared between services
+- **Watchtower** - Auto-updates for all containers
 
 ---
 
@@ -227,42 +313,79 @@ Pre-installed dashboards:
 |-----------|-------------|
 | **DC Overview** | Fleet overview with all GPU metrics |
 | **Node Exporter Full** | CPU, RAM, disk, network |
-| **NVIDIA DCGM** | GPU performance metrics |
+| **NVIDIA DCGM Exporter** | GPU performance metrics |
 | **Vast Dashboard** | Vast.ai provider earnings |
 | **IPMI Monitor** | BMC/IPMI sensor data |
 
 ---
 
+## Manual Worker Setup
+
+If automatic SSH deployment fails:
+
+```bash
+# On each GPU worker
+pip install dc-overview
+sudo dc-overview install-exporters
+```
+
+Or install exporters individually:
+
+```bash
+# Node Exporter
+wget https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz
+tar xzf node_exporter-*.tar.gz
+sudo cp node_exporter-*/node_exporter /usr/local/bin/
+sudo systemctl enable --now node_exporter
+
+# DC Exporter (GPU metrics)
+curl -L https://github.com/cryptolabsza/dc-exporter-releases/releases/latest/download/dc-exporter-rs -o /usr/local/bin/dc-exporter-rs
+chmod +x /usr/local/bin/dc-exporter-rs
+sudo systemctl enable --now dc-exporter
+```
+
+---
+
 ## Troubleshooting
 
-### Check container status
+### Check Status
 ```bash
 dc-overview status
 docker ps
+docker logs cryptolabs-proxy
 ```
 
-### View logs
+### View Service Logs
 ```bash
-dc-overview logs -f
-dc-overview logs grafana
-dc-overview logs prometheus
+dc-overview logs -f              # All services
+docker logs -f dc-overview       # Server Manager
+docker logs -f grafana           # Grafana
+docker logs -f prometheus        # Prometheus
 ```
 
-### Restart services
+### Restart Services
 ```bash
 dc-overview restart
+# Or individually:
+docker restart dc-overview grafana prometheus
 ```
 
-### Update to latest version
+### Update to Latest
 ```bash
-dc-overview upgrade
-pipx upgrade dc-overview
+dc-overview upgrade              # Pull and restart containers
+pipx upgrade dc-overview         # Update CLI tool
 ```
 
-### Check exporter connectivity
+### Test Exporter Connectivity
 ```bash
 curl http://worker-ip:9100/metrics  # node_exporter
 curl http://worker-ip:9835/metrics  # dc-exporter
+```
+
+### Nginx Config Issues
+```bash
+docker exec cryptolabs-proxy nginx -t  # Test config
+docker exec cryptolabs-proxy nginx -s reload  # Reload
 ```
 
 ---
@@ -273,7 +396,7 @@ curl http://worker-ip:9835/metrics  # dc-exporter
 |---------|-------------|
 | [ipmi-monitor](https://github.com/cryptolabsza/ipmi-monitor) | BMC/IPMI health monitoring |
 | [dc-exporter](https://github.com/cryptolabsza/dc-exporter) | GPU VRAM temperature exporter |
-| [cryptolabs-proxy](https://github.com/cryptolabsza/cryptolabs-proxy) | Unified reverse proxy |
+| [cryptolabs-proxy](https://github.com/cryptolabsza/cryptolabs-proxy) | Unified reverse proxy with auth |
 
 ---
 

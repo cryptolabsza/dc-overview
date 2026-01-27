@@ -1,11 +1,18 @@
 # DC Overview Configuration Templates
 
-This directory contains all configuration templates needed to deploy the DC Overview GPU monitoring stack.
+This directory contains reference configuration templates for manual deployment. For automated deployment, use:
+
+```bash
+dc-overview quickstart -c config.yaml -y
+```
+
+> **Note**: The quickstart command generates all necessary configuration files automatically in `/etc/dc-overview/`.
 
 ## Directory Structure
 
 ```
 config-templates/
+├── deployment-config.yaml    # Example YAML config for quickstart
 ├── docker-compose.yml        # Docker Compose for Prometheus & Grafana
 ├── prometheus.yml            # Prometheus scrape configuration
 ├── recording_rules.yml       # Prometheus recording rules for unified metrics
@@ -20,7 +27,47 @@ config-templates/
     └── dc-exporter.service      # VRAM/Hotspot temps exporter
 ```
 
-## Quick Deployment Guide
+## Recommended: Automated Deployment
+
+Create a configuration file and use quickstart:
+
+```yaml
+# my-fleet-config.yaml
+site_name: My Datacenter
+
+fleet_admin_user: admin
+fleet_admin_pass: SecurePassword123
+
+ssh:
+  username: root
+  key_path: /root/.ssh/id_rsa
+  port: 22
+
+ssl:
+  mode: letsencrypt
+  domain: dc.example.com
+  email: admin@example.com
+
+components:
+  dc_overview: true
+  ipmi_monitor: true
+  vast_exporter: false
+
+servers:
+  - name: gpu-01
+    server_ip: 192.168.1.101
+    bmc_ip: 192.168.1.201
+
+grafana:
+  admin_password: GrafanaPass123
+```
+
+Deploy:
+```bash
+dc-overview quickstart -c my-fleet-config.yaml -y
+```
+
+## Manual Deployment (Advanced)
 
 ### 1. Master Server Setup
 
@@ -39,16 +86,12 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
   -out /etc/dc-overview/ssl/server.crt \
   -subj "/CN=dc-overview"
 
-# Create Prometheus basic auth
-htpasswd -c /etc/nginx/.htpasswd_prometheus admin
-
-# Enable nginx site
-ln -s /etc/nginx/sites-available/dc-overview /etc/nginx/sites-enabled/
-nginx -t && systemctl reload nginx
+# Create Docker network
+docker network create cryptolabs
 
 # Start monitoring stack
 cd /root/dc-overview
-docker-compose up -d
+docker compose up -d
 ```
 
 ### 2. Worker Server Setup (Exporters Only)
@@ -60,12 +103,14 @@ On each worker server:
 wget https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz
 tar xvf node_exporter-*.tar.gz
 cp node_exporter-*/node_exporter /usr/local/bin/
-useradd -rs /bin/false node_exporter
 cp systemd/node-exporter.service /etc/systemd/system/
-systemctl daemon-reload && systemctl enable --now node-exporter
+systemctl daemon-reload && systemctl enable --now node_exporter
 
-# Install DCGM Exporter (requires NVIDIA drivers)
-# See dc-exporter README for detailed instructions
+# Install DC Exporter (GPU metrics)
+curl -L https://github.com/cryptolabsza/dc-exporter-releases/releases/latest/download/dc-exporter-rs -o /usr/local/bin/dc-exporter-rs
+chmod +x /usr/local/bin/dc-exporter-rs
+cp systemd/dc-exporter.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now dc-exporter
 ```
 
 ## Configuration Variables

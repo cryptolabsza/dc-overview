@@ -1623,141 +1623,102 @@ except Exception as e:
             return False
     
     def _integrate_with_proxy(self):
-        """Integrate with existing cryptolabs-proxy - add routes for dc-overview services."""
-        import re
+        """Integrate with existing cryptolabs-proxy - update it with correct config."""
+        import secrets as secrets_module
         
         console.print("\n[bold]Step 9: Integrating with CryptoLabs Proxy[/bold]\n")
-        console.print("[green]✓[/green] Using existing CryptoLabs Proxy")
-        console.print("[dim]Adding routes for DC Overview, Grafana, and Prometheus.[/dim]\n")
+        console.print("[dim]Updating proxy with Fleet credentials and Docker socket access...[/dim]\n")
         
-        # Find the existing nginx.conf
-        nginx_paths = [
-            Path("/etc/ipmi-monitor/nginx.conf"),
-            Path("/etc/cryptolabs-proxy/nginx.conf"),
-        ]
+        domain = self.config.ssl.domain or "localhost"
         
-        nginx_path = None
-        for path in nginx_paths:
-            if path.exists():
-                nginx_path = path
-                break
-        
-        if not nginx_path:
-            console.print("[yellow]⚠[/yellow] Could not find proxy nginx config")
-            return
-        
-        content = nginx_path.read_text()
-        modified = False
-        
-        # Services to add (only if not already present)
-        services_to_add = []
-        
-        # DC Overview route (server management web UI)
-        if '/dc/' not in content:
-            services_to_add.append(('DC Overview', '/dc/', 'dc-overview', 5001))
-        
-        # Add /servers shortcut redirect (if not already present)
-        if 'location /servers' not in content:
-            # Insert redirect before /dc/ location
-            redirect_block = '''
-        # Servers shortcut - redirect to DC Overview
-        location /servers {
-            return 301 /dc/servers;
-        }
-'''
-            dc_pattern = r'(location /dc/)'
-            if re.search(dc_pattern, content):
-                content = re.sub(dc_pattern, redirect_block + r'\n        \1', content)
-                nginx_path.write_text(content)
-                console.print(f"[green]✓[/green] Added /servers redirect")
-        
-        # Grafana route
-        if '/grafana/' not in content:
-            services_to_add.append(('Grafana', '/grafana/', 'grafana', 3000))
-        
-        # Prometheus route
-        if '/prometheus/' not in content:
-            services_to_add.append(('Prometheus', '/prometheus/', 'prometheus', 9090))
-        
-        if not services_to_add:
-            console.print("[green]✓[/green] All service routes already configured")
-        
-        # Update /api/services endpoint to include all running services
-        self._update_api_services_endpoint(nginx_path, content if not services_to_add else None)
-        
-        if services_to_add:
-            # Build location blocks for missing services with unified auth
-            location_blocks = ""
-            for display_name, path, container, port in services_to_add:
-                # Grafana needs special handling - no trailing slash to preserve subpath
-                if container == 'grafana':
-                    proxy_pass = f"http://{container}:{port}"
-                elif container == 'prometheus':
-                    # Prometheus needs the subpath passed to it
-                    proxy_pass = f"http://{container}:{port}/prometheus/"
-                else:
-                    proxy_pass = f"http://{container}:{port}/"
+        # Check if proxy needs to be updated (missing credentials or Docker socket)
+        needs_update = False
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", "cryptolabs-proxy", "--format", 
+                 "{{range .Config.Env}}{{println .}}{{end}}"],
+                capture_output=True, text=True, timeout=10
+            )
+            env_vars = result.stdout if result.returncode == 0 else ""
+            
+            # Check if credentials are set
+            if "FLEET_ADMIN_USER=" not in env_vars or "FLEET_ADMIN_PASS=" not in env_vars:
+                console.print("[dim]Proxy missing Fleet credentials - will update[/dim]")
+                needs_update = True
+            
+            # Check if Docker socket is mounted
+            result = subprocess.run(
+                ["docker", "exec", "cryptolabs-proxy", "ls", "/var/run/docker.sock"],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode != 0:
+                console.print("[dim]Proxy missing Docker socket - will update[/dim]")
+                needs_update = True
                 
-                location_blocks += f'''
-        # {display_name} (requires auth)
-        location {path} {{
-            auth_request /_auth_check;
-            auth_request_set $auth_user $upstream_http_x_fleet_auth_user;
-            auth_request_set $auth_role $upstream_http_x_fleet_auth_role;
-            auth_request_set $auth_token $upstream_http_x_fleet_auth_token;
-            error_page 401 = @login_redirect;
-
-            proxy_pass {proxy_pass};
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_set_header X-Script-Name {path.rstrip('/')};
+        except Exception as e:
+            console.print(f"[dim]Could not inspect proxy: {e} - will recreate[/dim]")
+            needs_update = True
+        
+        if needs_update:
+            # Determine SSL certificate paths
+            letsencrypt_path = Path(f"/etc/letsencrypt/live/{domain}")
+            ssl_mounts = []
             
-            # Forward Fleet auth headers to backend
-            proxy_set_header X-Fleet-Auth-User $auth_user;
-            proxy_set_header X-Fleet-Auth-Role $auth_role;
-            proxy_set_header X-Fleet-Auth-Token $auth_token;
-            proxy_set_header X-Fleet-Authenticated "true";
-
-            proxy_read_timeout 300s;
-            proxy_connect_timeout 10s;
-        }}
-'''
-            
-            # Find insertion point - before the root location / block
-            # Look for "location / {" that serves the landing page
-            root_location_pattern = r'(\s+# Fleet Management Landing Page.*?\n\s+location / \{)'
-            match = re.search(root_location_pattern, content, re.DOTALL)
-            
-            if match:
-                insert_pos = match.start()
-                new_content = content[:insert_pos] + location_blocks + content[insert_pos:]
+            if letsencrypt_path.exists():
+                # Use Let's Encrypt certificates
+                ssl_mounts = [
+                    "-v", f"{letsencrypt_path}/fullchain.pem:/etc/nginx/ssl/server.crt:ro",
+                    "-v", f"{letsencrypt_path}/privkey.pem:/etc/nginx/ssl/server.key:ro",
+                    "-v", "/etc/letsencrypt:/etc/letsencrypt:ro",
+                ]
+                console.print(f"[dim]Using Let's Encrypt certificate for {domain}[/dim]")
             else:
-                # Try simpler pattern - find last location block before closing braces
-                alt_pattern = r'(\s+location / \{[^}]+\})\s*\n\s*\}\s*\n\}'
-                match = re.search(alt_pattern, content, re.DOTALL)
-                if match:
-                    insert_pos = match.start()
-                    new_content = content[:insert_pos] + location_blocks + content[insert_pos:]
-                else:
-                    console.print("[yellow]⚠[/yellow] Could not find insertion point")
-                    console.print("[dim]Please add routes manually to nginx.conf[/dim]")
-                    return
+                # Check for self-signed certs
+                ssl_dir = Path("/etc/dc-overview/ssl")
+                if not ssl_dir.exists() or not (ssl_dir / "server.crt").exists():
+                    ssl_dir.mkdir(parents=True, exist_ok=True)
+                    self._generate_self_signed_cert(domain, ssl_dir)
+                ssl_mounts = ["-v", f"{ssl_dir}:/etc/nginx/ssl:ro"]
+                console.print("[dim]Using self-signed certificate[/dim]")
             
-            # Write updated config
-            nginx_path.write_text(new_content)
-            modified = True
+            # Generate auth secret
+            auth_secret = secrets_module.token_hex(32)
             
-            for display_name, path, _, _ in services_to_add:
-                console.print(f"[green]✓[/green] Added {path} route for {display_name}")
+            # Remove existing proxy
+            subprocess.run(["docker", "rm", "-f", "cryptolabs-proxy"], capture_output=True)
+            
+            # Recreate proxy with correct configuration
+            cmd = [
+                "docker", "run", "-d",
+                "--name", "cryptolabs-proxy",
+                "--restart", "unless-stopped",
+                "-p", "80:80", "-p", "443:443",
+                "-e", f"FLEET_ADMIN_USER={self.config.fleet_admin_user}",
+                "-e", f"FLEET_ADMIN_PASS={self.config.fleet_admin_pass}",
+                "-e", f"AUTH_SECRET_KEY={auth_secret}",
+                "-v", "/var/run/docker.sock:/var/run/docker.sock:ro",
+                "-v", "cryptolabs-proxy-data:/data",
+                "--network", "cryptolabs",
+                "--label", "com.centurylinklabs.watchtower.enable=true",
+            ] + ssl_mounts + [
+                "ghcr.io/cryptolabsza/cryptolabs-proxy:dev"
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                console.print("[green]✓[/green] CryptoLabs Proxy updated with Fleet credentials")
+                # Wait for proxy to be healthy
+                time.sleep(3)
+            else:
+                console.print(f"[red]✗[/red] Failed to update proxy: {result.stderr[:200]}")
+                return
+        else:
+            console.print("[green]✓[/green] Proxy already configured correctly")
         
         # Ensure containers are on the cryptolabs network
         network = "cryptolabs"
-        containers = ["prometheus", "grafana"]
+        containers = ["prometheus", "grafana", "dc-overview", "ipmi-monitor"]
         
         for container in containers:
             try:
@@ -1775,29 +1736,24 @@ except Exception as e:
         
         console.print("[green]✓[/green] Containers connected to cryptolabs network")
         
-        # Reload nginx in the proxy container
-        if modified or services_to_add:
-            try:
-                result = subprocess.run(
-                    ["docker", "exec", "cryptolabs-proxy", "nginx", "-t"],
-                    capture_output=True, text=True, timeout=10
-                )
-                if result.returncode == 0:
-                    subprocess.run(
-                        ["docker", "exec", "cryptolabs-proxy", "nginx", "-s", "reload"],
-                        capture_output=True, text=True, timeout=10
-                    )
-                    console.print("[green]✓[/green] Proxy configuration reloaded")
-                else:
-                    console.print(f"[yellow]⚠[/yellow] Nginx config test failed: {result.stderr[:100]}")
-                    console.print("[dim]Run: docker exec cryptolabs-proxy nginx -t[/dim]")
-            except Exception as e:
-                console.print(f"[yellow]⚠[/yellow] Could not reload proxy: {e}")
+        # Verify service detection is working
+        try:
+            result = subprocess.run(
+                ["curl", "-s", "http://localhost/api/services"],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0 and '"running": true' in result.stdout:
+                console.print("[green]✓[/green] Service detection working")
+            else:
+                console.print("[yellow]⚠[/yellow] Service detection may need a moment to initialize")
+        except Exception:
+            pass
         
-        domain = self.config.ssl.domain or "your-server"
-        console.print(f"\n  DC Overview: [cyan]https://{domain}/dc/[/cyan]")
+        console.print(f"\n  Fleet Management: [cyan]https://{domain}/[/cyan]")
+        console.print(f"  DC Overview: [cyan]https://{domain}/dc/[/cyan]")
         console.print(f"  Grafana: [cyan]https://{domain}/grafana/[/cyan]")
         console.print(f"  Prometheus: [cyan]https://{domain}/prometheus/[/cyan]")
+        console.print(f"\n  Login: [cyan]{self.config.fleet_admin_user}[/cyan] / [dim](password you set)[/dim]")
     
     def _update_api_services_endpoint(self, nginx_path: Path, content: str = None):
         """Update /api/services endpoint to include all running services."""

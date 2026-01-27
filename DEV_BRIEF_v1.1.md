@@ -1,10 +1,14 @@
 # DC Overview v1.1 Development Brief
 
+> **Note**: This document is the historical development brief. For current architecture documentation, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ## Project Goal
 
 Pivot DC Overview from native installation to **Docker-based deployment** (like IPMI Monitor), using the new **shared `cryptolabs-proxy`** for reverse proxy and fleet management landing page.
 
 **End State**: Both `ipmi-monitor` and `dc-overview` can be installed on the same server, share a unified reverse proxy, and cross-import server/SSH configurations.
+
+**Status**: ✅ IMPLEMENTED - See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for current state.
 
 ---
 
