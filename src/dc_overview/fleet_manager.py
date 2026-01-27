@@ -134,6 +134,8 @@ class FleetManager:
         if self.config.ssh_key_generated and self.config.ssh.key_path:
             console.print(f"[dim]Using existing SSH key: {self.config.ssh.key_path}[/dim]")
             console.print("[green]✓[/green] SSH key already configured")
+            # Still copy to shared location for sub-services
+            self._copy_ssh_key_to_config_dir()
             return
         
         # Generate key if not using existing
@@ -173,6 +175,31 @@ class FleetManager:
         else:
             console.print("[dim]No password provided - assuming SSH key already deployed[/dim]")
             self.config.ssh_key_generated = True
+        
+        # Copy SSH key to shared config directory for sub-services (IPMI Monitor, dc-overview)
+        self._copy_ssh_key_to_config_dir()
+    
+    def _copy_ssh_key_to_config_dir(self):
+        """Copy SSH key to config directory for use by sub-services."""
+        import shutil
+        
+        if not self.config.ssh.key_path:
+            return
+        
+        source_key = Path(self.config.ssh.key_path)
+        if not source_key.exists():
+            return
+        
+        ssh_keys_dir = self.config.config_dir / "ssh_keys"
+        ssh_keys_dir.mkdir(parents=True, exist_ok=True)
+        dest_key = ssh_keys_dir / "fleet_key"
+        
+        try:
+            shutil.copy2(source_key, dest_key)
+            os.chmod(dest_key, 0o600)
+            console.print(f"[dim]  Copied SSH key to {dest_key}[/dim]")
+        except Exception as e:
+            console.print(f"[yellow]⚠[/yellow] Failed to copy SSH key: {e}")
     
     # ============ Step 3: Prometheus + Grafana ============
     
