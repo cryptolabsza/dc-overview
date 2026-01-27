@@ -97,6 +97,9 @@ class FleetManager:
             else:
                 self._integrate_with_proxy()
             
+            # Step 10: Security Hardening (firewall setup)
+            self._setup_security_hardening()
+            
             # Done!
             self._show_completion()
             return True
@@ -1944,6 +1947,67 @@ except Exception as e:
             new_content = re.sub(api_services_pattern, new_api_services, content)
             nginx_path.write_text(new_content)
             console.print(f"[green]✓[/green] Updated /api/services with {len(services)} services")
+    
+    # ============ Step 10: Security Hardening ============
+    
+    def _setup_security_hardening(self):
+        """Configure UFW firewall and security settings."""
+        console.print("\n[bold]Step 10: Security Hardening[/bold]\n")
+        
+        # Check if UFW is available
+        result = subprocess.run(["which", "ufw"], capture_output=True)
+        if result.returncode != 0:
+            console.print("[yellow]⚠[/yellow] UFW not installed - skipping firewall configuration")
+            console.print("[dim]Install with: apt install ufw[/dim]")
+            return
+        
+        # Check current UFW status
+        result = subprocess.run(["ufw", "status"], capture_output=True, text=True)
+        if "Status: active" in result.stdout:
+            console.print("[green]✓[/green] UFW firewall already active")
+            return
+        
+        console.print("[dim]Configuring UFW firewall rules...[/dim]")
+        
+        # Set default policies
+        subprocess.run(["ufw", "default", "deny", "incoming"], capture_output=True)
+        subprocess.run(["ufw", "default", "allow", "outgoing"], capture_output=True)
+        
+        # Allow SSH (critical - don't lock yourself out!)
+        ssh_port = getattr(self.config.ssh, 'port', 22) or 22
+        subprocess.run(["ufw", "allow", str(ssh_port)], capture_output=True)
+        console.print(f"[green]✓[/green] Allowed SSH on port {ssh_port}")
+        
+        # Allow HTTP/HTTPS for the proxy
+        subprocess.run(["ufw", "allow", "80/tcp"], capture_output=True)
+        subprocess.run(["ufw", "allow", "443/tcp"], capture_output=True)
+        console.print("[green]✓[/green] Allowed HTTP (80) and HTTPS (443)")
+        
+        # Allow Prometheus from internal network only (if needed for external scraping)
+        # By default, keep it internal only
+        
+        # Allow metrics ports only from localhost/docker (internal only)
+        # These remain blocked from external access by default
+        
+        # Enable UFW (non-interactive)
+        result = subprocess.run(
+            ["ufw", "--force", "enable"],
+            capture_output=True, text=True
+        )
+        
+        if result.returncode == 0:
+            console.print("[green]✓[/green] UFW firewall enabled")
+            console.print()
+            console.print("[bold]Firewall Rules:[/bold]")
+            console.print("  • SSH (port %d): [green]ALLOWED[/green]" % ssh_port)
+            console.print("  • HTTP (port 80): [green]ALLOWED[/green]")
+            console.print("  • HTTPS (port 443): [green]ALLOWED[/green]")
+            console.print("  • All other incoming: [red]DENIED[/red]")
+            console.print()
+            console.print("[dim]Note: Internal services (Prometheus, Grafana, exporters) are")
+            console.print("accessible only through the HTTPS proxy for security.[/dim]")
+        else:
+            console.print(f"[yellow]⚠[/yellow] Failed to enable UFW: {result.stderr[:100]}")
     
     # ============ Completion ============
     

@@ -9,9 +9,12 @@ GitHub: https://github.com/cryptolabsza/dc-overview
 License: MIT
 """
 
-from flask import Flask, render_template_string, jsonify, request, Response, session, redirect, url_for
+from flask import Flask, render_template_string, jsonify, request, Response, session, redirect, url_for, g
 from functools import wraps
 from flask_sqlalchemy import SQLAlchemy
+from flask_wtf.csrf import CSRFProtect, CSRFError
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from datetime import datetime, timedelta
 from prometheus_client import Gauge, Counter, generate_latest, CONTENT_TYPE_LATEST, CollectorRegistry
 import subprocess
@@ -22,6 +25,9 @@ import yaml
 import os
 import socket
 import secrets
+import re
+import ipaddress
+import shlex
 from pathlib import Path
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -48,6 +54,11 @@ os.makedirs(DATA_DIR, exist_ok=True)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DATA_DIR}/dc_overview.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['WTF_CSRF_ENABLED'] = True
+app.config['WTF_CSRF_TIME_LIMIT'] = 3600  # 1 hour
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('SESSION_COOKIE_SECURE', 'true').lower() == 'true'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 # Application settings
 APPLICATION_ROOT = os.environ.get('APPLICATION_ROOT', '/dc')
@@ -55,7 +66,108 @@ GRAFANA_URL = os.environ.get('GRAFANA_URL', 'http://grafana:3000')
 PROMETHEUS_URL = os.environ.get('PROMETHEUS_URL', 'http://prometheus:9090')
 DC_OVERVIEW_PORT = int(os.environ.get('DC_OVERVIEW_PORT', '5001'))
 
+# =============================================================================
+# SECURITY CONFIGURATION
+# =============================================================================
+
+# Trusted proxy IPs - only accept X-Fleet-* headers from these sources
+# Docker internal network IPs, localhost, and configurable via environment
+TRUSTED_PROXY_IPS = set(
+    os.environ.get('TRUSTED_PROXY_IPS', '127.0.0.1,172.17.0.1,172.18.0.1,172.19.0.1,172.20.0.1').split(',')
+)
+
+# Initialize CSRF protection
+csrf = CSRFProtect(app)
+
+# Initialize rate limiter
+def get_client_ip():
+    """Get client IP, respecting X-Forwarded-For from trusted proxies."""
+    if request.remote_addr in TRUSTED_PROXY_IPS:
+        forwarded = request.headers.get('X-Forwarded-For', '')
+        if forwarded:
+            return forwarded.split(',')[0].strip()
+    return request.remote_addr
+
+limiter = Limiter(
+    key_func=get_client_ip,
+    app=app,
+    default_limits=["200 per minute", "50 per second"],
+    storage_uri="memory://",
+)
+
+# Input validation patterns
+VALID_IP_PATTERN = re.compile(r'^(\d{1,3}\.){3}\d{1,3}$')
+VALID_USERNAME_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_-]{0,31}$')
+VALID_HOSTNAME_PATTERN = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$')
+
+def validate_ip_address(ip_str):
+    """Validate and return IP address or raise ValueError."""
+    try:
+        ip = ipaddress.ip_address(ip_str.strip())
+        return str(ip)
+    except ValueError:
+        raise ValueError(f"Invalid IP address: {ip_str}")
+
+def validate_ssh_username(username):
+    """Validate SSH username format."""
+    if not username:
+        return 'root'
+    username = username.strip()
+    if not VALID_USERNAME_PATTERN.match(username):
+        raise ValueError(f"Invalid SSH username: {username}. Must be alphanumeric, starting with letter or underscore.")
+    return username
+
+def validate_hostname(hostname):
+    """Validate hostname/server name format."""
+    if not hostname:
+        raise ValueError("Hostname cannot be empty")
+    hostname = hostname.strip()
+    if not VALID_HOSTNAME_PATTERN.match(hostname):
+        raise ValueError(f"Invalid hostname: {hostname}. Must be alphanumeric with dots, dashes, underscores.")
+    return hostname
+
+def validate_port(port, default=22):
+    """Validate port number."""
+    try:
+        port = int(port) if port else default
+        if not 1 <= port <= 65535:
+            raise ValueError()
+        return port
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid port: {port}. Must be 1-65535.")
+
 db = SQLAlchemy(app)
+
+# CSRF error handler
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    """Handle CSRF validation errors."""
+    app.logger.warning(f"CSRF validation failed: {e.description} from {get_client_ip()}")
+    return jsonify({'error': 'CSRF token missing or invalid'}), 400
+
+# Security headers
+@app.after_request
+def add_security_headers(response):
+    """Add security headers to all responses."""
+    # Prevent clickjacking
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    # Prevent MIME type sniffing
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    # XSS protection (legacy but still useful)
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    # Referrer policy
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    # Content Security Policy (basic)
+    if 'text/html' in response.content_type:
+        response.headers['Content-Security-Policy'] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data: https:; "
+            "connect-src 'self'"
+        )
+    return response
 
 # =============================================================================
 # DATABASE MODELS
@@ -165,8 +277,22 @@ def is_proxy_authenticated():
     
     When running behind cryptolabs-proxy with unified auth,
     the proxy forwards authentication headers that we can trust.
+    
+    SECURITY: Only trust headers from known proxy IPs to prevent
+    header spoofing attacks from untrusted sources.
     """
-    # Check if the proxy auth flag is set
+    # SECURITY: First verify the request comes from a trusted proxy IP
+    client_ip = request.remote_addr
+    if client_ip not in TRUSTED_PROXY_IPS:
+        # Log attempted header spoofing from untrusted source
+        if request.headers.get(PROXY_AUTH_HEADER_FLAG) == 'true':
+            app.logger.warning(
+                f"SECURITY: Rejecting proxy auth headers from untrusted IP: {client_ip}. "
+                f"User attempted: {request.headers.get(PROXY_AUTH_HEADER_USER, 'unknown')}"
+            )
+        return False
+    
+    # Check if the proxy auth flag is set (only from trusted IPs)
     if request.headers.get(PROXY_AUTH_HEADER_FLAG) == 'true':
         username = request.headers.get(PROXY_AUTH_HEADER_USER)
         if username:
@@ -251,6 +377,7 @@ def is_running_behind_proxy():
 # =============================================================================
 
 @app.route('/api/health')
+@csrf.exempt
 def api_health():
     """Health check endpoint for Docker/proxy."""
     return jsonify({
@@ -315,28 +442,40 @@ def api_servers():
 @app.route('/api/servers', methods=['POST'])
 @write_required
 def api_add_server():
-    """Add a new server to monitor."""
+    """Add a new server to monitor with input validation."""
     data = request.json
     
     if not data.get('name') or not data.get('server_ip'):
         return jsonify({'error': 'name and server_ip required'}), 400
     
+    # SECURITY: Validate all inputs
+    try:
+        validated_name = validate_hostname(data['name'])
+        validated_ip = validate_ip_address(data['server_ip'])
+        validated_user = validate_ssh_username(data.get('ssh_user', 'root'))
+        validated_port = validate_port(data.get('ssh_port', 22))
+    except ValueError as e:
+        app.logger.warning(f"Invalid server input from {get_client_ip()}: {e}")
+        return jsonify({'error': str(e)}), 400
+    
     # Check for duplicate
     existing = Server.query.filter(
-        (Server.name == data['name']) | (Server.server_ip == data['server_ip'])
+        (Server.name == validated_name) | (Server.server_ip == validated_ip)
     ).first()
     if existing:
         return jsonify({'error': 'Server with this name or IP already exists'}), 409
     
     server = Server(
-        name=data['name'],
-        server_ip=data['server_ip'],
-        ssh_user=data.get('ssh_user', 'root'),
-        ssh_port=data.get('ssh_port', 22),
+        name=validated_name,
+        server_ip=validated_ip,
+        ssh_user=validated_user,
+        ssh_port=validated_port,
         ssh_key_id=data.get('ssh_key_id')
     )
     db.session.add(server)
     db.session.commit()
+    
+    app.logger.info(f"Server added: {validated_name} ({validated_ip}) by {session.get('username', 'unknown')}")
     
     # Update Prometheus config
     update_prometheus_targets()
@@ -908,10 +1047,13 @@ def api_prometheus_targets():
     return jsonify(targets)
 
 @app.route('/api/prometheus/targets.json')
+@csrf.exempt
+@limiter.limit("10 per minute")  # Rate limit unauthenticated endpoint
 def api_prometheus_file_sd():
     """
     File-based service discovery for Prometheus.
     Can be used with file_sd_configs in prometheus.yml
+    Note: This endpoint exposes server IPs - consider adding authentication in production.
     """
     servers = Server.query.all()
     targets = []
@@ -1184,6 +1326,8 @@ def api_grafana_sync_all_roles():
         }), 500
 
 @app.route('/metrics')
+@csrf.exempt
+@limiter.limit("30 per minute")  # Rate limit metrics scraping
 def prometheus_metrics():
     """Prometheus metrics endpoint."""
     # Update metrics
@@ -1228,8 +1372,10 @@ def index():
     )
 
 @app.route('/login', methods=['GET', 'POST'])
+@limiter.limit("5 per minute", error_message="Too many login attempts. Please wait.")
+@csrf.exempt  # Login form has its own CSRF handling
 def login():
-    """Login page."""
+    """Login page with rate limiting."""
     error = None
     
     if request.method == 'POST':
@@ -1238,17 +1384,28 @@ def login():
         
         # First run - set password
         if not stored_hash:
-            if len(password) >= 4:
-                set_setting('admin_password_hash', generate_password_hash(password))
-                session['authenticated'] = True
-                return redirect(url_for('index'))
+            # Enforce stronger password requirements
+            if len(password) >= 8:
+                if not re.search(r'[A-Za-z]', password) or not re.search(r'[0-9]', password):
+                    error = 'Password must contain both letters and numbers'
+                else:
+                    set_setting('admin_password_hash', generate_password_hash(password))
+                    session['authenticated'] = True
+                    session['role'] = 'admin'
+                    session['username'] = 'admin'
+                    app.logger.info(f"Initial admin password set from {get_client_ip()}")
+                    return redirect(url_for('index'))
             else:
-                error = 'Password must be at least 4 characters'
+                error = 'Password must be at least 8 characters with letters and numbers'
         else:
             if check_password_hash(stored_hash, password):
                 session['authenticated'] = True
+                session['role'] = 'admin'
+                session['username'] = 'admin'
+                app.logger.info(f"Admin login from {get_client_ip()}")
                 return redirect(url_for('index'))
             else:
+                app.logger.warning(f"Failed login attempt from {get_client_ip()}")
                 error = 'Invalid password'
     
     first_run = get_setting('admin_password_hash') is None
