@@ -170,11 +170,16 @@ def is_proxy_authenticated():
     if request.headers.get(PROXY_AUTH_HEADER_FLAG) == 'true':
         username = request.headers.get(PROXY_AUTH_HEADER_USER)
         if username:
-            # Auto-authenticate the session
-            if not session.get('authenticated'):
+            # Map proxy roles directly - preserve all role levels
+            proxy_role = request.headers.get(PROXY_AUTH_HEADER_ROLE, 'readonly')
+            # Valid roles: admin, readwrite, readonly
+            role = proxy_role if proxy_role in ['admin', 'readwrite', 'readonly'] else 'readonly'
+            
+            # Auto-authenticate the session or update role if changed
+            if not session.get('authenticated') or session.get('role') != role:
                 session['authenticated'] = True
                 session['username'] = username
-                session['role'] = request.headers.get(PROXY_AUTH_HEADER_ROLE, 'admin')
+                session['role'] = role
                 session['auth_via'] = 'fleet_proxy'
             return True
     return False
@@ -187,14 +192,53 @@ def check_auth():
     # Then check session
     return session.get('authenticated', False)
 
+def get_user_role():
+    """Get the current user's role."""
+    is_proxy_authenticated()  # Ensure session is updated
+    return session.get('role', 'readonly')
+
 def login_required(f):
-    """Decorator for routes that require authentication."""
+    """Decorator for routes that require any authenticated user."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not check_auth():
             if request.is_json:
                 return jsonify({'error': 'Authentication required'}), 401
             return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def admin_required(f):
+    """Decorator for routes that require admin role."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not check_auth():
+            if request.is_json:
+                return jsonify({'error': 'Authentication required'}), 401
+            return redirect(url_for('login'))
+        
+        role = get_user_role()
+        if role != 'admin':
+            if request.is_json:
+                return jsonify({'error': 'Admin access required', 'your_role': role}), 403
+            return "Admin access required", 403
+        return f(*args, **kwargs)
+    return decorated_function
+
+def write_required(f):
+    """Decorator for routes that require admin or readwrite role."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not check_auth():
+            if request.is_json:
+                return jsonify({'error': 'Authentication required'}), 401
+            return redirect(url_for('login'))
+        
+        role = get_user_role()
+        if role not in ['admin', 'readwrite']:
+            if request.is_json:
+                return jsonify({'error': 'Write access required', 'your_role': role}), 403
+            return "Write access required", 403
         return f(*args, **kwargs)
     return decorated_function
 
@@ -214,6 +258,27 @@ def api_health():
         'service': 'dc-overview',
         'version': __version__,
         'timestamp': datetime.utcnow().isoformat()
+    })
+
+@app.route('/api/auth/status')
+def api_auth_status():
+    """Get current authentication status and user info."""
+    is_authenticated = check_auth()
+    return jsonify({
+        'authenticated': is_authenticated,
+        'username': session.get('username') if is_authenticated else None,
+        'role': session.get('role') if is_authenticated else None,
+        'auth_via': session.get('auth_via') if is_authenticated else None,
+        'is_proxy_auth': is_running_behind_proxy(),
+        'permissions': {
+            'can_read': is_authenticated,
+            'can_write': is_authenticated and session.get('role') in ['admin', 'readwrite'],
+            'can_admin': is_authenticated and session.get('role') == 'admin'
+        } if is_authenticated else {
+            'can_read': False,
+            'can_write': False,
+            'can_admin': False
+        }
     })
 
 @app.route('/api/servers')
@@ -248,7 +313,7 @@ def api_servers():
     } for s in servers])
 
 @app.route('/api/servers', methods=['POST'])
-@login_required
+@write_required
 def api_add_server():
     """Add a new server to monitor."""
     data = request.json
@@ -279,7 +344,7 @@ def api_add_server():
     return jsonify({'id': server.id, 'message': 'Server added'}), 201
 
 @app.route('/api/servers/<int:server_id>', methods=['DELETE'])
-@login_required
+@write_required
 def api_delete_server(server_id):
     """Remove a server from monitoring."""
     server = Server.query.get_or_404(server_id)
@@ -427,7 +492,7 @@ def get_gpu_count_from_exporter(server_ip):
         return None
 
 @app.route('/api/servers/<int:server_id>/install-exporters', methods=['POST'])
-@login_required
+@write_required
 def api_install_exporters(server_id):
     """Install exporters on a remote server."""
     server = Server.query.get_or_404(server_id)
@@ -443,7 +508,7 @@ def api_install_exporters(server_id):
     return jsonify(results)
 
 @app.route('/api/servers/<int:server_id>/remove-exporters', methods=['POST'])
-@login_required
+@write_required
 def api_remove_exporters(server_id):
     """Remove exporters from a remote server."""
     server = Server.query.get_or_404(server_id)
@@ -521,7 +586,7 @@ def api_get_exporter_versions(server_id):
 
 
 @app.route('/api/servers/<int:server_id>/exporters/<exporter>/toggle', methods=['POST'])
-@login_required
+@write_required
 def api_toggle_exporter(server_id, exporter):
     """Enable or disable an exporter on a server."""
     server = Server.query.get_or_404(server_id)
@@ -572,7 +637,7 @@ def api_toggle_exporter(server_id, exporter):
 
 
 @app.route('/api/servers/<int:server_id>/exporters/<exporter>/update', methods=['POST'])
-@login_required
+@write_required
 def api_update_exporter(server_id, exporter):
     """Update an exporter to the latest version."""
     from .exporters import get_latest_exporter_version, get_exporter_download_url
@@ -618,7 +683,7 @@ def api_update_exporter(server_id, exporter):
 
 
 @app.route('/api/servers/<int:server_id>/exporters/settings', methods=['POST'])
-@login_required
+@write_required
 def api_update_exporter_settings(server_id):
     """Update exporter settings (auto-update, branch)."""
     server = Server.query.get_or_404(server_id)
@@ -899,7 +964,7 @@ def api_ssh_keys():
 
 
 @app.route('/api/ssh-keys', methods=['POST'])
-@login_required
+@admin_required
 def api_add_ssh_key():
     """Add a new SSH key."""
     data = request.json
@@ -943,7 +1008,7 @@ def api_add_ssh_key():
 
 
 @app.route('/api/ssh-keys/<int:key_id>', methods=['DELETE'])
-@login_required
+@admin_required
 def api_delete_ssh_key(key_id):
     """Delete an SSH key."""
     key = SSHKey.query.get_or_404(key_id)
@@ -960,7 +1025,7 @@ def api_delete_ssh_key(key_id):
 
 
 @app.route('/api/servers/<int:server_id>/ssh-key', methods=['POST'])
-@login_required
+@admin_required
 def api_set_server_ssh_key(server_id):
     """Set the SSH key for a server."""
     server = Server.query.get_or_404(server_id)
@@ -1077,7 +1142,7 @@ def servers_page():
     )
 
 @app.route('/settings')
-@login_required
+@admin_required
 def settings_page():
     """Settings page."""
     ssh_keys = SSHKey.query.all()
