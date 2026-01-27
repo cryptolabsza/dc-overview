@@ -151,6 +151,24 @@
             animation: pulse 2s infinite;
         }
         
+        .status-dot.status-running {
+            background: var(--success);
+        }
+        
+        .status-dot.status-warning {
+            background: var(--warning);
+        }
+        
+        .status-dot.status-stopped {
+            background: #ef4444;
+            animation: none;
+        }
+        
+        .status-dot.status-unknown {
+            background: var(--text-secondary);
+            animation: none;
+        }
+        
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
@@ -558,6 +576,53 @@
                 }, 2000);
             });
         }
+        
+        // Service status refresh - polls /api/services every 30 seconds
+        async function fetchServiceStatus() {
+            try {
+                const resp = await fetch('/api/services');
+                const services = await resp.json();
+                
+                // Update service status dots
+                const serviceCards = document.querySelectorAll('.service-card:not(.promo-card)');
+                serviceCards.forEach(card => {
+                    const href = card.getAttribute('href');
+                    let serviceName = null;
+                    
+                    // Map href to service name
+                    if (href === '/grafana/') serviceName = 'grafana';
+                    else if (href === '/prometheus/') serviceName = 'prometheus';
+                    else if (href === '/ipmi/') serviceName = 'ipmi-monitor';
+                    else if (href === '/dc/') serviceName = 'dc-overview';
+                    
+                    if (serviceName && services[serviceName]) {
+                        const status = services[serviceName];
+                        const statusDot = card.querySelector('.status-dot');
+                        const statusText = card.querySelector('.status span');
+                        
+                        if (statusDot) {
+                            statusDot.classList.remove('status-running', 'status-stopped', 'status-unknown');
+                            if (status.running && status.healthy) {
+                                statusDot.classList.add('status-running');
+                                if (statusText) statusText.textContent = 'Running';
+                            } else if (status.running) {
+                                statusDot.classList.add('status-warning');
+                                if (statusText) statusText.textContent = 'Unhealthy';
+                            } else {
+                                statusDot.classList.add('status-stopped');
+                                if (statusText) statusText.textContent = 'Stopped';
+                            }
+                        }
+                    }
+                });
+            } catch (e) {
+                console.log('Failed to fetch service status:', e);
+            }
+        }
+        
+        // Fetch service status on load and every 30 seconds
+        fetchServiceStatus();
+        setInterval(fetchServiceStatus, 30000);
         
         // Fetch stats from Prometheus read-only API
         async function fetchStats() {
