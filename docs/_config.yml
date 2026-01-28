@@ -1,0 +1,9 @@
+title: DC Overview Documentation
+description: Complete GPU Datacenter Monitoring Suite
+url: "https://cryptolabsza.github.io"
+baseurl: "/dc-overview"
+theme: jekyll-theme-minimal
+
+# GitHub repository
+github:
+  repo: cryptolabsza/dc-overview
