@@ -465,7 +465,7 @@ networks:
       - "--storage.tsdb.retention.time={self.config.prometheus.retention_days}d"
       - "--web.enable-lifecycle"
       - "--web.external-url=/prometheus/"
-      - "--web.route-prefix=/"
+      - "--web.route-prefix=/prometheus/"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
