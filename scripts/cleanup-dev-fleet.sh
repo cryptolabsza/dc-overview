@@ -21,8 +21,8 @@ NC='\033[0m' # No Color
 echo -e "${YELLOW}=== DC Overview Dev Fleet Cleanup ===${NC}"
 echo ""
 
-# DC Overview containers to remove
-DC_CONTAINERS="cryptolabs-proxy dc-overview ipmi-monitor grafana prometheus vastai-exporter"
+# DC Overview containers to remove (including certbot from ipmi-monitor standalone)
+DC_CONTAINERS="cryptolabs-proxy dc-overview ipmi-monitor grafana prometheus vastai-exporter certbot"
 
 # DC Overview volumes to remove
 DC_VOLUMES="dc-overview-data ipmi-monitor-data grafana-data prometheus-data dc-overview_grafana-data dc-overview_prometheus-data fleet-auth-data"
@@ -77,6 +77,11 @@ ssh_cmd ${MASTER_PORT} "systemctl daemon-reload"
 # Prune unused images on master
 echo "  Pruning unused images..."
 ssh_cmd ${MASTER_PORT} "docker image prune -a -f 2>/dev/null || true"
+
+# Clean up certbot lock files
+echo "  Cleaning certbot lock files..."
+ssh_cmd ${MASTER_PORT} "rm -f /var/lib/letsencrypt/.certbot.lock 2>/dev/null || true"
+ssh_cmd ${MASTER_PORT} "pkill -f certbot 2>/dev/null || true"
 
 # Uninstall dc-overview pip package and clear cache
 echo "  Uninstalling dc-overview pip package..."
