@@ -78,6 +78,11 @@ ssh_cmd ${MASTER_PORT} "systemctl daemon-reload"
 echo "  Pruning unused images..."
 ssh_cmd ${MASTER_PORT} "docker image prune -a -f 2>/dev/null || true"
 
+# Uninstall dc-overview pip package and clear cache
+echo "  Uninstalling dc-overview pip package..."
+ssh_cmd ${MASTER_PORT} "pip uninstall dc-overview -y --break-system-packages 2>/dev/null || true"
+ssh_cmd ${MASTER_PORT} "pip cache purge 2>/dev/null || true"
+
 echo -e "${GREEN}  ✓ Master node cleaned${NC}"
 
 echo ""
