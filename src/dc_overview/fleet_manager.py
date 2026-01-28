@@ -380,7 +380,7 @@ providers:
       - APPLICATION_ROOT=/dc
       - GRAFANA_URL=http://grafana:3000
       - PROMETHEUS_URL=http://prometheus:9090
-      - TRUSTED_PROXY_IPS={PROXY_STATIC_IP}
+      - TRUSTED_PROXY_IPS=127.0.0.1,{PROXY_STATIC_IP}
     volumes:
       - dc-data:/data
       - ./ssh_keys:/etc/dc-overview/ssh_keys:ro
@@ -1287,9 +1287,9 @@ echo "Exporters installed successfully"
                 "-e", f"AI_LICENSE_KEY={self.config.ipmi_monitor.ai_license_key}",
             ])
         
-        # Security: Only trust the proxy's static IP for X-Fleet-* header authentication
+        # Security: Trust proxy's static IP and localhost (for internal curl commands)
         env_vars.extend([
-            "-e", f"TRUSTED_PROXY_IPS={PROXY_STATIC_IP}",
+            "-e", f"TRUSTED_PROXY_IPS=127.0.0.1,{PROXY_STATIC_IP}",
         ])
         
         # Prepare SSH keys mount if available
@@ -1635,7 +1635,7 @@ except Exception as e:
             "--restart", "unless-stopped",
             "-e", f"FLASK_SECRET_KEY={flask_secret}",
             "-e", "DC_OVERVIEW_PORT=5001",
-            "-e", f"TRUSTED_PROXY_IPS={PROXY_STATIC_IP}",
+            "-e", f"TRUSTED_PROXY_IPS=127.0.0.1,{PROXY_STATIC_IP}",
             "-v", "dc-overview-data:/data",
             "-v", f"{self.config.config_dir}:/etc/dc-overview:ro",
             "--health-cmd", "curl -f http://127.0.0.1:5001/api/health || exit 1",
