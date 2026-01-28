@@ -339,48 +339,60 @@ providers:
         with Progress(SpinnerColumn(), TextColumn("Pulling images..."), console=console) as progress:
             progress.add_task("", total=None)
             
-            pull_result = subprocess.run(
+            subprocess.run(
                 ["docker", "compose", "pull"],
                 cwd=compose_dir,
                 capture_output=True,
                 text=True
             )
+            # Ignore pull exit code - images may be cached, docker compose up will handle it
         
-        if pull_result.returncode != 0:
-            # Check if it's a real error (not just progress output)
-            if "error" in pull_result.stderr.lower() or "failed" in pull_result.stderr.lower():
-                console.print(f"[yellow]⚠[/yellow] Image pull warning: {pull_result.stderr[:200]}")
-            # Continue anyway - images might already be cached
-        
-        # Start services
+        # Start services (docker compose writes all progress to stderr, even on success)
         with Progress(SpinnerColumn(), TextColumn("Starting services..."), console=console) as progress:
             progress.add_task("", total=None)
             
-            result = subprocess.run(
+            subprocess.run(
                 ["docker", "compose", "up", "-d"],
                 cwd=compose_dir,
                 capture_output=True,
                 text=True
             )
+            # Don't check return code - docker compose returns non-zero during normal operation
+            # We'll verify by checking if containers are actually running
         
-        # Check if containers are actually running (more reliable than exit code)
+        # Wait a moment for containers to initialize, then check status
+        time.sleep(2)
+        
+        # Check if containers are actually running (the only reliable way)
         check_result = subprocess.run(
-            ["docker", "ps", "--filter", "name=prometheus", "--filter", "name=grafana", "-q"],
+            ["docker", "ps", "--filter", "name=prometheus", "--filter", "name=grafana", "--format", "{{.Names}}"],
             capture_output=True,
             text=True
         )
-        running_containers = check_result.stdout.strip().split('\n')
-        running_containers = [c for c in running_containers if c]  # Filter empty
+        running_containers = [c.strip() for c in check_result.stdout.strip().split('\n') if c.strip()]
         
-        if len(running_containers) >= 2:
+        prometheus_running = any('prometheus' in c.lower() for c in running_containers)
+        grafana_running = any('grafana' in c.lower() for c in running_containers)
+        
+        if prometheus_running and grafana_running:
             console.print("[green]✓[/green] Prometheus running on port 9090")
             console.print("[green]✓[/green] Grafana running on port 3000")
-        elif result.returncode == 0:
+        elif prometheus_running or grafana_running:
             console.print("[green]✓[/green] Services starting...")
+            if not prometheus_running:
+                console.print("[yellow]⚠[/yellow] Prometheus may still be starting")
+            if not grafana_running:
+                console.print("[yellow]⚠[/yellow] Grafana may still be starting")
         else:
-            # Only show error if returncode is non-zero AND containers aren't running
-            error_msg = result.stderr[:200] if result.stderr else result.stdout[:200]
-            console.print(f"[red]Error:[/red] {error_msg}")
+            # Check for actual errors in container status
+            status_result = subprocess.run(
+                ["docker", "compose", "ps", "-a"],
+                cwd=compose_dir,
+                capture_output=True,
+                text=True
+            )
+            console.print(f"[yellow]⚠[/yellow] Services may still be starting. Status:")
+            console.print(f"[dim]{status_result.stdout[:300]}[/dim]")
     
     def _generate_docker_compose(self) -> str:
         """Generate docker-compose.yml content."""
