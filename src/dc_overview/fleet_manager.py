@@ -522,9 +522,9 @@ rule_files:
 
 scrape_configs:
   - job_name: 'prometheus'
-    metrics_path: /metrics
+    metrics_path: /prometheus/metrics
     static_configs:
-      - targets: ['localhost:9090']
+      - targets: ['prometheus:9090']
 
   - job_name: 'master'
     static_configs:
@@ -781,6 +781,7 @@ echo "Exporters installed successfully"
         scrape_configs = [
             {
                 "job_name": "prometheus",
+                "metrics_path": "/prometheus/metrics",
                 "static_configs": [{"targets": ["prometheus:9090"]}]
             },
             {
