@@ -1452,13 +1452,14 @@ try:
                     license_key = ?,
                     subscription_valid = 1,
                     subscription_tier = ?,
-                    max_servers = ?
+                    max_servers = ?,
+                    sync_enabled = 1
                 WHERE id = ?
             """, (license_key, validation.get("tier", "standard"), validation.get("max_servers", 50), existing[0]))
         else:
             c.execute("""
                 INSERT INTO cloud_sync (license_key, subscription_valid, subscription_tier, max_servers, sync_enabled)
-                VALUES (?, 1, ?, ?, 0)
+                VALUES (?, 1, ?, ?, 1)
             """, (license_key, validation.get("tier", "standard"), validation.get("max_servers", 50)))
         
         conn.commit()
