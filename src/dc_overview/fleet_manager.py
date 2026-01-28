@@ -1323,12 +1323,47 @@ echo "Exporters installed successfully"
             if servers:
                 console.print(f"[dim]  Configured {len(servers)} servers for IPMI monitoring[/dim]")
             
-            # Wait for container to be healthy and configure
-            time.sleep(3)
+            # Wait for container to be healthy and database migrations to complete
+            console.print("[dim]  Waiting for IPMI Monitor to initialize...[/dim]")
+            self._wait_for_ipmi_monitor_ready()
             self._import_ssh_key_to_ipmi_monitor()
             self._activate_ai_license_in_ipmi_monitor()
         else:
             console.print(f"[yellow]⚠[/yellow] Failed to start IPMI Monitor: {result.stderr[:100]}")
+    
+    def _wait_for_ipmi_monitor_ready(self, timeout: int = 60):
+        """Wait for IPMI Monitor container to be healthy and database ready."""
+        import time
+        start = time.time()
+        
+        while time.time() - start < timeout:
+            try:
+                # Check if the container is healthy and API is responding
+                result = subprocess.run(
+                    ['docker', 'exec', 'ipmi-monitor', 'curl', '-s', '-f', 
+                     'http://127.0.0.1:5000/api/health'],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0:
+                    # Also verify database tables exist by checking ssh_key table
+                    check_result = subprocess.run(
+                        ['docker', 'exec', 'ipmi-monitor', 'python3', '-c',
+                         'from app import db, app; app.app_context().push(); '
+                         'from sqlalchemy import inspect; '
+                         'inspector = inspect(db.engine); '
+                         'tables = inspector.get_table_names(); '
+                         'assert "ssh_key" in tables and "ssh_logs" in tables, "Tables missing"; '
+                         'print("ready")'],
+                        capture_output=True, text=True, timeout=15
+                    )
+                    if "ready" in check_result.stdout:
+                        return True
+            except Exception:
+                pass
+            time.sleep(2)
+        
+        console.print("[yellow]⚠[/yellow] IPMI Monitor taking longer than expected to initialize")
+        return False
     
     def _import_ssh_key_to_ipmi_monitor(self):
         """Import the fleet SSH key into IPMI Monitor's database."""
@@ -1354,54 +1389,53 @@ echo "Exporters installed successfully"
             except Exception:
                 fingerprint = "unknown"
             
-            # Import into IPMI Monitor database via docker exec
+            # Import into IPMI Monitor database via Flask app context
             enable_ssh_inventory = "true" if self.config.ipmi_monitor.enable_ssh_inventory else "false"
             enable_ssh_logs = "true" if self.config.ipmi_monitor.enable_ssh_logs else "false"
             
+            # Escape key content for safe embedding in script
+            escaped_key = key_content.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+            
             import_script = f'''
-import sqlite3
-from datetime import datetime
+from app import db, app, SSHKey, SystemSettings
 import sys
 
 key_content = """{key_content}"""
 fingerprint = "{fingerprint}"
-db_path = "/app/data/ipmi_events.db"
 
-try:
-    conn = sqlite3.connect(db_path)
-    c = conn.cursor()
-    
-    # Check if Fleet SSH Key already exists
-    c.execute("SELECT id FROM ssh_key WHERE name = ?", ("Fleet SSH Key",))
-    existing = c.fetchone()
-    
-    if existing:
-        print(f"Fleet SSH Key already exists with ID {{existing[0]}}", file=sys.stderr)
-        key_id = existing[0]
-    else:
-        c.execute("""
-            INSERT INTO ssh_key (name, key_content, fingerprint, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-        """, ("Fleet SSH Key", key_content, fingerprint, datetime.utcnow().isoformat(), datetime.utcnow().isoformat()))
-        conn.commit()
-        key_id = c.lastrowid
-        print(f"Imported Fleet SSH Key with ID: {{key_id}}", file=sys.stderr)
-    
-    # Set as default SSH key and SSH settings
-    c.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)", 
-              ("default_ssh_key_id", str(key_id)))
-    c.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)", 
-              ("ssh_user", "root"))
-    # Enable SSH inventory and logs based on config
-    c.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)", 
-              ("enable_ssh_inventory", "{enable_ssh_inventory}"))
-    c.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)", 
-              ("enable_ssh_logs", "{enable_ssh_logs}"))
-    conn.commit()
-    print("Set as default SSH key and enabled SSH features", file=sys.stderr)
-    conn.close()
-except Exception as e:
-    print(f"Error: {{e}}", file=sys.stderr)
+with app.app_context():
+    try:
+        # Check if Fleet SSH Key already exists
+        existing = SSHKey.query.filter_by(name="Fleet SSH Key").first()
+        
+        if existing:
+            print(f"Fleet SSH Key already exists with ID {{existing.id}}", file=sys.stderr)
+            key_id = existing.id
+            # Update fingerprint if different
+            if existing.fingerprint != fingerprint:
+                existing.fingerprint = fingerprint
+                db.session.commit()
+        else:
+            # Create new key
+            key = SSHKey(name="Fleet SSH Key", key_content=key_content, fingerprint=fingerprint)
+            db.session.add(key)
+            db.session.commit()
+            key_id = key.id
+            print(f"Imported Fleet SSH Key with ID: {{key_id}}", file=sys.stderr)
+        
+        # Set as default SSH key
+        SystemSettings.set("default_ssh_key_id", str(key_id))
+        SystemSettings.set("ssh_user", "root")
+        
+        # Enable SSH features based on config
+        SystemSettings.set("enable_ssh_inventory", "{enable_ssh_inventory}")
+        SystemSettings.set("enable_ssh_logs", "{enable_ssh_logs}")
+        db.session.commit()
+        
+        print("Set as default SSH key and enabled SSH features", file=sys.stderr)
+    except Exception as e:
+        print(f"Error: {{e}}", file=sys.stderr)
+        db.session.rollback()
 '''
             
             result = subprocess.run(
