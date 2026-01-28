@@ -24,8 +24,8 @@ echo ""
 # DC Overview containers to remove (including certbot from ipmi-monitor standalone)
 DC_CONTAINERS="cryptolabs-proxy dc-overview ipmi-monitor grafana prometheus vastai-exporter certbot"
 
-# DC Overview volumes to remove
-DC_VOLUMES="dc-overview-data ipmi-monitor-data grafana-data prometheus-data dc-overview_grafana-data dc-overview_prometheus-data fleet-auth-data"
+# DC Overview volumes to remove (all possible naming conventions)
+DC_VOLUMES="dc-overview-data ipmi-monitor-data grafana-data prometheus-data dc-overview_grafana-data dc-overview_prometheus-data fleet-auth-data cryptolabs-proxy-data root_grafana-data root_prometheus-data ipmi-monitor_ipmi-data"
 
 # DC Overview networks to remove
 DC_NETWORKS="cryptolabs dc-overview_monitoring"
@@ -57,9 +57,13 @@ ssh_cmd ${MASTER_PORT} "docker volume rm ${DC_VOLUMES} 2>/dev/null || true"
 echo "  Pruning unused volumes..."
 ssh_cmd ${MASTER_PORT} "docker volume prune -f 2>/dev/null || true"
 
-# Remove networks on master
+# Remove networks on master (force disconnect any remaining containers first)
 echo "  Removing networks..."
-ssh_cmd ${MASTER_PORT} "docker network rm ${DC_NETWORKS} 2>/dev/null || true"
+for net in ${DC_NETWORKS}; do
+    # Disconnect all containers from the network first
+    ssh_cmd ${MASTER_PORT} "docker network inspect ${net} -f '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null | xargs -r -n1 docker network disconnect -f ${net} 2>/dev/null || true"
+    ssh_cmd ${MASTER_PORT} "docker network rm ${net} 2>/dev/null || true"
+done
 
 # Prune unused networks
 echo "  Pruning unused networks..."

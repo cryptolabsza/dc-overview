@@ -77,14 +77,28 @@ def _ensure_docker_network():
             if network_info:
                 existing_subnet = network_info[0].get("IPAM", {}).get("Config", [{}])[0].get("Subnet", "")
                 if existing_subnet == DOCKER_NETWORK_SUBNET:
+                    console.print(f"[dim]Network {DOCKER_NETWORK_NAME} exists with subnet {existing_subnet}[/dim]")
                     return True  # Network already configured correctly
-                # Network exists but with wrong subnet - we can't change it without recreating
-                # This is fine for existing deployments, they'll use the old subnet
-                console.print(f"[dim]Network {DOCKER_NETWORK_NAME} exists with subnet {existing_subnet}[/dim]")
-                return True
-        except (json.JSONDecodeError, IndexError, KeyError):
-            pass
-        return True  # Network exists, use as-is
+                
+                # Network exists but with wrong subnet - need to recreate it for static IPs to work
+                console.print(f"[yellow]⚠[/yellow] Network {DOCKER_NETWORK_NAME} has wrong subnet ({existing_subnet}), recreating...")
+                
+                # Disconnect all containers from the network first
+                containers = network_info[0].get("Containers", {})
+                for container_id, container_info in containers.items():
+                    container_name = container_info.get("Name", container_id)
+                    subprocess.run(
+                        ["docker", "network", "disconnect", "-f", DOCKER_NETWORK_NAME, container_name],
+                        capture_output=True
+                    )
+                
+                # Remove the old network
+                subprocess.run(["docker", "network", "rm", DOCKER_NETWORK_NAME], capture_output=True)
+                
+        except (json.JSONDecodeError, IndexError, KeyError) as e:
+            # Network exists but can't parse info - try to remove and recreate
+            console.print(f"[yellow]⚠[/yellow] Cannot inspect network, recreating...")
+            subprocess.run(["docker", "network", "rm", DOCKER_NETWORK_NAME], capture_output=True)
     
     # Create network with specific subnet
     result = subprocess.run(
@@ -99,9 +113,12 @@ def _ensure_docker_network():
         console.print(f"[green]✓[/green] Created Docker network {DOCKER_NETWORK_NAME} with subnet {DOCKER_NETWORK_SUBNET}")
         return True
     else:
-        # Fallback - create without specific subnet
-        subprocess.run(["docker", "network", "create", DOCKER_NETWORK_NAME], capture_output=True)
-        return True
+        console.print(f"[red]✗[/red] Failed to create network: {result.stderr[:100]}")
+        # Fallback - create without specific subnet (won't support static IPs)
+        fallback = subprocess.run(["docker", "network", "create", DOCKER_NETWORK_NAME], capture_output=True)
+        if fallback.returncode == 0:
+            console.print(f"[yellow]⚠[/yellow] Created network without subnet (static IPs disabled)")
+        return fallback.returncode == 0
 
 
 class FleetManager:
