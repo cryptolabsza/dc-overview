@@ -1627,7 +1627,7 @@ except Exception as e:
         subprocess.run(["docker", "pull", "ghcr.io/cryptolabsza/dc-overview:dev"], 
                       capture_output=True, timeout=120)
         
-        # Start dc-overview container
+        # Start dc-overview container with static IP
         flask_secret = secrets_module.token_hex(16)
         cmd = [
             "docker", "run", "-d",
@@ -1635,6 +1635,7 @@ except Exception as e:
             "--restart", "unless-stopped",
             "-e", f"FLASK_SECRET_KEY={flask_secret}",
             "-e", "DC_OVERVIEW_PORT=5001",
+            "-e", f"TRUSTED_PROXY_IPS={PROXY_STATIC_IP}",
             "-v", "dc-overview-data:/data",
             "-v", f"{self.config.config_dir}:/etc/dc-overview:ro",
             "--health-cmd", "curl -f http://127.0.0.1:5001/api/health || exit 1",
@@ -1642,7 +1643,8 @@ except Exception as e:
             "--health-timeout", "5s",
             "--health-retries", "3",
             "--health-start-period", "10s",
-            "--network", "cryptolabs",
+            "--network", DOCKER_NETWORK_NAME,
+            "--ip", STATIC_IPS["dc-overview"],
             "--label", "com.centurylinklabs.watchtower.enable=true",
             "ghcr.io/cryptolabsza/dc-overview:dev"
         ]

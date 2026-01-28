@@ -440,6 +440,7 @@ def api_servers():
     } for s in servers])
 
 @app.route('/api/servers', methods=['POST'])
+@csrf.exempt  # Exempt for internal API calls with X-Fleet-Auth headers
 @write_required
 def api_add_server():
     """Add a new server to monitor with input validation."""
@@ -1106,6 +1107,7 @@ def api_ssh_keys():
 
 
 @app.route('/api/ssh-keys', methods=['POST'])
+@csrf.exempt  # Exempt for internal API calls with X-Fleet-Auth headers
 @admin_required
 def api_add_ssh_key():
     """Add a new SSH key."""
