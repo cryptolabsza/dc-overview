@@ -824,6 +824,8 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     config.ipmi_monitor.enabled = config.components.ipmi_monitor
     config.ipmi_monitor.admin_password = ipmi.get('admin_password')
     config.ipmi_monitor.ai_license_key = ipmi.get('ai_license_key')
+    config.ipmi_monitor.enable_ssh_inventory = ipmi.get('enable_ssh_inventory', True)
+    config.ipmi_monitor.enable_ssh_logs = ipmi.get('enable_ssh_logs', False)
     
     # Security / Firewall
     security = data.get('security', {})

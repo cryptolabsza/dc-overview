@@ -1355,6 +1355,9 @@ echo "Exporters installed successfully"
                 fingerprint = "unknown"
             
             # Import into IPMI Monitor database via docker exec
+            enable_ssh_inventory = "true" if self.config.ipmi_monitor.enable_ssh_inventory else "false"
+            enable_ssh_logs = "true" if self.config.ipmi_monitor.enable_ssh_logs else "false"
+            
             import_script = f'''
 import sqlite3
 from datetime import datetime
@@ -1384,13 +1387,18 @@ try:
         key_id = c.lastrowid
         print(f"Imported Fleet SSH Key with ID: {{key_id}}", file=sys.stderr)
     
-    # Set as default SSH key
+    # Set as default SSH key and SSH settings
     c.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)", 
               ("default_ssh_key_id", str(key_id)))
     c.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)", 
               ("ssh_user", "root"))
+    # Enable SSH inventory and logs based on config
+    c.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)", 
+              ("enable_ssh_inventory", "{enable_ssh_inventory}"))
+    c.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)", 
+              ("enable_ssh_logs", "{enable_ssh_logs}"))
     conn.commit()
-    print("Set as default SSH key", file=sys.stderr)
+    print("Set as default SSH key and enabled SSH features", file=sys.stderr)
     conn.close()
 except Exception as e:
     print(f"Error: {{e}}", file=sys.stderr)
@@ -1403,6 +1411,10 @@ except Exception as e:
             
             if "Imported" in result.stderr or "already exists" in result.stderr:
                 console.print("[green]✓[/green] SSH key imported into IPMI Monitor")
+                if self.config.ipmi_monitor.enable_ssh_inventory:
+                    console.print("[green]✓[/green] SSH inventory enabled")
+                if self.config.ipmi_monitor.enable_ssh_logs:
+                    console.print("[green]✓[/green] SSH log collection enabled")
             else:
                 console.print(f"[yellow]⚠[/yellow] SSH key import: {result.stderr[:100]}")
                 

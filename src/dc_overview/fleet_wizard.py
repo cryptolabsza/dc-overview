@@ -303,6 +303,23 @@ class FleetWizard:
                     "CryptoLabs License Key:",
                     style=custom_style
                 ).ask()
+            
+            # SSH features for IPMI Monitor
+            console.print("\n[bold]SSH Features[/bold]")
+            console.print("[dim]SSH enables detailed inventory and log collection from your servers[/dim]\n")
+            
+            self.config.ipmi_monitor.enable_ssh_inventory = questionary.confirm(
+                "Enable SSH for detailed inventory? (hardware info, software list)",
+                default=True,
+                style=custom_style
+            ).ask()
+            
+            self.config.ipmi_monitor.enable_ssh_logs = questionary.confirm(
+                "Enable SSH log collection? (auth.log, syslog, dmesg)",
+                default=False,
+                style=custom_style
+            ).ask()
+            
         elif self.config.components.ipmi_monitor and self._detect_existing_ipmi():
             # IPMI Monitor already installed - we'll just integrate with it
             console.print("\n[bold]IPMI Monitor[/bold]")

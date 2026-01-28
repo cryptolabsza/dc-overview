@@ -111,6 +111,9 @@ class IPMIMonitorConfig:
     port: int = 5000
     admin_password: Optional[str] = None
     ai_license_key: Optional[str] = None
+    # SSH settings for IPMI Monitor
+    enable_ssh_inventory: bool = True  # Enable SSH for detailed inventory
+    enable_ssh_logs: bool = False  # Enable SSH log collection (disabled by default)
 
 
 @dataclass
@@ -259,6 +262,8 @@ class FleetConfig:
             "ipmi_monitor": {
                 "enabled": self.ipmi_monitor.enabled,
                 "port": self.ipmi_monitor.port,
+                "enable_ssh_inventory": self.ipmi_monitor.enable_ssh_inventory,
+                "enable_ssh_logs": self.ipmi_monitor.enable_ssh_logs,
             },
             "vast": {
                 "enabled": self.vast.enabled,
@@ -362,6 +367,8 @@ class FleetConfig:
             ipmi = data.get("ipmi_monitor", {})
             config.ipmi_monitor.enabled = ipmi.get("enabled", False)
             config.ipmi_monitor.port = ipmi.get("port", 5000)
+            config.ipmi_monitor.enable_ssh_inventory = ipmi.get("enable_ssh_inventory", True)
+            config.ipmi_monitor.enable_ssh_logs = ipmi.get("enable_ssh_logs", False)
             
             vast = data.get("vast", {})
             config.vast.enabled = vast.get("enabled", False)
