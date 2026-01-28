@@ -1413,26 +1413,33 @@ with app.app_context():
     try:
         key_id = None
         
-        # First check if a key with the same fingerprint already exists (auto-import may have created it)
-        existing_by_fp = SSHKey.query.filter_by(fingerprint=fingerprint).first() if fingerprint else None
-        existing_by_name = SSHKey.query.filter_by(name="Fleet SSH Key").first()
+        # Check for existing keys
+        existing_fleet_ssh_key = SSHKey.query.filter_by(name="Fleet SSH Key").first()
+        existing_fleet_key = SSHKey.query.filter_by(name="fleet_key").first()  # Auto-imported key
+        existing_by_fp = SSHKey.query.filter_by(fingerprint=fingerprint).first() if fingerprint and fingerprint != "unknown" else None
         
-        if existing_by_name:
-            # Fleet SSH Key already exists
-            print(f"Fleet SSH Key already exists with ID {{existing_by_name.id}}", file=sys.stderr)
-            key_id = existing_by_name.id
-            # Update fingerprint if different
-            if existing_by_name.fingerprint != fingerprint:
-                existing_by_name.fingerprint = fingerprint
+        if existing_fleet_ssh_key:
+            # Fleet SSH Key already exists - use it
+            print(f"Fleet SSH Key already exists with ID {{existing_fleet_ssh_key.id}}", file=sys.stderr)
+            key_id = existing_fleet_ssh_key.id
+            # Update fingerprint if needed
+            if existing_fleet_ssh_key.fingerprint != fingerprint:
+                existing_fleet_ssh_key.fingerprint = fingerprint
                 db.session.commit()
-            # Delete any other keys with same fingerprint (duplicates from auto-import)
-            if existing_by_fp and existing_by_fp.id != existing_by_name.id:
-                print(f"Deleting duplicate key: {{existing_by_fp.name}}", file=sys.stderr)
-                db.session.delete(existing_by_fp)
+            # Delete duplicate "fleet_key" if it exists (from auto-import)
+            if existing_fleet_key:
+                print(f"Deleting duplicate auto-imported key: fleet_key", file=sys.stderr)
+                db.session.delete(existing_fleet_key)
                 db.session.commit()
+        elif existing_fleet_key:
+            # Auto-imported "fleet_key" exists - rename it to "Fleet SSH Key"
+            print(f"Renaming auto-imported fleet_key to Fleet SSH Key", file=sys.stderr)
+            existing_fleet_key.name = "Fleet SSH Key"
+            existing_fleet_key.fingerprint = fingerprint  # Set correct fingerprint
+            db.session.commit()
+            key_id = existing_fleet_key.id
         elif existing_by_fp:
-            # Key with same fingerprint exists but different name (from auto-import)
-            # Rename it to Fleet SSH Key
+            # Key with same fingerprint exists but different name
             print(f"Renaming {{existing_by_fp.name}} to Fleet SSH Key", file=sys.stderr)
             existing_by_fp.name = "Fleet SSH Key"
             db.session.commit()
