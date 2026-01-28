@@ -1411,16 +1411,32 @@ fingerprint = "{fingerprint}"
 
 with app.app_context():
     try:
-        # Check if Fleet SSH Key already exists
-        existing = SSHKey.query.filter_by(name="Fleet SSH Key").first()
+        key_id = None
         
-        if existing:
-            print(f"Fleet SSH Key already exists with ID {{existing.id}}", file=sys.stderr)
-            key_id = existing.id
+        # First check if a key with the same fingerprint already exists (auto-import may have created it)
+        existing_by_fp = SSHKey.query.filter_by(fingerprint=fingerprint).first() if fingerprint else None
+        existing_by_name = SSHKey.query.filter_by(name="Fleet SSH Key").first()
+        
+        if existing_by_name:
+            # Fleet SSH Key already exists
+            print(f"Fleet SSH Key already exists with ID {{existing_by_name.id}}", file=sys.stderr)
+            key_id = existing_by_name.id
             # Update fingerprint if different
-            if existing.fingerprint != fingerprint:
-                existing.fingerprint = fingerprint
+            if existing_by_name.fingerprint != fingerprint:
+                existing_by_name.fingerprint = fingerprint
                 db.session.commit()
+            # Delete any other keys with same fingerprint (duplicates from auto-import)
+            if existing_by_fp and existing_by_fp.id != existing_by_name.id:
+                print(f"Deleting duplicate key: {{existing_by_fp.name}}", file=sys.stderr)
+                db.session.delete(existing_by_fp)
+                db.session.commit()
+        elif existing_by_fp:
+            # Key with same fingerprint exists but different name (from auto-import)
+            # Rename it to Fleet SSH Key
+            print(f"Renaming {{existing_by_fp.name}} to Fleet SSH Key", file=sys.stderr)
+            existing_by_fp.name = "Fleet SSH Key"
+            db.session.commit()
+            key_id = existing_by_fp.id
         else:
             # Create new key
             key = SSHKey(name="Fleet SSH Key", key_content=key_content, fingerprint=fingerprint)
