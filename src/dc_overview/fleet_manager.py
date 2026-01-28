@@ -509,7 +509,9 @@ networks:
     
     def _generate_prometheus_config(self) -> str:
         """Generate initial prometheus.yml."""
-        master_ip = self.config.master_ip or get_local_ip()
+        # Use host.docker.internal for master since Prometheus runs in Docker
+        # and can't reach the host's LAN IP from within the container
+        master_target = "host.docker.internal"
         
         config = f"""global:
   scrape_interval: 15s
@@ -526,7 +528,7 @@ scrape_configs:
 
   - job_name: 'master'
     static_configs:
-      - targets: ['{master_ip}:9100', '{master_ip}:9835']
+      - targets: ['{master_target}:9100', '{master_target}:9835']
         labels:
           instance: 'master'
 """
@@ -2141,6 +2143,12 @@ except Exception as e:
         # Allow configured ports
         for port in sorted(ports_to_allow.keys()):
             subprocess.run(["ufw", "allow", str(port)], capture_output=True)
+        
+        # Allow Docker network to access host ports (required for Prometheus to scrape host exporters)
+        subprocess.run(
+            ["ufw", "allow", "from", DOCKER_NETWORK_SUBNET, "comment", "Docker cryptolabs network"],
+            capture_output=True
+        )
         
         # Enable UFW (non-interactive)
         result = subprocess.run(
