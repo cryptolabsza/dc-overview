@@ -62,65 +62,74 @@ Built-in dashboard for Vast.ai providers:
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     MASTER SERVER                            │
-│  ┌──────────┐  ┌────────────┐  ┌──────────────────────────┐ │
-│  │ Grafana  │  │ Prometheus │  │ Optional: ipmi-monitor,  │ │
-│  │ (UI)     │  │ (metrics)  │  │ vastai-exporter, etc.    │ │
-│  └──────────┘  └────────────┘  └──────────────────────────┘ │
-│       ↑              ↑                                       │
-│       └──────────────┼───────────────────────────────────────┤
-│                      │ scrapes metrics                       │
-└──────────────────────┼───────────────────────────────────────┘
-                       │
-        ┌──────────────┼──────────────┐
-        │              │              │
-        ▼              ▼              ▼
+                        ┌───────────────────────────────────────┐
+                        │         cryptolabs-proxy              │
+                        │    (Landing Page & Unified Auth)      │
+                        │           HTTPS :443                  │
+                        └───────────────────────────────────────┘
+                                        │
+        ┌───────────────────────────────┼───────────────────────────────┐
+        ▼                               ▼                               ▼
+┌───────────────┐             ┌───────────────┐             ┌───────────────┐
+│   dc-overview │             │    Grafana    │             │  Prometheus   │
+│  Server Mgmt  │             │  Dashboards   │             │   Metrics     │
+│     /dc/      │             │   /grafana/   │             │ /prometheus/  │
+└───────────────┘             └───────────────┘             └───────────────┘
+                                        │
+                                        │ scrapes metrics
+                                        ▼
+        ┌──────────────┬──────────────┬──────────────┐
+        ▼              ▼              ▼              ▼
 ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
 │ GPU Worker 1 │ │ GPU Worker 2 │ │ GPU Worker N │
 │              │ │              │ │              │
 │ • node_exp   │ │ • node_exp   │ │ • node_exp   │
-│ • dcgm-exp   │ │ • dcgm-exp   │ │ • dcgm-exp   │
+│   :9100      │ │   :9100      │ │   :9100      │
 │ • dc-exporter│ │ • dc-exporter│ │ • dc-exporter│
-│              │ │              │ │              │
-│ Ports:       │ │ Ports:       │ │ Ports:       │
-│ 9100, 9400,  │ │ 9100, 9400,  │ │ 9100, 9400,  │
-│ 9500         │ │ 9500         │ │ 9500         │
+│   :9835      │ │   :9835      │ │   :9835      │
 └──────────────┘ └──────────────┘ └──────────────┘
+     (systemd)       (systemd)       (systemd)
 ```
 
 **No containers on GPU workers** - Native systemd services only. Works with RunPod, Vast.ai, and any environment.
+
+All services are accessed through [cryptolabs-proxy](https://github.com/cryptolabsza/cryptolabs-proxy) which provides unified authentication and HTTPS.
 
 ---
 
 ## Quick Installation
 
-### Master Server (5 minutes)
+### Automated Deployment (Recommended)
+
+Deploy everything with a single command:
 
 ```bash
-git clone https://github.com/cryptolabsza/dc-overview.git
-cd dc-overview/server
-cp .env.example .env && nano .env
-docker compose up -d
+# Install from dev branch (latest features)
+pip install git+https://github.com/cryptolabsza/dc-overview.git@dev --break-system-packages
+
+# Create your config file (copy from examples)
+# See: https://github.com/cryptolabsza/dc-overview/blob/main/test-config.yaml
+
+# Deploy with config file (no prompts)
+sudo dc-overview quickstart -c /path/to/config.yaml -y
 ```
 
-### GPU Workers (2 minutes each)
+This automatically:
+- Deploys Prometheus, Grafana, and all dashboards
+- Installs exporters on GPU workers via SSH
+- Sets up HTTPS with Let's Encrypt or self-signed certs
+- Configures unified authentication via cryptolabs-proxy
+
+### Interactive Setup
 
 ```bash
-# One-liner for each exporter
-curl -sSL https://install.cryptolabs.co.za/dc-overview | bash
+pip install dc-overview
+sudo dc-overview quickstart
 ```
 
-### Configure Prometheus
+The Fleet Wizard guides you through all configuration options.
 
-Edit `prometheus.yml` to add your workers:
-```yaml
-- job_name: 'gpu-worker-01'
-  static_configs:
-    - targets: ['192.168.1.101:9100', '192.168.1.101:9400', '192.168.1.101:9500']
-```
-
-**That's it.** Your monitoring is live.
+**That's it.** Your monitoring is live at `https://your-domain/`
 
 ---
 

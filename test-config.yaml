@@ -1,57 +1,56 @@
-# DC Overview Test Configuration
-# Used for automated testing on dev server (41.193.204.66:100)
+# DC Overview Example Configuration
+# ==================================
+# Copy this file and replace placeholder values with your actual credentials
+#
+# Usage: sudo dc-overview quickstart -c /path/to/your-config.yaml -y
 
-site_name: CryptoLabs Dev
+site_name: MyDatacenter
 
-# Fleet Management Login
+# Fleet Management Login (for cryptolabs-proxy landing page)
 fleet_admin_user: admin
-fleet_admin_pass: Test1234
+fleet_admin_pass: YOUR_ADMIN_PASSWORD
 
 # SSH Access (for all servers)
 ssh:
   username: root
-  key_path: /root/.ssh/id_rsa
+  key_path: ~/.ssh/id_rsa
   port: 22
 
 # BMC/IPMI Access (default for all servers)
 bmc:
   username: admin
-  password: Romans8:28
+  password: YOUR_BMC_PASSWORD
 
 # SSL Configuration
 ssl:
-  mode: letsencrypt
-  domain: dc.cryptolabs.co.za
-  email: info@cryptolabs.co.za
+  mode: letsencrypt  # Options: letsencrypt, selfsigned
+  domain: monitoring.example.com
+  email: admin@example.com
 
 # Components to install
 components:
   dc_overview: true
   ipmi_monitor: true
-  vast_exporter: true
+  vast_exporter: false  # Set to true if using Vast.ai
 
-# Vast.ai API Key
+# Vast.ai API Key (only needed if vast_exporter is true)
 vast:
-  api_key: 5c5cf71752a657bf49914b84c261ad0f85df85d809ca7b16336fed02f5bba408
+  api_key: YOUR_VAST_API_KEY
 
 # Servers to monitor
 servers:
-  - name: master
+  - name: server1
     server_ip: 192.168.1.100
-    bmc_ip: 192.168.1.83
+    bmc_ip: 192.168.1.10
 
-  - name: wk01
+  - name: server2
     server_ip: 192.168.1.101
-    bmc_ip: 192.168.1.85
-
-  - name: wk03
-    server_ip: 192.168.1.103
-    bmc_ip: 192.168.1.88
+    bmc_ip: 192.168.1.11
 
 # Grafana password
 grafana:
-  admin_password: Test1234
+  admin_password: YOUR_GRAFANA_PASSWORD
 
 # IPMI Monitor password
 ipmi_monitor:
-  admin_password: Test1234
+  admin_password: YOUR_IPMI_MONITOR_PASSWORD

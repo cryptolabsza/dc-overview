@@ -472,35 +472,41 @@ dc-overview quickstart -c /root/test-config.yaml -y
 
 ### Test Configuration
 
-Location: `/root/test-config.yaml` (on master)
+Create a test config file (e.g., `/root/test-config.yaml`):
 
 ```yaml
-site_name: CryptoLabs Dev
+site_name: MyDatacenter
 fleet_admin_user: admin
-fleet_admin_pass: Test1234
+fleet_admin_pass: YOUR_ADMIN_PASSWORD
 ssh:
   username: root
-  key_path: /root/.ssh/id_rsa
+  key_path: ~/.ssh/id_rsa
   port: 22
+bmc:
+  username: admin
+  password: YOUR_BMC_PASSWORD
 ssl:
-  mode: letsencrypt
-  domain: dc.cryptolabs.co.za
-  email: info@cryptolabs.co.za
+  mode: letsencrypt  # Options: letsencrypt, selfsigned
+  domain: monitoring.example.com
+  email: admin@example.com
 components:
   dc_overview: true
   ipmi_monitor: true
-  vast_exporter: true
+  vast_exporter: false
 servers:
-  - name: master
+  - name: server1
     server_ip: 192.168.1.100
-    bmc_ip: 192.168.1.83
-  - name: wk01
+    bmc_ip: 192.168.1.10
+  - name: server2
     server_ip: 192.168.1.101
-    bmc_ip: 192.168.1.85
-  - name: wk03
-    server_ip: 192.168.1.103
-    bmc_ip: 192.168.1.88
+    bmc_ip: 192.168.1.11
+grafana:
+  admin_password: YOUR_GRAFANA_PASSWORD
+ipmi_monitor:
+  admin_password: YOUR_IPMI_MONITOR_PASSWORD
 ```
+
+> **Security Note:** Never commit config files with real credentials. Use placeholder values in documentation.
 
 ### Cleanup Commands
 

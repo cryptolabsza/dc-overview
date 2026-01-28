@@ -1,7 +1,7 @@
 # DC Overview Deployment Configuration
 # =====================================
-# This file contains all settings for redeploying the monitoring stack
-# Last updated: 2026-01-19
+# Example configuration file - copy and customize with your values
+# For documentation: https://www.cryptolabs.co.za/dc-overview-support-documentation/
 
 # Master Server Configuration
 master:
@@ -12,22 +12,21 @@ master:
 
 # Worker Servers
 workers:
-  - name: "wk01"
+  - name: "worker01"
     ip: "192.168.1.101"
     ssh_user: "root"
     gpus:
       - "NVIDIA RTX A6000"
-  - name: "wk03"
-    ip: "192.168.1.103"
+  - name: "worker02"
+    ip: "192.168.1.102"
     ssh_user: "root"
     gpus:
-      - "NVIDIA GeForce RTX 4090"
       - "NVIDIA GeForce RTX 4090"
 
 # Grafana Configuration
 grafana:
   admin_user: "admin"
-  admin_password: "DcOverview2024!"
+  admin_password: "YOUR_GRAFANA_PASSWORD"
   port: 3000
   plugins:
     - "grafana-clock-panel"
@@ -46,12 +45,12 @@ nginx:
   ssl_key: "/etc/dc-overview/ssl/server.key"
   prometheus_auth:
     user: "admin"
-    password: "DcOverview2024!"
+    password: "YOUR_PROMETHEUS_AUTH_PASSWORD"
 
-# Vast.ai Integration
+# Vast.ai Integration (optional)
 vastai:
-  enabled: true
-  api_key: "6cac575c555d39e07bfafecce58737851307a0aacbe81def6768ed2032678ce9"
+  enabled: false
+  api_key: "YOUR_VAST_API_KEY"
   exporter_port: 8622
   scrape_interval: "60s"
 
@@ -60,20 +59,16 @@ ipmi_monitor:
   enabled: true
   port: 5000
   admin_user: "admin"
-  admin_password: "admin"  # Change on first login
+  admin_password: "YOUR_IPMI_MONITOR_PASSWORD"
   servers:
-    - name: "Server-83"
-      bmc_ip: "192.168.1.83"
-      username: "root"
-      password: "Romans8:28"
-    - name: "Server-85"
-      bmc_ip: "192.168.1.85"
+    - name: "Server-01"
+      bmc_ip: "192.168.1.10"
       username: "admin"
-      password: "Romans8:28"
-    - name: "Server-88"
-      bmc_ip: "192.168.1.88"
+      password: "YOUR_BMC_PASSWORD"
+    - name: "Server-02"
+      bmc_ip: "192.168.1.11"
       username: "admin"
-      password: "Romans8:28"
+      password: "YOUR_BMC_PASSWORD"
 
 # Exporter Ports Reference
 exporters:

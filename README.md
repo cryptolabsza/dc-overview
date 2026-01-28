@@ -63,23 +63,34 @@
 
 ## Quick Start
 
-### One Command Setup
+### Automated Deployment (Recommended)
+
+Deploy everything with a single command using a config file:
 
 ```bash
-# Install
-pipx install dc-overview
+# Install from dev branch (latest features)
+pip install git+https://github.com/cryptolabsza/dc-overview.git@dev --break-system-packages
 
-# Run quickstart with config file
+# Deploy with config file (no prompts)
+sudo dc-overview quickstart -c /path/to/config.yaml -y
+```
+
+Or install from PyPI (stable):
+
+```bash
+pipx install dc-overview
 sudo dc-overview quickstart -c config.yaml -y
 ```
 
 ### Interactive Setup
 
+For first-time users or when you don't have a config file:
+
 ```bash
 sudo dc-overview quickstart
 ```
 
-The Fleet Wizard collects all configuration upfront:
+The Fleet Wizard guides you through:
 1. **Components** - DC Overview, IPMI Monitor, Vast.ai exporter
 2. **Credentials** - Fleet admin, Grafana, SSH, BMC/IPMI
 3. **Servers** - Import from IPMI Monitor or enter manually
@@ -87,34 +98,36 @@ The Fleet Wizard collects all configuration upfront:
 
 Then deploys everything automatically without further prompts.
 
+> **Note:** This automatically deploys [cryptolabs-proxy](https://github.com/cryptolabsza/cryptolabs-proxy) as the unified entry point and authentication layer for all services.
+
 ---
 
 ## Configuration File
 
-Create a YAML config for automated deployments:
+Create a YAML config for automated deployments. See [test-config.yaml](test-config.yaml) for a complete example.
 
 ```yaml
 # fleet-config.yaml
 site_name: My Datacenter
 
-# Fleet Management Login (unified auth)
+# Fleet Management Login (unified auth via cryptolabs-proxy)
 fleet_admin_user: admin
-fleet_admin_pass: SecurePassword123
+fleet_admin_pass: YOUR_ADMIN_PASSWORD
 
 # SSH Access (for all servers)
 ssh:
   username: root
-  key_path: /root/.ssh/id_rsa
+  key_path: ~/.ssh/id_rsa
   port: 22
 
 # BMC/IPMI Access (default for all servers)
 bmc:
   username: admin
-  password: BMCPassword
+  password: YOUR_BMC_PASSWORD
 
 # SSL Configuration
 ssl:
-  mode: letsencrypt  # or: self_signed
+  mode: letsencrypt  # Options: letsencrypt, selfsigned
   domain: dc.example.com
   email: admin@example.com
 
@@ -122,11 +135,11 @@ ssl:
 components:
   dc_overview: true
   ipmi_monitor: true
-  vast_exporter: false
+  vast_exporter: false  # Set to true if using Vast.ai
 
-# Vast.ai API Key (optional)
+# Vast.ai API Key (only needed if vast_exporter is true)
 vast:
-  api_key: your-api-key-here
+  api_key: YOUR_VAST_API_KEY
 
 # Servers to monitor
 servers:
@@ -140,13 +153,19 @@ servers:
 
 # Grafana password
 grafana:
-  admin_password: GrafanaPass123
+  admin_password: YOUR_GRAFANA_PASSWORD
+
+# IPMI Monitor password (if ipmi_monitor is enabled)
+ipmi_monitor:
+  admin_password: YOUR_IPMI_MONITOR_PASSWORD
 ```
 
 Deploy with:
 ```bash
 sudo dc-overview quickstart -c fleet-config.yaml -y
 ```
+
+> **Security Note:** Never commit config files with real credentials. Use placeholder values in examples and store actual credentials securely.
 
 ---
 
