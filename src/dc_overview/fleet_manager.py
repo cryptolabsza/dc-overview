@@ -2083,7 +2083,7 @@ except Exception as e:
                 "-e", f"FLEET_ADMIN_PASS={self.config.fleet_admin_pass}",
                 "-e", f"AUTH_SECRET_KEY={auth_secret}",
                 "-v", "/var/run/docker.sock:/var/run/docker.sock:ro",
-                "-v", "cryptolabs-proxy-data:/data",
+                "-v", "fleet-auth-data:/data",
                 "--network", DOCKER_NETWORK_NAME,
                 "--ip", PROXY_STATIC_IP,
                 "--label", "com.centurylinklabs.watchtower.enable=true",
