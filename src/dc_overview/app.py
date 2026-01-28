@@ -1927,8 +1927,8 @@ DASHBOARD_TEMPLATE = """
         <p class="version">Server Manager v{{ version }}</p>
     </div>
     <script>
-    // Get base path for API calls
-    const basePath = window.location.pathname.replace(/\/$/, '');
+    // Get base path for API calls - extract /dc from any subpath like /dc/servers
+    const basePath = window.location.pathname.match(/^(\/[^\/]+)/)?.[1] || '';
     
     // Check user permissions and adjust UI
     async function checkUserPermissions() {
@@ -2198,10 +2198,8 @@ SERVERS_TEMPLATE = """
     </div>
     
     <script>
-    // Get base path for API calls (handles /dc/ subpath)
-    const basePath = window.location.pathname.endsWith('/servers') 
-        ? window.location.pathname.replace('/servers', '') 
-        : window.location.pathname.replace(/\/$/, '');
+    // Get base path for API calls - extract /dc from any subpath like /dc/servers
+    const basePath = window.location.pathname.match(/^(\/[^\/]+)/)?.[1] || '';
     
     let currentServerId = null;
     let userPermissions = { can_read: false, can_write: false, can_admin: false };
@@ -2585,9 +2583,8 @@ SETTINGS_TEMPLATE = """
     </div>
     
     <script>
-    const basePath = window.location.pathname.endsWith('/settings') 
-        ? window.location.pathname.replace('/settings', '') 
-        : window.location.pathname.replace(/\/$/, '');
+    // Get base path for API calls - extract /dc from any subpath like /dc/settings
+    const basePath = window.location.pathname.match(/^(\/[^\/]+)/)?.[1] || '';
     
     document.getElementById('addSSHKeyForm').onsubmit = async (e) => {
         e.preventDefault();
