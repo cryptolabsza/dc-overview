@@ -335,6 +335,23 @@ providers:
         # Ensure cryptolabs network exists with correct subnet before starting services
         _ensure_docker_network()
         
+        # Pull images first (docker compose writes progress to stderr which can look like errors)
+        with Progress(SpinnerColumn(), TextColumn("Pulling images..."), console=console) as progress:
+            progress.add_task("", total=None)
+            
+            pull_result = subprocess.run(
+                ["docker", "compose", "pull"],
+                cwd=compose_dir,
+                capture_output=True,
+                text=True
+            )
+        
+        if pull_result.returncode != 0:
+            # Check if it's a real error (not just progress output)
+            if "error" in pull_result.stderr.lower() or "failed" in pull_result.stderr.lower():
+                console.print(f"[yellow]⚠[/yellow] Image pull warning: {pull_result.stderr[:200]}")
+            # Continue anyway - images might already be cached
+        
         # Start services
         with Progress(SpinnerColumn(), TextColumn("Starting services..."), console=console) as progress:
             progress.add_task("", total=None)
@@ -346,11 +363,24 @@ providers:
                 text=True
             )
         
-        if result.returncode == 0:
+        # Check if containers are actually running (more reliable than exit code)
+        check_result = subprocess.run(
+            ["docker", "ps", "--filter", "name=prometheus", "--filter", "name=grafana", "-q"],
+            capture_output=True,
+            text=True
+        )
+        running_containers = check_result.stdout.strip().split('\n')
+        running_containers = [c for c in running_containers if c]  # Filter empty
+        
+        if len(running_containers) >= 2:
             console.print("[green]✓[/green] Prometheus running on port 9090")
             console.print("[green]✓[/green] Grafana running on port 3000")
+        elif result.returncode == 0:
+            console.print("[green]✓[/green] Services starting...")
         else:
-            console.print(f"[red]Error:[/red] {result.stderr[:200]}")
+            # Only show error if returncode is non-zero AND containers aren't running
+            error_msg = result.stderr[:200] if result.stderr else result.stdout[:200]
+            console.print(f"[red]Error:[/red] {error_msg}")
     
     def _generate_docker_compose(self) -> str:
         """Generate docker-compose.yml content."""
