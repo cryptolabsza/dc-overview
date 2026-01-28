@@ -1341,22 +1341,28 @@ echo "Exporters installed successfully"
                 # Check if the container is healthy and API is responding
                 result = subprocess.run(
                     ['docker', 'exec', 'ipmi-monitor', 'curl', '-s', '-f', 
-                     'http://127.0.0.1:5000/api/health'],
+                     'http://127.0.0.1:5000/health'],
                     capture_output=True, text=True, timeout=10
                 )
-                if result.returncode == 0:
-                    # Also verify database tables exist by checking ssh_key table
+                if result.returncode == 0 and 'healthy' in result.stdout:
+                    # Also verify database tables exist
+                    check_script = '''
+import sys
+from app import db, app
+from sqlalchemy import inspect
+with app.app_context():
+    inspector = inspect(db.engine)
+    tables = inspector.get_table_names()
+    if "ssh_key" in tables and "ssh_logs" in tables:
+        print("READY")
+        sys.exit(0)
+    sys.exit(1)
+'''
                     check_result = subprocess.run(
-                        ['docker', 'exec', 'ipmi-monitor', 'python3', '-c',
-                         'from app import db, app; app.app_context().push(); '
-                         'from sqlalchemy import inspect; '
-                         'inspector = inspect(db.engine); '
-                         'tables = inspector.get_table_names(); '
-                         'assert "ssh_key" in tables and "ssh_logs" in tables, "Tables missing"; '
-                         'print("ready")'],
+                        ['docker', 'exec', 'ipmi-monitor', 'python3', '-c', check_script],
                         capture_output=True, text=True, timeout=15
                     )
-                    if "ready" in check_result.stdout:
+                    if "READY" in check_result.stdout:
                         return True
             except Exception:
                 pass
@@ -1429,7 +1435,10 @@ with app.app_context():
         
         # Enable SSH features based on config
         SystemSettings.set("enable_ssh_inventory", "{enable_ssh_inventory}")
-        SystemSettings.set("enable_ssh_logs", "{enable_ssh_logs}")
+        # SSH log collection settings (correct setting names for IPMI Monitor)
+        SystemSettings.set("enable_ssh_log_collection", "{enable_ssh_logs}")
+        if "{enable_ssh_logs}" == "true":
+            SystemSettings.set("ssh_log_interval", "15")  # 15 minute interval
         db.session.commit()
         
         print("Set as default SSH key and enabled SSH features", file=sys.stderr)
