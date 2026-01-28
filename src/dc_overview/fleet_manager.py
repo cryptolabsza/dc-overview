@@ -312,7 +312,7 @@ datasources:
   - name: Prometheus
     type: prometheus
     access: proxy
-    url: http://prometheus:9090
+    url: http://prometheus:9090/prometheus/
     isDefault: true
     uid: prometheus
 """
@@ -976,7 +976,7 @@ echo "Exporters installed successfully"
             datasource_data = json.dumps({
                 "name": "Prometheus",
                 "type": "prometheus",
-                "url": "http://prometheus:9090",
+                "url": "http://prometheus:9090/prometheus/",
                 "access": "proxy",
                 "isDefault": True,
             }).encode('utf-8')
