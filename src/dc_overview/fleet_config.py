@@ -114,6 +114,14 @@ class IPMIMonitorConfig:
 
 
 @dataclass
+class SecurityConfig:
+    """Security and firewall configuration."""
+    ufw_enabled: bool = True  # Enable UFW firewall
+    ufw_ports: List[int] = field(default_factory=lambda: [22, 80, 443])  # Ports to allow
+    ufw_additional_ports: List[int] = field(default_factory=list)  # Extra ports to allow
+
+
+@dataclass
 class FleetConfig:
     """
     Master configuration object that holds EVERYTHING.
@@ -143,6 +151,9 @@ class FleetConfig:
     prometheus: PrometheusConfig = field(default_factory=PrometheusConfig)
     ipmi_monitor: IPMIMonitorConfig = field(default_factory=IPMIMonitorConfig)
     vast: VastConfig = field(default_factory=VastConfig)
+    
+    # Security
+    security: SecurityConfig = field(default_factory=SecurityConfig)
     
     # Servers to monitor
     servers: List[Server] = field(default_factory=list)

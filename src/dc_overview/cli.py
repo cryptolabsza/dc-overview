@@ -769,7 +769,7 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     import yaml
     from .fleet_config import FleetConfig, SSLConfig, SSHCredentials, BMCCredentials, Server
     from .fleet_config import ComponentConfig, GrafanaConfig, VastConfig, IPMIMonitorConfig
-    from .fleet_config import SSLMode, AuthMethod
+    from .fleet_config import SecurityConfig, SSLMode, AuthMethod
     
     with open(config_file, 'r') as f:
         data = yaml.safe_load(f)
@@ -824,6 +824,12 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     config.ipmi_monitor.enabled = config.components.ipmi_monitor
     config.ipmi_monitor.admin_password = ipmi.get('admin_password')
     config.ipmi_monitor.ai_license_key = ipmi.get('ai_license_key')
+    
+    # Security / Firewall
+    security = data.get('security', {})
+    config.security.ufw_enabled = security.get('ufw_enabled', True)
+    config.security.ufw_ports = security.get('ufw_ports', [22, 80, 443])
+    config.security.ufw_additional_ports = security.get('ufw_additional_ports', [])
     
     # Servers
     for srv in data.get('servers', []):

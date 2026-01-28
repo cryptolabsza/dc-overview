@@ -2050,6 +2050,11 @@ except Exception as e:
         """Configure UFW firewall and security settings."""
         console.print("\n[bold]Step 10: Security Hardening[/bold]\n")
         
+        # Check if UFW is enabled in config
+        if hasattr(self.config, 'security') and not self.config.security.ufw_enabled:
+            console.print("[dim]UFW firewall disabled in configuration[/dim]")
+            return
+        
         # Check if UFW is available
         result = subprocess.run(["which", "ufw"], capture_output=True)
         if result.returncode != 0:
@@ -2072,10 +2077,14 @@ except Exception as e:
             443: "HTTPS (proxy)",
         }
         
-        # Add any custom SSH ports from config
-        if hasattr(self.config, 'additional_ssh_ports'):
-            for port in self.config.additional_ssh_ports:
-                ports_to_allow[port] = f"SSH (port {port})"
+        # Add ports from security config
+        if hasattr(self.config, 'security'):
+            for port in self.config.security.ufw_ports:
+                if port not in ports_to_allow:
+                    ports_to_allow[port] = f"Port {port}"
+            for port in self.config.security.ufw_additional_ports:
+                if port not in ports_to_allow:
+                    ports_to_allow[port] = f"Port {port} (custom)"
         
         # Check if common alternative SSH ports might be in use (100, 101, 103)
         for alt_port in [100, 101, 103]:
