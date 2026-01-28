@@ -1,7 +1,7 @@
 #!/bin/bash
 # Cleanup script for DC Overview dev fleet
 # This removes all dc-overview related containers, volumes, networks, and exporters
-# while preserving unrelated services (minecraft, vastai-exporter, etc.)
+# while preserving unrelated services (minecraft, watchtower, etc.)
 
 set -e
 
@@ -22,7 +22,7 @@ echo -e "${YELLOW}=== DC Overview Dev Fleet Cleanup ===${NC}"
 echo ""
 
 # DC Overview containers to remove
-DC_CONTAINERS="cryptolabs-proxy dc-overview ipmi-monitor grafana prometheus"
+DC_CONTAINERS="cryptolabs-proxy dc-overview ipmi-monitor grafana prometheus vastai-exporter"
 
 # DC Overview volumes to remove
 DC_VOLUMES="dc-overview-data ipmi-monitor-data grafana-data prometheus-data dc-overview_grafana-data dc-overview_prometheus-data fleet-auth-data"
