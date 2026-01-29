@@ -1954,7 +1954,46 @@ DASHBOARD_TEMPLATE = """
             console.error('Failed to check permissions:', e);
         }
     }
-    document.addEventListener('DOMContentLoaded', checkUserPermissions);
+    
+    // Refresh dashboard data by reloading
+    async function refreshDashboard() {
+        try {
+            // Silently refresh the page data every 30 seconds
+            const response = await fetch(`${basePath}/api/servers`);
+            if (response.ok) {
+                // Data has been updated via the check endpoints, so reload
+                window.location.reload();
+            }
+        } catch (e) {
+            console.error('Failed to refresh dashboard:', e);
+        }
+    }
+    
+    document.addEventListener('DOMContentLoaded', async () => {
+        await checkUserPermissions();
+        // Auto-check all servers on first load, then reload to show updated status
+        try {
+            const response = await fetch(`${basePath}/api/servers`);
+            const servers = await response.json();
+            if (servers && servers.length > 0) {
+                // Check each server silently
+                for (const server of servers) {
+                    try {
+                        await fetch(`${basePath}/api/servers/${server.id}/check`);
+                    } catch (e) {}
+                }
+                // Reload to show updated status (only once on initial load)
+                if (!sessionStorage.getItem('dashboard_checked')) {
+                    sessionStorage.setItem('dashboard_checked', 'true');
+                    window.location.reload();
+                }
+            }
+        } catch (e) {
+            console.error('Failed to auto-check servers:', e);
+        }
+        // Set up periodic refresh every 60 seconds
+        setInterval(refreshDashboard, 60000);
+    });
     </script>
 </body></html>
 """
@@ -2243,8 +2282,61 @@ SERVERS_TEMPLATE = """
         }
     }
     
-    // Run permission check on load
-    document.addEventListener('DOMContentLoaded', checkUserPermissions);
+    // Run permission check on load, then auto-check all servers
+    document.addEventListener('DOMContentLoaded', async () => {
+        await checkUserPermissions();
+        // Auto-check all servers on page load (silent, no alerts)
+        await checkAllServersQuietly();
+        // Set up periodic refresh every 30 seconds
+        setInterval(checkAllServersQuietly, 30000);
+    });
+    
+    async function checkAllServersQuietly() {
+        // Check all servers and update table without showing alerts
+        const rows = document.querySelectorAll('#serversTable tr[data-id]');
+        for (const row of rows) {
+            const id = row.dataset.id;
+            try {
+                const response = await fetch(`${basePath}/api/servers/${id}/check`);
+                if (response.ok) {
+                    const result = await response.json();
+                    updateServerRow(row, result);
+                }
+            } catch (e) {
+                console.error(`Failed to check server ${id}:`, e);
+            }
+        }
+    }
+    
+    function updateServerRow(row, result) {
+        // Update the exporter status indicators
+        const statusCell = row.querySelector('.exporter-status');
+        if (!statusCell) return;
+        
+        const indicators = statusCell.querySelectorAll('.status-indicator');
+        if (indicators.length >= 3) {
+            // node exporter
+            indicators[0].className = 'status-indicator ' + 
+                (result.node_exporter?.running ? 'status-enabled' : 'status-not-installed');
+            // dc exporter  
+            indicators[1].className = 'status-indicator ' + 
+                (result.dc_exporter?.running ? 'status-enabled' : 'status-not-installed');
+            // dcgm exporter
+            indicators[2].className = 'status-indicator ' + 
+                (result.dcgm_exporter?.running ? 'status-enabled' : 'status-not-installed');
+        }
+        
+        // Add version info if available
+        const nodeSpan = statusCell.innerHTML.match(/node<br>([^<]*)/);
+        let html = '';
+        html += `<span class="status-indicator ${result.node_exporter?.running ? 'status-enabled' : 'status-not-installed'}"></span>node`;
+        if (result.node_exporter?.version) html += `<br><small>${result.node_exporter.version}</small>`;
+        html += `<span class="status-indicator ${result.dc_exporter?.running ? 'status-enabled' : 'status-not-installed'}" style="margin-left:8px"></span>dc`;
+        if (result.dc_exporter?.version) html += `<br><small>${result.dc_exporter.version}</small>`;
+        html += `<span class="status-indicator ${result.dcgm_exporter?.running ? 'status-enabled' : 'status-not-installed'}" style="margin-left:8px"></span>dcgm`;
+        if (result.dcgm_exporter?.version) html += `<br><small>${result.dcgm_exporter.version}</small>`;
+        statusCell.innerHTML = html;
+    }
     
     document.getElementById('addServerForm').onsubmit = async (e) => {
         e.preventDefault();
