@@ -1994,9 +1994,11 @@ DASHBOARD_TEMPLATE = """
                 }
                 // Hide indicator
                 if (indicator) indicator.style.display = 'none';
-                // Reload to show updated status (only once on initial load)
-                if (!sessionStorage.getItem('dashboard_checked')) {
-                    sessionStorage.setItem('dashboard_checked', 'true');
+                // Reload to show updated status (skip if we just reloaded)
+                const lastReload = parseInt(sessionStorage.getItem('dashboard_reload_time') || '0');
+                const now = Date.now();
+                if (now - lastReload > 10000) { // Only reload if >10 seconds since last reload
+                    sessionStorage.setItem('dashboard_reload_time', now.toString());
                     window.location.reload();
                 }
             }
