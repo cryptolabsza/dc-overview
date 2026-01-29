@@ -965,6 +965,46 @@ echo "Exporters installed successfully"
                 console.print(f"  [yellow]⚠[/yellow] {name}: {str(e)[:50]}")
         
         console.print("[green]✓[/green] Dashboards imported")
+        
+        # Set DC Overview as the home dashboard
+        self._set_grafana_home_dashboard(grafana_url, auth_header)
+    
+    def _set_grafana_home_dashboard(self, grafana_url: str, auth_header: str):
+        """
+        Set DC Overview as the Grafana home dashboard.
+        
+        This API call is safe because:
+        1. Grafana is bound to 127.0.0.1:3000 (not externally accessible)
+        2. Only called during local quickstart setup
+        3. Uses already-configured admin credentials
+        """
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Basic {auth_header}"
+        }
+        
+        try:
+            # Set org preferences to use DC Overview as home dashboard
+            data = json.dumps({
+                "homeDashboardUID": "dc-overview-main"
+            }).encode('utf-8')
+            
+            req = urllib.request.Request(
+                f"{grafana_url}/api/org/preferences",
+                data=data,
+                headers=headers,
+                method="PUT"
+            )
+            
+            resp = urllib.request.urlopen(req, timeout=10)
+            if resp.status == 200:
+                console.print("[green]✓[/green] DC Overview set as Grafana home dashboard")
+            else:
+                console.print("[yellow]⚠[/yellow] Could not set home dashboard")
+                
+        except Exception as e:
+            # Non-critical - just log and continue
+            console.print(f"[dim]Note: Could not set home dashboard: {str(e)[:40]}[/dim]")
     
     def _wait_for_grafana_and_get_datasource_uid(
         self,
