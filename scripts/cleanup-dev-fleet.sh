@@ -22,8 +22,8 @@ echo -e "${YELLOW}=== DC Overview Dev Fleet Cleanup ===${NC}"
 echo ""
 
 # DC Overview containers to remove (including certbot from ipmi-monitor standalone)
-# Note: watchtower-minecraft is preserved, but 'watchtower' (if created by quickstart) is removed
-DC_CONTAINERS="cryptolabs-proxy dc-overview ipmi-monitor grafana prometheus vastai-exporter certbot watchtower"
+# Note: watchtower is NOT removed as it may be shared with minecraft or other services
+DC_CONTAINERS="cryptolabs-proxy dc-overview ipmi-monitor grafana prometheus vastai-exporter certbot"
 
 # DC Overview volumes to remove (all possible naming conventions)
 DC_VOLUMES="dc-overview-data ipmi-monitor-data grafana-data prometheus-data dc-overview_grafana-data dc-overview_prometheus-data fleet-auth-data cryptolabs-proxy-data root_grafana-data root_prometheus-data ipmi-monitor_ipmi-data"
