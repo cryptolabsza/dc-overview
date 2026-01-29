@@ -488,7 +488,6 @@ providers:
       - GF_AUTH_PROXY_ENABLED=true
       - GF_AUTH_PROXY_HEADER_NAME=X-WEBAUTH-USER
       - GF_AUTH_PROXY_AUTO_SIGN_UP=true
-      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/DC_Overview.json
     depends_on:
       - prometheus
     networks:
@@ -552,7 +551,6 @@ networks:
       - GF_AUTH_PROXY_ENABLED=true
       - GF_AUTH_PROXY_HEADER_NAME=X-WEBAUTH-USER
       - GF_AUTH_PROXY_AUTO_SIGN_UP=true
-      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/DC_Overview.json
     depends_on:
       - prometheus
     networks:

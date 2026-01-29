@@ -4,7 +4,7 @@
       {
         "builtIn": 1,
         "datasource": {
-          "type": "grafana",
+          "type": "prometheus",
           "uid": "prometheus"
         },
         "enable": true,
@@ -18,6 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
+  "id": 4,
   "links": [],
   "panels": [
     {
@@ -141,7 +142,7 @@
         "showHeader": true,
         "sortBy": []
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.2",
       "targets": [
         {
           "datasource": {
@@ -610,7 +611,7 @@
         "showHeader": true,
         "sortBy": []
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.2",
       "targets": [
         {
           "datasource": {
@@ -1079,7 +1080,7 @@
         "showHeader": true,
         "sortBy": []
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.2",
       "targets": [
         {
           "datasource": {
@@ -1548,7 +1549,7 @@
         "showHeader": true,
         "sortBy": []
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.2",
       "targets": [
         {
           "datasource": {
@@ -2017,7 +2018,7 @@
         "showHeader": true,
         "sortBy": []
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.2",
       "targets": [
         {
           "datasource": {
@@ -2464,7 +2465,7 @@
         "showHeader": true,
         "sortBy": []
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.2",
       "targets": [
         {
           "datasource": {
@@ -2933,7 +2934,7 @@
         "showHeader": true,
         "sortBy": []
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.2",
       "targets": [
         {
           "datasource": {
@@ -3295,7 +3296,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "APT_UPGRADABLE_PACKAGES Updated once every 1h\n",
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -3304,62 +3305,103 @@
           "custom": {
             "align": "auto",
             "cellOptions": {
-              "type": "auto"
+              "mode": "gradient",
+              "type": "color-background"
             },
+            "filterable": false,
             "footer": {
               "reducers": []
             },
             "inspect": false,
-            "minWidth": 50
+            "minWidth": 60
           },
-          "mappings": [],
+          "decimals": 0,
+          "mappings": [
+            {
+              "options": {
+                "from": 0,
+                "result": {
+                  "color": "blue",
+                  "index": 0
+                },
+                "to": 50
+              },
+              "type": "range"
+            },
+            {
+              "options": {
+                "from": 50,
+                "result": {
+                  "color": "green",
+                  "index": 1
+                },
+                "to": 70
+              },
+              "type": "range"
+            },
+            {
+              "options": {
+                "from": 70,
+                "result": {
+                  "color": "yellow",
+                  "index": 2
+                },
+                "to": 90
+              },
+              "type": "range"
+            },
+            {
+              "options": {
+                "from": 90,
+                "result": {
+                  "color": "red",
+                  "index": 3
+                },
+                "to": 100
+              },
+              "type": "range"
+            }
+          ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "transparent",
                 "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
               }
             ]
-          }
+          },
+          "unit": "%"
         },
         "overrides": [
           {
             "matcher": {
               "id": "byName",
-              "options": "job"
+              "options": "Machine"
             },
             "properties": [
               {
                 "id": "custom.width",
-                "value": 149
+                "value": 95
               }
             ]
           }
         ]
       },
       "gridPos": {
-        "h": 8,
+        "h": 9,
         "w": 8,
         "x": 8,
         "y": 19
       },
-      "id": 12,
+      "id": 14,
       "options": {
         "cellHeight": "sm",
+        "frameIndex": 0,
         "showHeader": true,
-        "sortBy": [
-          {
-            "desc": false,
-            "displayName": "job"
-          }
-        ]
+        "sortBy": []
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.2",
       "targets": [
         {
           "datasource": {
@@ -3367,40 +3409,352 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "APT_UPGRADABLE_PACKAGES",
+          "expr": "DCGM_FI_DEV_GPU_UTIL{gpu=\"0\"}",
           "format": "table",
-          "instant": false,
+          "hide": false,
+          "legendFormat": "__auto",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "DCGM_FI_DEV_GPU_UTIL{gpu=\"1\"}",
+          "format": "table",
+          "hide": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "DCGM_FI_DEV_GPU_UTIL{gpu=\"2\"}",
+          "format": "table",
+          "hide": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "DCGM_FI_DEV_GPU_UTIL{gpu=\"3\"}",
+          "format": "table",
+          "hide": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "DCGM_FI_DEV_GPU_UTIL{gpu=\"4\"}",
+          "format": "table",
+          "hide": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "DCGM_FI_DEV_GPU_UTIL{gpu=\"5\"}",
+          "format": "table",
+          "hide": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "F"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "DCGM_FI_DEV_GPU_UTIL{gpu=\"6\"}",
+          "format": "table",
+          "hide": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "G"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "DCGM_FI_DEV_GPU_UTIL{gpu=\"7\"}",
+          "format": "table",
+          "hide": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "H"
         }
       ],
-      "title": "Pending Updates",
+      "title": "Machine GPU Utilization",
       "transformations": [
         {
-          "id": "groupBy",
+          "id": "joinByField",
           "options": {
-            "fields": {
-              "Value": {
-                "aggregations": [
-                  "last"
-                ],
-                "operation": "aggregate"
-              },
-              "job": {
-                "aggregations": [],
-                "operation": "groupby"
-              }
-            }
+            "byField": "Hostname",
+            "mode": "outer"
           }
         },
         {
           "id": "organize",
           "options": {
-            "excludeByName": {},
-            "indexByName": {},
+            "excludeByName": {
+              "DCGM_FI_DRIVER_VERSION": true,
+              "DCGM_FI_DRIVER_VERSION 1": true,
+              "DCGM_FI_DRIVER_VERSION 2": true,
+              "DCGM_FI_DRIVER_VERSION 3": true,
+              "DCGM_FI_DRIVER_VERSION 4": true,
+              "DCGM_FI_DRIVER_VERSION 5": true,
+              "DCGM_FI_DRIVER_VERSION 6": true,
+              "DCGM_FI_DRIVER_VERSION 7": true,
+              "DCGM_FI_DRIVER_VERSION 8": true,
+              "DCXP_FI_DRIVER_VERSION": true,
+              "DCXP_FI_DRIVER_VERSION 1": true,
+              "DCXP_FI_DRIVER_VERSION 2": true,
+              "DCXP_FI_DRIVER_VERSION 3": true,
+              "DCXP_FI_DRIVER_VERSION 4": true,
+              "DCXP_FI_DRIVER_VERSION 5": true,
+              "DCXP_FI_DRIVER_VERSION 6": true,
+              "DCXP_FI_DRIVER_VERSION 7": true,
+              "DCXP_FI_DRIVER_VERSION 8": true,
+              "Hostname 1": true,
+              "Hostname 1 1": true,
+              "Hostname 1 2": true,
+              "Hostname 1 3": true,
+              "Hostname 1 4": true,
+              "Hostname 1 5": true,
+              "Hostname 1 6": true,
+              "Hostname 1 7": true,
+              "Hostname 1 8": true,
+              "Hostname 2": true,
+              "Hostname 2 1": true,
+              "Hostname 2 2": true,
+              "Hostname 2 3": true,
+              "Hostname 2 4": true,
+              "Hostname 2 5": true,
+              "Hostname 2 6": true,
+              "Hostname 2 7": true,
+              "Hostname 2 8": true,
+              "Hostname 3": true,
+              "Hostname 3 1": true,
+              "Hostname 3 2": true,
+              "Hostname 3 3": true,
+              "Hostname 3 4": true,
+              "Hostname 3 5": true,
+              "Hostname 3 6": true,
+              "Hostname 3 7": true,
+              "Hostname 3 8": true,
+              "Hostname 4": true,
+              "Hostname 4 1": true,
+              "Hostname 4 2": true,
+              "Hostname 4 3": true,
+              "Hostname 4 4": true,
+              "Hostname 4 5": true,
+              "Hostname 4 6": true,
+              "Hostname 4 7": true,
+              "Hostname 4 8": true,
+              "Hostname 5": true,
+              "Hostname 5 1": true,
+              "Hostname 5 2": true,
+              "Hostname 5 3": true,
+              "Hostname 5 4": true,
+              "Hostname 5 5": true,
+              "Hostname 5 6": true,
+              "Hostname 5 7": true,
+              "Hostname 5 8": true,
+              "Hostname 6": true,
+              "Hostname 6 1": true,
+              "Hostname 6 2": true,
+              "Hostname 6 3": true,
+              "Hostname 6 4": true,
+              "Hostname 6 5": true,
+              "Hostname 6 6": true,
+              "Hostname 6 7": true,
+              "Hostname 6 8": true,
+              "Hostname 7": true,
+              "Hostname 7 1": true,
+              "Hostname 7 2": true,
+              "Hostname 7 3": true,
+              "Hostname 7 4": true,
+              "Hostname 7 5": true,
+              "Hostname 7 6": true,
+              "Hostname 7 7": true,
+              "Hostname 7 8": true,
+              "Hostname 8": true,
+              "Hostname 8 1": true,
+              "Hostname 8 2": true,
+              "Hostname 8 3": true,
+              "Hostname 8 4": true,
+              "Hostname 8 5": true,
+              "Hostname 8 6": true,
+              "Hostname 8 7": true,
+              "Hostname 8 8": true,
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true,
+              "Time 4": true,
+              "Time 5": true,
+              "Time 6": true,
+              "Time 7": true,
+              "Time 8": true,
+              "UUID": true,
+              "UUID 1": true,
+              "UUID 2": true,
+              "UUID 3": true,
+              "UUID 4": true,
+              "UUID 5": true,
+              "UUID 6": true,
+              "UUID 7": true,
+              "UUID 8": true,
+              "__name__": true,
+              "__name__ 1": true,
+              "__name__ 2": true,
+              "__name__ 3": true,
+              "__name__ 4": true,
+              "__name__ 5": true,
+              "__name__ 6": true,
+              "__name__ 7": true,
+              "__name__ 8": true,
+              "device": true,
+              "device 1": true,
+              "device 2": true,
+              "device 3": true,
+              "device 4": true,
+              "device 5": true,
+              "device 6": true,
+              "device 7": true,
+              "device 8": true,
+              "gpu": true,
+              "gpu 1": true,
+              "gpu 2": true,
+              "gpu 3": true,
+              "gpu 4": true,
+              "gpu 5": true,
+              "gpu 6": true,
+              "gpu 7": true,
+              "gpu 8": true,
+              "instance": true,
+              "instance 1": true,
+              "instance 2": true,
+              "instance 3": true,
+              "instance 4": true,
+              "instance 5": true,
+              "instance 6": true,
+              "instance 7": true,
+              "instance 8": true,
+              "job": true,
+              "job 1": true,
+              "job 2": true,
+              "job 3": true,
+              "job 4": true,
+              "job 5": true,
+              "job 6": true,
+              "job 7": true,
+              "job 8": true,
+              "modelName": true,
+              "modelName 1": true,
+              "modelName 2": true,
+              "modelName 3": true,
+              "modelName 4": true,
+              "modelName 5": true,
+              "modelName 6": true,
+              "modelName 7": true,
+              "modelName 8": true,
+              "pci_bus_id": true,
+              "pci_bus_id 1": true,
+              "pci_bus_id 2": true,
+              "pci_bus_id 3": true,
+              "pci_bus_id 4": true,
+              "pci_bus_id 5": true,
+              "pci_bus_id 6": true,
+              "pci_bus_id 7": true,
+              "pci_bus_id 8": true,
+              "reason": true,
+              "reason 1": true,
+              "reason 2": true,
+              "reason 3": true,
+              "reason 4": true,
+              "reason 5": true,
+              "reason 6": true,
+              "reason 7": true,
+              "reason 8": true,
+              "source": true,
+              "source 1": true,
+              "source 2": true,
+              "source 3": true,
+              "source 4": true,
+              "source 5": true,
+              "source 6": true,
+              "source 7": true,
+              "source 8": true,
+              "vm_name": true
+            },
+            "includeByName": {},
+            "indexByName": {
+              "GPU0": 1,
+              "GPU1": 2,
+              "GPU2": 3,
+              "GPU3": 4,
+              "GPU4": 5,
+              "GPU5": 6,
+              "GPU6": 7,
+              "GPU7": 8,
+              "Hostname": 0,
+              "Machine": 0,
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 3,
+              "Value #D": 4,
+              "Value #E": 5,
+              "Value #F": 6,
+              "Value #G": 7,
+              "Value #H": 8
+            },
             "renameByName": {
-              "Value (last)": "Updateds"
+              "Hostname": "Machine",
+              "Value #A": "GPU0",
+              "Value #B": "GPU1",
+              "Value #C": "GPU2",
+              "Value #D": "GPU3",
+              "Value #E": "GPU4",
+              "Value #F": "GPU5",
+              "Value #G": "GPU6",
+              "Value #H": "GPU7"
             }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Machine"
+              }
+            ]
           }
         }
       ],
@@ -3532,7 +3886,7 @@
         "showHeader": true,
         "sortBy": []
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.2",
       "targets": [
         {
           "datasource": {
@@ -3895,6 +4249,122 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
+      "description": "APT_UPGRADABLE_PACKAGES Updated once every 1h\n",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false,
+            "minWidth": 50
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "job"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 149
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 27
+      },
+      "id": 12,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "job"
+          }
+        ]
+      },
+      "pluginVersion": "12.3.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "APT_UPGRADABLE_PACKAGES",
+          "format": "table",
+          "instant": false,
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Pending Updates",
+      "transformations": [
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "Value": {
+                "aggregations": [
+                  "last"
+                ],
+                "operation": "aggregate"
+              },
+              "job": {
+                "aggregations": [],
+                "operation": "groupby"
+              }
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {},
+            "renameByName": {
+              "Value (last)": "Updateds"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "description": "GPU drivers\n",
       "fieldConfig": {
         "defaults": {
@@ -3970,7 +4440,7 @@
         "h": 8,
         "w": 16,
         "x": 8,
-        "y": 27
+        "y": 28
       },
       "id": 13,
       "options": {
@@ -3983,7 +4453,7 @@
           }
         ]
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.2",
       "targets": [
         {
           "datasource": {
@@ -4119,7 +4589,7 @@
         "h": 33,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 36
       },
       "id": 1,
       "options": {
@@ -4133,7 +4603,7 @@
           }
         ]
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.2",
       "targets": [
         {
           "datasource": {
@@ -4577,5 +5047,5 @@
   "timezone": "",
   "title": "DC OverView",
   "uid": "dc-overview-main",
-  "weekStart": ""
+  "version": 2
 }
