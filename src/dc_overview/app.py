@@ -1780,6 +1780,8 @@ BASE_STYLE = """
     .form-group { margin-bottom: 15px; }
     .form-group label { display: block; margin-bottom: 5px; color: var(--text-secondary); }
     .version { color: var(--text-secondary); font-size: 0.8rem; margin-top: 30px; text-align: center; }
+    .checking-spinner { display: inline-block; animation: spin 1s linear infinite; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 </style>
 """
 
@@ -1880,7 +1882,12 @@ DASHBOARD_TEMPLATE = """
         </div>
         
         <div class="card">
-            <h2>GPU Workers</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h2>GPU Workers</h2>
+                <div id="checkingIndicator" style="display: none; color: var(--accent-cyan); font-size: 14px;">
+                    <span class="checking-spinner">⟳</span> Checking servers...
+                </div>
+            </div>
             {% if servers %}
             <table>
                 <thead>
@@ -1972,16 +1979,21 @@ DASHBOARD_TEMPLATE = """
     document.addEventListener('DOMContentLoaded', async () => {
         await checkUserPermissions();
         // Auto-check all servers on first load, then reload to show updated status
+        const indicator = document.getElementById('checkingIndicator');
         try {
             const response = await fetch(`${basePath}/api/servers`);
             const servers = await response.json();
             if (servers && servers.length > 0) {
+                // Show checking indicator
+                if (indicator) indicator.style.display = 'block';
                 // Check each server silently
                 for (const server of servers) {
                     try {
                         await fetch(`${basePath}/api/servers/${server.id}/check`);
                     } catch (e) {}
                 }
+                // Hide indicator
+                if (indicator) indicator.style.display = 'none';
                 // Reload to show updated status (only once on initial load)
                 if (!sessionStorage.getItem('dashboard_checked')) {
                     sessionStorage.setItem('dashboard_checked', 'true');
@@ -1990,6 +2002,7 @@ DASHBOARD_TEMPLATE = """
             }
         } catch (e) {
             console.error('Failed to auto-check servers:', e);
+            if (indicator) indicator.style.display = 'none';
         }
         // Set up periodic refresh every 60 seconds
         setInterval(refreshDashboard, 60000);
@@ -2186,8 +2199,14 @@ SERVERS_TEMPLATE = """
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                 <h2>Managed Servers</h2>
-                <button class="btn btn-secondary" onclick="checkAllUpdates()">Check for Updates</button>
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <span id="checkingIndicator" style="display: none; color: var(--accent-cyan); font-size: 14px;">
+                        <span style="display: inline-block; animation: spin 1s linear infinite;">⟳</span> Checking...
+                    </span>
+                    <button class="btn btn-secondary" onclick="checkAllUpdates()">Check for Updates</button>
+                </div>
             </div>
+            <style>@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }</style>
             <table>
                 <thead>
                     <tr>
@@ -2293,7 +2312,11 @@ SERVERS_TEMPLATE = """
     
     async function checkAllServersQuietly() {
         // Check all servers and update table without showing alerts
+        const indicator = document.getElementById('checkingIndicator');
         const rows = document.querySelectorAll('#serversTable tr[data-id]');
+        
+        if (indicator && rows.length > 0) indicator.style.display = 'inline';
+        
         for (const row of rows) {
             const id = row.dataset.id;
             try {
@@ -2306,6 +2329,8 @@ SERVERS_TEMPLATE = """
                 console.error(`Failed to check server ${id}:`, e);
             }
         }
+        
+        if (indicator) indicator.style.display = 'none';
     }
     
     function updateServerRow(row, result) {
