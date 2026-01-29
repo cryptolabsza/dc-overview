@@ -28,6 +28,8 @@ grafana:
   admin_user: "admin"
   admin_password: "YOUR_GRAFANA_PASSWORD"
   port: 3000
+  # Home dashboard: dc-overview-main, vast-dashboard, node-exporter-full, or null
+  home_dashboard: "dc-overview-main"
   plugins:
     - "grafana-clock-panel"
     - "grafana-piechart-panel"

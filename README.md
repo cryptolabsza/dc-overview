@@ -151,11 +151,13 @@ servers:
     server_ip: 192.168.1.102
     bmc_ip: 192.168.1.202
 
-# Grafana password
+# Grafana settings
 grafana:
   admin_password: YOUR_GRAFANA_PASSWORD
+  # Home dashboard: dc-overview-main, vast-dashboard, node-exporter-full, or null
+  home_dashboard: dc-overview-main
 
-# IPMI Monitor password (if ipmi_monitor is enabled)
+# IPMI Monitor settings (if ipmi_monitor is enabled)
 ipmi_monitor:
   admin_password: YOUR_IPMI_MONITOR_PASSWORD
 ```
