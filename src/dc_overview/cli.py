@@ -818,6 +818,8 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     # Grafana
     grafana = data.get('grafana', {})
     config.grafana.admin_password = grafana.get('admin_password', 'admin')
+    # home_dashboard: "dc-overview-main", "vast-dashboard", or None to disable
+    config.grafana.home_dashboard = grafana.get('home_dashboard', 'dc-overview-main')
     
     # IPMI Monitor
     ipmi = data.get('ipmi_monitor', {})

@@ -95,6 +95,9 @@ class GrafanaConfig:
     """Grafana configuration."""
     admin_password: str = "admin"
     port: int = 3000
+    # Home dashboard setting: None (disabled), or dashboard UID
+    # Available options: "dc-overview-main", "vast-dashboard", etc.
+    home_dashboard: Optional[str] = "dc-overview-main"
 
 
 @dataclass

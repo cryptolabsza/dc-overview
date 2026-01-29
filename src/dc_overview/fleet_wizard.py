@@ -279,6 +279,21 @@ class FleetWizard:
             style=custom_style
         ).ask() or "admin"
         
+        # Grafana home dashboard
+        home_dashboard_choices = [
+            questionary.Choice("DC Overview (recommended)", value="dc-overview-main"),
+            questionary.Choice("Vast.ai Dashboard", value="vast-dashboard"),
+            questionary.Choice("Node Exporter Full", value="node-exporter-full"),
+            questionary.Choice("None (use Grafana default)", value=""),
+        ]
+        home_dashboard = questionary.select(
+            "Home dashboard:",
+            choices=home_dashboard_choices,
+            default="dc-overview-main",
+            style=custom_style
+        ).ask()
+        self.config.grafana.home_dashboard = home_dashboard if home_dashboard else None
+        
         # IPMI Monitor password (only if enabled AND not already installed)
         if self.config.components.ipmi_monitor and not self._detect_existing_ipmi():
             console.print("\n[bold]IPMI Monitor[/bold]")

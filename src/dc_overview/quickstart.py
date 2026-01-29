@@ -795,6 +795,23 @@ def setup_master_docker():
         style=custom_style
     ).ask() or "admin"
     
+    # Ask for Grafana home dashboard
+    home_dashboard_choices = [
+        questionary.Choice("DC Overview (recommended)", value="dc-overview-main"),
+        questionary.Choice("Vast.ai Dashboard", value="vast-dashboard"),
+        questionary.Choice("Node Exporter Full", value="node-exporter-full"),
+        questionary.Choice("None (use Grafana default)", value=""),
+    ]
+    home_dashboard = questionary.select(
+        "Grafana home dashboard:",
+        choices=home_dashboard_choices,
+        default="dc-overview-main",
+        style=custom_style
+    ).ask()
+    # Default to dc-overview-main if user cancels (Ctrl+C on this question)
+    if home_dashboard is None:
+        home_dashboard = "dc-overview-main"
+    
     # Reverse proxy questions (only if not already set up)
     if not skip_proxy_questions:
         console.print("\n[bold]HTTPS Reverse Proxy[/bold]")
@@ -1052,6 +1069,10 @@ providers:
         elif skip_proxy_questions:
             console.print("[green]✓[/green] Using existing CryptoLabs Proxy")
         console.print(f"[dim]  Grafana login: admin / {grafana_pass}[/dim]")
+        
+        # Set Grafana home dashboard if configured
+        if home_dashboard:
+            _set_grafana_home_dashboard(grafana_pass, home_dashboard)
     else:
         console.print(f"[red]Error starting services:[/red] {result.stderr.decode()[:200]}")
         return
@@ -1176,6 +1197,63 @@ def generate_self_signed_cert(ssl_dir: Path, domain: str):
         console.print("[green]✓[/green] Self-signed certificate generated")
     except Exception as e:
         console.print(f"[yellow]⚠[/yellow] Could not generate certificate: {e}")
+
+
+def _set_grafana_home_dashboard(grafana_pass: str, dashboard_uid: str):
+    """
+    Set the configured dashboard as Grafana home dashboard.
+    
+    This API call is safe because:
+    1. Grafana is bound to 127.0.0.1:3000 (not externally accessible)
+    2. Only called during local quickstart setup
+    3. Uses already-configured admin credentials
+    """
+    import urllib.request
+    import base64
+    import time
+    
+    # Dashboard UID to display name mapping
+    dashboard_names = {
+        "dc-overview-main": "DC Overview",
+        "vast-dashboard": "Vast.ai Dashboard",
+        "node-exporter-full": "Node Exporter Full",
+    }
+    
+    grafana_url = "http://localhost:3000"
+    auth = f"admin:{grafana_pass}"
+    auth_header = base64.b64encode(auth.encode()).decode()
+    
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Basic {auth_header}"
+    }
+    
+    # Wait a moment for Grafana API to be ready
+    time.sleep(2)
+    
+    try:
+        # Set org preferences to use configured dashboard as home
+        data = json.dumps({
+            "homeDashboardUID": dashboard_uid
+        }).encode('utf-8')
+        
+        req = urllib.request.Request(
+            f"{grafana_url}/api/org/preferences",
+            data=data,
+            headers=headers,
+            method="PUT"
+        )
+        
+        resp = urllib.request.urlopen(req, timeout=10)
+        dashboard_name = dashboard_names.get(dashboard_uid, dashboard_uid)
+        if resp.status == 200:
+            console.print(f"[green]✓[/green] {dashboard_name} set as Grafana home dashboard")
+        else:
+            console.print("[yellow]⚠[/yellow] Could not set home dashboard")
+            
+    except Exception as e:
+        # Non-critical - just log and continue
+        console.print(f"[dim]Note: Could not set home dashboard: {str(e)[:40]}[/dim]")
 
 
 def generate_basic_compose(dc_port: int, grafana_pass: str, enable_proxy: bool) -> str:
