@@ -22,7 +22,8 @@ echo -e "${YELLOW}=== DC Overview Dev Fleet Cleanup ===${NC}"
 echo ""
 
 # DC Overview containers to remove (including certbot from ipmi-monitor standalone)
-DC_CONTAINERS="cryptolabs-proxy dc-overview ipmi-monitor grafana prometheus vastai-exporter certbot"
+# Note: watchtower-minecraft is preserved, but 'watchtower' (if created by quickstart) is removed
+DC_CONTAINERS="cryptolabs-proxy dc-overview ipmi-monitor grafana prometheus vastai-exporter certbot watchtower"
 
 # DC Overview volumes to remove (all possible naming conventions)
 DC_VOLUMES="dc-overview-data ipmi-monitor-data grafana-data prometheus-data dc-overview_grafana-data dc-overview_prometheus-data fleet-auth-data cryptolabs-proxy-data root_grafana-data root_prometheus-data ipmi-monitor_ipmi-data"
@@ -87,9 +88,10 @@ echo "  Cleaning certbot lock files..."
 ssh_cmd ${MASTER_PORT} "rm -f /var/lib/letsencrypt/.certbot.lock 2>/dev/null || true"
 ssh_cmd ${MASTER_PORT} "pkill -f certbot 2>/dev/null || true"
 
-# Uninstall dc-overview pip package and clear cache
-echo "  Uninstalling dc-overview pip package..."
+# Uninstall pip packages and clear cache
+echo "  Uninstalling dc-overview and ipmi-monitor pip packages..."
 ssh_cmd ${MASTER_PORT} "pip uninstall dc-overview -y --break-system-packages 2>/dev/null || true"
+ssh_cmd ${MASTER_PORT} "pip uninstall ipmi-monitor -y --break-system-packages 2>/dev/null || true"
 ssh_cmd ${MASTER_PORT} "pip cache purge 2>/dev/null || true"
 
 echo -e "${GREEN}  ✓ Master node cleaned${NC}"
