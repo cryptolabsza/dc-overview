@@ -377,19 +377,25 @@ providers:
             # Don't check return code - docker compose returns non-zero during normal operation
             # We'll verify by checking if containers are actually running
         
-        # Wait a moment for containers to initialize, then check status
+        # Wait for containers to appear in docker ps (they can take a few seconds after up -d)
+        def _check_containers():
+            result = subprocess.run(
+                ["docker", "ps", "--filter", "name=prometheus", "--filter", "name=grafana", "--format", "{{.Names}}"],
+                capture_output=True,
+                text=True,
+                cwd=compose_dir,
+            )
+            names = [c.strip() for c in result.stdout.strip().split('\n') if c.strip()]
+            return (
+                any('prometheus' in c.lower() for c in names),
+                any('grafana' in c.lower() for c in names),
+            )
+        
         time.sleep(2)
-        
-        # Check if containers are actually running (the only reliable way)
-        check_result = subprocess.run(
-            ["docker", "ps", "--filter", "name=prometheus", "--filter", "name=grafana", "--format", "{{.Names}}"],
-            capture_output=True,
-            text=True
-        )
-        running_containers = [c.strip() for c in check_result.stdout.strip().split('\n') if c.strip()]
-        
-        prometheus_running = any('prometheus' in c.lower() for c in running_containers)
-        grafana_running = any('grafana' in c.lower() for c in running_containers)
+        prometheus_running, grafana_running = _check_containers()
+        if not (prometheus_running and grafana_running):
+            time.sleep(3)  # Give a bit more time before warning
+            prometheus_running, grafana_running = _check_containers()
         
         if prometheus_running and grafana_running:
             console.print("[green]✓[/green] Prometheus running on port 9090")
@@ -401,14 +407,14 @@ providers:
             if not grafana_running:
                 console.print("[yellow]⚠[/yellow] Grafana may still be starting")
         else:
-            # Check for actual errors in container status
+            # After retry, still not up - show status so user can see if there are errors
             status_result = subprocess.run(
                 ["docker", "compose", "ps", "-a"],
                 cwd=compose_dir,
                 capture_output=True,
                 text=True
             )
-            console.print(f"[yellow]⚠[/yellow] Services may still be starting. Status:")
+            console.print("[yellow]⚠[/yellow] Containers may need a few more seconds. Status:")
             console.print(f"[dim]{status_result.stdout[:300]}[/dim]")
     
     def _generate_docker_compose(self) -> str:
