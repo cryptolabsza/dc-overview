@@ -399,45 +399,81 @@ providers:
             # Don't check return code - docker compose returns non-zero during normal operation
             # We'll verify by checking if containers are actually running
         
-        # Wait for containers to appear in docker ps (they can take a few seconds after up -d)
+        # Wait for containers to be running (up to 10 minutes)
+        # This ensures we don't proceed until services are actually ready
+        MAX_WAIT_SECONDS = 600  # 10 minutes
+        CHECK_INTERVAL = 10    # Check every 10 seconds
+        
         def _check_containers():
+            """Check if prometheus and grafana containers are running."""
             result = subprocess.run(
-                ["docker", "ps", "--filter", "name=prometheus", "--filter", "name=grafana", "--format", "{{.Names}}"],
+                ["docker", "ps", "--filter", "name=prometheus", "--filter", "name=grafana", "--format", "{{.Names}}:{{.Status}}"],
                 capture_output=True,
                 text=True,
                 cwd=compose_dir,
             )
-            names = [c.strip() for c in result.stdout.strip().split('\n') if c.strip()]
-            return (
-                any('prometheus' in c.lower() for c in names),
-                any('grafana' in c.lower() for c in names),
-            )
+            lines = [l.strip() for l in result.stdout.strip().split('\n') if l.strip()]
+            prometheus_running = any('prometheus' in l.lower() and 'up' in l.lower() for l in lines)
+            grafana_running = any('grafana' in l.lower() and 'up' in l.lower() for l in lines)
+            return prometheus_running, grafana_running
         
-        time.sleep(2)
-        prometheus_running, grafana_running = _check_containers()
-        if not (prometheus_running and grafana_running):
-            time.sleep(3)  # Give a bit more time before warning
+        console.print("[dim]Waiting for services to start...[/dim]")
+        
+        waited = 0
+        prometheus_running = False
+        grafana_running = False
+        
+        while waited < MAX_WAIT_SECONDS:
             prometheus_running, grafana_running = _check_containers()
+            
+            if prometheus_running and grafana_running:
+                break
+            
+            # Show progress every 30 seconds
+            if waited > 0 and waited % 30 == 0:
+                status = []
+                if prometheus_running:
+                    status.append("prometheus: up")
+                else:
+                    status.append("prometheus: waiting")
+                if grafana_running:
+                    status.append("grafana: up")
+                else:
+                    status.append("grafana: waiting")
+                console.print(f"[dim]  Still starting... ({', '.join(status)}) [{waited}s/{MAX_WAIT_SECONDS}s][/dim]")
+            
+            time.sleep(CHECK_INTERVAL)
+            waited += CHECK_INTERVAL
         
+        # Final status
         if prometheus_running and grafana_running:
             console.print("[green]✓[/green] Prometheus running on port 9090")
             console.print("[green]✓[/green] Grafana running on port 3000")
-        elif prometheus_running or grafana_running:
-            console.print("[green]✓[/green] Services starting...")
-            if not prometheus_running:
-                console.print("[yellow]⚠[/yellow] Prometheus may still be starting")
-            if not grafana_running:
-                console.print("[yellow]⚠[/yellow] Grafana may still be starting")
         else:
-            # After retry, still not up - show status so user can see if there are errors
+            # Timeout - show what's happening
+            console.print(f"[red]✗[/red] Services failed to start within {MAX_WAIT_SECONDS // 60} minutes")
+            
             status_result = subprocess.run(
                 ["docker", "compose", "ps", "-a"],
                 cwd=compose_dir,
                 capture_output=True,
                 text=True
             )
-            console.print("[yellow]⚠[/yellow] Containers may need a few more seconds. Status:")
-            console.print(f"[dim]{status_result.stdout[:300]}[/dim]")
+            console.print("[dim]Container status:[/dim]")
+            console.print(f"[dim]{status_result.stdout}[/dim]")
+            
+            # Check logs for errors
+            for svc in ["prometheus", "grafana"]:
+                log_result = subprocess.run(
+                    ["docker", "logs", "--tail", "20", svc],
+                    capture_output=True,
+                    text=True
+                )
+                if log_result.stderr:
+                    console.print(f"[dim]{svc} logs:[/dim]")
+                    console.print(f"[dim]{log_result.stderr[-500:]}[/dim]")
+            
+            raise RuntimeError("Prometheus and Grafana failed to start. Check docker logs for details.")
     
     def _generate_docker_compose(self) -> str:
         """Generate docker-compose.yml content."""
@@ -1844,15 +1880,21 @@ except Exception as e:
         ]
         
         result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0:
-            console.print("[green]✓[/green] CryptoLabs Proxy started")
-            console.print(f"\n  Fleet Management: [cyan]https://{domain}/[/cyan]")
-            console.print(f"  Server Manager: [cyan]https://{domain}/dc/[/cyan]")
-            console.print(f"  Grafana: [cyan]https://{domain}/grafana/[/cyan]")
-            console.print(f"  Prometheus: [cyan]https://{domain}/prometheus/[/cyan]")
-            console.print(f"\n  Login: [cyan]{self.config.fleet_admin_user}[/cyan] / [dim](password you set)[/dim]")
-        else:
+        if result.returncode != 0:
             console.print(f"[red]✗[/red] Failed to start proxy: {result.stderr[:200]}")
+            return
+        
+        # Wait for proxy to be healthy (up to 2 minutes)
+        if not self._wait_for_container("cryptolabs-proxy", timeout=120, require_healthy=True):
+            console.print("[red]✗[/red] Proxy failed to become healthy")
+            return
+        
+        console.print("[green]✓[/green] CryptoLabs Proxy started")
+        console.print(f"\n  Fleet Management: [cyan]https://{domain}/[/cyan]")
+        console.print(f"  Server Manager: [cyan]https://{domain}/dc/[/cyan]")
+        console.print(f"  Grafana: [cyan]https://{domain}/grafana/[/cyan]")
+        console.print(f"  Prometheus: [cyan]https://{domain}/prometheus/[/cyan]")
+        console.print(f"\n  Login: [cyan]{self.config.fleet_admin_user}[/cyan] / [dim](password you set)[/dim]")
     
     def _deploy_dc_overview_container(self):
         """Deploy dc-overview container on cryptolabs network."""
@@ -1888,10 +1930,18 @@ except Exception as e:
         ]
         
         result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0:
-            console.print("[green]✓[/green] DC Overview (Server Manager) container started")
-            # Populate servers after container starts
-            self._populate_dc_overview_servers()
+        if result.returncode != 0:
+            console.print(f"[red]✗[/red] Failed to start dc-overview: {result.stderr[:200]}")
+            return
+        
+        # Wait for container to be healthy (up to 2 minutes)
+        console.print("[dim]Waiting for DC Overview to be healthy...[/dim]")
+        if not self._wait_for_container("dc-overview", timeout=120, require_healthy=True):
+            console.print("[yellow]⚠[/yellow] DC Overview taking longer than expected, but container is running")
+        
+        console.print("[green]✓[/green] DC Overview (Server Manager) container started")
+        # Populate servers after container starts
+        self._populate_dc_overview_servers()
     
     def _populate_dc_overview_servers(self):
         """Populate dc-overview database with configured servers via API."""
@@ -1904,17 +1954,9 @@ except Exception as e:
             
         console.print("[dim]Populating Server Manager with configured servers...[/dim]")
         
-        # Wait for dc-overview container to be healthy
-        max_retries = 30
-        for i in range(max_retries):
-            result = subprocess.run(
-                ["docker", "inspect", "--format", "{{.State.Health.Status}}", "dc-overview"],
-                capture_output=True, text=True
-            )
-            if result.returncode == 0 and result.stdout.strip() == "healthy":
-                break
-            time.sleep(1)
-        else:
+        # Wait for dc-overview container to be healthy (up to 5 minutes)
+        if not self._wait_for_container("dc-overview", timeout=300, require_healthy=True):
+            # Still try to continue even if not healthy
             console.print("[yellow]⚠[/yellow] dc-overview container not healthy, skipping server population")
             return
         
@@ -2051,6 +2093,61 @@ except Exception as e:
             "-H", "X-Fleet-Auth-Role: admin",
             "-d", data
         ], capture_output=True, text=True)
+    
+    def _wait_for_container(
+        self, 
+        container_name: str, 
+        timeout: int = 600, 
+        require_healthy: bool = False,
+        check_interval: int = 5
+    ) -> bool:
+        """Wait for a container to be running (and optionally healthy).
+        
+        Args:
+            container_name: Name of the Docker container
+            timeout: Maximum seconds to wait (default 10 minutes)
+            require_healthy: If True, wait for health check to pass
+            check_interval: Seconds between checks
+            
+        Returns:
+            True if container is ready, False if timeout
+        """
+        waited = 0
+        
+        while waited < timeout:
+            # Check container status
+            result = subprocess.run(
+                ["docker", "inspect", "--format", 
+                 "{{.State.Running}}:{{.State.Health.Status}}" if require_healthy 
+                 else "{{.State.Running}}",
+                 container_name],
+                capture_output=True, text=True
+            )
+            
+            if result.returncode == 0:
+                status = result.stdout.strip()
+                
+                if require_healthy:
+                    # Format: "true:healthy" or "true:starting" etc
+                    parts = status.split(":")
+                    is_running = parts[0] == "true"
+                    health = parts[1] if len(parts) > 1 else ""
+                    
+                    if is_running and health == "healthy":
+                        return True
+                else:
+                    if status == "true":
+                        return True
+            
+            # Show progress every 30 seconds
+            if waited > 0 and waited % 30 == 0:
+                health_info = f" (health: {health})" if require_healthy and 'health' in dir() else ""
+                console.print(f"[dim]  Waiting for {container_name}...{health_info} [{waited}s/{timeout}s][/dim]")
+            
+            time.sleep(check_interval)
+            waited += check_interval
+        
+        return False
     
     def _generate_self_signed_cert(self, domain: str, ssl_dir: Path):
         """Generate self-signed SSL certificate."""
