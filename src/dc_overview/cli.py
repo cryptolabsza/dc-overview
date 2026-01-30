@@ -771,8 +771,25 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     from .fleet_config import ComponentConfig, GrafanaConfig, VastConfig, IPMIMonitorConfig
     from .fleet_config import SecurityConfig, SSLMode, AuthMethod
     
-    with open(config_file, 'r') as f:
-        data = yaml.safe_load(f)
+    try:
+        with open(config_file, 'r') as f:
+            data = yaml.safe_load(f)
+    except FileNotFoundError:
+        console.print(f"[red]Config file not found:[/red] {config_file}")
+        sys.exit(1)
+    except yaml.YAMLError as e:
+        console.print(f"[red]Invalid YAML in config file:[/red] {config_file}")
+        if hasattr(e, 'problem_mark'):
+            mark = e.problem_mark
+            console.print(f"  Line {mark.line + 1}, column {mark.column + 1}: {e.problem}")
+        else:
+            console.print(f"  {e}")
+        console.print("\n[dim]Common causes: inconsistent indentation (use 2 spaces), list items aligned (e.g. '  - name:' not '   - name:').[/dim]")
+        sys.exit(1)
+    
+    if data is None:
+        console.print(f"[red]Config file is empty:[/red] {config_file}")
+        sys.exit(1)
     
     config = FleetConfig()
     
