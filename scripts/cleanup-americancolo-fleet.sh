@@ -64,12 +64,16 @@ echo "  Containers to PRESERVE: registry, netbootxyz, watchtower"
 echo "  Containers to REMOVE: ${REMOVE_CONTAINERS}"
 echo ""
 
-# Stop and remove monitoring containers on master
+# Stop and remove monitoring containers on master (one by one so missing names don't skip the rest)
 echo "  Stopping monitoring containers..."
-ssh_master "docker stop ${REMOVE_CONTAINERS} 2>/dev/null || true"
+for c in ${REMOVE_CONTAINERS}; do
+  ssh_master "docker stop ${c} 2>/dev/null && echo \"    stopped ${c}\" || true"
+done
 
 echo "  Removing monitoring containers..."
-ssh_master "docker rm ${REMOVE_CONTAINERS} 2>/dev/null || true"
+for c in ${REMOVE_CONTAINERS}; do
+  ssh_master "docker rm ${c} 2>/dev/null && echo \"    removed ${c}\" || true"
+done
 
 # Remove exporter services on master (if any)
 echo "  Removing exporter services on master..."
