@@ -23,10 +23,17 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
 console = Console()
 
-# Latest versions (defaults, will be overridden by GitHub releases)
-NODE_EXPORTER_VERSION = "1.7.0"
-DC_EXPORTER_RS_VERSION = "0.1.0"
-DCGM_EXPORTER_VERSION = "3.3.5-3.4.1"
+# Latest versions (defaults, used as fallback when GitHub API is rate limited)
+NODE_EXPORTER_VERSION = "1.8.2"
+DC_EXPORTER_RS_VERSION = "0.2.5"
+DCGM_EXPORTER_VERSION = "3.3.8-3.6.0"
+
+# Fallback versions when GitHub API fails
+FALLBACK_VERSIONS = {
+    'node_exporter': NODE_EXPORTER_VERSION,
+    'dc_exporter': DC_EXPORTER_RS_VERSION,
+    'dcgm_exporter': DCGM_EXPORTER_VERSION,
+}
 
 # GitHub repositories for each exporter
 EXPORTER_REPOS = {
@@ -757,6 +764,7 @@ def get_latest_github_release(repo: str, branch: str = 'main') -> Optional[Dict[
 def get_latest_exporter_version(exporter: str, branch: str = 'main') -> Optional[str]:
     """
     Get the latest available version for an exporter from GitHub.
+    Falls back to known versions if GitHub API is rate limited.
     
     Args:
         exporter: One of 'node_exporter', 'dc_exporter', 'dcgm_exporter'
@@ -767,11 +775,14 @@ def get_latest_exporter_version(exporter: str, branch: str = 'main') -> Optional
     """
     repo = EXPORTER_REPOS.get(exporter)
     if not repo:
-        return None
+        return FALLBACK_VERSIONS.get(exporter)
     
     release = get_latest_github_release(repo, branch)
     if release:
         return release.get('version')
+    
+    # Fallback to known latest versions when GitHub API fails (rate limit)
+    return FALLBACK_VERSIONS.get(exporter)
     
     return None
 
