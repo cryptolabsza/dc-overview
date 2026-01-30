@@ -730,6 +730,7 @@ def run_fleet_quickstart(config_file: str = None, auto_confirm: bool = False):
         if config_file:
             # Load configuration from file
             config = load_config_from_file(config_file)
+            config.auto_confirm = auto_confirm  # Pass -y flag to deployment
             
             if not auto_confirm:
                 # Show config summary and confirm

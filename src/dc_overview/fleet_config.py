@@ -172,6 +172,7 @@ class FleetConfig:
     # Internal state
     master_ip: Optional[str] = None
     ssh_key_generated: bool = False
+    auto_confirm: bool = False  # Skip interactive prompts (set by -y flag)
     
     def add_server(
         self,

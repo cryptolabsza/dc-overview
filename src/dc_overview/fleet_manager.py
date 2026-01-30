@@ -20,6 +20,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+from rich.markup import escape as rich_escape
 import yaml
 
 from .fleet_config import FleetConfig, Server, SSLMode, AuthMethod, get_local_ip
@@ -197,7 +198,9 @@ class FleetManager:
             return True
             
         except Exception as e:
-            console.print(f"\n[red]Deployment failed:[/red] {e}")
+            console.print(f"\n[red]Deployment failed:[/red] {rich_escape(str(e))}")
+            import traceback
+            traceback.print_exc()
             return False
     
     # ============ Step 1: Prerequisites ============
@@ -2344,8 +2347,7 @@ except Exception as e:
                 console.print(f"[green]✓[/green] Added ports: {', '.join(added_ports)}")
             return
         
-        console.print("[dim]Internal services (Prometheus :9090, Grafana :3000, exporters) will")
-        console.print("only be accessible through the HTTPS proxy, not directly.[/dim]")
+        console.print("[dim]Internal services (Prometheus :9090, Grafana :3000, exporters) will\nonly be accessible through the HTTPS proxy, not directly.[/dim]")
         console.print()
         
         # Check if non-interactive mode (auto-confirm)
