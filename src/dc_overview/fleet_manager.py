@@ -2261,9 +2261,11 @@ except Exception as e:
         
         # Check current UFW status
         result = subprocess.run(["ufw", "status"], capture_output=True, text=True)
-        if "Status: active" in result.stdout:
-            console.print("[green]✓[/green] UFW firewall already active")
-            return
+        ufw_already_active = "Status: active" in result.stdout
+        
+        if ufw_already_active:
+            console.print("[green]✓[/green] UFW firewall already active (likely configured by cryptolabs-proxy)")
+            console.print("[dim]Adding any additional ports from dc-overview config...[/dim]")
         
         # Build list of ports to allow
         ssh_port = getattr(self.config.ssh, 'port', 22) or 22
@@ -2311,6 +2313,30 @@ except Exception as e:
         port_table.add_row("*", "All other incoming", "[red]DENY[/red]")
         console.print(port_table)
         console.print()
+        
+        # If UFW is already active (e.g., configured by cryptolabs-proxy), just add ports
+        if ufw_already_active:
+            # Just add any additional ports without re-prompting
+            added_ports = []
+            for port in sorted(ports_to_allow.keys()):
+                subprocess.run(["ufw", "allow", str(port)], capture_output=True)
+                added_ports.append(f"{port}/tcp")
+            
+            # Add UDP ports
+            if hasattr(self.config, 'security') and hasattr(self.config.security, 'ufw_udp_ports'):
+                for port in self.config.security.ufw_udp_ports:
+                    subprocess.run(["ufw", "allow", f"{port}/udp"], capture_output=True)
+                    added_ports.append(f"{port}/udp")
+            
+            # Ensure Docker network is allowed
+            subprocess.run(
+                ["ufw", "allow", "from", DOCKER_NETWORK_SUBNET, "comment", "Docker cryptolabs network"],
+                capture_output=True
+            )
+            
+            if added_ports:
+                console.print(f"[green]✓[/green] Added ports: {', '.join(added_ports)}")
+            return
         
         console.print("[dim]Internal services (Prometheus :9090, Grafana :3000, exporters) will")
         console.print("only be accessible through the HTTPS proxy, not directly.[/dim]")
