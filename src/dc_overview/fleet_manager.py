@@ -365,11 +365,10 @@ class FleetManager:
         recording_rules = self._generate_recording_rules()
         (compose_dir / "recording_rules.yml").write_text(recording_rules)
         
-        # Create grafana provisioning directories
+        # Create grafana provisioning directories (only datasources, not dashboards)
+        # Dashboards are imported via API to make them fully editable by users
         grafana_dir = compose_dir / "grafana"
         (grafana_dir / "provisioning" / "datasources").mkdir(parents=True, exist_ok=True)
-        (grafana_dir / "provisioning" / "dashboards").mkdir(parents=True, exist_ok=True)
-        (grafana_dir / "dashboards").mkdir(parents=True, exist_ok=True)
         
         # Datasource config (with /prometheus/ path for proxy setup)
         datasource_config = """apiVersion: 1
@@ -383,21 +382,8 @@ datasources:
 """
         (grafana_dir / "provisioning" / "datasources" / "prometheus.yml").write_text(datasource_config)
         
-        # Dashboard provisioning config
-        # allowUiUpdates: true allows users to edit/resize panels in Grafana UI
-        dashboard_config = """apiVersion: 1
-providers:
-  - name: 'DC Overview'
-    orgId: 1
-    folder: ''
-    type: file
-    disableDeletion: false
-    updateIntervalSeconds: 0
-    allowUiUpdates: true
-    options:
-      path: /var/lib/grafana/dashboards
-"""
-        (grafana_dir / "provisioning" / "dashboards" / "default.yml").write_text(dashboard_config)
+        # Note: Dashboards are NOT provisioned via files - they are imported via API
+        # in _import_dashboards() which stores them in Grafana's database for full editability
         
         # Ensure cryptolabs network exists with correct subnet before starting services
         _ensure_docker_network()
@@ -575,7 +561,6 @@ providers:
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     environment:
       - GF_SECURITY_ADMIN_PASSWORD={self.config.grafana.admin_password}
       - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-piechart-panel
@@ -637,7 +622,6 @@ networks:
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     environment:
       - GF_SECURITY_ADMIN_PASSWORD={self.config.grafana.admin_password}
       - GF_USERS_ALLOW_SIGN_UP=false
@@ -1030,7 +1014,12 @@ echo "Exporters installed successfully"
             console.print(f"[dim]Prometheus datasource UID: {prometheus_uid}[/dim]")
         
         dashboards = self._get_dashboard_list()
-        grafana_dash_dir = self.config.config_dir / "grafana" / "dashboards"
+        
+        # Import dashboards via API (stored in database, fully editable)
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Basic {auth_header}"
+        }
         
         for dashboard in dashboards:
             name = dashboard["name"]
@@ -1047,21 +1036,38 @@ echo "Exporters installed successfully"
                 # Fix datasource references throughout the dashboard
                 dash_obj = self._fix_dashboard_datasources(dash_obj, prometheus_uid)
                 
-                # Remove id to avoid conflicts
+                # Remove id to avoid conflicts (API will assign new one)
                 if "id" in dash_obj:
                     dash_obj["id"] = None
                 
-                # Write to provisioning directory
-                filename = name.lower().replace(" ", "_") + ".json"
-                with open(grafana_dash_dir / filename, "w") as f:
-                    json.dump(dash_obj, f, indent=2)
+                # Import via Grafana API - this stores in database, not as provisioned file
+                import_payload = json.dumps({
+                    "dashboard": dash_obj,
+                    "overwrite": True,
+                    "inputs": [
+                        {
+                            "name": "DS_PROMETHEUS",
+                            "type": "datasource",
+                            "pluginId": "prometheus",
+                            "value": "Prometheus"
+                        }
+                    ],
+                    "folderId": 0
+                }).encode('utf-8')
                 
+                req = urllib.request.Request(
+                    f"{grafana_url}/api/dashboards/import",
+                    data=import_payload,
+                    headers=headers,
+                    method="POST"
+                )
+                urllib.request.urlopen(req, timeout=30)
                 console.print(f"  [green]✓[/green] {name}")
                 
             except Exception as e:
                 console.print(f"  [yellow]⚠[/yellow] {name}: {str(e)[:50]}")
         
-        console.print("[green]✓[/green] Dashboards imported")
+        console.print("[green]✓[/green] Dashboards imported (stored in database, fully editable)")
         
         # Set DC Overview as the home dashboard
         self._set_grafana_home_dashboard(grafana_url, auth_header)

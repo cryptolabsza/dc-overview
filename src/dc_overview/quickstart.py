@@ -980,16 +980,15 @@ GRAFANA_PASSWORD={grafana_pass}
         compose_content = generate_basic_compose(dc_port, grafana_pass, setup_proxy)
         (config_dir / "docker-compose.yml").write_text(compose_content)
     
-    # Create Grafana provisioning directories
+    # Create Grafana provisioning directories (only datasources, not dashboards)
+    # Dashboards are imported via API to make them fully editable by users
     grafana_dirs = [
         config_dir / "grafana" / "provisioning" / "datasources",
-        config_dir / "grafana" / "provisioning" / "dashboards",
-        config_dir / "grafana" / "dashboards"
     ]
     for d in grafana_dirs:
         d.mkdir(parents=True, exist_ok=True)
     
-    # Copy Grafana provisioning configs
+    # Copy Grafana provisioning configs (only datasource, not dashboards)
     try:
         # Datasource config
         datasource_config = """apiVersion: 1
@@ -1003,21 +1002,9 @@ datasources:
     uid: prometheus
 """
         (config_dir / "grafana" / "provisioning" / "datasources" / "prometheus.yml").write_text(datasource_config)
-        
-        # Dashboard provisioning config
-        dashboard_config = """apiVersion: 1
-providers:
-  - name: 'DC Overview'
-    orgId: 1
-    folder: ''
-    type: file
-    disableDeletion: false
-    updateIntervalSeconds: 30
-    options:
-      path: /var/lib/grafana/dashboards
-"""
-        (config_dir / "grafana" / "provisioning" / "dashboards" / "default.yml").write_text(dashboard_config)
-        console.print("[green]✓[/green] Grafana provisioning configured")
+        # Note: Dashboards are NOT provisioned via files - they are imported via API
+        # in configure_grafana() to make them fully editable by users
+        console.print("[green]✓[/green] Grafana datasource provisioning configured")
     except Exception as e:
         console.print(f"[yellow]⚠[/yellow] Grafana provisioning warning: {e}")
     
@@ -1042,8 +1029,8 @@ providers:
     else:
         (config_dir / "prometheus_targets.json").write_text("[]")
     
-    # Copy dashboards
-    copy_dashboards(config_dir / "grafana" / "dashboards")
+    # Note: Dashboards are imported via API after Grafana starts (in configure_grafana)
+    # This makes them fully editable by users instead of read-only provisioned files
     
     # Pull and start services
     console.print("\n[bold]Starting Services[/bold]\n")
@@ -1301,7 +1288,6 @@ def generate_basic_compose(dc_port: int, grafana_pass: str, enable_proxy: bool) 
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     networks:
       - cryptolabs
 
