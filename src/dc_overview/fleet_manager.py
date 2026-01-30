@@ -384,6 +384,7 @@ datasources:
         (grafana_dir / "provisioning" / "datasources" / "prometheus.yml").write_text(datasource_config)
         
         # Dashboard provisioning config
+        # allowUiUpdates: true allows users to edit/resize panels in Grafana UI
         dashboard_config = """apiVersion: 1
 providers:
   - name: 'DC Overview'
@@ -391,7 +392,8 @@ providers:
     folder: ''
     type: file
     disableDeletion: false
-    updateIntervalSeconds: 30
+    updateIntervalSeconds: 0
+    allowUiUpdates: true
     options:
       path: /var/lib/grafana/dashboards
 """
