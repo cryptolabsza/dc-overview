@@ -44,6 +44,8 @@ dependencies = [
     # Security
     "flask-wtf>=1.2.0",
     "flask-limiter>=3.5.0",
+    # Proxy management (SSL, reverse proxy)
+    "cryptolabs-proxy>=1.0.0",
 ]
 
 [project.optional-dependencies]

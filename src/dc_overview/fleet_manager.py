@@ -27,11 +27,30 @@ from .fleet_config import FleetConfig, Server, SSLMode, AuthMethod, get_local_ip
 from .prerequisites import PrerequisitesInstaller
 from .ssh_manager import SSHManager
 
+# Import cryptolabs-proxy setup API (handles SSL, proxy deployment)
+try:
+    from cryptolabs_proxy import (
+        ProxyConfig,
+        setup_proxy as proxy_setup,
+        is_proxy_running,
+        update_proxy_credentials,
+        ensure_docker_network as proxy_ensure_network,
+        DOCKER_NETWORK_NAME as PROXY_NETWORK_NAME,
+        DOCKER_NETWORK_SUBNET as PROXY_NETWORK_SUBNET,
+        PROXY_STATIC_IP,
+    )
+    HAS_PROXY_MODULE = True
+except ImportError:
+    HAS_PROXY_MODULE = False
+    PROXY_NETWORK_NAME = "cryptolabs"
+    PROXY_NETWORK_SUBNET = "172.30.0.0/16"
+    PROXY_STATIC_IP = "172.30.0.2"
+
 console = Console()
 
 # Docker network configuration - use fixed subnet and IPs for security
-DOCKER_NETWORK_NAME = "cryptolabs"
-DOCKER_NETWORK_SUBNET = "172.30.0.0/16"
+DOCKER_NETWORK_NAME = PROXY_NETWORK_NAME if HAS_PROXY_MODULE else "cryptolabs"
+DOCKER_NETWORK_SUBNET = PROXY_NETWORK_SUBNET if HAS_PROXY_MODULE else "172.30.0.0/16"
 DOCKER_NETWORK_GATEWAY = "172.30.0.1"
 
 # Static IPs for all services - proxy IP is trusted by downstream services
@@ -1737,21 +1756,61 @@ except Exception as e:
     def _deploy_cryptolabs_proxy(self):
         """Deploy the cryptolabs-proxy Docker container.
         
-        The proxy handles its own nginx configuration internally.
-        We just need to provide SSL certs and auth credentials.
+        Delegates to cryptolabs-proxy's setup API which handles:
+        - SSL certificate management (LE detection, renewal, self-signed fallback)
+        - Docker network setup
+        - Proxy container deployment
         """
-        import secrets as secrets_module
-        
         domain = self.config.ssl.domain or "localhost"
         
-        # Create directory for SSL certs
+        # Deploy dc-overview container first (it needs to exist before proxy routes to it)
+        self._deploy_dc_overview_container()
+        
+        # Connect existing containers to cryptolabs network
+        for container in ["prometheus", "grafana"]:
+            subprocess.run(["docker", "network", "connect", "cryptolabs", container], capture_output=True)
+        
+        # Use cryptolabs-proxy's setup API if available
+        if HAS_PROXY_MODULE:
+            console.print("[dim]Setting up proxy via cryptolabs-proxy module...[/dim]")
+            
+            proxy_config = ProxyConfig(
+                domain=domain,
+                email=self.config.ssl.email or f"admin@{domain}",
+                use_letsencrypt=(self.config.ssl.mode == SSLMode.LETSENCRYPT),
+                fleet_admin_user=self.config.fleet_admin_user,
+                fleet_admin_pass=self.config.fleet_admin_pass,
+            )
+            
+            def log_callback(msg: str):
+                console.print(f"[dim]{msg}[/dim]")
+            
+            success, message = proxy_setup(proxy_config, callback=log_callback)
+            
+            if success:
+                console.print("[green]✓[/green] CryptoLabs Proxy started")
+                console.print(f"\n  Fleet Management: [cyan]https://{domain}/[/cyan]")
+                console.print(f"  Server Manager: [cyan]https://{domain}/dc/[/cyan]")
+                console.print(f"  Grafana: [cyan]https://{domain}/grafana/[/cyan]")
+                console.print(f"  Prometheus: [cyan]https://{domain}/prometheus/[/cyan]")
+                console.print(f"\n  Login: [cyan]{self.config.fleet_admin_user}[/cyan] / [dim](password you set)[/dim]")
+            else:
+                console.print(f"[red]✗[/red] Failed to start proxy: {message}")
+        else:
+            # Fallback to legacy inline setup (for backwards compatibility)
+            self._deploy_cryptolabs_proxy_legacy(domain)
+    
+    def _deploy_cryptolabs_proxy_legacy(self, domain: str):
+        """Legacy proxy deployment - used when cryptolabs-proxy module not available."""
+        import secrets as secrets_module
+        
         ssl_dir = Path("/etc/cryptolabs-proxy/ssl")
         ssl_dir.mkdir(parents=True, exist_ok=True)
         
-        # Ensure cryptolabs network exists with correct subnet
+        # Ensure network
         _ensure_docker_network()
         
-        # Handle SSL certificate (certs are always placed in ssl_dir)
+        # Handle SSL
         if self.config.ssl.mode == SSLMode.LETSENCRYPT:
             console.print("[dim]Checking Let's Encrypt certificate...[/dim]")
             if not self._obtain_letsencrypt_cert(domain, self.config.ssl.email):
@@ -1760,26 +1819,13 @@ except Exception as e:
         else:
             self._generate_self_signed_cert(domain, ssl_dir)
         
-        # Deploy dc-overview container first
-        self._deploy_dc_overview_container()
-        
-        # Connect existing containers to cryptolabs network
-        for container in ["prometheus", "grafana"]:
-            subprocess.run(["docker", "network", "connect", "cryptolabs", container], capture_output=True)
-        
-        # Pull proxy image
+        # Pull and start proxy
         console.print("[dim]Pulling cryptolabs-proxy image...[/dim]")
         subprocess.run(["docker", "pull", "ghcr.io/cryptolabsza/cryptolabs-proxy:dev"], 
                       capture_output=True, timeout=120)
-        
-        # Remove existing proxy container if any
         subprocess.run(["docker", "rm", "-f", "cryptolabs-proxy"], capture_output=True)
         
-        # Generate auth secret
         auth_secret = secrets_module.token_hex(32)
-        
-        # Start proxy - no nginx.conf override, use built-in config
-        # Use static IP so downstream services can trust only this specific IP
         cmd = [
             "docker", "run", "-d",
             "--name", "cryptolabs-proxy",
@@ -1790,17 +1836,14 @@ except Exception as e:
             "-e", f"AUTH_SECRET_KEY={auth_secret}",
             "-v", "/var/run/docker.sock:/var/run/docker.sock:ro",
             "-v", "fleet-auth-data:/data/auth",
+            "-v", f"{ssl_dir}:/etc/nginx/ssl:ro",
             "--network", DOCKER_NETWORK_NAME,
             "--ip", PROXY_STATIC_IP,
+            "--label", "com.centurylinklabs.watchtower.enable=true",
+            "ghcr.io/cryptolabsza/cryptolabs-proxy:dev"
         ]
         
-        # Add SSL volume - certs are always copied to ssl_dir (by _obtain_letsencrypt_cert or _generate_self_signed_cert)
-        cmd.extend(["-v", f"{ssl_dir}:/etc/nginx/ssl:ro"])
-        
-        cmd.append("ghcr.io/cryptolabsza/cryptolabs-proxy:dev")
-        
         result = subprocess.run(cmd, capture_output=True, text=True)
-        
         if result.returncode == 0:
             console.print("[green]✓[/green] CryptoLabs Proxy started")
             console.print(f"\n  Fleet Management: [cyan]https://{domain}/[/cyan]")
@@ -2093,101 +2136,52 @@ except Exception as e:
     
     def _integrate_with_proxy(self):
         """Integrate with existing cryptolabs-proxy - update it with correct config."""
-        import secrets as secrets_module
-        
         console.print("\n[bold]Step 9: Integrating with CryptoLabs Proxy[/bold]\n")
-        console.print("[dim]Updating proxy with Fleet credentials and Docker socket access...[/dim]\n")
+        console.print("[dim]Updating proxy with Fleet credentials...[/dim]\n")
         
         domain = self.config.ssl.domain or "localhost"
         
-        # Check if proxy needs to be updated (missing credentials or Docker socket)
-        needs_update = False
-        try:
-            result = subprocess.run(
-                ["docker", "inspect", "cryptolabs-proxy", "--format", 
-                 "{{range .Config.Env}}{{println .}}{{end}}"],
-                capture_output=True, text=True, timeout=10
-            )
-            env_vars = result.stdout if result.returncode == 0 else ""
+        # Use cryptolabs-proxy API if available
+        if HAS_PROXY_MODULE:
+            # Check if proxy needs credential update
+            existing_config = get_proxy_config()
             
-            # Check if credentials are set
-            if "FLEET_ADMIN_USER=" not in env_vars or "FLEET_ADMIN_PASS=" not in env_vars:
-                console.print("[dim]Proxy missing Fleet credentials - will update[/dim]")
-                needs_update = True
-            
-            # Check if Docker socket is mounted
-            result = subprocess.run(
-                ["docker", "exec", "cryptolabs-proxy", "ls", "/var/run/docker.sock"],
-                capture_output=True, text=True, timeout=10
-            )
-            if result.returncode != 0:
-                console.print("[dim]Proxy missing Docker socket - will update[/dim]")
-                needs_update = True
+            if existing_config:
+                current_user = existing_config.get("FLEET_ADMIN_USER", "")
+                current_pass = existing_config.get("FLEET_ADMIN_PASS", "")
                 
-        except Exception as e:
-            console.print(f"[dim]Could not inspect proxy: {e} - will recreate[/dim]")
-            needs_update = True
-        
-        if needs_update:
-            # Determine SSL certificate paths
-            letsencrypt_path = Path(f"/etc/letsencrypt/live/{domain}")
-            ssl_mounts = []
-            
-            if letsencrypt_path.exists():
-                # Use Let's Encrypt certificates
-                ssl_mounts = [
-                    "-v", f"{letsencrypt_path}/fullchain.pem:/etc/nginx/ssl/server.crt:ro",
-                    "-v", f"{letsencrypt_path}/privkey.pem:/etc/nginx/ssl/server.key:ro",
-                    "-v", "/etc/letsencrypt:/etc/letsencrypt:ro",
-                ]
-                console.print(f"[dim]Using Let's Encrypt certificate for {domain}[/dim]")
+                if (current_user == self.config.fleet_admin_user and 
+                    current_pass == self.config.fleet_admin_pass):
+                    console.print("[green]✓[/green] Proxy already configured correctly")
+                else:
+                    console.print("[dim]Updating proxy credentials...[/dim]")
+                    success, message = update_proxy_credentials(
+                        self.config.fleet_admin_user,
+                        self.config.fleet_admin_pass
+                    )
+                    if success:
+                        console.print("[green]✓[/green] CryptoLabs Proxy credentials updated")
+                    else:
+                        console.print(f"[yellow]⚠[/yellow] {message}")
             else:
-                # Check for self-signed certs
-                ssl_dir = Path("/etc/dc-overview/ssl")
-                if not ssl_dir.exists() or not (ssl_dir / "server.crt").exists():
-                    ssl_dir.mkdir(parents=True, exist_ok=True)
-                    self._generate_self_signed_cert(domain, ssl_dir)
-                ssl_mounts = ["-v", f"{ssl_dir}:/etc/nginx/ssl:ro"]
-                console.print("[dim]Using self-signed certificate[/dim]")
-            
-            # Generate auth secret
-            auth_secret = secrets_module.token_hex(32)
-            
-            # Remove existing proxy
-            subprocess.run(["docker", "rm", "-f", "cryptolabs-proxy"], capture_output=True)
-            
-            # Ensure network exists with correct subnet before recreating proxy
-            _ensure_docker_network()
-            
-            # Recreate proxy with correct configuration and static IP for security
-            cmd = [
-                "docker", "run", "-d",
-                "--name", "cryptolabs-proxy",
-                "--restart", "unless-stopped",
-                "-p", "80:80", "-p", "443:443",
-                "-e", f"FLEET_ADMIN_USER={self.config.fleet_admin_user}",
-                "-e", f"FLEET_ADMIN_PASS={self.config.fleet_admin_pass}",
-                "-e", f"AUTH_SECRET_KEY={auth_secret}",
-                "-v", "/var/run/docker.sock:/var/run/docker.sock:ro",
-                "-v", "fleet-auth-data:/data",
-                "--network", DOCKER_NETWORK_NAME,
-                "--ip", PROXY_STATIC_IP,
-                "--label", "com.centurylinklabs.watchtower.enable=true",
-            ] + ssl_mounts + [
-                "ghcr.io/cryptolabsza/cryptolabs-proxy:dev"
-            ]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            
-            if result.returncode == 0:
-                console.print("[green]✓[/green] CryptoLabs Proxy updated with Fleet credentials")
-                # Wait for proxy to be healthy
-                time.sleep(3)
-            else:
-                console.print(f"[red]✗[/red] Failed to update proxy: {result.stderr[:200]}")
-                return
+                # Proxy not running, do full setup
+                console.print("[dim]Proxy not running, performing full setup...[/dim]")
+                proxy_config = ProxyConfig(
+                    domain=domain,
+                    email=self.config.ssl.email or f"admin@{domain}",
+                    use_letsencrypt=(self.config.ssl.mode == SSLMode.LETSENCRYPT),
+                    fleet_admin_user=self.config.fleet_admin_user,
+                    fleet_admin_pass=self.config.fleet_admin_pass,
+                )
+                success, message = proxy_setup(proxy_config)
+                if success:
+                    console.print("[green]✓[/green] CryptoLabs Proxy started")
+                else:
+                    console.print(f"[red]✗[/red] {message}")
+                    return
         else:
-            console.print("[green]✓[/green] Proxy already configured correctly")
+            # Legacy integration
+            self._integrate_with_proxy_legacy(domain)
         
         # Ensure containers are on the cryptolabs network
         network = "cryptolabs"
@@ -2227,6 +2221,78 @@ except Exception as e:
         console.print(f"  Grafana: [cyan]https://{domain}/grafana/[/cyan]")
         console.print(f"  Prometheus: [cyan]https://{domain}/prometheus/[/cyan]")
         console.print(f"\n  Login: [cyan]{self.config.fleet_admin_user}[/cyan] / [dim](password you set)[/dim]")
+    
+    def _integrate_with_proxy_legacy(self, domain: str):
+        """Legacy proxy integration - used when cryptolabs-proxy module not available."""
+        import secrets as secrets_module
+        
+        # Check if proxy needs update
+        needs_update = False
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", "cryptolabs-proxy", "--format", 
+                 "{{range .Config.Env}}{{println .}}{{end}}"],
+                capture_output=True, text=True, timeout=10
+            )
+            env_vars = result.stdout if result.returncode == 0 else ""
+            
+            if "FLEET_ADMIN_USER=" not in env_vars or "FLEET_ADMIN_PASS=" not in env_vars:
+                needs_update = True
+            
+            result = subprocess.run(
+                ["docker", "exec", "cryptolabs-proxy", "ls", "/var/run/docker.sock"],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode != 0:
+                needs_update = True
+        except Exception:
+            needs_update = True
+        
+        if needs_update:
+            letsencrypt_path = Path(f"/etc/letsencrypt/live/{domain}")
+            ssl_dir = Path("/etc/cryptolabs-proxy/ssl")
+            
+            if letsencrypt_path.exists():
+                # Copy LE certs to proxy SSL dir
+                ssl_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(letsencrypt_path / "fullchain.pem", ssl_dir / "server.crt")
+                shutil.copy2(letsencrypt_path / "privkey.pem", ssl_dir / "server.key")
+                os.chmod(ssl_dir / "server.key", 0o600)
+                console.print(f"[dim]Using Let's Encrypt certificate for {domain}[/dim]")
+            elif not ssl_dir.exists() or not (ssl_dir / "server.crt").exists():
+                ssl_dir.mkdir(parents=True, exist_ok=True)
+                self._generate_self_signed_cert(domain, ssl_dir)
+                console.print("[dim]Using self-signed certificate[/dim]")
+            
+            auth_secret = secrets_module.token_hex(32)
+            subprocess.run(["docker", "rm", "-f", "cryptolabs-proxy"], capture_output=True)
+            _ensure_docker_network()
+            
+            cmd = [
+                "docker", "run", "-d",
+                "--name", "cryptolabs-proxy",
+                "--restart", "unless-stopped",
+                "-p", "80:80", "-p", "443:443",
+                "-e", f"FLEET_ADMIN_USER={self.config.fleet_admin_user}",
+                "-e", f"FLEET_ADMIN_PASS={self.config.fleet_admin_pass}",
+                "-e", f"AUTH_SECRET_KEY={auth_secret}",
+                "-v", "/var/run/docker.sock:/var/run/docker.sock:ro",
+                "-v", "fleet-auth-data:/data",
+                "-v", f"{ssl_dir}:/etc/nginx/ssl:ro",
+                "--network", DOCKER_NETWORK_NAME,
+                "--ip", PROXY_STATIC_IP,
+                "--label", "com.centurylinklabs.watchtower.enable=true",
+                "ghcr.io/cryptolabsza/cryptolabs-proxy:dev"
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                console.print("[green]✓[/green] CryptoLabs Proxy updated")
+                time.sleep(3)
+            else:
+                console.print(f"[red]✗[/red] Failed to update proxy: {result.stderr[:200]}")
+        else:
+            console.print("[green]✓[/green] Proxy already configured correctly")
     
     def _update_api_services_endpoint(self, nginx_path: Path, content: str = None):
         """Update /api/services endpoint to include all running services."""
