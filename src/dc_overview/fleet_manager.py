@@ -1751,14 +1751,10 @@ except Exception as e:
         # Ensure cryptolabs network exists with correct subnet
         _ensure_docker_network()
         
-        # Handle SSL certificate
-        use_letsencrypt = False
+        # Handle SSL certificate (certs are always placed in ssl_dir)
         if self.config.ssl.mode == SSLMode.LETSENCRYPT:
-            console.print("[dim]Obtaining Let's Encrypt certificate...[/dim]")
-            cert_result = self._obtain_letsencrypt_cert(domain, self.config.ssl.email)
-            if cert_result:
-                use_letsencrypt = True
-            else:
+            console.print("[dim]Checking Let's Encrypt certificate...[/dim]")
+            if not self._obtain_letsencrypt_cert(domain, self.config.ssl.email):
                 console.print("[yellow]⚠[/yellow] Could not obtain Let's Encrypt cert, using self-signed")
                 self._generate_self_signed_cert(domain, ssl_dir)
         else:
@@ -1798,13 +1794,8 @@ except Exception as e:
             "--ip", PROXY_STATIC_IP,
         ]
         
-        # Add SSL volume based on what was actually obtained
-        if use_letsencrypt:
-            # Mount Let's Encrypt certs to the path the proxy expects
-            cmd.extend(["-v", "/etc/letsencrypt/live/{}/fullchain.pem:/etc/nginx/ssl/server.crt:ro".format(domain)])
-            cmd.extend(["-v", "/etc/letsencrypt/live/{}/privkey.pem:/etc/nginx/ssl/server.key:ro".format(domain)])
-        else:
-            cmd.extend(["-v", f"{ssl_dir}:/etc/nginx/ssl:ro"])
+        # Add SSL volume - certs are always copied to ssl_dir (by _obtain_letsencrypt_cert or _generate_self_signed_cert)
+        cmd.extend(["-v", f"{ssl_dir}:/etc/nginx/ssl:ro"])
         
         cmd.append("ghcr.io/cryptolabsza/cryptolabs-proxy:dev")
         
@@ -2038,7 +2029,33 @@ except Exception as e:
             console.print("[yellow]⚠[/yellow] Could not generate SSL certificate")
     
     def _obtain_letsencrypt_cert(self, domain: str, email: str) -> bool:
-        """Obtain Let's Encrypt certificate using certbot."""
+        """Obtain Let's Encrypt certificate using certbot.
+        
+        First checks if a valid cert already exists. If so, uses it.
+        Only requests a new cert if none exists or current one is invalid/expired.
+        """
+        cert_path = Path(f"/etc/letsencrypt/live/{domain}/fullchain.pem")
+        key_path = Path(f"/etc/letsencrypt/live/{domain}/privkey.pem")
+        
+        # Check if valid cert already exists
+        if cert_path.exists() and key_path.exists():
+            # Verify cert is still valid (not expired)
+            result = subprocess.run(
+                ["openssl", "x509", "-in", str(cert_path), "-noout", "-checkend", "86400"],
+                capture_output=True
+            )
+            if result.returncode == 0:
+                console.print(f"[green]✓[/green] Found existing Let's Encrypt certificate for {domain}")
+                # Copy to proxy SSL directory so it's used
+                ssl_dir = Path("/etc/cryptolabs-proxy/ssl")
+                ssl_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(cert_path, ssl_dir / "server.crt")
+                shutil.copy2(key_path, ssl_dir / "server.key")
+                os.chmod(ssl_dir / "server.key", 0o600)
+                return True
+            else:
+                console.print("[dim]Existing cert is expired or expiring soon, renewing...[/dim]")
+        
         # Check if certbot is installed
         if not shutil.which("certbot"):
             subprocess.run(["apt-get", "update", "-qq"], capture_output=True)
@@ -2047,7 +2064,7 @@ except Exception as e:
         if not shutil.which("certbot"):
             return False
         
-        # Stop nginx temporarily if running on port 80
+        # Stop services temporarily if running on port 80
         subprocess.run(["systemctl", "stop", "nginx"], capture_output=True)
         subprocess.run(["docker", "stop", "cryptolabs-proxy"], capture_output=True)
         
@@ -2063,9 +2080,15 @@ except Exception as e:
         
         if result.returncode == 0:
             console.print("[green]✓[/green] Let's Encrypt certificate obtained")
+            # Copy to proxy SSL directory
+            ssl_dir = Path("/etc/cryptolabs-proxy/ssl")
+            ssl_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(cert_path, ssl_dir / "server.crt")
+            shutil.copy2(key_path, ssl_dir / "server.key")
+            os.chmod(ssl_dir / "server.key", 0o600)
             return True
         else:
-            console.print(f"[yellow]⚠[/yellow] certbot failed: {result.stderr[:100]}")
+            console.print(f"[yellow]⚠[/yellow] certbot failed: {rich_escape(result.stderr[:100])}")
             return False
     
     def _integrate_with_proxy(self):
