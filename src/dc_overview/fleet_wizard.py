@@ -21,7 +21,7 @@ from rich.prompt import Prompt
 from .fleet_config import (
     FleetConfig, Server, SSLConfig, SSLMode, SSHCredentials,
     BMCCredentials, AuthMethod, ComponentConfig, VastConfig,
-    GrafanaConfig, IPMIMonitorConfig, get_local_ip
+    GrafanaConfig, IPMIMonitorConfig, SecurityConfig, get_local_ip
 )
 
 console = Console()
@@ -73,7 +73,10 @@ class FleetWizard:
         # Step 4: SSL Configuration
         self._collect_ssl_config()
         
-        # Step 5: Review
+        # Step 5: Security / Firewall
+        self._collect_security_config()
+        
+        # Step 6: Review
         self._show_review()
         
         # Save config
@@ -93,7 +96,8 @@ class FleetWizard:
             "  1. Which components to install (GPU monitoring, IPMI, Vast.ai)\n"
             "  2. Login credentials (Grafana password, SSH, BMC/IPMI)\n"
             "  3. Servers to monitor (IPs, machine names)\n"
-            "  4. HTTPS/SSL configuration\n\n"
+            "  4. HTTPS/SSL configuration\n"
+            "  5. Firewall configuration (additional ports)\n\n"
             "[dim]Press Ctrl+C at any time to cancel.[/dim]",
             border_style="cyan"
         ))
@@ -1360,7 +1364,80 @@ class FleetWizard:
         
         console.print()
     
-    # ============ Step 5: Review ============
+    # ============ Step 5: Security / Firewall ============
+    
+    def _collect_security_config(self):
+        """Collect firewall/UFW configuration."""
+        console.print(Panel(
+            "[bold]Step 5: Firewall Configuration[/bold]\n\n"
+            "Configure UFW firewall to secure this server.",
+            border_style="blue"
+        ))
+        
+        # Ask if UFW should be enabled
+        enable_ufw = questionary.confirm(
+            "Enable UFW firewall?",
+            default=True,
+            style=custom_style
+        ).ask()
+        
+        self.config.security.ufw_enabled = enable_ufw
+        
+        if not enable_ufw:
+            console.print("[dim]Firewall will not be configured.[/dim]")
+            console.print()
+            return
+        
+        # Default ports
+        console.print("\n[dim]Standard ports (22, 80, 443) will be opened automatically.[/dim]")
+        
+        # Ask about additional TCP ports
+        has_additional = questionary.confirm(
+            "Do you have additional services that need ports opened?",
+            default=False,
+            style=custom_style
+        ).ask()
+        
+        if has_additional:
+            console.print("\n[bold]Additional TCP Ports[/bold]")
+            console.print("[dim]Examples: Docker Registry (5000), PXE web (3001, 8888), etc.[/dim]")
+            
+            tcp_ports_str = questionary.text(
+                "Additional TCP ports (comma-separated, or leave empty):",
+                default="",
+                style=custom_style
+            ).ask() or ""
+            
+            if tcp_ports_str.strip():
+                try:
+                    tcp_ports = [int(p.strip()) for p in tcp_ports_str.split(",") if p.strip().isdigit()]
+                    self.config.security.ufw_additional_ports = tcp_ports
+                    if tcp_ports:
+                        console.print(f"[dim]TCP ports to open: {tcp_ports}[/dim]")
+                except ValueError:
+                    console.print("[yellow]⚠[/yellow] Invalid port format, skipping additional TCP ports")
+            
+            console.print("\n[bold]UDP Ports[/bold]")
+            console.print("[dim]Examples: TFTP/PXE (69), DNS (53), etc.[/dim]")
+            
+            udp_ports_str = questionary.text(
+                "UDP ports to open (comma-separated, or leave empty):",
+                default="",
+                style=custom_style
+            ).ask() or ""
+            
+            if udp_ports_str.strip():
+                try:
+                    udp_ports = [int(p.strip()) for p in udp_ports_str.split(",") if p.strip().isdigit()]
+                    self.config.security.ufw_udp_ports = udp_ports
+                    if udp_ports:
+                        console.print(f"[dim]UDP ports to open: {udp_ports}[/dim]")
+                except ValueError:
+                    console.print("[yellow]⚠[/yellow] Invalid port format, skipping UDP ports")
+        
+        console.print()
+    
+    # ============ Step 6: Review ============
     
     def _show_review(self):
         """Show configuration review before deployment."""
