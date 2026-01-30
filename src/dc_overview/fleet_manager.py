@@ -78,6 +78,32 @@ DEFAULT_UFW_PORTS = {
 }
 
 
+def _get_docker_compose_cmd() -> list:
+    """Get the correct docker compose command for this system.
+    
+    Some systems have 'docker compose' (plugin), others have 'docker-compose' (standalone).
+    Returns the command as a list, e.g. ['docker', 'compose'] or ['docker-compose'].
+    """
+    # Try 'docker compose' first (newer plugin version)
+    result = subprocess.run(
+        ["docker", "compose", "version"],
+        capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        return ["docker", "compose"]
+    
+    # Fall back to 'docker-compose' (standalone binary)
+    result = subprocess.run(
+        ["docker-compose", "version"],
+        capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        return ["docker-compose"]
+    
+    # Default to docker compose, will fail with clear error
+    return ["docker", "compose"]
+
+
 def _ensure_docker_network():
     """Ensure the cryptolabs Docker network exists with the correct subnet.
     
@@ -374,12 +400,16 @@ providers:
         # Ensure cryptolabs network exists with correct subnet before starting services
         _ensure_docker_network()
         
+        # Detect correct docker compose command for this system
+        compose_cmd = _get_docker_compose_cmd()
+        console.print(f"[dim]Using: {' '.join(compose_cmd)}[/dim]")
+        
         # Pull images first (docker compose writes progress to stderr which can look like errors)
         with Progress(SpinnerColumn(), TextColumn("Pulling images..."), console=console) as progress:
             progress.add_task("", total=None)
             
             subprocess.run(
-                ["docker", "compose", "pull"],
+                compose_cmd + ["pull"],
                 cwd=compose_dir,
                 capture_output=True,
                 text=True
@@ -391,7 +421,7 @@ providers:
             progress.add_task("", total=None)
             
             subprocess.run(
-                ["docker", "compose", "up", "-d"],
+                compose_cmd + ["up", "-d"],
                 cwd=compose_dir,
                 capture_output=True,
                 text=True
@@ -453,8 +483,9 @@ providers:
             # Timeout - show what's happening
             console.print(f"[red]✗[/red] Services failed to start within {MAX_WAIT_SECONDS // 60} minutes")
             
+            compose_cmd = _get_docker_compose_cmd()
             status_result = subprocess.run(
-                ["docker", "compose", "ps", "-a"],
+                compose_cmd + ["ps", "-a"],
                 cwd=compose_dir,
                 capture_output=True,
                 text=True
