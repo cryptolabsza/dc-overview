@@ -720,6 +720,11 @@ def get_latest_github_release(repo: str, branch: str = 'main') -> Optional[Dict[
         req.add_header('Accept', 'application/vnd.github.v3+json')
         req.add_header('User-Agent', 'dc-overview')
         
+        # Add GitHub token if available (increases rate limit from 60 to 5000 req/hour)
+        github_token = os.environ.get('GITHUB_TOKEN')
+        if github_token:
+            req.add_header('Authorization', f'token {github_token}')
+        
         with urllib.request.urlopen(req, timeout=10) as response:
             releases = json.loads(response.read().decode('utf-8'))
             
