@@ -56,3 +56,10 @@ grafana:
 # IPMI Monitor password
 ipmi_monitor:
   admin_password: YOUR_IPMI_MONITOR_PASSWORD
+
+# Security / Firewall (optional)
+# security:
+#   ufw_enabled: true
+#   ufw_ports: [22, 80, 443]           # TCP ports
+#   ufw_additional_ports: [5000, 9100]  # Extra TCP ports
+#   ufw_udp_ports: [69]                 # UDP ports (e.g., TFTP/PXE)
