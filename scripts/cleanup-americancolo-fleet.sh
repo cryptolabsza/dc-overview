@@ -103,51 +103,94 @@ ssh_master "docker ps --format 'table {{.Names}}\t{{.Status}}'" | head -10
 echo ""
 
 # ============================================================================
-# Step 2: Clean exporter services on workers
+# Step 2: Clean exporter services on workers (PARALLEL - max 64 concurrent)
 # ============================================================================
 echo -e "${YELLOW}Step 2: Cleaning exporter services on workers...${NC}"
 echo -e "${CYAN}  Note: Docker containers on workers are NOT affected${NC}"
+echo -e "${CYAN}  Running cleanup in parallel (max 64 concurrent)...${NC}"
 echo ""
+
+# Max parallel jobs
+MAX_PARALLEL=64
+
+# Temp directory for results
+RESULT_DIR=$(mktemp -d)
+trap "rm -rf ${RESULT_DIR}" EXIT
 
 # Counter for progress
 total=$(echo ${ALL_WORKERS} | wc -w)
-current=0
 
-for subnet in ${ALL_WORKERS}; do
-    current=$((current + 1))
-    worker_ip="88.0.${subnet}.1"
+# Function to clean a single worker (runs in background)
+clean_worker() {
+    local subnet=$1
+    local worker_ip="88.0.${subnet}.1"
+    local result_file="${RESULT_DIR}/${subnet}.result"
     
     # Check if worker is reachable
-    if ! ssh_worker ${subnet} "echo 1" > /dev/null 2>&1; then
-        echo -e "  [${current}/${total}] ${worker_ip}: ${RED}UNREACHABLE${NC}"
-        continue
+    if ! ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes -i ${SSH_KEY} ${SSH_USER}@${worker_ip} "echo 1" > /dev/null 2>&1; then
+        echo "UNREACHABLE" > "${result_file}"
+        return
     fi
     
     # Get hostname
-    hostname=$(ssh_worker ${subnet} "hostname" 2>/dev/null || echo "unknown")
+    hostname=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes -i ${SSH_KEY} ${SSH_USER}@${worker_ip} "hostname" 2>/dev/null || echo "unknown")
     
-    # Stop and disable exporter services
-    services_removed=0
-    for svc in ${EXPORTER_SERVICES}; do
-        # Check if service exists
-        if ssh_worker ${subnet} "systemctl list-unit-files | grep -q ${svc}" 2>/dev/null; then
-            ssh_worker ${subnet} "systemctl stop ${svc} 2>/dev/null; systemctl disable ${svc} 2>/dev/null; rm -f /etc/systemd/system/${svc}.service 2>/dev/null" || true
-            services_removed=$((services_removed + 1))
-        fi
-    done
+    # Run all cleanup in a single SSH command for speed
+    ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o BatchMode=yes -i ${SSH_KEY} ${SSH_USER}@${worker_ip} "
+        for svc in node_exporter dc-exporter dcgm-exporter gddr6-metrics-exporter dcgm nvidia-dcgm; do
+            systemctl stop \${svc} 2>/dev/null || true
+            systemctl disable \${svc} 2>/dev/null || true
+            rm -f /etc/systemd/system/\${svc}.service 2>/dev/null || true
+        done
+        systemctl daemon-reload 2>/dev/null || true
+        rm -f /usr/local/bin/node_exporter /usr/local/bin/dc-exporter* /opt/dc-exporter/* 2>/dev/null || true
+    " 2>/dev/null
     
-    # Reload systemd
-    ssh_worker ${subnet} "systemctl daemon-reload 2>/dev/null" || true
+    echo "OK:${hostname}" > "${result_file}"
+}
+
+# Launch all workers in parallel (with max limit)
+running=0
+for subnet in ${ALL_WORKERS}; do
+    clean_worker ${subnet} &
+    running=$((running + 1))
     
-    # Remove exporter binaries (optional cleanup)
-    ssh_worker ${subnet} "rm -f /usr/local/bin/node_exporter /usr/local/bin/dc-exporter* /opt/dc-exporter/* 2>/dev/null" || true
-    
-    if [ ${services_removed} -gt 0 ]; then
-        echo -e "  [${current}/${total}] ${hostname} (${worker_ip}): ${GREEN}✓ ${services_removed} services removed${NC}"
-    else
-        echo -e "  [${current}/${total}] ${hostname} (${worker_ip}): ${CYAN}(no exporter services found)${NC}"
+    # Limit concurrent jobs
+    if [ ${running} -ge ${MAX_PARALLEL} ]; then
+        wait -n 2>/dev/null || wait
+        running=$((running - 1))
     fi
 done
+
+# Wait for all remaining jobs
+wait
+
+# Collect and display results
+echo "  Results:"
+ok_count=0
+fail_count=0
+for subnet in ${ALL_WORKERS}; do
+    worker_ip="88.0.${subnet}.1"
+    result_file="${RESULT_DIR}/${subnet}.result"
+    
+    if [ -f "${result_file}" ]; then
+        result=$(cat "${result_file}")
+        if [ "${result}" = "UNREACHABLE" ]; then
+            echo -e "    ${worker_ip}: ${RED}UNREACHABLE${NC}"
+            fail_count=$((fail_count + 1))
+        else
+            hostname=$(echo "${result}" | cut -d: -f2)
+            echo -e "    ${hostname} (${worker_ip}): ${GREEN}✓ cleaned${NC}"
+            ok_count=$((ok_count + 1))
+        fi
+    else
+        echo -e "    ${worker_ip}: ${RED}NO RESULT${NC}"
+        fail_count=$((fail_count + 1))
+    fi
+done
+
+echo ""
+echo -e "  ${GREEN}✓ ${ok_count} workers cleaned${NC}, ${RED}${fail_count} failed${NC}"
 
 echo ""
 
