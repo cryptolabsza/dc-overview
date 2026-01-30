@@ -86,7 +86,17 @@ for svc in ${EXPORTER_SERVICES}; do
 done
 ssh_master "systemctl daemon-reload 2>/dev/null || true"
 
-# Prune unused volumes (only those not in use)
+# Remove dc-overview related volumes explicitly
+echo "  Removing monitoring volumes..."
+REMOVE_VOLUMES="prometheus-data grafana-data ipmi-monitor-data dc-overview-data"
+for v in ${REMOVE_VOLUMES}; do
+  ssh_master "docker volume rm ${v} 2>/dev/null && echo \"    removed volume ${v}\" || true"
+done
+
+# Also remove compose-created volumes (prefixed with directory name)
+ssh_master "docker volume ls --format '{{.Name}}' | grep -E 'dc-overview|prometheus|grafana|ipmi' | xargs -r docker volume rm 2>/dev/null || true"
+
+# Prune any remaining unused volumes
 echo "  Pruning unused volumes..."
 ssh_master "docker volume prune -f 2>/dev/null || true"
 
