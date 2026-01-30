@@ -32,7 +32,9 @@ echo ""
 
 # Containers to REMOVE on master (monitoring-related only)
 # Note: registry, netbootxyz are PRESERVED
-REMOVE_CONTAINERS="admin-grafana-1 admin-prometheus-1 admin-db-1 ipmi-monitor cadvisor my-node-exporter watchtower"
+# Old monitoring: admin-grafana-1, admin-prometheus-1, admin-db-1, cadvisor, my-node-exporter
+# DC Overview containers: cryptolabs-proxy, dc-overview, prometheus, grafana, ipmi-monitor, vastai-exporter
+REMOVE_CONTAINERS="admin-grafana-1 admin-prometheus-1 admin-db-1 ipmi-monitor cadvisor my-node-exporter watchtower cryptolabs-proxy dc-overview prometheus grafana vastai-exporter"
 
 # Exporter services to remove on workers (systemd services only, no Docker!)
 # - node_exporter: from jjziets/DCMontoring install_node_exporter.sh
@@ -155,7 +157,7 @@ echo ""
 echo -e "${YELLOW}Step 3: Verification...${NC}"
 echo ""
 
-echo "  Master containers (should see registry, netbootxyz, watchtower):"
+echo "  Master containers (should see registry, netbootxyz only):"
 ssh_master "docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'"
 echo ""
 
@@ -170,7 +172,7 @@ echo ""
 echo -e "${GREEN}=== Cleanup Complete ===${NC}"
 echo ""
 echo "Summary:"
-echo "  • Master: Removed monitoring containers, kept registry/netbootxyz/watchtower"
+echo "  • Master: Removed ALL monitoring containers (old + dc-overview), kept registry/netbootxyz"
 echo "  • Workers: Removed exporter systemd services, Docker containers untouched"
 echo "  • No reboots performed"
 echo ""
