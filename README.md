@@ -69,6 +69,7 @@ Deploy everything with a single command using a config file:
 
 ```bash
 # Install from dev branch (latest features)
+pip install git+https://github.com/cryptolabsza/cryptolabs-proxy.git@dev --break-system-packages
 pip install git+https://github.com/cryptolabsza/dc-overview.git@dev --break-system-packages
 
 # Deploy with config file (no prompts)
@@ -250,7 +251,8 @@ Push to `dev` branch automatically builds Docker images:
 ### Testing Dev Builds
 
 ```bash
-# Install from dev branch
+# Install from dev branch (cryptolabs-proxy first for SSL management)
+pip install git+https://github.com/cryptolabsza/cryptolabs-proxy.git@dev --break-system-packages
 pip install git+https://github.com/cryptolabsza/dc-overview.git@dev --break-system-packages
 
 # Run quickstart
