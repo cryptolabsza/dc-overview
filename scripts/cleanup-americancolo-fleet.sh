@@ -37,10 +37,10 @@ REMOVE_CONTAINERS="admin-grafana-1 admin-prometheus-1 ipmi-monitor cadvisor my-n
 # Exporter services to remove on workers (systemd services only, no Docker!)
 # - node_exporter: from jjziets/DCMontoring install_node_exporter.sh
 # - dcgm-exporter: from jjziets/DCMontoring install_NvidiaDCGM_Exporter.sh
-# - dc-exporter: from dc-overview deploy
+# - dc-exporter: old dc-exporter (dc-overview will install dc-exporter-rs)
 # - gddr6-metrics-exporter: legacy (may already be cleared)
-# Note: Do NOT add "dcgm" or "nvidia-dcgm" - those are the NVIDIA DCGM daemon (required for GPU stack)
-EXPORTER_SERVICES="node_exporter dc-exporter dcgm-exporter gddr6-metrics-exporter"
+# - dcgm, nvidia-dcgm: NVIDIA DCGM daemon (replaced by dc-exporter-rs for GPU metrics)
+EXPORTER_SERVICES="node_exporter dc-exporter dcgm-exporter gddr6-metrics-exporter dcgm nvidia-dcgm"
 
 # Function to run SSH command on master
 ssh_master() {
