@@ -31,8 +31,8 @@ echo -e "${CYAN}Workers: $(echo ${ALL_WORKERS} | wc -w) servers${NC}"
 echo ""
 
 # Containers to REMOVE on master (monitoring-related only)
-# Note: registry, netbootxyz, watchtower are PRESERVED
-REMOVE_CONTAINERS="admin-grafana-1 admin-prometheus-1 admin-db-1 ipmi-monitor cadvisor my-node-exporter"
+# Note: registry, netbootxyz are PRESERVED
+REMOVE_CONTAINERS="admin-grafana-1 admin-prometheus-1 admin-db-1 ipmi-monitor cadvisor my-node-exporter watchtower"
 
 # Exporter services to remove on workers (systemd services only, no Docker!)
 # - node_exporter: from jjziets/DCMontoring install_node_exporter.sh
@@ -60,7 +60,7 @@ ssh_worker() {
 echo -e "${YELLOW}Step 1: Cleaning master node (${MASTER_IP})...${NC}"
 echo ""
 
-echo "  Containers to PRESERVE: registry, netbootxyz, watchtower"
+echo "  Containers to PRESERVE: registry, netbootxyz"
 echo "  Containers to REMOVE: ${REMOVE_CONTAINERS}"
 echo ""
 
