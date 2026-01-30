@@ -632,6 +632,7 @@ def get_gpu_count_from_exporter(server_ip):
         return None
 
 @app.route('/api/servers/<int:server_id>/install-exporters', methods=['POST'])
+@csrf.exempt  # Session-authenticated internal API
 @write_required
 def api_install_exporters(server_id):
     """Install exporters on a remote server."""
@@ -648,6 +649,7 @@ def api_install_exporters(server_id):
     return jsonify(results)
 
 @app.route('/api/servers/<int:server_id>/remove-exporters', methods=['POST'])
+@csrf.exempt  # Session-authenticated internal API
 @write_required
 def api_remove_exporters(server_id):
     """Remove exporters from a remote server."""
@@ -726,6 +728,7 @@ def api_get_exporter_versions(server_id):
 
 
 @app.route('/api/servers/<int:server_id>/exporters/<exporter>/toggle', methods=['POST'])
+@csrf.exempt  # Session-authenticated internal API
 @write_required
 def api_toggle_exporter(server_id, exporter):
     """Enable or disable an exporter on a server."""
@@ -777,6 +780,7 @@ def api_toggle_exporter(server_id, exporter):
 
 
 @app.route('/api/servers/<int:server_id>/exporters/<exporter>/update', methods=['POST'])
+@csrf.exempt  # Session-authenticated internal API
 @write_required
 def api_update_exporter(server_id, exporter):
     """Update an exporter to the latest version."""
@@ -823,6 +827,7 @@ def api_update_exporter(server_id, exporter):
 
 
 @app.route('/api/servers/<int:server_id>/exporters/settings', methods=['POST'])
+@csrf.exempt  # Session-authenticated internal API
 @write_required
 def api_update_exporter_settings(server_id):
     """Update exporter settings (auto-update, branch)."""
