@@ -35,6 +35,38 @@ FALLBACK_VERSIONS = {
     'dcgm_exporter': DCGM_EXPORTER_VERSION,
 }
 
+# Version cache - check GitHub once per hour, not per server
+import time
+_VERSION_CACHE = {
+    'versions': {},      # exporter -> version
+    'last_update': 0,    # timestamp of last GitHub check
+    'ttl': 3600,         # cache TTL in seconds (1 hour)
+}
+
+def _get_cached_versions() -> Dict[str, Optional[str]]:
+    """Get latest versions from cache, refreshing from GitHub if stale."""
+    now = time.time()
+    
+    # If cache is fresh, return cached versions
+    if _VERSION_CACHE['versions'] and (now - _VERSION_CACHE['last_update']) < _VERSION_CACHE['ttl']:
+        return _VERSION_CACHE['versions']
+    
+    # Cache is stale - try to refresh from GitHub
+    new_versions = {}
+    for exporter, repo in EXPORTER_REPOS.items():
+        release = get_latest_github_release(repo, 'main')
+        if release:
+            new_versions[exporter] = release.get('version')
+        else:
+            # GitHub failed - use fallback or previous cached value
+            new_versions[exporter] = _VERSION_CACHE['versions'].get(exporter) or FALLBACK_VERSIONS.get(exporter)
+    
+    # Update cache
+    _VERSION_CACHE['versions'] = new_versions
+    _VERSION_CACHE['last_update'] = now
+    
+    return new_versions
+
 # GitHub repositories for each exporter
 EXPORTER_REPOS = {
     'node_exporter': 'prometheus/node_exporter',
@@ -763,8 +795,8 @@ def get_latest_github_release(repo: str, branch: str = 'main') -> Optional[Dict[
 
 def get_latest_exporter_version(exporter: str, branch: str = 'main') -> Optional[str]:
     """
-    Get the latest available version for an exporter from GitHub.
-    Falls back to known versions if GitHub API is rate limited.
+    Get the latest available version for an exporter.
+    Uses a 1-hour cache to avoid GitHub API rate limiting.
     
     Args:
         exporter: One of 'node_exporter', 'dc_exporter', 'dcgm_exporter'
@@ -773,23 +805,21 @@ def get_latest_exporter_version(exporter: str, branch: str = 'main') -> Optional
     Returns:
         Version string or None
     """
-    repo = EXPORTER_REPOS.get(exporter)
-    if not repo:
-        return FALLBACK_VERSIONS.get(exporter)
+    # Use cached versions (refreshes from GitHub once per hour)
+    cached = _get_cached_versions()
+    version = cached.get(exporter)
     
-    release = get_latest_github_release(repo, branch)
-    if release:
-        return release.get('version')
+    if version:
+        return version
     
-    # Fallback to known latest versions when GitHub API fails (rate limit)
+    # Ultimate fallback
     return FALLBACK_VERSIONS.get(exporter)
-    
-    return None
 
 
 def get_all_latest_versions(branch: str = 'main') -> Dict[str, Optional[str]]:
     """
     Get the latest available versions for all exporters.
+    Uses a 1-hour cache to minimize GitHub API calls.
     
     Args:
         branch: Branch to check ('main' or 'dev')
@@ -797,11 +827,8 @@ def get_all_latest_versions(branch: str = 'main') -> Dict[str, Optional[str]]:
     Returns:
         Dictionary mapping exporter name to latest version
     """
-    return {
-        'node_exporter': get_latest_exporter_version('node_exporter', branch),
-        'dc_exporter': get_latest_exporter_version('dc_exporter', branch),
-        'dcgm_exporter': get_latest_exporter_version('dcgm_exporter', branch),
-    }
+    # Use the cache directly - it handles GitHub API and fallbacks
+    return _get_cached_versions()
 
 
 def check_for_updates(server_ip: str, ssh_user: str = 'root', ssh_port: int = 22,
