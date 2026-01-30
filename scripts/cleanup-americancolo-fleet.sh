@@ -32,7 +32,7 @@ echo ""
 
 # Containers to REMOVE on master (monitoring-related only)
 # Note: registry, netbootxyz, watchtower are PRESERVED
-REMOVE_CONTAINERS="admin-grafana-1 admin-prometheus-1 ipmi-monitor cadvisor my-node-exporter"
+REMOVE_CONTAINERS="admin-grafana-1 admin-prometheus-1 admin-db-1 ipmi-monitor cadvisor my-node-exporter"
 
 # Exporter services to remove on workers (systemd services only, no Docker!)
 # - node_exporter: from jjziets/DCMontoring install_node_exporter.sh
