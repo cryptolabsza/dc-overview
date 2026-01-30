@@ -101,16 +101,17 @@ ssh_master "docker volume ls --format '{{.Name}}' | grep -E 'dc-overview|prometh
 echo "  Pruning unused volumes..."
 ssh_master "docker volume prune -f 2>/dev/null || true"
 
-# Remove dc-overview related images (ensures fresh pull on next deploy)
+# Remove dc-overview related images ONLY (ensures fresh pull on next deploy)
+# PRESERVES: registry, netbootxyz, pxe images
 echo "  Removing monitoring images..."
 REMOVE_IMAGES="ghcr.io/cryptolabsza/ipmi-monitor ghcr.io/cryptolabsza/dc-overview ghcr.io/cryptolabsza/cryptolabs-proxy ghcr.io/cryptolabsza/vastai-exporter prom/prometheus grafana/grafana"
 for img in ${REMOVE_IMAGES}; do
-  ssh_master "docker images --format '{{.Repository}}:{{.Tag}}' | grep '^${img}' | xargs -r docker rmi 2>/dev/null && echo \"    removed ${img}\" || true"
+  ssh_master "docker images --format '{{.Repository}}:{{.Tag}}' | grep '^${img}' | xargs -r docker rmi -f 2>/dev/null && echo \"    removed ${img}\" || true"
 done
 
-# Prune all unused images
-echo "  Pruning all unused images..."
-ssh_master "docker image prune -a -f 2>/dev/null || true"
+# Prune dangling images only (not all unused - preserves registry/netbootxyz/pxe images)
+echo "  Pruning dangling images..."
+ssh_master "docker image prune -f 2>/dev/null || true"
 
 echo -e "${GREEN}  ✓ Master node cleaned${NC}"
 echo ""
@@ -233,11 +234,11 @@ echo ""
 echo -e "${GREEN}=== Cleanup Complete ===${NC}"
 echo ""
 echo "Summary:"
-echo "  • Master: Removed ALL monitoring containers, volumes, and images"
-echo "  • Preserved: registry, netbootxyz"
+echo "  • Master: Removed monitoring containers, volumes, and images"
+echo "  • Preserved: registry, netbootxyz, pxe containers and images"
 echo "  • Workers: Removed exporter systemd services, Docker containers untouched"
 echo "  • No reboots performed"
-echo "  • Next deploy will pull fresh images"
+echo "  • Next deploy will pull fresh monitoring images"
 echo ""
 echo "To redeploy dc-overview:"
 echo "  ssh ${SSH_USER}@${MASTER_IP} -i ${SSH_KEY}"

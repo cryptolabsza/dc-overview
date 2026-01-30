@@ -80,16 +80,17 @@ for svc in ${EXPORTER_SERVICES}; do
 done
 ssh_cmd ${MASTER_PORT} "systemctl daemon-reload"
 
-# Remove dc-overview related images (ensures fresh pull on next deploy)
+# Remove dc-overview related images ONLY (ensures fresh pull on next deploy)
+# PRESERVES: minecraft, watchtower images
 echo "  Removing monitoring images..."
 DC_IMAGES="ghcr.io/cryptolabsza/ipmi-monitor ghcr.io/cryptolabsza/dc-overview ghcr.io/cryptolabsza/cryptolabs-proxy ghcr.io/cryptolabsza/vastai-exporter prom/prometheus grafana/grafana"
 for img in ${DC_IMAGES}; do
-  ssh_cmd ${MASTER_PORT} "docker images --format '{{.Repository}}:{{.Tag}}' | grep '^${img}' | xargs -r docker rmi 2>/dev/null && echo \"    removed ${img}\" || true"
+  ssh_cmd ${MASTER_PORT} "docker images --format '{{.Repository}}:{{.Tag}}' | grep '^${img}' | xargs -r docker rmi -f 2>/dev/null && echo \"    removed ${img}\" || true"
 done
 
-# Prune all unused images
-echo "  Pruning all unused images..."
-ssh_cmd ${MASTER_PORT} "docker image prune -a -f 2>/dev/null || true"
+# Prune dangling images only (not all unused - preserves minecraft/watchtower images)
+echo "  Pruning dangling images..."
+ssh_cmd ${MASTER_PORT} "docker image prune -f 2>/dev/null || true"
 
 # Clean up certbot lock files
 echo "  Cleaning certbot lock files..."
