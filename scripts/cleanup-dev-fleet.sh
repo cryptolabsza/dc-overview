@@ -1,7 +1,8 @@
 #!/bin/bash
 # Cleanup script for DC Overview dev fleet
-# This removes all dc-overview related containers, volumes, networks, and exporters
+# This removes ALL dc-overview related containers, volumes, networks, images, and exporters
 # while preserving unrelated services (minecraft, watchtower, etc.)
+# Designed for testing - ensures fresh images on next deploy
 
 set -e
 
@@ -79,8 +80,15 @@ for svc in ${EXPORTER_SERVICES}; do
 done
 ssh_cmd ${MASTER_PORT} "systemctl daemon-reload"
 
-# Prune unused images on master
-echo "  Pruning unused images..."
+# Remove dc-overview related images (ensures fresh pull on next deploy)
+echo "  Removing monitoring images..."
+DC_IMAGES="ghcr.io/cryptolabsza/ipmi-monitor ghcr.io/cryptolabsza/dc-overview ghcr.io/cryptolabsza/cryptolabs-proxy ghcr.io/cryptolabsza/vastai-exporter prom/prometheus grafana/grafana"
+for img in ${DC_IMAGES}; do
+  ssh_cmd ${MASTER_PORT} "docker images --format '{{.Repository}}:{{.Tag}}' | grep '^${img}' | xargs -r docker rmi 2>/dev/null && echo \"    removed ${img}\" || true"
+done
+
+# Prune all unused images
+echo "  Pruning all unused images..."
 ssh_cmd ${MASTER_PORT} "docker image prune -a -f 2>/dev/null || true"
 
 # Clean up certbot lock files
