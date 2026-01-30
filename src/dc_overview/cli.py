@@ -834,6 +834,7 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     config.security.ufw_enabled = security.get('ufw_enabled', True)
     config.security.ufw_ports = security.get('ufw_ports', [22, 80, 443])
     config.security.ufw_additional_ports = security.get('ufw_additional_ports', [])
+    config.security.ufw_udp_ports = security.get('ufw_udp_ports', [])
     
     # Servers
     for srv in data.get('servers', []):

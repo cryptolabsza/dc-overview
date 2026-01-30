@@ -123,8 +123,9 @@ class IPMIMonitorConfig:
 class SecurityConfig:
     """Security and firewall configuration."""
     ufw_enabled: bool = True  # Enable UFW firewall
-    ufw_ports: List[int] = field(default_factory=lambda: [22, 80, 443])  # Ports to allow
-    ufw_additional_ports: List[int] = field(default_factory=list)  # Extra ports to allow
+    ufw_ports: List[int] = field(default_factory=lambda: [22, 80, 443])  # Ports to allow (TCP)
+    ufw_additional_ports: List[int] = field(default_factory=list)  # Extra ports to allow (TCP)
+    ufw_udp_ports: List[int] = field(default_factory=list)  # UDP ports to allow (e.g., 69 for TFTP/PXE)
 
 
 @dataclass

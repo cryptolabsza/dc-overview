@@ -2333,9 +2333,16 @@ except Exception as e:
         subprocess.run(["ufw", "default", "deny", "incoming"], capture_output=True)
         subprocess.run(["ufw", "default", "allow", "outgoing"], capture_output=True)
         
-        # Allow configured ports
+        # Allow configured TCP ports
         for port in sorted(ports_to_allow.keys()):
             subprocess.run(["ufw", "allow", str(port)], capture_output=True)
+        
+        # Allow configured UDP ports (e.g., TFTP for PXE)
+        udp_ports = {}
+        if hasattr(self.config, 'security') and hasattr(self.config.security, 'ufw_udp_ports'):
+            for port in self.config.security.ufw_udp_ports:
+                subprocess.run(["ufw", "allow", f"{port}/udp"], capture_output=True)
+                udp_ports[port] = f"Port {port}/udp (custom)"
         
         # Allow Docker network to access host ports (required for Prometheus to scrape host exporters)
         subprocess.run(
@@ -2354,7 +2361,9 @@ except Exception as e:
             console.print()
             console.print("[bold]Active Firewall Rules:[/bold]")
             for port, service in sorted(ports_to_allow.items()):
-                console.print(f"  • {service} (port {port}): [green]ALLOWED[/green]")
+                console.print(f"  • {service} (port {port}/tcp): [green]ALLOWED[/green]")
+            for port, service in sorted(udp_ports.items()):
+                console.print(f"  • {service}: [green]ALLOWED[/green]")
             console.print("  • All other incoming: [red]DENIED[/red]")
         else:
             console.print(f"[yellow]⚠[/yellow] Failed to enable UFW: {result.stderr[:100]}")
