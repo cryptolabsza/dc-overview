@@ -35,7 +35,11 @@ echo ""
 # Note: registry, netbootxyz are PRESERVED
 # Old monitoring: admin-grafana-1, admin-prometheus-1, admin-db-1, cadvisor, my-node-exporter
 # DC Overview containers: cryptolabs-proxy, dc-overview, prometheus, grafana, ipmi-monitor, vastai-exporter, runpod-exporter
-REMOVE_CONTAINERS="admin-grafana-1 admin-prometheus-1 admin-db-1 ipmi-monitor cadvisor my-node-exporter watchtower cryptolabs-proxy dc-overview prometheus grafana vastai-exporter runpod-exporter"
+# Also includes docker-compose prefixed versions
+REMOVE_CONTAINERS="admin-grafana-1 admin-prometheus-1 admin-db-1 ipmi-monitor cadvisor my-node-exporter watchtower cryptolabs-proxy dc-overview prometheus grafana vastai-exporter runpod-exporter certbot"
+
+# Container name patterns for wildcard matching (catches docker-compose prefixed names)
+CONTAINER_PATTERNS="grafana prometheus ipmi-monitor dc-overview cryptolabs-proxy vastai-exporter runpod-exporter certbot"
 
 # Exporter services to remove on workers (systemd services only, no Docker!)
 # - node_exporter: from jjziets/DCMontoring install_node_exporter.sh
@@ -73,9 +77,21 @@ for c in ${REMOVE_CONTAINERS}; do
   ssh_master "docker stop ${c} 2>/dev/null && echo \"    stopped ${c}\" || true"
 done
 
+# Also stop containers matching patterns (catches docker-compose prefixed names like root_grafana_1)
+echo "  Stopping containers by pattern..."
+for pattern in ${CONTAINER_PATTERNS}; do
+  ssh_master "docker ps -a --format '{{.Names}}' | grep -i '${pattern}' | xargs -r docker stop 2>/dev/null || true"
+done
+
 echo "  Removing monitoring containers..."
 for c in ${REMOVE_CONTAINERS}; do
-  ssh_master "docker rm ${c} 2>/dev/null && echo \"    removed ${c}\" || true"
+  ssh_master "docker rm -f ${c} 2>/dev/null && echo \"    removed ${c}\" || true"
+done
+
+# Also remove containers matching patterns
+echo "  Removing containers by pattern..."
+for pattern in ${CONTAINER_PATTERNS}; do
+  ssh_master "docker ps -a --format '{{.Names}}' | grep -i '${pattern}' | xargs -r docker rm -f 2>/dev/null || true"
 done
 
 # Remove exporter services on master (if any)
@@ -89,17 +105,38 @@ ssh_master "systemctl daemon-reload 2>/dev/null || true"
 
 # Remove dc-overview related volumes explicitly
 echo "  Removing monitoring volumes..."
-REMOVE_VOLUMES="prometheus-data grafana-data ipmi-monitor-data dc-overview-data"
+REMOVE_VOLUMES="prometheus-data grafana-data ipmi-monitor-data dc-overview-data fleet-auth-data cryptolabs-proxy-data root_grafana-data root_prometheus-data ipmi-monitor_ipmi-data dc-overview_grafana-data dc-overview_prometheus-data"
 for v in ${REMOVE_VOLUMES}; do
   ssh_master "docker volume rm ${v} 2>/dev/null && echo \"    removed volume ${v}\" || true"
 done
 
-# Also remove compose-created volumes (prefixed with directory name)
-ssh_master "docker volume ls --format '{{.Name}}' | grep -E 'dc-overview|prometheus|grafana|ipmi' | xargs -r docker volume rm 2>/dev/null || true"
+# Also remove compose-created volumes by pattern (catches all naming conventions)
+echo "  Removing volumes by pattern..."
+VOLUME_PATTERNS="dc-overview prometheus grafana ipmi vastai runpod cryptolabs-proxy fleet-auth"
+for pattern in ${VOLUME_PATTERNS}; do
+  ssh_master "docker volume ls --format '{{.Name}}' | grep -i '${pattern}' | xargs -r docker volume rm 2>/dev/null || true"
+done
 
 # Prune any remaining unused volumes
 echo "  Pruning unused volumes..."
 ssh_master "docker volume prune -f 2>/dev/null || true"
+
+# Remove dc-overview related networks
+echo "  Removing monitoring networks..."
+REMOVE_NETWORKS="cryptolabs dc-overview_monitoring dc-overview_default"
+for net in ${REMOVE_NETWORKS}; do
+  # Disconnect all containers from the network first
+  ssh_master "docker network inspect ${net} -f '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null | xargs -r -n1 docker network disconnect -f ${net} 2>/dev/null || true"
+  ssh_master "docker network rm ${net} 2>/dev/null && echo \"    removed network ${net}\" || true"
+done
+
+# Also remove networks by pattern
+echo "  Removing networks by pattern..."
+ssh_master "docker network ls --format '{{.Name}}' | grep -iE 'dc-overview|cryptolabs|monitoring' | xargs -r docker network rm 2>/dev/null || true"
+
+# Prune unused networks
+echo "  Pruning unused networks..."
+ssh_master "docker network prune -f 2>/dev/null || true"
 
 # Remove dc-overview related images ONLY (ensures fresh pull on next deploy)
 # PRESERVES: registry, netbootxyz, pxe images

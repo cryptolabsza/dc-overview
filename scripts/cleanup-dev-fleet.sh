@@ -24,13 +24,19 @@ echo ""
 
 # DC Overview containers to remove (including certbot from ipmi-monitor standalone)
 # Note: watchtower is NOT removed as it may be shared with minecraft or other services
-DC_CONTAINERS="cryptolabs-proxy dc-overview ipmi-monitor grafana prometheus vastai-exporter runpod-exporter certbot"
+DC_CONTAINERS="cryptolabs-proxy dc-overview ipmi-monitor grafana prometheus vastai-exporter runpod-exporter certbot watchtower"
+
+# Container name patterns for wildcard matching (catches docker-compose prefixed names)
+CONTAINER_PATTERNS="grafana prometheus ipmi-monitor dc-overview cryptolabs-proxy vastai-exporter runpod-exporter certbot"
 
 # DC Overview volumes to remove (all possible naming conventions)
 DC_VOLUMES="dc-overview-data ipmi-monitor-data grafana-data prometheus-data dc-overview_grafana-data dc-overview_prometheus-data fleet-auth-data cryptolabs-proxy-data root_grafana-data root_prometheus-data ipmi-monitor_ipmi-data"
 
+# Volume patterns for wildcard matching
+VOLUME_PATTERNS="dc-overview prometheus grafana ipmi vastai runpod cryptolabs-proxy fleet-auth"
+
 # DC Overview networks to remove
-DC_NETWORKS="cryptolabs dc-overview_monitoring"
+DC_NETWORKS="cryptolabs dc-overview_monitoring dc-overview_default"
 
 # Exporter services to remove
 EXPORTER_SERVICES="dc-exporter node_exporter"
@@ -48,12 +54,30 @@ echo -e "${YELLOW}Step 1: Cleaning master node (port ${MASTER_PORT})...${NC}"
 echo "  Stopping containers..."
 ssh_cmd ${MASTER_PORT} "docker stop ${DC_CONTAINERS} 2>/dev/null || true"
 
+# Also stop containers matching patterns (catches docker-compose prefixed names)
+echo "  Stopping containers by pattern..."
+for pattern in ${CONTAINER_PATTERNS}; do
+  ssh_cmd ${MASTER_PORT} "docker ps -a --format '{{.Names}}' | grep -i '${pattern}' | xargs -r docker stop 2>/dev/null || true"
+done
+
 echo "  Removing containers..."
-ssh_cmd ${MASTER_PORT} "docker rm ${DC_CONTAINERS} 2>/dev/null || true"
+ssh_cmd ${MASTER_PORT} "docker rm -f ${DC_CONTAINERS} 2>/dev/null || true"
+
+# Also remove containers matching patterns
+echo "  Removing containers by pattern..."
+for pattern in ${CONTAINER_PATTERNS}; do
+  ssh_cmd ${MASTER_PORT} "docker ps -a --format '{{.Names}}' | grep -i '${pattern}' | xargs -r docker rm -f 2>/dev/null || true"
+done
 
 # Remove volumes on master
 echo "  Removing volumes..."
 ssh_cmd ${MASTER_PORT} "docker volume rm ${DC_VOLUMES} 2>/dev/null || true"
+
+# Also remove volumes by pattern
+echo "  Removing volumes by pattern..."
+for pattern in ${VOLUME_PATTERNS}; do
+  ssh_cmd ${MASTER_PORT} "docker volume ls --format '{{.Name}}' | grep -i '${pattern}' | xargs -r docker volume rm 2>/dev/null || true"
+done
 
 # Prune unused volumes
 echo "  Pruning unused volumes..."
@@ -66,6 +90,10 @@ for net in ${DC_NETWORKS}; do
     ssh_cmd ${MASTER_PORT} "docker network inspect ${net} -f '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null | xargs -r -n1 docker network disconnect -f ${net} 2>/dev/null || true"
     ssh_cmd ${MASTER_PORT} "docker network rm ${net} 2>/dev/null || true"
 done
+
+# Also remove networks by pattern
+echo "  Removing networks by pattern..."
+ssh_cmd ${MASTER_PORT} "docker network ls --format '{{.Name}}' | grep -iE 'dc-overview|cryptolabs|monitoring' | xargs -r docker network rm 2>/dev/null || true"
 
 # Prune unused networks
 echo "  Pruning unused networks..."
