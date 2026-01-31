@@ -1263,9 +1263,10 @@ echo "Exporters installed successfully"
             return dashboard
         
         # Calculate required height for table panels showing per-server data
-        # Formula: servers / 2.5 rows per height unit + 2 for header/padding
+        # With Grafana table "sm" cell height, each row needs ~0.9-1.0 height units
+        # Formula: servers + 3 for header/padding (gives h=47 for 44 servers)
         import math
-        required_height = math.ceil(server_count / 2.5) + 2
+        required_height = server_count + 3
         
         # Define which panels to scale based on dashboard type
         # These are panels that show per-server data
