@@ -506,6 +506,8 @@ def api_check_server(server_id):
     
     results = {
         'server_ip': server.server_ip,
+        'server_id': server.id,
+        'server_name': server.name,
         'ssh': check_ssh_connection(server),
         'node_exporter': check_exporter(server.server_ip, 9100),
         'dc_exporter': check_exporter(server.server_ip, 9835),
@@ -523,11 +525,15 @@ def api_check_server(server_id):
     else:
         server.status = 'offline'
     
+    # Include status and last_seen in response
+    results['status'] = server.status
+    results['last_seen'] = server.last_seen.strftime('%Y-%m-%d %H:%M') if server.last_seen else None
+    
     # Get GPU count from dc-exporter metrics
     gpu_count = get_gpu_count_from_exporter(server.server_ip)
     if gpu_count is not None:
         server.gpu_count = gpu_count
-        results['gpu_count'] = gpu_count
+    results['gpu_count'] = server.gpu_count or 0
     
     # Detect exporter versions
     ssh_key_path = server.ssh_key.key_path if server.ssh_key else None
@@ -800,7 +806,7 @@ def api_update_exporter(server_id, exporter):
         return jsonify({'error': 'Could not determine latest version'}), 500
     
     # Update the exporter
-    success = update_exporter_remote(server, exporter, latest_version, branch)
+    success, error_msg = update_exporter_remote(server, exporter, latest_version, branch)
     
     if success:
         # Update version in database
@@ -822,7 +828,7 @@ def api_update_exporter(server_id, exporter):
     else:
         return jsonify({
             'success': False,
-            'error': f'Failed to update {exporter}'
+            'error': f'Failed to update {exporter}: {error_msg or "Unknown error"}'
         }), 500
 
 
@@ -959,70 +965,109 @@ def toggle_exporter_service(server, exporter: str, enabled: bool) -> bool:
         return False
 
 
-def update_exporter_remote(server, exporter: str, version: str, branch: str = 'main') -> bool:
-    """Update an exporter on a remote server to a specific version."""
+def update_exporter_remote(server, exporter: str, version: str, branch: str = 'main') -> tuple:
+    """Update an exporter on a remote server to a specific version.
+    
+    Returns:
+        tuple: (success: bool, error_message: str or None)
+    """
     from .exporters import get_exporter_download_url
     
     download_url = get_exporter_download_url(exporter, version, branch)
     if not download_url:
-        return False
+        return False, f"Could not get download URL for {exporter} v{version}"
     
     try:
+        # Validate SSH key exists
+        ssh_key_path = None
+        if server.ssh_key:
+            ssh_key_path = server.ssh_key.key_path
+            if not os.path.exists(ssh_key_path):
+                return False, f"SSH key not found at {ssh_key_path}"
+        else:
+            # Try default SSH key locations
+            default_keys = ['/etc/dc-overview/ssh_keys/fleet_key', 
+                           os.path.expanduser('~/.ssh/id_rsa')]
+            for key_path in default_keys:
+                if os.path.exists(key_path):
+                    ssh_key_path = key_path
+                    break
+            if not ssh_key_path:
+                return False, "No SSH key configured for server"
+        
         ssh_cmd = [
             'ssh',
-            '-o', 'ConnectTimeout=10',
+            '-o', 'ConnectTimeout=15',
             '-o', 'StrictHostKeyChecking=no',
             '-o', 'BatchMode=yes',
-            '-p', str(server.ssh_port)
+            '-o', 'ServerAliveInterval=10',
+            '-p', str(server.ssh_port or 22),
+            '-i', ssh_key_path
         ]
         
-        if server.ssh_key:
-            ssh_cmd.extend(['-i', server.ssh_key.key_path])
-        
-        ssh_cmd.append(f'{server.ssh_user}@{server.server_ip}')
+        ssh_cmd.append(f'{server.ssh_user or "root"}@{server.server_ip}')
         
         if exporter == 'node_exporter':
             # Download, extract, and replace binary
             update_script = f'''
-cd /tmp &&
-curl -sL "{download_url}" -o node_exporter.tar.gz &&
-tar xzf node_exporter.tar.gz &&
-systemctl stop node_exporter &&
-cp node_exporter-*/node_exporter /usr/local/bin/ &&
-chmod +x /usr/local/bin/node_exporter &&
-systemctl start node_exporter &&
-rm -rf node_exporter* &&
-echo "OK"
+set -e
+cd /tmp
+curl -sL "{download_url}" -o node_exporter.tar.gz
+tar xzf node_exporter.tar.gz
+systemctl stop node_exporter 2>/dev/null || true
+cp node_exporter-*/node_exporter /usr/local/bin/
+chmod +x /usr/local/bin/node_exporter
+systemctl start node_exporter
+rm -rf node_exporter*
+echo "UPDATE_SUCCESS"
 '''
             ssh_cmd.append(update_script)
             
         elif exporter == 'dc_exporter':
             # Download binary directly
             update_script = f'''
+set -e
 systemctl stop dc-exporter 2>/dev/null || true
-curl -sL "{download_url}" -o /usr/local/bin/dc-exporter-rs &&
-chmod +x /usr/local/bin/dc-exporter-rs &&
-systemctl start dc-exporter &&
-echo "OK"
+curl -sL "{download_url}" -o /usr/local/bin/dc-exporter-rs
+chmod +x /usr/local/bin/dc-exporter-rs
+systemctl start dc-exporter
+echo "UPDATE_SUCCESS"
 '''
             ssh_cmd.append(update_script)
             
         elif exporter == 'dcgm_exporter':
             # Update Docker image
             update_script = f'''
+set -e
 docker stop dcgm-exporter 2>/dev/null || true
 docker rm dcgm-exporter 2>/dev/null || true
-docker pull {download_url} &&
-docker run -d --name dcgm-exporter --gpus all -p 9400:9400 --restart unless-stopped {download_url} &&
-echo "OK"
+docker pull {download_url}
+docker run -d --name dcgm-exporter --gpus all -p 9400:9400 --restart unless-stopped {download_url}
+echo "UPDATE_SUCCESS"
 '''
             ssh_cmd.append(update_script)
+        else:
+            return False, f"Unknown exporter type: {exporter}"
         
-        result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=120)
-        return 'OK' in result.stdout
+        app.logger.info(f"[Exporter Update] Running: ssh -p {server.ssh_port or 22} {server.ssh_user or 'root'}@{server.server_ip}")
+        result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=180)
         
-    except Exception:
-        return False
+        if result.returncode != 0:
+            error_msg = result.stderr.strip() or result.stdout.strip() or f"SSH command failed with code {result.returncode}"
+            app.logger.error(f"[Exporter Update] Failed for {server.server_ip}: {error_msg[:200]}")
+            return False, error_msg[:200]
+        
+        if 'UPDATE_SUCCESS' in result.stdout:
+            app.logger.info(f"[Exporter Update] Successfully updated {exporter} on {server.server_ip}")
+            return True, None
+        else:
+            return False, f"Update script did not complete successfully: {result.stdout[:200]}"
+        
+    except subprocess.TimeoutExpired:
+        return False, "SSH connection timed out (180s)"
+    except Exception as e:
+        app.logger.exception(f"[Exporter Update] Exception updating {exporter} on {server.server_ip}")
+        return False, str(e)[:200]
 
 
 @app.route('/api/prometheus/targets')
@@ -1905,17 +1950,17 @@ DASHBOARD_TEMPLATE = """
                         <th>Last Seen</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="serversTableBody">
                     {% for server in servers %}
-                    <tr>
+                    <tr data-id="{{ server.id }}">
                         <td><strong>{{ server.name }}</strong></td>
                         <td>{{ server.server_ip }}</td>
-                        <td>
+                        <td class="status-cell">
                             <span class="status-dot status-{{ server.status }}"></span>
                             {{ server.status }}
                         </td>
-                        <td>{{ server.gpu_count }}</td>
-                        <td>
+                        <td class="gpu-cell">{{ server.gpu_count }}</td>
+                        <td class="exporter-cell">
                             <span class="exporter-badge {% if server.node_exporter_installed and server.node_exporter_enabled %}enabled{% elif server.node_exporter_installed %}disabled{% else %}not-installed{% endif %}">
                                 node{% if server.node_exporter_version %} <span class="version-tag">{{ server.node_exporter_version }}</span>{% endif %}
                             </span>
@@ -1926,7 +1971,7 @@ DASHBOARD_TEMPLATE = """
                                 dcgm{% if server.dcgm_exporter_version %} <span class="version-tag">{{ server.dcgm_exporter_version }}</span>{% endif %}
                             </span>
                         </td>
-                        <td>{{ server.last_seen.strftime('%Y-%m-%d %H:%M') if server.last_seen else '—' }}</td>
+                        <td class="lastseen-cell">{{ server.last_seen.strftime('%Y-%m-%d %H:%M') if server.last_seen else '—' }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -1967,52 +2012,72 @@ DASHBOARD_TEMPLATE = """
         }
     }
     
-    // Refresh dashboard data by reloading
-    async function refreshDashboard() {
-        try {
-            // Silently refresh the page data every 30 seconds
-            const response = await fetch(`${basePath}/api/servers`);
-            if (response.ok) {
-                // Data has been updated via the check endpoints, so reload
-                window.location.reload();
-            }
-        } catch (e) {
-            console.error('Failed to refresh dashboard:', e);
+    // Update a single server row with check results
+    function updateDashboardRow(row, result) {
+        // Status cell
+        const statusCell = row.querySelector('.status-cell');
+        if (statusCell && result.status) {
+            statusCell.innerHTML = `<span class="status-dot status-${result.status}"></span>${result.status}`;
         }
+        
+        // GPU count cell
+        const gpuCell = row.querySelector('.gpu-cell');
+        if (gpuCell && result.gpu_count !== undefined) {
+            gpuCell.textContent = result.gpu_count;
+        }
+        
+        // Exporter cell
+        const exporterCell = row.querySelector('.exporter-cell');
+        if (exporterCell) {
+            const nodeClass = result.node_exporter?.running ? 'enabled' : 'not-installed';
+            const dcClass = result.dc_exporter?.running ? 'enabled' : 'not-installed';
+            const dcgmClass = result.dcgm_exporter?.running ? 'enabled' : 'not-installed';
+            
+            exporterCell.innerHTML = `
+                <span class="exporter-badge ${nodeClass}">node${result.node_exporter?.version ? ` <span class="version-tag">${result.node_exporter.version}</span>` : ''}</span>
+                <span class="exporter-badge ${dcClass}">dc${result.dc_exporter?.version ? ` <span class="version-tag">${result.dc_exporter.version}</span>` : ''}</span>
+                <span class="exporter-badge ${dcgmClass}">dcgm${result.dcgm_exporter?.version ? ` <span class="version-tag">${result.dcgm_exporter.version}</span>` : ''}</span>
+            `;
+        }
+        
+        // Last seen cell
+        const lastSeenCell = row.querySelector('.lastseen-cell');
+        if (lastSeenCell) {
+            lastSeenCell.textContent = result.last_seen || '\u2014';
+        }
+    }
+    
+    // Refresh all servers without page reload
+    async function refreshDashboard() {
+        const indicator = document.getElementById('checkingIndicator');
+        const rows = document.querySelectorAll('#serversTableBody tr[data-id]');
+        
+        if (!rows.length) return;
+        
+        if (indicator) indicator.style.display = 'block';
+        
+        for (const row of rows) {
+            const id = row.dataset.id;
+            try {
+                const response = await fetch(`${basePath}/api/servers/${id}/check`);
+                if (response.ok) {
+                    const result = await response.json();
+                    updateDashboardRow(row, result);
+                }
+            } catch (e) {
+                console.error(`Failed to check server ${id}:`, e);
+            }
+        }
+        
+        if (indicator) indicator.style.display = 'none';
     }
     
     document.addEventListener('DOMContentLoaded', async () => {
         await checkUserPermissions();
-        // Auto-check all servers on first load, then reload to show updated status
-        const indicator = document.getElementById('checkingIndicator');
-        try {
-            const response = await fetch(`${basePath}/api/servers`);
-            const servers = await response.json();
-            if (servers && servers.length > 0) {
-                // Show checking indicator
-                if (indicator) indicator.style.display = 'block';
-                // Check each server silently
-                for (const server of servers) {
-                    try {
-                        await fetch(`${basePath}/api/servers/${server.id}/check`);
-                    } catch (e) {}
-                }
-                // Hide indicator
-                if (indicator) indicator.style.display = 'none';
-                // Reload to show updated status (skip if we just reloaded)
-                const lastReload = parseInt(sessionStorage.getItem('dashboard_reload_time') || '0');
-                const now = Date.now();
-                if (now - lastReload > 10000) { // Only reload if >10 seconds since last reload
-                    sessionStorage.setItem('dashboard_reload_time', now.toString());
-                    window.location.reload();
-                }
-            }
-        } catch (e) {
-            console.error('Failed to auto-check servers:', e);
-            if (indicator) indicator.style.display = 'none';
-        }
-        // Set up periodic refresh every 60 seconds
-        setInterval(refreshDashboard, 60000);
+        // Auto-check all servers on first load (inline updates, no page reload)
+        await refreshDashboard();
+        // Set up periodic refresh every 30 seconds
+        setInterval(refreshDashboard, 30000);
     });
     </script>
 </body></html>
@@ -2341,33 +2406,43 @@ SERVERS_TEMPLATE = """
     }
     
     function updateServerRow(row, result) {
-        // Update the exporter status indicators
-        const statusCell = row.querySelector('.exporter-status');
-        if (!statusCell) return;
+        // Update all columns in the table row
+        const cells = row.querySelectorAll('td');
+        if (cells.length < 6) return;  // Expect: Name, IP, Status, GPUs, Exporters, Last Seen, Actions
         
-        const indicators = statusCell.querySelectorAll('.status-indicator');
-        if (indicators.length >= 3) {
-            // node exporter
-            indicators[0].className = 'status-indicator ' + 
-                (result.node_exporter?.running ? 'status-enabled' : 'status-not-installed');
-            // dc exporter  
-            indicators[1].className = 'status-indicator ' + 
-                (result.dc_exporter?.running ? 'status-enabled' : 'status-not-installed');
-            // dcgm exporter
-            indicators[2].className = 'status-indicator ' + 
-                (result.dcgm_exporter?.running ? 'status-enabled' : 'status-not-installed');
+        // Status column (index 2)
+        const statusCell = cells[2];
+        if (statusCell && result.status) {
+            const statusClass = result.status === 'online' ? 'status-online' : 'status-offline';
+            statusCell.innerHTML = `<span class="${statusClass}">${result.status}</span>`;
         }
         
-        // Add version info if available
-        const nodeSpan = statusCell.innerHTML.match(/node<br>([^<]*)/);
-        let html = '';
-        html += `<span class="status-indicator ${result.node_exporter?.running ? 'status-enabled' : 'status-not-installed'}"></span>node`;
-        if (result.node_exporter?.version) html += `<br><small>${result.node_exporter.version}</small>`;
-        html += `<span class="status-indicator ${result.dc_exporter?.running ? 'status-enabled' : 'status-not-installed'}" style="margin-left:8px"></span>dc`;
-        if (result.dc_exporter?.version) html += `<br><small>${result.dc_exporter.version}</small>`;
-        html += `<span class="status-indicator ${result.dcgm_exporter?.running ? 'status-enabled' : 'status-not-installed'}" style="margin-left:8px"></span>dcgm`;
-        if (result.dcgm_exporter?.version) html += `<br><small>${result.dcgm_exporter.version}</small>`;
-        statusCell.innerHTML = html;
+        // GPU count column (index 3)
+        const gpuCell = cells[3];
+        if (gpuCell && result.gpu_count !== undefined) {
+            gpuCell.textContent = result.gpu_count;
+        }
+        
+        // Exporter status column (index 4)
+        const exporterCell = cells[4];
+        if (exporterCell) {
+            let html = '';
+            html += `<span class="status-indicator ${result.node_exporter?.running ? 'status-enabled' : 'status-not-installed'}"></span>node`;
+            if (result.node_exporter?.version) html += ` ${result.node_exporter.version}`;
+            html += `<span class="status-indicator ${result.dc_exporter?.running ? 'status-enabled' : 'status-not-installed'}" style="margin-left:8px"></span>dc`;
+            if (result.dc_exporter?.version) html += ` ${result.dc_exporter.version}`;
+            html += `<span class="status-indicator ${result.dcgm_exporter?.running ? 'status-enabled' : 'status-not-installed'}" style="margin-left:8px"></span>dcgm`;
+            if (result.dcgm_exporter?.version) html += ` ${result.dcgm_exporter.version}`;
+            exporterCell.innerHTML = html;
+        }
+        
+        // Last Seen column (index 5)
+        const lastSeenCell = cells[5];
+        if (lastSeenCell && result.last_seen) {
+            lastSeenCell.textContent = result.last_seen;
+        } else if (lastSeenCell && result.status === 'offline') {
+            lastSeenCell.textContent = '\u2014';  // em dash
+        }
     }
     
     document.getElementById('addServerForm').onsubmit = async (e) => {
