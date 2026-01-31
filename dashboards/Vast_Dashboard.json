@@ -3577,7 +3577,7 @@
         {
           "id": "joinByField",
           "options": {
-            "byField": "Hostname",
+            "byField": "job",
             "mode": "outer"
           }
         },
@@ -3682,7 +3682,6 @@
               "pci_bus_id 8": true,
               "device": true,
               "modelName": true,
-              "job": true,
               "job 1": true,
               "job 2": true,
               "job 3": true,
@@ -4065,7 +4064,7 @@
         {
           "id": "joinByField",
           "options": {
-            "byField": "Hostname",
+            "byField": "job",
             "mode": "outer"
           }
         },
@@ -4169,7 +4168,6 @@
               "pci_bus_id 8": true,
               "device": true,
               "modelName": true,
-              "job": true,
               "job 1": true,
               "job 2": true,
               "job 3": true,
@@ -4482,7 +4480,7 @@
         {
           "id": "joinByField",
           "options": {
-            "byField": "Hostname",
+            "byField": "job",
             "mode": "outer"
           }
         },
@@ -4586,7 +4584,6 @@
               "pci_bus_id 8": true,
               "device": true,
               "modelName": true,
-              "job": true,
               "job 1": true,
               "job 2": true,
               "job 3": true,
@@ -4888,7 +4885,7 @@
         {
           "id": "joinByField",
           "options": {
-            "byField": "Hostname",
+            "byField": "job",
             "mode": "outer"
           }
         },
@@ -4992,7 +4989,6 @@
               "pci_bus_id 8": true,
               "device": true,
               "modelName": true,
-              "job": true,
               "job 1": true,
               "job 2": true,
               "job 3": true,
@@ -5295,7 +5291,7 @@
         {
           "id": "joinByField",
           "options": {
-            "byField": "Hostname",
+            "byField": "job",
             "mode": "outer"
           }
         },
@@ -5399,7 +5395,6 @@
               "pci_bus_id 8": true,
               "device": true,
               "modelName": true,
-              "job": true,
               "job 1": true,
               "job 2": true,
               "job 3": true,
@@ -5680,7 +5675,7 @@
         {
           "id": "joinByField",
           "options": {
-            "byField": "Hostname",
+            "byField": "job",
             "mode": "outer"
           }
         },
@@ -5785,7 +5780,6 @@
               "pci_bus_id 8": true,
               "device": true,
               "modelName": true,
-              "job": true,
               "job 1": true,
               "job 2": true,
               "job 3": true,
@@ -6087,7 +6081,7 @@
         {
           "id": "joinByField",
           "options": {
-            "byField": "Hostname",
+            "byField": "job",
             "mode": "outer"
           }
         },
@@ -6191,7 +6185,6 @@
               "pci_bus_id 8": true,
               "device": true,
               "modelName": true,
-              "job": true,
               "job 1": true,
               "job 2": true,
               "job 3": true,
@@ -6494,7 +6487,7 @@
         {
           "id": "joinByField",
           "options": {
-            "byField": "Hostname",
+            "byField": "job",
             "mode": "outer"
           }
         },
@@ -6598,7 +6591,6 @@
               "pci_bus_id 8": true,
               "device": true,
               "modelName": true,
-              "job": true,
               "job 1": true,
               "job 2": true,
               "job 3": true,
