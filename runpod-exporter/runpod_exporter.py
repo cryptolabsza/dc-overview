@@ -110,7 +110,8 @@ class RunPodClient:
         """Execute a GraphQL query"""
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}"
+            "Authorization": f"Bearer {self.api_key}",
+            "User-Agent": "RunPod-Exporter/1.0 (CryptoLabs DC-Overview)"
         }
         
         data = json.dumps({"query": query}).encode('utf-8')
