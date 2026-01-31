@@ -2124,7 +2124,7 @@
           "refId": "H"
         }
       ],
-      "title": "Machine GPU VRAM Temps ",
+      "title": "Machine GPU VRAM Temps",
       "transformations": [
         {
           "id": "joinByField",
