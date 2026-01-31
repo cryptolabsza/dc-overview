@@ -1048,6 +1048,9 @@ echo "Exporters installed successfully"
                 # Parse dashboard
                 dash_obj = json.loads(dashboard_json)
                 
+                # Scale panel heights for server count (if servers are configured)
+                dash_obj = self._scale_dashboard_for_servers(dash_obj, name)
+                
                 # Fix datasource references throughout the dashboard
                 dash_obj = self._fix_dashboard_datasources(dash_obj, prometheus_uid)
                 
@@ -1239,6 +1242,127 @@ echo "Exporters installed successfully"
             return None
         except Exception:
             return None
+    
+    def _scale_dashboard_for_servers(self, dashboard: dict, dashboard_name: str) -> dict:
+        """
+        Scale dashboard panel heights based on server count.
+        
+        For fleets with many servers, table panels need to be taller to display
+        all servers without excessive scrolling. This dynamically adjusts panel
+        heights based on the configured server count.
+        
+        Scaling logic:
+        - Each table row needs ~25-30px, 1 Grafana height unit ≈ 30px
+        - So for N servers: min_height ≈ ceil(N / 2.5) + 2 (for header)
+        - Only scale if the calculated height exceeds the original
+        """
+        server_count = len(self.config.servers)
+        
+        # Only scale if we have server information
+        if server_count < 5:
+            return dashboard
+        
+        # Calculate required height for table panels showing per-server data
+        # Formula: servers / 2.5 rows per height unit + 2 for header/padding
+        import math
+        required_height = math.ceil(server_count / 2.5) + 2
+        
+        # Define which panels to scale based on dashboard type
+        # These are panels that show per-server data
+        scalable_panels = {
+            "DC Overview": {
+                # Panel titles that show per-server data
+                "titles": [
+                    "Machine Overview",
+                    "Machine GPU Temps",
+                    "Machine GPU VRAM Temps",
+                    "Machine GPU Power",
+                    "Machine GPU FAN Speeds",
+                    "Machine GPU Core Hot Spot",
+                    "Machine GPU Thermal Throttle",
+                    "Machine GPU AER_ ERRORS",
+                    "Machine GPU Utilization",
+                    "Machine GPU Error State",
+                    "Pending Updates",
+                    "GPU Driver and count",
+                ],
+                # Machine Overview is special - it's the main table
+                "large_panels": ["Machine Overview"],
+            },
+            "IPMI Monitor": {
+                "titles": ["Server Status"],
+                "large_panels": ["Server Status"],
+            },
+            "Vast Dashboard": {
+                "titles": ["Machine Status", "Earnings by Machine"],
+                "large_panels": [],
+            },
+            "RunPod Dashboard": {
+                "titles": ["Machines Overview", "Machine Details"],
+                "large_panels": [],
+            },
+        }
+        
+        config = scalable_panels.get(dashboard_name, {})
+        if not config:
+            return dashboard
+        
+        titles_to_scale = config.get("titles", [])
+        large_panels = config.get("large_panels", [])
+        
+        panels = dashboard.get("panels", [])
+        if not panels:
+            return dashboard
+        
+        # Track height adjustments for repositioning subsequent panels
+        # Group panels by their Y position for proper adjustment
+        y_adjustments = {}  # Maps original Y to additional height needed
+        
+        for panel in panels:
+            title = panel.get("title", "")
+            grid_pos = panel.get("gridPos", {})
+            original_height = grid_pos.get("h", 8)
+            original_y = grid_pos.get("y", 0)
+            
+            if title in titles_to_scale:
+                # Large panels (main tables) get more height
+                if title in large_panels:
+                    new_height = max(original_height, required_height + 5)
+                else:
+                    new_height = max(original_height, required_height)
+                
+                if new_height > original_height:
+                    height_diff = new_height - original_height
+                    grid_pos["h"] = new_height
+                    
+                    # Track adjustment for panels below this one
+                    panel_bottom = original_y + original_height
+                    if panel_bottom not in y_adjustments:
+                        y_adjustments[panel_bottom] = 0
+                    y_adjustments[panel_bottom] = max(y_adjustments[panel_bottom], height_diff)
+        
+        # Apply Y-position adjustments to panels below scaled panels
+        if y_adjustments:
+            # Sort adjustment points
+            adjustment_points = sorted(y_adjustments.keys())
+            
+            for panel in panels:
+                grid_pos = panel.get("gridPos", {})
+                panel_y = grid_pos.get("y", 0)
+                
+                # Calculate total adjustment for this panel
+                total_adjustment = 0
+                for adj_y in adjustment_points:
+                    if panel_y >= adj_y:
+                        total_adjustment += y_adjustments[adj_y]
+                
+                if total_adjustment > 0:
+                    grid_pos["y"] = panel_y + total_adjustment
+        
+        if server_count >= 10:
+            console.print(f"    [dim]Scaled panels for {server_count} servers[/dim]")
+        
+        return dashboard
     
     def _fix_dashboard_datasources(self, dashboard: dict, prometheus_uid: str) -> dict:
         """
