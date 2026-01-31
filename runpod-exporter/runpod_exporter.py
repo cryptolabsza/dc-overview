@@ -276,31 +276,37 @@ class MetricsCollector:
             lines.append(f'runpod_machine_verified{{{labels}}} {verified}')
         
         lines.append("")
-        lines.append("# HELP runpod_machine_uptime_percent_1w Uptime percentage over 1 week")
+        lines.append("# HELP runpod_machine_uptime_percent_1w Uptime percentage over 1 week (0-100)")
         lines.append("# TYPE runpod_machine_uptime_percent_1w gauge")
         for m in metrics.get('machines', []):
             labels = self._machine_labels(m)
             uptime = m.get('uptimePercentListedOneWeek')
             if uptime is not None:
-                lines.append(f'runpod_machine_uptime_percent_1w{{{labels}}} {uptime}')
+                # API returns 0-1 fraction, convert to 0-100 percentage
+                uptime_pct = max(0, float(uptime) * 100)
+                lines.append(f'runpod_machine_uptime_percent_1w{{{labels}}} {uptime_pct}')
         
         lines.append("")
-        lines.append("# HELP runpod_machine_uptime_percent_4w Uptime percentage over 4 weeks")
+        lines.append("# HELP runpod_machine_uptime_percent_4w Uptime percentage over 4 weeks (0-100)")
         lines.append("# TYPE runpod_machine_uptime_percent_4w gauge")
         for m in metrics.get('machines', []):
             labels = self._machine_labels(m)
             uptime = m.get('uptimePercentListedFourWeek')
             if uptime is not None:
-                lines.append(f'runpod_machine_uptime_percent_4w{{{labels}}} {uptime}')
+                # API returns 0-1 fraction, convert to 0-100 percentage
+                uptime_pct = max(0, float(uptime) * 100)
+                lines.append(f'runpod_machine_uptime_percent_4w{{{labels}}} {uptime_pct}')
         
         lines.append("")
-        lines.append("# HELP runpod_machine_uptime_percent_12w Uptime percentage over 12 weeks")
+        lines.append("# HELP runpod_machine_uptime_percent_12w Uptime percentage over 12 weeks (0-100)")
         lines.append("# TYPE runpod_machine_uptime_percent_12w gauge")
         for m in metrics.get('machines', []):
             labels = self._machine_labels(m)
             uptime = m.get('uptimePercentListedTwelveWeek')
             if uptime is not None:
-                lines.append(f'runpod_machine_uptime_percent_12w{{{labels}}} {uptime}')
+                # API returns 0-1 fraction, convert to 0-100 percentage
+                uptime_pct = max(0, float(uptime) * 100)
+                lines.append(f'runpod_machine_uptime_percent_12w{{{labels}}} {uptime_pct}')
         
         lines.append("")
         lines.append("# HELP runpod_machine_disk_total_gb Total disk space in GB")

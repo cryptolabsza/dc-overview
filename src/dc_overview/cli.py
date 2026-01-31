@@ -743,7 +743,8 @@ def run_fleet_quickstart(config_file: str = None, auto_confirm: bool = False):
                 console.print(f"  Servers: {len(config.servers)}")
                 console.print(f"  Components: DC Overview" + 
                              (", IPMI Monitor" if config.components.ipmi_monitor else "") +
-                             (", Vast.ai" if config.components.vast_exporter else ""))
+                             (", Vast.ai" if config.components.vast_exporter else "") +
+                             (f", RunPod ({len(config.runpod.api_keys)} account(s))" if config.runpod.enabled else ""))
                 console.print()
                 
                 import questionary
@@ -827,11 +828,28 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     config.components.dc_overview = components.get('dc_overview', True)
     config.components.ipmi_monitor = components.get('ipmi_monitor', False)
     config.components.vast_exporter = components.get('vast_exporter', False)
+    config.components.runpod_exporter = components.get('runpod_exporter', False)
     
     # Vast.ai
     vast = data.get('vast', {})
     config.vast.enabled = config.components.vast_exporter
     config.vast.api_key = vast.get('api_key')
+    
+    # RunPod (supports multiple API keys)
+    runpod = data.get('runpod', {})
+    config.runpod.enabled = runpod.get('enabled', False) or config.components.runpod_exporter
+    config.runpod.port = runpod.get('port', 8623)
+    # Support api_keys list with name/key pairs
+    for api_key_data in runpod.get('api_keys', []):
+        if isinstance(api_key_data, dict):
+            config.runpod.add_key(
+                name=api_key_data.get('name', 'default'),
+                key=api_key_data.get('key', '')
+            )
+    # If RunPod is enabled via api_keys, also set the component flag
+    if config.runpod.api_keys:
+        config.runpod.enabled = True
+        config.components.runpod_exporter = True
     
     # Grafana
     grafana = data.get('grafana', {})

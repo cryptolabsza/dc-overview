@@ -24,7 +24,7 @@ echo ""
 
 # DC Overview containers to remove (including certbot from ipmi-monitor standalone)
 # Note: watchtower is NOT removed as it may be shared with minecraft or other services
-DC_CONTAINERS="cryptolabs-proxy dc-overview ipmi-monitor grafana prometheus vastai-exporter certbot"
+DC_CONTAINERS="cryptolabs-proxy dc-overview ipmi-monitor grafana prometheus vastai-exporter runpod-exporter certbot"
 
 # DC Overview volumes to remove (all possible naming conventions)
 DC_VOLUMES="dc-overview-data ipmi-monitor-data grafana-data prometheus-data dc-overview_grafana-data dc-overview_prometheus-data fleet-auth-data cryptolabs-proxy-data root_grafana-data root_prometheus-data ipmi-monitor_ipmi-data"
@@ -83,7 +83,7 @@ ssh_cmd ${MASTER_PORT} "systemctl daemon-reload"
 # Remove dc-overview related images ONLY (ensures fresh pull on next deploy)
 # PRESERVES: minecraft, watchtower images
 echo "  Removing monitoring images..."
-DC_IMAGES="ghcr.io/cryptolabsza/ipmi-monitor ghcr.io/cryptolabsza/dc-overview ghcr.io/cryptolabsza/cryptolabs-proxy ghcr.io/cryptolabsza/vastai-exporter prom/prometheus grafana/grafana"
+DC_IMAGES="ghcr.io/cryptolabsza/ipmi-monitor ghcr.io/cryptolabsza/dc-overview ghcr.io/cryptolabsza/cryptolabs-proxy ghcr.io/cryptolabsza/vastai-exporter ghcr.io/cryptolabsza/runpod-exporter prom/prometheus grafana/grafana"
 for img in ${DC_IMAGES}; do
   ssh_cmd ${MASTER_PORT} "docker images --format '{{.Repository}}:{{.Tag}}' | grep '^${img}' | xargs -r docker rmi -f 2>/dev/null && echo \"    removed ${img}\" || true"
 done

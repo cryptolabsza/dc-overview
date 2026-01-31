@@ -61,7 +61,7 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
+        "w": 3,
         "x": 0,
         "y": 1
       },
@@ -72,7 +72,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -125,7 +127,7 @@
       "gridPos": {
         "h": 4,
         "w": 3,
-        "x": 4,
+        "x": 3,
         "y": 1
       },
       "id": 2,
@@ -135,7 +137,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -187,8 +191,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 3,
-        "x": 7,
+        "w": 2,
+        "x": 6,
         "y": 1
       },
       "id": 3,
@@ -198,7 +202,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -250,8 +256,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 3,
-        "x": 10,
+        "w": 2,
+        "x": 8,
         "y": 1
       },
       "id": 4,
@@ -261,7 +267,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -313,8 +321,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 3,
-        "x": 13,
+        "w": 2,
+        "x": 10,
         "y": 1
       },
       "id": 5,
@@ -324,7 +332,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -376,8 +386,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 16,
+        "w": 3,
+        "x": 12,
         "y": 1
       },
       "id": 6,
@@ -387,7 +397,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -410,6 +422,146 @@
         }
       ],
       "title": "Today's Earnings",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Earnings rate per hour (based on increase over last hour)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 15,
+        "y": 1
+      },
+      "id": 8,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.1.3",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(increase(runpod_machine_total_earnings[1h]))",
+          "legendFormat": "Per Hour",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Earnings/Hour",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "GPU utilization rate (rented / total)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 75
+              }
+            ]
+          },
+          "unit": "percent",
+          "max": 100,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 18,
+        "y": 1
+      },
+      "id": 9,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.1.3",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "100 * sum(runpod_machine_gpu_rented) / sum(runpod_machine_gpu_total)",
+          "legendFormat": "Util %",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Utilization",
       "type": "stat"
     },
     {
@@ -447,8 +599,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 20,
+        "w": 3,
+        "x": 21,
         "y": 1
       },
       "id": 7,
@@ -458,7 +610,9 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": ["mean"],
+          "calcs": [
+            "mean"
+          ],
           "fields": "",
           "values": false
         },
@@ -562,7 +716,9 @@
       "id": 10,
       "options": {
         "legend": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "displayMode": "table",
           "placement": "right",
           "showLegend": true
@@ -646,7 +802,9 @@
           "countRows": false,
           "enablePagination": false,
           "fields": "",
-          "reducer": ["sum"],
+          "reducer": [
+            "sum"
+          ],
           "show": true
         },
         "showHeader": true
@@ -807,9 +965,18 @@
                 "value": {
                   "mode": "absolute",
                   "steps": [
-                    {"color": "red", "value": null},
-                    {"color": "yellow", "value": 90},
-                    {"color": "green", "value": 95}
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 90
+                    },
+                    {
+                      "color": "green",
+                      "value": 95
+                    }
                   ]
                 }
               },
@@ -831,8 +998,26 @@
               {
                 "id": "mappings",
                 "value": [
-                  {"options": {"0": {"color": "red", "index": 1, "text": "No"}}, "type": "value"},
-                  {"options": {"1": {"color": "green", "index": 0, "text": "Yes"}}, "type": "value"}
+                  {
+                    "options": {
+                      "0": {
+                        "color": "red",
+                        "index": 1,
+                        "text": "No"
+                      }
+                    },
+                    "type": "value"
+                  },
+                  {
+                    "options": {
+                      "1": {
+                        "color": "green",
+                        "index": 0,
+                        "text": "Yes"
+                      }
+                    },
+                    "type": "value"
+                  }
                 ]
               },
               {
@@ -853,8 +1038,26 @@
               {
                 "id": "mappings",
                 "value": [
-                  {"options": {"0": {"color": "orange", "index": 1, "text": "No"}}, "type": "value"},
-                  {"options": {"1": {"color": "green", "index": 0, "text": "Yes"}}, "type": "value"}
+                  {
+                    "options": {
+                      "0": {
+                        "color": "orange",
+                        "index": 1,
+                        "text": "No"
+                      }
+                    },
+                    "type": "value"
+                  },
+                  {
+                    "options": {
+                      "1": {
+                        "color": "green",
+                        "index": 0,
+                        "text": "Yes"
+                      }
+                    },
+                    "type": "value"
+                  }
                 ]
               },
               {
@@ -880,8 +1083,14 @@
         "footer": {
           "countRows": false,
           "enablePagination": false,
-          "fields": ["GPUs", "Rented", "Earnings"],
-          "reducer": ["sum"],
+          "fields": [
+            "GPUs",
+            "Rented",
+            "Earnings"
+          ],
+          "reducer": [
+            "sum"
+          ],
           "show": true
         },
         "showHeader": true,
@@ -1175,7 +1384,10 @@
       "id": 30,
       "options": {
         "legend": {
-          "calcs": ["lastNotNull", "mean"],
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ],
           "displayMode": "table",
           "placement": "right",
           "showLegend": true
@@ -1279,7 +1491,9 @@
       "id": 31,
       "options": {
         "legend": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "displayMode": "table",
           "placement": "right",
           "showLegend": true
@@ -1369,7 +1583,9 @@
         "namePlacement": "left",
         "orientation": "horizontal",
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "fields": "",
           "values": false
         },
@@ -1466,7 +1682,10 @@
       "id": 41,
       "options": {
         "legend": {
-          "calcs": ["mean", "min"],
+          "calcs": [
+            "mean",
+            "min"
+          ],
           "displayMode": "table",
           "placement": "right",
           "showLegend": true
@@ -1496,7 +1715,12 @@
   ],
   "refresh": "1m",
   "schemaVersion": 39,
-  "tags": ["runpod", "gpu", "hosting", "earnings"],
+  "tags": [
+    "runpod",
+    "gpu",
+    "hosting",
+    "earnings"
+  ],
   "templating": {
     "list": []
   },

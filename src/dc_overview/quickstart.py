@@ -158,6 +158,20 @@ def run_quickstart():
     if setup_vast:
         setup_vastai_exporter()
     
+    # ============ Step 5b: RunPod Integration ============
+    console.print("\n[bold]Step 5b: RunPod Integration (Optional)[/bold]\n")
+    console.print("[dim]If you're a RunPod host, this tracks your earnings, rentals, and reliability.[/dim]")
+    console.print("[dim]Supports multiple accounts if you have more than one RunPod login.[/dim]")
+    
+    setup_runpod = questionary.confirm(
+        "Are you a RunPod host?",
+        default=False,
+        style=custom_style
+    ).ask()
+    
+    if setup_runpod:
+        setup_runpod_exporter()
+    
     # ============ Step 6: SSL/Reverse Proxy (master only) ============
     if role in ["master", "both"]:
         console.print("\n[bold]Step 6: HTTPS Access (Recommended)[/bold]\n")

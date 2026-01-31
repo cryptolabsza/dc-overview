@@ -267,6 +267,7 @@ class FleetConfig:
                 "dc_overview": self.components.dc_overview,
                 "ipmi_monitor": self.components.ipmi_monitor,
                 "vast_exporter": self.components.vast_exporter,
+                "runpod_exporter": self.components.runpod_exporter,
             },
             "ssl": {
                 "mode": self.ssl.mode.value,
@@ -300,6 +301,10 @@ class FleetConfig:
             },
             "vast": {
                 "enabled": self.vast.enabled,
+            },
+            "runpod": {
+                "enabled": self.runpod.enabled,
+                "port": self.runpod.port,
             },
             "servers": [
                 {

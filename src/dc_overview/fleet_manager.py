@@ -226,11 +226,11 @@ class FleetManager:
                     traceback.print_exc()
             
             # Step 8: Vast.ai exporter (if enabled)
-            if self.config.components.vast_exporter:
+            if self.config.components.vast_exporter and self.config.vast.api_key:
                 self._deploy_vast_exporter()
             
             # Step 8b: RunPod exporter (if enabled)
-            if self.config.components.runpod_exporter:
+            if self.config.components.runpod_exporter and self.config.runpod.api_keys:
                 self._deploy_runpod_exporter()
             
             # Step 9: Proxy Integration (skip if using existing cryptolabs-proxy)
@@ -1383,6 +1383,13 @@ echo "Exporters installed successfully"
                 "name": "IPMI Monitor",
                 "local_file": "IPMI_Monitor.json",
                 "github_url": f"{base_url}/IPMI_Monitor.json",
+            })
+        
+        if self.config.components.runpod_exporter:
+            dashboards.append({
+                "name": "RunPod Dashboard",
+                "local_file": "RunPod_Dashboard.json",
+                "github_url": f"{base_url}/RunPod_Dashboard.json",
             })
         
         return dashboards
@@ -2738,6 +2745,8 @@ except Exception as e:
         console.print("  • DC Exporter Details (GPU metrics)")
         if self.config.components.vast_exporter:
             console.print("  • Vast Dashboard (earnings/reliability)")
+        if self.config.components.runpod_exporter:
+            console.print("  • RunPod Dashboard (earnings/rentals/utilization)")
         if self.config.components.ipmi_monitor:
             console.print("  • IPMI Monitor (server health)")
         

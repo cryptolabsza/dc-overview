@@ -93,7 +93,7 @@ class FleetWizard:
             "your datacenter monitoring. [bold]We'll ask everything upfront[/bold],\n"
             "then handle the installation automatically.\n\n"
             "[bold]What we'll ask for:[/bold]\n"
-            "  1. Which components to install (GPU monitoring, IPMI, Vast.ai)\n"
+            "  1. Which components to install (GPU monitoring, IPMI, Vast.ai, RunPod)\n"
             "  2. Login credentials (Grafana password, SSH, BMC/IPMI)\n"
             "  3. Servers to monitor (IPs, machine names)\n"
             "  4. HTTPS/SSL configuration\n"
@@ -205,6 +205,11 @@ class FleetWizard:
                     value="vast_exporter",
                     checked=False
                 ),
+                questionary.Choice(
+                    "RunPod Integration (Host earnings, rentals & utilization)",
+                    value="runpod_exporter",
+                    checked=False
+                ),
             ],
             style=custom_style
         ).ask()
@@ -215,10 +220,12 @@ class FleetWizard:
         self.config.components.dc_overview = "dc_overview" in components
         self.config.components.ipmi_monitor = "ipmi_monitor" in components
         self.config.components.vast_exporter = "vast_exporter" in components
+        self.config.components.runpod_exporter = "runpod_exporter" in components
         
         # Update dependent configs
         self.config.ipmi_monitor.enabled = self.config.components.ipmi_monitor
         self.config.vast.enabled = self.config.components.vast_exporter
+        self.config.runpod.enabled = self.config.components.runpod_exporter
         
         console.print()
     
@@ -604,6 +611,45 @@ class FleetWizard:
                 "Vast.ai API Key:",
                 style=custom_style
             ).ask()
+        
+        # RunPod API Keys (supports multiple accounts)
+        if self.config.components.runpod_exporter:
+            console.print("\n[bold]RunPod Integration[/bold]")
+            console.print("[dim]Get your API key from: https://www.runpod.io/console/user/settings[/dim]")
+            console.print("[dim]You can add multiple accounts if you have more than one RunPod login.[/dim]\n")
+            
+            while True:
+                # Ask for account name
+                prompt_text = "Account name (e.g., 'MyAccount'):" if not self.config.runpod.api_keys else "Add another account name (or Enter to finish):"
+                account_name = questionary.text(
+                    prompt_text,
+                    style=custom_style
+                ).ask()
+                
+                if not account_name:
+                    if not self.config.runpod.api_keys:
+                        console.print("[yellow]⚠[/yellow] No RunPod API keys added. RunPod integration will be disabled.")
+                        self.config.components.runpod_exporter = False
+                        self.config.runpod.enabled = False
+                    break
+                
+                # Ask for API key
+                api_key = questionary.password(
+                    f"RunPod API Key for {account_name}:",
+                    style=custom_style
+                ).ask()
+                
+                if api_key:
+                    self.config.runpod.add_key(account_name, api_key)
+                    console.print(f"[green]✓[/green] Added account: {account_name}")
+                
+                # Ask if more accounts
+                if not questionary.confirm(
+                    "Add another RunPod account?",
+                    default=False,
+                    style=custom_style
+                ).ask():
+                    break
         
         console.print()
     
@@ -1464,6 +1510,10 @@ class FleetWizard:
             "Vast.ai Integration",
             "[green]✓ Enabled[/green]" if self.config.components.vast_exporter else "[dim]Disabled[/dim]"
         )
+        comp_table.add_row(
+            "RunPod Integration",
+            f"[green]✓ Enabled ({len(self.config.runpod.api_keys)} account(s))[/green]" if self.config.components.runpod_exporter else "[dim]Disabled[/dim]"
+        )
         
         console.print(comp_table)
         console.print()
@@ -1541,6 +1591,9 @@ class FleetWizard:
         
         if self.config.components.vast_exporter:
             dash_table.add_row("Vast Dashboard (earnings/reliability)")
+        
+        if self.config.components.runpod_exporter:
+            dash_table.add_row("RunPod Dashboard (earnings/rentals/utilization)")
         
         console.print(dash_table)
         console.print()

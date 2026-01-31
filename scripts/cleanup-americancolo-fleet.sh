@@ -34,8 +34,8 @@ echo ""
 # Containers to REMOVE on master (monitoring-related only)
 # Note: registry, netbootxyz are PRESERVED
 # Old monitoring: admin-grafana-1, admin-prometheus-1, admin-db-1, cadvisor, my-node-exporter
-# DC Overview containers: cryptolabs-proxy, dc-overview, prometheus, grafana, ipmi-monitor, vastai-exporter
-REMOVE_CONTAINERS="admin-grafana-1 admin-prometheus-1 admin-db-1 ipmi-monitor cadvisor my-node-exporter watchtower cryptolabs-proxy dc-overview prometheus grafana vastai-exporter"
+# DC Overview containers: cryptolabs-proxy, dc-overview, prometheus, grafana, ipmi-monitor, vastai-exporter, runpod-exporter
+REMOVE_CONTAINERS="admin-grafana-1 admin-prometheus-1 admin-db-1 ipmi-monitor cadvisor my-node-exporter watchtower cryptolabs-proxy dc-overview prometheus grafana vastai-exporter runpod-exporter"
 
 # Exporter services to remove on workers (systemd services only, no Docker!)
 # - node_exporter: from jjziets/DCMontoring install_node_exporter.sh
@@ -104,7 +104,7 @@ ssh_master "docker volume prune -f 2>/dev/null || true"
 # Remove dc-overview related images ONLY (ensures fresh pull on next deploy)
 # PRESERVES: registry, netbootxyz, pxe images
 echo "  Removing monitoring images..."
-REMOVE_IMAGES="ghcr.io/cryptolabsza/ipmi-monitor ghcr.io/cryptolabsza/dc-overview ghcr.io/cryptolabsza/cryptolabs-proxy ghcr.io/cryptolabsza/vastai-exporter prom/prometheus grafana/grafana"
+REMOVE_IMAGES="ghcr.io/cryptolabsza/ipmi-monitor ghcr.io/cryptolabsza/dc-overview ghcr.io/cryptolabsza/cryptolabs-proxy ghcr.io/cryptolabsza/vastai-exporter ghcr.io/cryptolabsza/runpod-exporter prom/prometheus grafana/grafana"
 for img in ${REMOVE_IMAGES}; do
   ssh_master "docker images --format '{{.Repository}}:{{.Tag}}' | grep '^${img}' | xargs -r docker rmi -f 2>/dev/null && echo \"    removed ${img}\" || true"
 done
