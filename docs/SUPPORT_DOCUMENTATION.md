@@ -45,7 +45,8 @@ DC Overview is a complete GPU datacenter monitoring solution that deploys Promet
 | **IPMI Monitor** | BMC/IPMI server health monitoring (optional) | 5000 |
 | **node_exporter** | CPU, RAM, disk metrics (on workers) | 9100 |
 | **dc-exporter** | GPU VRAM temps, hotspot, power (on workers) | 9835 |
-| **vastai-exporter** | Vast.ai earnings (optional) | 8622 |
+| **vastai-exporter** | Vast.ai earnings & rentals (optional) | 8622 |
+| **runpod-exporter** | RunPod earnings & GPU utilization (optional) | 8623 |
 
 ---
 
@@ -76,10 +77,11 @@ sudo dc-overview quickstart
 ```
 
 The Fleet Wizard guides you through:
-1. **Components** - DC Overview, IPMI Monitor, Vast.ai exporter
-2. **Credentials** - Fleet admin, Grafana, SSH, BMC/IPMI
-3. **Servers** - Import from IPMI Monitor or enter manually
-4. **SSL** - Let's Encrypt or self-signed
+1. **Site Name** - Customize your datacenter branding (e.g., "CryptoLabs", "AmericanColo")
+2. **Components** - DC Overview, IPMI Monitor, Vast.ai exporter, RunPod exporter
+3. **Credentials** - Fleet admin, Grafana, SSH, BMC/IPMI
+4. **Servers** - Import from IPMI Monitor or enter manually
+5. **SSL** - Let's Encrypt or self-signed
 
 ---
 
@@ -152,11 +154,21 @@ ssl:
 components:
   dc_overview: true
   ipmi_monitor: true
-  vast_exporter: false  # Set to true if using Vast.ai
+  vast_exporter: false    # Set to true if using Vast.ai
+  runpod_exporter: false  # Set to true if using RunPod
 
 # Vast.ai API Key (only needed if vast_exporter is true)
 vast:
   api_key: YOUR_VAST_API_KEY
+
+# RunPod API Keys (only needed if runpod_exporter is true)
+# Supports multiple accounts with labels
+runpod:
+  api_keys:
+    - key: YOUR_RUNPOD_API_KEY
+      label: main-account
+    - key: YOUR_SECOND_RUNPOD_API_KEY
+      label: secondary-account
 
 # Servers to monitor
 servers:
@@ -341,16 +353,19 @@ dc-overview setup-ssl               # Configure HTTPS
 
 ## Grafana Dashboards
 
-Pre-installed dashboards:
+Pre-installed dashboards (auto-scaled to fit your fleet size):
 
 | Dashboard | Description |
 |-----------|-------------|
 | **DC Overview** | Fleet overview with all GPU metrics |
-| **DC Exporter Details** | Detailed GPU metrics (VRAM temp, hotspot, power) |
+| **DC Exporter Details** | Detailed GPU metrics (VRAM temp, hotspot, power, PCIe errors) |
 | **Node Exporter Full** | CPU, RAM, disk, network |
 | **NVIDIA DCGM Exporter** | GPU performance metrics |
-| **Vast Dashboard** | Vast.ai provider earnings |
+| **Vast Dashboard** | Vast.ai provider earnings & machine status |
+| **RunPod Dashboard** | RunPod earnings, GPU utilization & reliability |
 | **IPMI Monitor** | BMC/IPMI sensor data |
+
+> **Note:** Dashboard table panels automatically scale based on your server count to ensure all machines are visible without scrolling.
 
 ### Accessing Dashboards
 
@@ -437,6 +452,14 @@ pip install --upgrade dc-overview  # Update CLI tool
 ---
 
 ## FAQ
+
+### Q: Can I use this with Vast.ai or RunPod?
+
+Yes! Worker exporters run as native systemd services (not Docker), making them fully compatible with GPU rental platforms. Enable the dedicated exporters to track:
+- **Vast.ai**: Earnings, rental status, GPU utilization per machine
+- **RunPod**: Earnings, GPU utilization, reliability metrics (supports multiple accounts)
+
+When IPMI Monitor is also enabled with SSH, dc-overview automatically configures log collection for Vast.ai Daemon Logs and RunPod Agent Logs.
 
 ### Q: What GPUs are supported?
 

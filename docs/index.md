@@ -59,7 +59,8 @@ The Fleet Wizard guides you through all configuration options and deploys everyt
 | **IPMI Monitor** | BMC/IPMI server health monitoring (optional) | 5000 |
 | **node_exporter** | CPU, RAM, disk metrics (on workers) | 9100 |
 | **dc-exporter** | GPU VRAM temps, hotspot, power (on workers) | 9835 |
-| **vastai-exporter** | Vast.ai earnings (optional) | 8622 |
+| **vastai-exporter** | Vast.ai earnings & rentals (optional) | 8622 |
+| **runpod-exporter** | RunPod earnings & GPU utilization (optional) | 8623 |
 
 ---
 
@@ -117,7 +118,7 @@ dc-overview add-machine IP          # Add a worker to monitor
 ## Configuration Example
 
 ```yaml
-site_name: My Datacenter
+site_name: My Datacenter  # Appears in landing page and IPMI Monitor
 
 fleet_admin_user: admin
 fleet_admin_pass: YOUR_ADMIN_PASSWORD
@@ -139,6 +140,13 @@ components:
   dc_overview: true
   ipmi_monitor: true
   vast_exporter: false
+  runpod_exporter: false
+
+# RunPod API Keys (supports multiple accounts)
+runpod:
+  api_keys:
+    - key: YOUR_RUNPOD_API_KEY
+      label: main-account
 
 servers:
   - name: gpu-01
@@ -153,15 +161,16 @@ grafana:
 
 ## Grafana Dashboards
 
-Pre-installed dashboards:
+Pre-installed dashboards (auto-scaled to fit your fleet):
 
 | Dashboard | Description |
 |-----------|-------------|
 | **DC Overview** | Fleet overview with all GPU metrics |
-| **DC Exporter Details** | VRAM temp, hotspot, power, throttling |
+| **DC Exporter Details** | VRAM temp, hotspot, power, PCIe errors |
 | **Node Exporter Full** | CPU, RAM, disk, network |
 | **NVIDIA DCGM Exporter** | GPU performance metrics |
-| **Vast Dashboard** | Vast.ai provider earnings |
+| **Vast Dashboard** | Vast.ai provider earnings & machine status |
+| **RunPod Dashboard** | RunPod earnings, GPU utilization & reliability |
 | **IPMI Monitor** | BMC/IPMI sensor data |
 
 ---

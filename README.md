@@ -19,7 +19,21 @@
 | **IPMI Monitor** | BMC/IPMI server health monitoring (optional) | 5000 |
 | **node_exporter** | CPU, RAM, disk metrics (on workers) | 9100 |
 | **dc-exporter** | GPU VRAM temps, hotspot, power (on workers) | 9835 |
-| **vastai-exporter** | Vast.ai earnings (optional) | 8622 |
+| **vastai-exporter** | Vast.ai earnings & rentals (optional) | 8622 |
+| **runpod-exporter** | RunPod earnings & GPU utilization (optional) | 8623 |
+
+---
+
+## What's New in v1.1.0
+
+| Feature | Description |
+|---------|-------------|
+| **RunPod Integration** | Track RunPod earnings, GPU utilization, and reliability with multi-account support |
+| **Site Name Branding** | Customize your landing page and IPMI Monitor with your datacenter name |
+| **Auto-Scaling Dashboards** | Grafana table panels automatically resize based on your server count |
+| **Vast.ai/RunPod Logs** | IPMI Monitor auto-collects daemon logs when exporters are enabled |
+| **Multi-API Key Support** | RunPod exporter supports multiple API keys with labels |
+| **Improved Dashboard Layout** | Machine column displays on the left for better readability |
 
 ---
 
@@ -92,10 +106,11 @@ sudo dc-overview quickstart
 ```
 
 The Fleet Wizard guides you through:
-1. **Components** - DC Overview, IPMI Monitor, Vast.ai exporter
-2. **Credentials** - Fleet admin, Grafana, SSH, BMC/IPMI
-3. **Servers** - Import from IPMI Monitor or enter manually
-4. **SSL** - Let's Encrypt or self-signed
+1. **Site Name** - Customize your datacenter branding (e.g., "CryptoLabs", "AmericanColo")
+2. **Components** - DC Overview, IPMI Monitor, Vast.ai exporter, RunPod exporter
+3. **Credentials** - Fleet admin, Grafana, SSH, BMC/IPMI
+4. **Servers** - Import from IPMI Monitor or enter manually
+5. **SSL** - Let's Encrypt or self-signed
 
 Then deploys everything automatically without further prompts.
 
@@ -136,11 +151,21 @@ ssl:
 components:
   dc_overview: true
   ipmi_monitor: true
-  vast_exporter: false  # Set to true if using Vast.ai
+  vast_exporter: false    # Set to true if using Vast.ai
+  runpod_exporter: false  # Set to true if using RunPod
 
 # Vast.ai API Key (only needed if vast_exporter is true)
 vast:
   api_key: YOUR_VAST_API_KEY
+
+# RunPod API Keys (only needed if runpod_exporter is true)
+# Supports multiple accounts with labels
+runpod:
+  api_keys:
+    - key: YOUR_RUNPOD_API_KEY
+      label: main-account
+    - key: YOUR_SECOND_RUNPOD_API_KEY
+      label: secondary-account
 
 # Servers to monitor
 servers:
@@ -271,9 +296,10 @@ The `quickstart` command executes these steps:
 4. **Exporters** - Install node_exporter and dc-exporter on workers via SSH
 5. **Prometheus Config** - Configure scrape targets
 6. **Dashboards** - Import Grafana dashboards
-7. **IPMI Monitor** - Deploy if enabled
+7. **IPMI Monitor** - Deploy if enabled (with automatic Vast.ai/RunPod log collection)
 8. **Vast.ai Exporter** - Deploy if enabled
-9. **Reverse Proxy** - Configure cryptolabs-proxy with SSL
+9. **RunPod Exporter** - Deploy if enabled (supports multiple API keys)
+10. **Reverse Proxy** - Configure cryptolabs-proxy with SSL and site branding
 
 ---
 
@@ -304,6 +330,7 @@ After setup, access your monitoring at:
 | dc-exporter | 9835 | GPU metrics |
 | dcgm-exporter | 9400 | NVIDIA DCGM |
 | vastai-exporter | 8622 | Vast.ai earnings |
+| runpod-exporter | 8623 | RunPod earnings |
 
 ---
 
@@ -330,15 +357,19 @@ Shared components:
 
 ## Grafana Dashboards
 
-Pre-installed dashboards:
+Pre-installed dashboards (auto-scaled to fit your fleet size):
 
 | Dashboard | Description |
 |-----------|-------------|
 | **DC Overview** | Fleet overview with all GPU metrics |
+| **DC Exporter Details** | Detailed GPU metrics (VRAM temp, hotspot, power, PCIe errors) |
 | **Node Exporter Full** | CPU, RAM, disk, network |
 | **NVIDIA DCGM Exporter** | GPU performance metrics |
-| **Vast Dashboard** | Vast.ai provider earnings |
+| **Vast Dashboard** | Vast.ai provider earnings & machine status |
+| **RunPod Dashboard** | RunPod earnings, GPU utilization & reliability |
 | **IPMI Monitor** | BMC/IPMI sensor data |
+
+> **Note:** Dashboard table panels automatically scale based on your server count to ensure all machines are visible without scrolling.
 
 ---
 
