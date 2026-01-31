@@ -1302,6 +1302,10 @@ echo "Exporters installed successfully"
                 "titles": ["Machines Overview", "Machine Details"],
                 "large_panels": [],
             },
+            "DC Exporter Details": {
+                "titles": ["PCIe AER Errors", "GPU Inventory"],
+                "large_panels": [],
+            },
         }
         
         config = scalable_panels.get(dashboard_name, {})
