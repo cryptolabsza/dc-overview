@@ -1652,6 +1652,27 @@ echo "Exporters installed successfully"
                 "-e", f"AI_LICENSE_KEY={self.config.ipmi_monitor.ai_license_key}",
             ])
         
+        # Enable SSH log collection if SSH credentials are configured
+        if self.config.ipmi_monitor.enable_ssh_inventory or self.config.ipmi_monitor.enable_ssh_logs:
+            env_vars.extend([
+                "-e", "ENABLE_SSH_LOGS=true",
+            ])
+            console.print("[dim]  SSH log collection enabled[/dim]")
+            
+            # Enable Vast.ai daemon log collection if Vast is enabled
+            if self.config.components.vast_exporter:
+                env_vars.extend([
+                    "-e", "COLLECT_VASTAI_LOGS=true",
+                ])
+                console.print("[dim]  Vast.ai daemon logs will be collected[/dim]")
+            
+            # Enable RunPod agent log collection if RunPod is enabled
+            if self.config.components.runpod_exporter:
+                env_vars.extend([
+                    "-e", "COLLECT_RUNPOD_LOGS=true",
+                ])
+                console.print("[dim]  RunPod agent logs will be collected[/dim]")
+        
         # Security: Trust proxy's static IP and localhost (for internal curl commands)
         env_vars.extend([
             "-e", f"TRUSTED_PROXY_IPS=127.0.0.1,{PROXY_STATIC_IP}",
@@ -2031,6 +2052,7 @@ except Exception as e:
                 use_letsencrypt=(self.config.ssl.mode == SSLMode.LETSENCRYPT),
                 fleet_admin_user=self.config.fleet_admin_user,
                 fleet_admin_pass=self.config.fleet_admin_pass,
+                site_name=self.config.site_name,
             )
             
             def log_callback(msg: str):
@@ -2085,6 +2107,7 @@ except Exception as e:
             "-e", f"FLEET_ADMIN_USER={self.config.fleet_admin_user}",
             "-e", f"FLEET_ADMIN_PASS={self.config.fleet_admin_pass}",
             "-e", f"AUTH_SECRET_KEY={auth_secret}",
+            "-e", f"SITE_NAME={self.config.site_name}",
             "-v", "/var/run/docker.sock:/var/run/docker.sock:ro",
             "-v", "fleet-auth-data:/data/auth",
             "-v", f"{ssl_dir}:/etc/nginx/ssl:ro",
