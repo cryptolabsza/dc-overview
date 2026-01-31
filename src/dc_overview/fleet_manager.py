@@ -229,6 +229,10 @@ class FleetManager:
             if self.config.components.vast_exporter:
                 self._deploy_vast_exporter()
             
+            # Step 8b: RunPod exporter (if enabled)
+            if self.config.components.runpod_exporter:
+                self._deploy_runpod_exporter()
+            
             # Step 9: Proxy Integration (skip if using existing cryptolabs-proxy)
             if not getattr(self.config.ssl, 'use_existing_proxy', False):
                 self._setup_reverse_proxy()
@@ -956,6 +960,17 @@ echo "Exporters installed successfully"
                 "static_configs": [{
                     "targets": ["host.docker.internal:8622"],
                     "labels": {"instance": "vastai"}
+                }]
+            })
+        
+        # Add RunPod exporter if enabled
+        if self.config.components.runpod_exporter and self.config.runpod.api_keys:
+            scrape_configs.append({
+                "job_name": "runpod",
+                "scrape_interval": "60s",
+                "static_configs": [{
+                    "targets": ["host.docker.internal:8623"],
+                    "labels": {"instance": "runpod"}
                 }]
             })
         
@@ -1813,6 +1828,36 @@ except Exception as e:
             console.print("[green]✓[/green] Vast.ai exporter running on port 8622")
         else:
             console.print(f"[yellow]⚠[/yellow] Vast.ai exporter failed: {result.stderr[:100]}")
+    
+    def _deploy_runpod_exporter(self):
+        """Deploy RunPod exporter with multi-account support."""
+        if not self.config.runpod.enabled or not self.config.runpod.api_keys:
+            return
+        
+        console.print("\n[bold]Step 8b: Starting RunPod Exporter[/bold]\n")
+        
+        # Stop existing container
+        subprocess.run(["docker", "rm", "-f", "runpod-exporter"], capture_output=True)
+        
+        # Build command with all API keys
+        cmd = [
+            "docker", "run", "-d",
+            "--name", "runpod-exporter",
+            "--restart", "unless-stopped",
+            "-p", "8623:8623",
+            "ghcr.io/cryptolabsza/runpod-exporter:latest"
+        ]
+        
+        # Add each API key
+        for api_key in self.config.runpod.api_keys:
+            cmd.extend(["-api-key", f"{api_key.name}:{api_key.key}"])
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            console.print(f"[green]✓[/green] RunPod exporter running on port 8623 ({len(self.config.runpod.api_keys)} account(s))")
+        else:
+            console.print(f"[yellow]⚠[/yellow] RunPod exporter failed: {result.stderr[:100]}")
     
     # ============ Step 9: Reverse Proxy ============
     

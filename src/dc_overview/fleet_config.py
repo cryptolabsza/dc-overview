@@ -81,6 +81,7 @@ class ComponentConfig:
     dc_overview: bool = True  # Prometheus + Grafana + dashboards
     ipmi_monitor: bool = False  # IPMI/BMC monitoring
     vast_exporter: bool = False  # Vast.ai earnings/reliability
+    runpod_exporter: bool = False  # RunPod earnings/reliability
 
 
 @dataclass
@@ -88,6 +89,32 @@ class VastConfig:
     """Vast.ai configuration."""
     enabled: bool = False
     api_key: Optional[str] = None
+
+
+@dataclass
+class RunPodApiKey:
+    """A single RunPod API key with account name."""
+    name: str  # Account name (e.g., "RunpodCCC", "Brickbox")
+    key: str   # API key (rpa_XXXX)
+
+
+@dataclass
+class RunPodConfig:
+    """RunPod configuration - supports multiple accounts."""
+    enabled: bool = False
+    api_keys: List[RunPodApiKey] = field(default_factory=list)
+    port: int = 8623  # Exporter port
+    
+    def add_key(self, name: str, key: str) -> None:
+        """Add an API key."""
+        self.api_keys.append(RunPodApiKey(name=name, key=key))
+    
+    def get_docker_args(self) -> List[str]:
+        """Get Docker command arguments for multiple API keys."""
+        args = []
+        for api_key in self.api_keys:
+            args.extend(["-api-key", f"{api_key.name}:{api_key.key}"])
+        return args
 
 
 @dataclass
@@ -158,6 +185,7 @@ class FleetConfig:
     prometheus: PrometheusConfig = field(default_factory=PrometheusConfig)
     ipmi_monitor: IPMIMonitorConfig = field(default_factory=IPMIMonitorConfig)
     vast: VastConfig = field(default_factory=VastConfig)
+    runpod: RunPodConfig = field(default_factory=RunPodConfig)
     
     # Security
     security: SecurityConfig = field(default_factory=SecurityConfig)
@@ -293,6 +321,9 @@ class FleetConfig:
             data["grafana"]["admin_password"] = self.grafana.admin_password
             data["ipmi_monitor"]["admin_password"] = self.ipmi_monitor.admin_password
             data["vast"]["api_key"] = self.vast.api_key
+            data["runpod"]["api_keys"] = [
+                {"name": k.name, "key": k.key} for k in self.runpod.api_keys
+            ]
         
         return data
     
@@ -307,6 +338,7 @@ class FleetConfig:
             "ipmi_monitor_password": self.ipmi_monitor.admin_password,
             "vast_api_key": self.vast.api_key,
             "ipmi_ai_license": self.ipmi_monitor.ai_license_key,
+            "runpod_api_keys": [{"name": k.name, "key": k.key} for k in self.runpod.api_keys],
         }
         
         # Add per-server BMC passwords
@@ -340,6 +372,7 @@ class FleetConfig:
             config.components.dc_overview = comp.get("dc_overview", True)
             config.components.ipmi_monitor = comp.get("ipmi_monitor", False)
             config.components.vast_exporter = comp.get("vast_exporter", False)
+            config.components.runpod_exporter = comp.get("runpod_exporter", False)
             
             # SSL
             ssl = data.get("ssl", {})
@@ -378,6 +411,17 @@ class FleetConfig:
             vast = data.get("vast", {})
             config.vast.enabled = vast.get("enabled", False)
             
+            # RunPod (supports multiple API keys)
+            runpod = data.get("runpod", {})
+            config.runpod.enabled = runpod.get("enabled", False)
+            config.runpod.port = runpod.get("port", 8623)
+            for api_key_data in runpod.get("api_keys", []):
+                if isinstance(api_key_data, dict):
+                    config.runpod.add_key(
+                        name=api_key_data.get("name", "default"),
+                        key=api_key_data.get("key", "")
+                    )
+            
             # Servers
             for s in data.get("servers", []):
                 config.servers.append(Server(
@@ -403,6 +447,14 @@ class FleetConfig:
             config.ipmi_monitor.admin_password = secrets.get("ipmi_monitor_password")
             config.vast.api_key = secrets.get("vast_api_key")
             config.ipmi_monitor.ai_license_key = secrets.get("ipmi_ai_license")
+            
+            # Load RunPod API keys from secrets
+            for api_key_data in secrets.get("runpod_api_keys", []):
+                if isinstance(api_key_data, dict):
+                    config.runpod.add_key(
+                        name=api_key_data.get("name", "default"),
+                        key=api_key_data.get("key", "")
+                    )
             
             # Load per-server BMC passwords
             server_bmc_passwords = secrets.get("server_bmc_passwords", {})

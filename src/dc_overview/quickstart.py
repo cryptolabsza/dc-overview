@@ -1978,6 +1978,104 @@ def setup_vastai_exporter():
         console.print(f"[red]Error:[/red] {result.stderr.decode()[:100]}")
 
 
+def setup_runpod_exporter():
+    """Set up RunPod exporter with multi-account support."""
+    console.print("\n[dim]Get your API key from: https://www.runpod.io/console/user/settings[/dim]")
+    console.print("[dim]Supports multiple accounts - add one at a time[/dim]\n")
+    
+    api_keys = []
+    
+    while True:
+        # Ask for account name
+        account_name = questionary.text(
+            "Account name (e.g., 'RunpodCCC', 'Brickbox'):" if not api_keys else "Add another account name (or Enter to finish):",
+            style=custom_style
+        ).ask()
+        
+        if not account_name:
+            if not api_keys:
+                console.print("[dim]Skipping RunPod setup[/dim]")
+                return
+            break
+        
+        # Ask for API key
+        api_key = questionary.password(
+            f"RunPod API Key for {account_name}:",
+            style=custom_style
+        ).ask()
+        
+        if api_key:
+            api_keys.append((account_name, api_key))
+            console.print(f"[green]✓[/green] Added account: {account_name}")
+        
+        # Ask if more accounts
+        if not questionary.confirm(
+            "Add another RunPod account?",
+            default=False,
+            style=custom_style
+        ).ask():
+            break
+    
+    if not api_keys:
+        console.print("[dim]Skipping RunPod setup[/dim]")
+        return
+    
+    # Check if Docker available
+    if subprocess.run(["which", "docker"], capture_output=True).returncode != 0:
+        console.print("[yellow]Docker required for RunPod exporter[/yellow]")
+        return
+    
+    with Progress(SpinnerColumn(), TextColumn("Starting RunPod exporter..."), console=console) as progress:
+        progress.add_task("", total=None)
+        
+        # Stop existing
+        subprocess.run(["docker", "rm", "-f", "runpod-exporter"], capture_output=True)
+        
+        # Build command with all API keys
+        cmd = [
+            "docker", "run", "-d",
+            "--name", "runpod-exporter",
+            "--restart", "unless-stopped",
+            "-p", "8623:8623",
+            "ghcr.io/cryptolabsza/runpod-exporter:latest"
+        ]
+        
+        for account_name, api_key in api_keys:
+            cmd.extend(["-api-key", f"{account_name}:{api_key}"])
+        
+        result = subprocess.run(cmd, capture_output=True)
+    
+    if result.returncode == 0:
+        console.print(f"[green]✓[/green] RunPod exporter running on port 8623 ({len(api_keys)} account(s))")
+        
+        # Add to Prometheus
+        config_dir = Path("/etc/dc-overview")
+        prometheus_file = config_dir / "prometheus.yml"
+        
+        if prometheus_file.exists():
+            with open(prometheus_file) as f:
+                config = yaml.safe_load(f)
+            
+            # Check if runpod job already exists
+            existing_jobs = [j.get('job_name') for j in config.get('scrape_configs', [])]
+            if 'runpod' not in existing_jobs:
+                config["scrape_configs"].append({
+                    "job_name": "runpod",
+                    "scrape_interval": "60s",
+                    "static_configs": [{
+                        "targets": ["localhost:8623"],
+                        "labels": {"instance": "runpod"}
+                    }]
+                })
+                
+                with open(prometheus_file, "w") as f:
+                    yaml.dump(config, f, default_flow_style=False)
+                
+                subprocess.run(["docker", "exec", "prometheus", "kill", "-HUP", "1"], capture_output=True)
+    else:
+        console.print(f"[red]Error:[/red] {result.stderr.decode()[:100]}")
+
+
 def setup_reverse_proxy_wizard(local_ip: str):
     """Interactive setup for SSL reverse proxy."""
     from .reverse_proxy import setup_reverse_proxy

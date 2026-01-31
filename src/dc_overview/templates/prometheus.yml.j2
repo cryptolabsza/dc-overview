@@ -39,6 +39,14 @@ scrape_configs:
       - targets: ['vastai-exporter:8622']
 {% endif %}
 
+{% if runpod_enabled %}
+  # RunPod exporter (earnings and reliability)
+  - job_name: 'runpod'
+    scrape_interval: 60s
+    static_configs:
+      - targets: ['runpod-exporter:8623']
+{% endif %}
+
   # ==========================================================================
   # GPU Worker Exporters - File-based service discovery
   # Targets are auto-updated by dc-overview when servers are added/removed
