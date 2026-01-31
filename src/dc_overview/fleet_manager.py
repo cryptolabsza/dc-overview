@@ -1630,8 +1630,13 @@ echo "Exporters installed successfully"
         admin_pass = self.config.ipmi_monitor.admin_password or self.config.fleet_admin_pass or "changeme"
         
         # Build environment variables
+        # Use site name for IPMI Monitor branding (e.g., "AmericanColo" -> "AmericanColo IPMI")
+        site_name = self.config.site_name or "IPMI Monitor"
+        app_name = f"{site_name} IPMI" if site_name != "IPMI Monitor" and site_name != "DC Overview" else "IPMI Monitor"
+        
         env_vars = [
-            "-e", "APP_NAME=IPMI Monitor",
+            "-e", f"APP_NAME={app_name}",
+            "-e", f"SITE_NAME={site_name}",
             "-e", f"ADMIN_USER={self.config.fleet_admin_user or 'admin'}",
             "-e", f"ADMIN_PASS={admin_pass}",
             "-e", f"SECRET_KEY={os.urandom(32).hex()}",
