@@ -47,7 +47,14 @@ CONTAINER_PATTERNS="grafana prometheus ipmi-monitor dc-overview cryptolabs-proxy
 # - dc-exporter: old dc-exporter (dc-overview will install dc-exporter-rs)
 # - gddr6-metrics-exporter: legacy (may already be cleared)
 # - dcgm, nvidia-dcgm: NVIDIA DCGM daemon (replaced by dc-exporter-rs for GPU metrics)
-EXPORTER_SERVICES="node_exporter dc-exporter dcgm-exporter gddr6-metrics-exporter dcgm nvidia-dcgm"
+# - vastai/runpod exporters: legacy host-based exporters
+EXPORTER_SERVICES="node_exporter dc-exporter dcgm-exporter gddr6-metrics-exporter dcgm nvidia-dcgm vastai-exporter runpod-exporter vastai_exporter runpod_exporter"
+
+# Legacy exporter files to remove
+LEGACY_EXPORTER_FILES="/opt/runpod_exporter.py /opt/vastai_exporter.py /opt/runpod-exporter /opt/vastai-exporter"
+
+# Ports to check for legacy host-based exporters
+EXPORTER_PORTS="8622 8623"
 
 # Function to run SSH command on master
 ssh_master() {
@@ -102,6 +109,18 @@ for svc in ${EXPORTER_SERVICES}; do
     ssh_master "rm -f /etc/systemd/system/${svc}.service 2>/dev/null || true"
 done
 ssh_master "systemctl daemon-reload 2>/dev/null || true"
+
+# Kill any host-based exporters running on ports 8622/8623 (legacy installations)
+echo "  Killing legacy host-based exporters..."
+for port in ${EXPORTER_PORTS}; do
+    ssh_master "lsof -t -i :${port} 2>/dev/null | xargs -r kill -9 && echo \"    killed process on port ${port}\" || true"
+done
+
+# Remove legacy exporter files
+echo "  Removing legacy exporter files..."
+for file in ${LEGACY_EXPORTER_FILES}; do
+    ssh_master "rm -f ${file} 2>/dev/null && echo \"    removed ${file}\" || true"
+done
 
 # Remove dc-overview related volumes explicitly
 echo "  Removing monitoring volumes..."

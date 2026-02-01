@@ -38,8 +38,14 @@ VOLUME_PATTERNS="dc-overview prometheus grafana ipmi vastai runpod cryptolabs-pr
 # DC Overview networks to remove
 DC_NETWORKS="cryptolabs dc-overview_monitoring dc-overview_default"
 
-# Exporter services to remove
-EXPORTER_SERVICES="dc-exporter node_exporter"
+# Exporter services to remove (systemd services)
+EXPORTER_SERVICES="dc-exporter node_exporter vastai-exporter runpod-exporter vastai_exporter runpod_exporter"
+
+# Legacy exporter files to remove
+LEGACY_EXPORTER_FILES="/opt/runpod_exporter.py /opt/vastai_exporter.py /opt/runpod-exporter /opt/vastai-exporter"
+
+# Ports to check for legacy host-based exporters
+EXPORTER_PORTS="8622 8623"
 
 # Function to run SSH command
 ssh_cmd() {
@@ -107,6 +113,18 @@ for svc in ${EXPORTER_SERVICES}; do
     ssh_cmd ${MASTER_PORT} "rm -f /etc/systemd/system/${svc}.service 2>/dev/null || true"
 done
 ssh_cmd ${MASTER_PORT} "systemctl daemon-reload"
+
+# Kill any host-based exporters running on ports 8622/8623 (legacy installations)
+echo "  Killing legacy host-based exporters..."
+for port in ${EXPORTER_PORTS}; do
+    ssh_cmd ${MASTER_PORT} "lsof -t -i :${port} 2>/dev/null | xargs -r kill -9 && echo \"    killed process on port ${port}\" || true"
+done
+
+# Remove legacy exporter files
+echo "  Removing legacy exporter files..."
+for file in ${LEGACY_EXPORTER_FILES}; do
+    ssh_cmd ${MASTER_PORT} "rm -f ${file} 2>/dev/null && echo \"    removed ${file}\" || true"
+done
 
 # Remove dc-overview related images ONLY (ensures fresh pull on next deploy)
 # PRESERVES: minecraft, watchtower images

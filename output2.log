@@ -3,63 +3,18 @@
 [1;33mStep 1: Cleaning master node (port 100)...[0m
   Stopping containers...
 cryptolabs-proxy
-dc-overview
-ipmi-monitor
 grafana
 prometheus
 vastai-exporter
   Stopping containers by pattern...
 grafana
 prometheus
-ipmi-monitor
-dc-overview
 cryptolabs-proxy
 vastai-exporter
   Removing containers...
 cryptolabs-proxy
-dc-overview
-ipmi-monitor
 grafana
 prometheus
 vastai-exporter
   Removing containers by pattern...
-  Removing volumes...
-dc-overview-data
-ipmi-monitor-data
-dc-overview_grafana-data
-dc-overview_prometheus-data
-fleet-auth-data
-  Removing volumes by pattern...
-  Pruning unused volumes...
-Deleted Volumes:
-bf2f597da469f31e24538ecc072f3f56b35d805f23df8237b29e8ca62c9ee70c
-223c5da191a8c047f9e79278e0c7d351cdba97ac55d9183054c4de68f2daee94
-075974e7bee2aa29e5797c1fcf4ee84452cfaf05f49303c904f47ed3b5a4bcca
-
-Total reclaimed space: 0B
-  Removing networks...
-cryptolabs
-  Removing networks by pattern...
-  Pruning unused networks...
-  Removing exporter services...
-  Removing monitoring images...
-Untagged: ghcr.io/cryptolabsza/ipmi-monitor:dev
-Untagged: ghcr.io/cryptolabsza/ipmi-monitor@sha256:238a5d7ae96f909ccdefe3be15472d58a57e5b974841c80a3fd5ab41f859d7d7
-    removed ghcr.io/cryptolabsza/ipmi-monitor
-Untagged: ghcr.io/cryptolabsza/dc-overview:dev
-Untagged: ghcr.io/cryptolabsza/dc-overview@sha256:2f7d715a8dc596c7aeac2f38d173226143511ca1b6fec1e3fe4d3a288af970a8
-    removed ghcr.io/cryptolabsza/dc-overview
-Untagged: ghcr.io/cryptolabsza/cryptolabs-proxy:dev
-Untagged: ghcr.io/cryptolabsza/cryptolabs-proxy@sha256:ceb5fcdc2e9ba3f437bce19ee54aaf8c544dc50a03202c3708e946fc7b0ce9a4
-    removed ghcr.io/cryptolabsza/cryptolabs-proxy
-    removed ghcr.io/cryptolabsza/vastai-exporter
-    removed ghcr.io/cryptolabsza/runpod-exporter
-Untagged: prom/prometheus:latest
-Untagged: prom/prometheus@sha256:1f0f50f06acaceb0f5670d2c8a658a599affe7b0d8e78b898c1035653849a702
-    removed prom/prometheus
-Untagged: grafana/grafana:latest
-Untagged: grafana/grafana@sha256:ba93c9d192e58b23e064c7f501d453426ccf4a85065bf25b705ab1e98602bfb1
-    removed grafana/grafana
-  Pruning dangling images...
-Total reclaimed space: 0B
-  Cleaning certbot lock files...
+./scripts/cleanup-dev-fleet.sh: line 156: syntax error near unexpected token `('
