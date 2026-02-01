@@ -186,32 +186,32 @@ class MetricsCollector:
         lines.append("# HELP vastai_account_balance The current account balance of the user")
         lines.append("# TYPE vastai_account_balance gauge")
         for item in metrics.get('accounts', []):
-            lines.append(f'vastai_account_balance {item["balance"]}')
+            lines.append(f'vastai_account_balance{{account="{item["account"]}"}} {item["balance"]}')
         
         lines.append("")
         lines.append("# HELP vastai_current_balance Current balance")
         lines.append("# TYPE vastai_current_balance gauge")
         for item in metrics.get('accounts', []):
-            lines.append(f'vastai_current_balance {item["balance"]}')
+            lines.append(f'vastai_current_balance{{account="{item["account"]}"}} {item["balance"]}')
         
         lines.append("")
         lines.append("# HELP vastai_current_credit Current credit")
         lines.append("# TYPE vastai_current_credit gauge")
         for item in metrics.get('accounts', []):
-            lines.append(f'vastai_current_credit {item["credit"]}')
+            lines.append(f'vastai_current_credit{{account="{item["account"]}"}} {item["credit"]}')
         
         lines.append("")
         lines.append("# HELP vastai_current_service_fee Current service fee")
         lines.append("# TYPE vastai_current_service_fee gauge")
         for item in metrics.get('accounts', []):
-            lines.append(f'vastai_current_service_fee {item["service_fee"]}')
+            lines.append(f'vastai_current_service_fee{{account="{item["account"]}"}} {item["service_fee"]}')
         
         lines.append("")
         lines.append("# HELP vastai_current_total Current total")
         lines.append("# TYPE vastai_current_total gauge")
         for item in metrics.get('accounts', []):
             total = round(item["balance"] + item["credit"], 2)
-            lines.append(f'vastai_current_total {total}')
+            lines.append(f'vastai_current_total{{account="{item["account"]}"}} {total}')
         
         # Machine ID
         lines.append("")
@@ -280,11 +280,12 @@ class MetricsCollector:
         lines.append("# HELP vast_machine_gpu_name Type and total number of GPUs in the machine")
         lines.append("# TYPE vast_machine_gpu_name gauge")
         for m in metrics.get('machines', []):
+            account = m.get('_account', 'default')
             hostname = (m.get('hostname', '') or '').replace('"', '\\"')
             machine_id = str(m.get('id', m.get('machine_id', 'unknown')))
             gpu_name = (m.get('gpu_name', '') or '').replace('"', '\\"')
             num_gpus = self._safe_int(m.get('num_gpus', 0))
-            lines.append(f'vast_machine_gpu_name{{gpu_name="{gpu_name}",hostname="{hostname}",machine_id="{machine_id}"}} {num_gpus}')
+            lines.append(f'vast_machine_gpu_name{{account="{account}",gpu_name="{gpu_name}",hostname="{hostname}",machine_id="{machine_id}"}} {num_gpus}')
         
         # Total FLOPS
         lines.append("")
@@ -384,16 +385,18 @@ class MetricsCollector:
         lines.append("# HELP vastai_machine_ErrorDescription Machine Error Description")
         lines.append("# TYPE vastai_machine_ErrorDescription gauge")
         for m in metrics.get('machines', []):
+            account = m.get('_account', 'default')
             hostname = (m.get('hostname', '') or '').replace('"', '\\"')
             machine_id = str(m.get('id', m.get('machine_id', 'unknown')))
             error_desc = (m.get('error_description', '') or '').replace('"', '\\"')
-            lines.append(f'vastai_machine_ErrorDescription{{error_description="{error_desc}",hostname="{hostname}",machine_id="{machine_id}"}} 1')
+            lines.append(f'vastai_machine_ErrorDescription{{account="{account}",error_description="{error_desc}",hostname="{hostname}",machine_id="{machine_id}"}} 1')
         
         # GPU occupancy (parsed from string like "0/2" -> outputs for each GPU)
         lines.append("")
         lines.append("# HELP vastai_machine_gpu_occupancy GPU occupancy state per machine and GPU number.")
         lines.append("# TYPE vastai_machine_gpu_occupancy gauge")
         for m in metrics.get('machines', []):
+            account = m.get('_account', 'default')
             hostname = (m.get('hostname', '') or '').replace('"', '\\"')
             machine_id = str(m.get('id', m.get('machine_id', 'unknown')))
             gpu_occupancy = m.get('gpu_occupancy', '') or ''
@@ -409,7 +412,7 @@ class MetricsCollector:
                 
                 for i in range(num_gpus):
                     occupied = 1 if i < rented else 0
-                    lines.append(f'vastai_machine_gpu_occupancy{{gpu_num="{i}",hostname="{hostname}",machine_id="{machine_id}"}} {occupied}')
+                    lines.append(f'vastai_machine_gpu_occupancy{{account="{account}",gpu_num="{i}",hostname="{hostname}",machine_id="{machine_id}"}} {occupied}')
             except (ValueError, TypeError):
                 pass
         
@@ -433,29 +436,44 @@ class MetricsCollector:
             idle = max(0, num_gpus - running)
             lines.append(f'vastai_machine_gpu_idle{{{labels}}} {idle}')
         
-        # Summary totals
-        total_gpu_earn = sum(self._safe_float(m.get('earn_day', 0)) for m in metrics.get('machines', []))
-        total_gpus = sum(self._safe_int(m.get('num_gpus', 0)) for m in metrics.get('machines', []))
+        # Summary totals per account
+        account_earnings = {}
+        account_gpus = {}
+        account_machines = {}
+        for m in metrics.get('machines', []):
+            account = m.get('_account', 'default')
+            account_earnings[account] = account_earnings.get(account, 0) + self._safe_float(m.get('earn_day', 0))
+            account_gpus[account] = account_gpus.get(account, 0) + self._safe_int(m.get('num_gpus', 0))
+            account_machines[account] = account_machines.get(account, 0) + 1
         
         lines.append("")
         lines.append("# HELP vastai_summary_total_gpu Total GPU earnings in summary")
         lines.append("# TYPE vastai_summary_total_gpu gauge")
-        lines.append(f'vastai_summary_total_gpu {total_gpu_earn}')
+        for account, earn in account_earnings.items():
+            lines.append(f'vastai_summary_total_gpu{{account="{account}"}} {earn}')
         
         lines.append("")
         lines.append("# HELP vastai_account_gpus_total Total GPUs per account")
         lines.append("# TYPE vastai_account_gpus_total gauge")
-        lines.append(f'vastai_account_gpus_total {total_gpus}')
+        for account, gpus in account_gpus.items():
+            lines.append(f'vastai_account_gpus_total{{account="{account}"}} {gpus}')
+        
+        lines.append("")
+        lines.append("# HELP vastai_account_machines_total Total machines per account")
+        lines.append("# TYPE vastai_account_machines_total gauge")
+        for account, count in account_machines.items():
+            lines.append(f'vastai_account_machines_total{{account="{account}"}} {count}')
         
         lines.append("")
         return "\n".join(lines)
     
     def _machine_labels(self, machine: Dict) -> str:
         """Generate Prometheus labels for a machine"""
+        account = machine.get('_account', 'default')
         machine_id = str(machine.get('id', machine.get('machine_id', 'unknown')))
         hostname = (machine.get('hostname', '') or machine_id).replace('"', '\\"')
         
-        return f'hostname="{hostname}",machine_id="{machine_id}"'
+        return f'account="{account}",hostname="{hostname}",machine_id="{machine_id}"'
 
 
 class MetricsHandler(BaseHTTPRequestHandler):
