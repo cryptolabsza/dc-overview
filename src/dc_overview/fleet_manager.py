@@ -2040,7 +2040,7 @@ except Exception as e:
             "--name", "vastai-exporter",
             "--restart", "unless-stopped",
             "-p", "8622:8622",
-            "jjziets/vastai-exporter:latest",
+            "ghcr.io/cryptolabsza/vastai-exporter:latest",
             "-api-key", self.config.vast.api_key
         ], capture_output=True, text=True)
         

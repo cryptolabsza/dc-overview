@@ -1963,7 +1963,7 @@ def setup_vastai_exporter():
             "--name", "vastai-exporter",
             "--restart", "unless-stopped",
             "-p", "8622:8622",
-            "jjziets/vastai-exporter:latest",
+            "ghcr.io/cryptolabsza/vastai-exporter:latest",
             "-api-key", api_key
         ], capture_output=True)
     

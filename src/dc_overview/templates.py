@@ -58,7 +58,7 @@ services:
 {% if vast_api_key %}
 
   vastai-exporter:
-    image: jjziets/vastai-exporter:latest
+    image: ghcr.io/cryptolabsza/vastai-exporter:latest
     container_name: vastai-exporter
     restart: unless-stopped
     ports:
