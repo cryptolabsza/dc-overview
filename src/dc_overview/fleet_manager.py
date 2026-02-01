@@ -27,6 +27,15 @@ from .fleet_config import FleetConfig, Server, SSLMode, AuthMethod, get_local_ip
 from .prerequisites import PrerequisitesInstaller
 from .ssh_manager import SSHManager
 
+# CryptoLabs Alert System integration (v1.1.0+)
+# Provides hooks for push notifications on deployment failures
+try:
+    from . import alerts as _alerts_module
+    _ALERTS_AVAILABLE = True
+except ImportError:
+    _alerts_module = None
+    _ALERTS_AVAILABLE = False
+
 # Import cryptolabs-proxy setup API (handles SSL, proxy deployment)
 try:
     from cryptolabs_proxy import (
@@ -224,6 +233,14 @@ class FleetManager:
                     console.print(f"[red]IPMI Monitor deployment failed:[/red] {e}")
                     import traceback
                     traceback.print_exc()
+                    # CryptoLabs Alert System hook (v1.1.0+)
+                    if _ALERTS_AVAILABLE:
+                        _alerts_module.get_alert_manager().send_deployment_failed_alert(
+                            server_id=self.config.master_ip or "master",
+                            server_name=self.config.domain or "master",
+                            component="ipmi-monitor",
+                            error=str(e)
+                        )
             
             # Step 8: Vast.ai exporter (if enabled)
             if self.config.components.vast_exporter and self.config.vast.api_key:
@@ -250,6 +267,14 @@ class FleetManager:
             console.print(f"\n[red]Deployment failed:[/red] {rich_escape(str(e))}")
             import traceback
             traceback.print_exc()
+            # CryptoLabs Alert System hook (v1.1.0+)
+            if _ALERTS_AVAILABLE:
+                _alerts_module.get_alert_manager().send_deployment_failed_alert(
+                    server_id=self.config.master_ip or "master",
+                    server_name=self.config.domain or "master",
+                    component="dc-overview",
+                    error=str(e)
+                )
             return False
     
     # ============ Step 1: Prerequisites ============
@@ -802,6 +827,14 @@ scrape_configs:
                     console.print(f"  [green]✓[/green] {server.name} ({server.server_ip})")
                 else:
                     console.print(f"  [yellow]⚠[/yellow] {server.name} - manual install needed")
+                    # CryptoLabs Alert System hook (v1.1.0+)
+                    if _ALERTS_AVAILABLE:
+                        _alerts_module.get_alert_manager().send_exporter_failed_alert(
+                            server_id=server.server_ip,
+                            server_name=server.name,
+                            exporter_name="node_exporter/dc-exporter",
+                            error="Installation failed - manual install needed"
+                        )
                 
                 progress.advance(task)
         
@@ -817,6 +850,13 @@ scrape_configs:
         
         # First, test connection
         if not self.ssh.test_connection(server.server_ip, creds.username, creds.port, key_path=ssh_key):
+            # CryptoLabs Alert System hook (v1.1.0+)
+            if _ALERTS_AVAILABLE:
+                _alerts_module.get_alert_manager().send_worker_unreachable_alert(
+                    server_id=server.server_ip,
+                    server_name=server.name,
+                    reason="SSH connection failed during deployment"
+                )
             return False
         
         # Install node_exporter and dc-exporter directly (no pip required)
@@ -1031,9 +1071,11 @@ echo "Exporters installed successfully"
         dashboards = self._get_dashboard_list()
         
         # Import dashboards via API (stored in database, fully editable)
+        # Use both Basic auth and X-WEBAUTH-USER for proxy auth mode
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Basic {auth_header}"
+            "Authorization": f"Basic {auth_header}",
+            "X-WEBAUTH-USER": "admin"
         }
         
         for dashboard in dashboards:
@@ -1114,7 +1156,8 @@ echo "Exporters installed successfully"
         
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Basic {auth_header}"
+            "Authorization": f"Basic {auth_header}",
+            "X-WEBAUTH-USER": "admin"
         }
         
         try:
@@ -1155,7 +1198,8 @@ echo "Exporters installed successfully"
         
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Basic {auth_header}"
+            "Authorization": f"Basic {auth_header}",
+            "X-WEBAUTH-USER": "admin"
         }
         
         # Wait for Grafana to be ready

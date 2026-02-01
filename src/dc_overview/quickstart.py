@@ -1226,7 +1226,8 @@ def _set_grafana_home_dashboard(grafana_pass: str, dashboard_uid: str):
     
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Basic {auth_header}"
+        "Authorization": f"Basic {auth_header}",
+        "X-WEBAUTH-USER": "admin"  # For proxy auth mode
     }
     
     # Wait a moment for Grafana API to be ready
@@ -1365,7 +1366,8 @@ def configure_grafana(password: str):
             data=datasource_data,
             headers={
                 "Content-Type": "application/json",
-                "Authorization": f"Basic {auth_header}"
+                "Authorization": f"Basic {auth_header}",
+                "X-WEBAUTH-USER": "admin"
             },
             method="POST"
         )
@@ -1474,7 +1476,8 @@ def configure_grafana(password: str):
                 data=import_data,
                 headers={
                     "Content-Type": "application/json",
-                    "Authorization": f"Basic {auth_header}"
+                    "Authorization": f"Basic {auth_header}",
+                    "X-WEBAUTH-USER": "admin"
                 },
                 method="POST"
             )
@@ -1546,7 +1549,7 @@ def detect_and_configure_optional_exporters(grafana_url: str, auth_header: str):
             req = urllib.request.Request(
                 f"{grafana_url}/api/dashboards/import",
                 data=import_data,
-                headers={"Content-Type": "application/json", "Authorization": f"Basic {auth_header}"},
+                headers={"Content-Type": "application/json", "Authorization": f"Basic {auth_header}", "X-WEBAUTH-USER": "admin"},
                 method="POST"
             )
             urllib.request.urlopen(req, timeout=30)
