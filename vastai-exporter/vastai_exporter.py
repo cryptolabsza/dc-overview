@@ -5,20 +5,18 @@ Vast.ai Prometheus Exporter
 Exposes Vast.ai host metrics for Prometheus scraping.
 Supports multiple API keys for hosts with multiple accounts.
 
+Based on analysis of jjziets/vastai-exporter.
+
 Metrics exposed:
-- vastai_account_balance: Current account balance
-- vastai_machine_reliability: Machine reliability score (0-1)
-- vastai_machine_listed: Whether machine is listed (1=yes, 0=no)
-- vastai_machine_verified: Whether machine is verified (1=yes, 0=no)
-- vastai_machine_num_gpus: Number of GPUs on machine
-- vastai_machine_gpu_rented: Number of GPUs currently rented
-- vastai_machine_disk_total_gb: Total disk space
-- vastai_machine_disk_allocated_gb: Allocated disk space
-- vastai_machine_inet_up_mbps: Upload speed
-- vastai_machine_inet_down_mbps: Download speed
-- vastai_machine_rentals_on_demand: Current on-demand rentals
-- vastai_machine_rentals_bid: Current bid rentals
-- vastai_machine_total_flops: Total TFLOPS of machine
+- Account: balance, credit, service_fee, total
+- Machine: gpu earnings, storage earnings, bandwidth earnings
+- Machine: listed, verified, reliability, timeout
+- Machine: num_gpus, gpu_name, gpu_occupancy
+- Machine: disk_space, alloc_disk_space, avail_disk_space
+- Machine: inet_up, inet_down, total_flops
+- Machine: current_rentals (running, on_demand, resident, bid)
+- Machine: earn_hour, earn_day
+- Summary: total_gpu, total_stor, total_bwu, total_bwd
 """
 
 import argparse
@@ -51,14 +49,15 @@ class VastAIClient:
     def __init__(self, api_key: str, account_name: str = "default"):
         self.api_key = api_key
         self.account_name = account_name
-        self._user_id = None
         
     def _request(self, endpoint: str) -> Optional[Dict[str, Any]]:
-        """Execute an API request"""
-        url = f"{VASTAI_API_URL}{endpoint}"
+        """Execute an API request - API key as query parameter"""
+        # Add api_key as query parameter (this is how Vast.ai API works)
+        separator = "&" if "?" in endpoint else "?"
+        url = f"{VASTAI_API_URL}{endpoint}{separator}api_key={self.api_key}"
+        
         headers = {
             "Accept": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
             "User-Agent": "VastAI-Exporter/1.0 (CryptoLabs DC-Overview)"
         }
         
@@ -80,35 +79,18 @@ class VastAIClient:
             logger.error(f"Error calling Vast.ai API for {self.account_name}: {e}")
             return None
     
-    def get_user_id(self) -> Optional[str]:
-        """Get current user ID from API key"""
-        if self._user_id:
-            return self._user_id
-        
-        # The /users/current endpoint returns current user info
-        data = self._request("/users/current/")
-        if data and 'id' in data:
-            self._user_id = str(data['id'])
-            return self._user_id
-        return None
+    def get_user_info(self) -> Optional[Dict[str, Any]]:
+        """Get user account info including balance"""
+        return self._request("/users/current/")
     
     def get_machines(self) -> Optional[List[Dict[str, Any]]]:
         """Get all machines for the authenticated user"""
-        user_id = self.get_user_id()
-        if not user_id:
-            logger.error(f"Could not get user ID for {self.account_name}")
-            return None
-        
-        data = self._request(f"/machines/?user_id={user_id}")
+        data = self._request("/machines/")
         if data and 'machines' in data:
             return data['machines']
         elif isinstance(data, list):
             return data
         return None
-    
-    def get_user_info(self) -> Optional[Dict[str, Any]]:
-        """Get user account info including balance"""
-        return self._request("/users/current/")
 
 
 class MetricsCollector:
@@ -152,8 +134,9 @@ class MetricsCollector:
                     if user_info:
                         all_metrics['accounts'].append({
                             'account': client.account_name,
-                            'balance': user_info.get('balance', 0) or 0,
-                            'credit': user_info.get('credit', 0) or 0,
+                            'balance': float(user_info.get('balance', 0) or 0),
+                            'credit': float(user_info.get('credit', 0) or 0),
+                            'service_fee': float(user_info.get('service_fee', 0) or 0),
                         })
                     
                     # Get machines
@@ -171,157 +154,308 @@ class MetricsCollector:
             
             return self._format_metrics(all_metrics)
     
+    def _safe_float(self, value, default=0) -> float:
+        """Safely convert value to float"""
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return default
+    
+    def _safe_int(self, value, default=0) -> int:
+        """Safely convert value to int"""
+        if value is None:
+            return default
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return default
+    
     def _format_metrics(self, metrics: Dict) -> str:
         """Format metrics in Prometheus exposition format"""
         lines = []
         
-        # Add header
-        lines.append("# Vast.ai Exporter Metrics (CryptoLabs)")
+        # Prometheus handler metrics
+        lines.append("# HELP promhttp_metric_handler_requests_in_flight Current number of scrapes being served.")
+        lines.append("# TYPE promhttp_metric_handler_requests_in_flight gauge")
+        lines.append("promhttp_metric_handler_requests_in_flight 1")
         lines.append("")
         
         # Account balance
-        lines.append("# HELP vastai_account_balance Current account balance in USD")
+        lines.append("# HELP vastai_account_balance The current account balance of the user")
         lines.append("# TYPE vastai_account_balance gauge")
         for item in metrics.get('accounts', []):
-            lines.append(f'vastai_account_balance{{account="{item["account"]}"}} {item["balance"]}')
+            lines.append(f'vastai_account_balance {item["balance"]}')
         
         lines.append("")
-        lines.append("# HELP vastai_account_credit Current account credit in USD")
-        lines.append("# TYPE vastai_account_credit gauge")
+        lines.append("# HELP vastai_current_balance Current balance")
+        lines.append("# TYPE vastai_current_balance gauge")
         for item in metrics.get('accounts', []):
-            lines.append(f'vastai_account_credit{{account="{item["account"]}"}} {item["credit"]}')
+            lines.append(f'vastai_current_balance {item["balance"]}')
         
-        # Machine metrics
         lines.append("")
-        lines.append("# HELP vastai_machine_num_gpus Number of GPUs on machine")
-        lines.append("# TYPE vastai_machine_num_gpus gauge")
+        lines.append("# HELP vastai_current_credit Current credit")
+        lines.append("# TYPE vastai_current_credit gauge")
+        for item in metrics.get('accounts', []):
+            lines.append(f'vastai_current_credit {item["credit"]}')
+        
+        lines.append("")
+        lines.append("# HELP vastai_current_service_fee Current service fee")
+        lines.append("# TYPE vastai_current_service_fee gauge")
+        for item in metrics.get('accounts', []):
+            lines.append(f'vastai_current_service_fee {item["service_fee"]}')
+        
+        lines.append("")
+        lines.append("# HELP vastai_current_total Current total")
+        lines.append("# TYPE vastai_current_total gauge")
+        for item in metrics.get('accounts', []):
+            total = round(item["balance"] + item["credit"], 2)
+            lines.append(f'vastai_current_total {total}')
+        
+        # Machine ID
+        lines.append("")
+        lines.append("# HELP vast_machine_id Machine ID")
+        lines.append("# TYPE vast_machine_id gauge")
         for m in metrics.get('machines', []):
             labels = self._machine_labels(m)
-            num_gpus = m.get('num_gpus', 0) or 0
-            lines.append(f'vastai_machine_num_gpus{{{labels}}} {num_gpus}')
+            machine_id = self._safe_int(m.get('id', m.get('machine_id', 0)))
+            lines.append(f'vast_machine_id{{{labels}}} {machine_id}')
         
+        # Machine hostname
         lines.append("")
-        lines.append("# HELP vastai_machine_reliability Machine reliability score (0-1)")
-        lines.append("# TYPE vastai_machine_reliability gauge")
+        lines.append("# HELP vast_machine_hostname Machine Hostname")
+        lines.append("# TYPE vast_machine_hostname gauge")
         for m in metrics.get('machines', []):
             labels = self._machine_labels(m)
-            reliability = m.get('reliability2', m.get('reliability', 0)) or 0
-            lines.append(f'vastai_machine_reliability{{{labels}}} {reliability}')
+            lines.append(f'vast_machine_hostname{{{labels}}} 1')
         
+        # Machine Listed
         lines.append("")
-        lines.append("# HELP vastai_machine_listed Machine listing status (1=listed, 0=unlisted)")
-        lines.append("# TYPE vastai_machine_listed gauge")
+        lines.append("# HELP vast_machine_Listed Machine Listed")
+        lines.append("# TYPE vast_machine_Listed gauge")
         for m in metrics.get('machines', []):
             labels = self._machine_labels(m)
             listed = 1 if m.get('listed') else 0
-            lines.append(f'vastai_machine_listed{{{labels}}} {listed}')
+            lines.append(f'vast_machine_Listed{{{labels}}} {listed}')
         
+        # Machine Verification
         lines.append("")
-        lines.append("# HELP vastai_machine_verified Machine verification status (1=verified, 0=unverified)")
-        lines.append("# TYPE vastai_machine_verified gauge")
+        lines.append("# HELP vast_machine_Verification Machine Verification")
+        lines.append("# TYPE vast_machine_Verification gauge")
         for m in metrics.get('machines', []):
             labels = self._machine_labels(m)
             verified = 1 if m.get('verification') else 0
-            lines.append(f'vastai_machine_verified{{{labels}}} {verified}')
+            lines.append(f'vast_machine_Verification{{{labels}}} {verified}')
         
+        # Machine Reliability
         lines.append("")
-        lines.append("# HELP vastai_machine_disk_total_gb Total disk space in GB")
-        lines.append("# TYPE vastai_machine_disk_total_gb gauge")
+        lines.append("# HELP vast_machine_Reliability Machine Reliability")
+        lines.append("# TYPE vast_machine_Reliability gauge")
         for m in metrics.get('machines', []):
             labels = self._machine_labels(m)
-            disk = m.get('disk_space', 0) or 0
-            lines.append(f'vastai_machine_disk_total_gb{{{labels}}} {disk}')
+            reliability = self._safe_float(m.get('reliability2', m.get('reliability', 0)))
+            lines.append(f'vast_machine_Reliability{{{labels}}} {reliability}')
         
+        # Machine timeout
         lines.append("")
-        lines.append("# HELP vastai_machine_disk_allocated_gb Allocated disk space in GB")
-        lines.append("# TYPE vastai_machine_disk_allocated_gb gauge")
+        lines.append("# HELP vast_machine_timeout Machine timeout")
+        lines.append("# TYPE vast_machine_timeout gauge")
         for m in metrics.get('machines', []):
             labels = self._machine_labels(m)
-            alloc = m.get('allocated_disk_space', m.get('disk_allocated', 0)) or 0
-            lines.append(f'vastai_machine_disk_allocated_gb{{{labels}}} {alloc}')
+            timeout = self._safe_float(m.get('timeout', 0))
+            lines.append(f'vast_machine_timeout{{{labels}}} {timeout}')
         
+        # Number of GPUs
         lines.append("")
-        lines.append("# HELP vastai_machine_inet_up_mbps Upload speed in Mbps")
-        lines.append("# TYPE vastai_machine_inet_up_mbps gauge")
+        lines.append("# HELP vast_machine_num_gpus Number of GPUs in the machine")
+        lines.append("# TYPE vast_machine_num_gpus gauge")
         for m in metrics.get('machines', []):
             labels = self._machine_labels(m)
-            up = m.get('inet_up', 0) or 0
-            lines.append(f'vastai_machine_inet_up_mbps{{{labels}}} {up}')
+            num_gpus = self._safe_int(m.get('num_gpus', 0))
+            lines.append(f'vast_machine_num_gpus{{{labels}}} {num_gpus}')
         
+        # GPU name (as a gauge with gpu_name label)
         lines.append("")
-        lines.append("# HELP vastai_machine_inet_down_mbps Download speed in Mbps")
-        lines.append("# TYPE vastai_machine_inet_down_mbps gauge")
+        lines.append("# HELP vast_machine_gpu_name Type and total number of GPUs in the machine")
+        lines.append("# TYPE vast_machine_gpu_name gauge")
+        for m in metrics.get('machines', []):
+            hostname = (m.get('hostname', '') or '').replace('"', '\\"')
+            machine_id = str(m.get('id', m.get('machine_id', 'unknown')))
+            gpu_name = (m.get('gpu_name', '') or '').replace('"', '\\"')
+            num_gpus = self._safe_int(m.get('num_gpus', 0))
+            lines.append(f'vast_machine_gpu_name{{gpu_name="{gpu_name}",hostname="{hostname}",machine_id="{machine_id}"}} {num_gpus}')
+        
+        # Total FLOPS
+        lines.append("")
+        lines.append("# HELP vast_machine_total_flops Machine total FLOPS")
+        lines.append("# TYPE vast_machine_total_flops gauge")
         for m in metrics.get('machines', []):
             labels = self._machine_labels(m)
-            down = m.get('inet_down', 0) or 0
-            lines.append(f'vastai_machine_inet_down_mbps{{{labels}}} {down}')
+            flops = self._safe_float(m.get('total_flops', 0))
+            lines.append(f'vast_machine_total_flops{{{labels}}} {flops}')
         
+        # Inet Up/Down
         lines.append("")
-        lines.append("# HELP vastai_machine_total_flops Total TFLOPS of machine")
-        lines.append("# TYPE vastai_machine_total_flops gauge")
+        lines.append("# HELP vast_machine_InetDown Machine Inet Down")
+        lines.append("# TYPE vast_machine_InetDown gauge")
         for m in metrics.get('machines', []):
             labels = self._machine_labels(m)
-            flops = m.get('total_flops', 0) or 0
-            lines.append(f'vastai_machine_total_flops{{{labels}}} {flops}')
+            inet_down = self._safe_float(m.get('inet_down', 0))
+            lines.append(f'vast_machine_InetDown{{{labels}}} {inet_down}')
         
         lines.append("")
-        lines.append("# HELP vastai_machine_rentals_on_demand Current on-demand rentals")
-        lines.append("# TYPE vastai_machine_rentals_on_demand gauge")
+        lines.append("# HELP vastai_machine_InetUp Machine Inet Up")
+        lines.append("# TYPE vastai_machine_InetUp gauge")
         for m in metrics.get('machines', []):
             labels = self._machine_labels(m)
-            rentals = m.get('current_rentals_on_demand', 0) or 0
-            lines.append(f'vastai_machine_rentals_on_demand{{{labels}}} {rentals}')
+            inet_up = self._safe_float(m.get('inet_up', 0))
+            lines.append(f'vastai_machine_InetUp{{{labels}}} {inet_up}')
         
+        # Disk space
         lines.append("")
-        lines.append("# HELP vastai_machine_rentals_bid Current bid rentals")
-        lines.append("# TYPE vastai_machine_rentals_bid gauge")
+        lines.append("# HELP vastai_machine_alloc_disk_space Allocated disk space on machine")
+        lines.append("# TYPE vastai_machine_alloc_disk_space gauge")
         for m in metrics.get('machines', []):
             labels = self._machine_labels(m)
-            rentals = m.get('current_rentals_bid', m.get('current_rentals_running', 0)) or 0
-            lines.append(f'vastai_machine_rentals_bid{{{labels}}} {rentals}')
+            alloc = self._safe_int(m.get('alloc_disk_space', m.get('allocated_disk_space', 0)))
+            lines.append(f'vastai_machine_alloc_disk_space{{{labels}}} {alloc}')
         
         lines.append("")
-        lines.append("# HELP vastai_machine_timeout Machine timeout status (1=timed out)")
-        lines.append("# TYPE vastai_machine_timeout gauge")
+        lines.append("# HELP vastai_machine_avail_disk_space Available disk space on machine")
+        lines.append("# TYPE vastai_machine_avail_disk_space gauge")
         for m in metrics.get('machines', []):
             labels = self._machine_labels(m)
-            timeout = 1 if m.get('timeout') else 0
-            lines.append(f'vastai_machine_timeout{{{labels}}} {timeout}')
+            avail = self._safe_int(m.get('avail_disk_space', 0))
+            lines.append(f'vastai_machine_avail_disk_space{{{labels}}} {avail}')
         
-        # Account-level aggregates
         lines.append("")
-        lines.append("# HELP vastai_account_machines_total Total machines per account")
-        lines.append("# TYPE vastai_account_machines_total gauge")
-        account_machines = {}
-        account_gpus = {}
+        lines.append("# HELP vastai_machine_max_disk_space Maximum disk space on machine")
+        lines.append("# TYPE vastai_machine_max_disk_space gauge")
         for m in metrics.get('machines', []):
-            account = m.get('_account', 'default')
-            account_machines[account] = account_machines.get(account, 0) + 1
-            account_gpus[account] = account_gpus.get(account, 0) + (m.get('num_gpus', 0) or 0)
-        for account, count in account_machines.items():
-            lines.append(f'vastai_account_machines_total{{account="{account}"}} {count}')
+            labels = self._machine_labels(m)
+            max_disk = self._safe_int(m.get('max_disk_space', m.get('disk_space', 0)))
+            lines.append(f'vastai_machine_max_disk_space{{{labels}}} {max_disk}')
+        
+        # Rentals
+        lines.append("")
+        lines.append("# HELP vastai_machine_current_rentals_running Current running rentals on machine")
+        lines.append("# TYPE vastai_machine_current_rentals_running gauge")
+        for m in metrics.get('machines', []):
+            labels = self._machine_labels(m)
+            rentals = self._safe_int(m.get('current_rentals_running', 0))
+            lines.append(f'vastai_machine_current_rentals_running{{{labels}}} {rentals}')
+        
+        lines.append("")
+        lines.append("# HELP vastai_machine_current_rentals_running_on_demand Current on-demand rentals on machine")
+        lines.append("# TYPE vastai_machine_current_rentals_running_on_demand gauge")
+        for m in metrics.get('machines', []):
+            labels = self._machine_labels(m)
+            rentals = self._safe_int(m.get('current_rentals_running_on_demand', m.get('current_rentals_on_demand', 0)))
+            lines.append(f'vastai_machine_current_rentals_running_on_demand{{{labels}}} {rentals}')
+        
+        lines.append("")
+        lines.append("# HELP vastai_machine_current_rentals_resident Current resident rentals on machine")
+        lines.append("# TYPE vastai_machine_current_rentals_resident gauge")
+        for m in metrics.get('machines', []):
+            labels = self._machine_labels(m)
+            rentals = self._safe_int(m.get('current_rentals_resident', 0))
+            lines.append(f'vastai_machine_current_rentals_resident{{{labels}}} {rentals}')
+        
+        # Earnings
+        lines.append("")
+        lines.append("# HELP vastai_machine_earn_hour Machine earn hour")
+        lines.append("# TYPE vastai_machine_earn_hour gauge")
+        for m in metrics.get('machines', []):
+            labels = self._machine_labels(m)
+            earn = self._safe_float(m.get('earn_hour', 0))
+            lines.append(f'vastai_machine_earn_hour{{{labels}}} {earn}')
+        
+        lines.append("")
+        lines.append("# HELP vastai_machine_earn_day Machine earn day")  
+        lines.append("# TYPE vastai_machine_earn_day gauge")
+        for m in metrics.get('machines', []):
+            labels = self._machine_labels(m)
+            earn = self._safe_float(m.get('earn_day', 0))
+            lines.append(f'vastai_machine_earn_day{{{labels}}} {earn}')
+        
+        # Error description
+        lines.append("")
+        lines.append("# HELP vastai_machine_ErrorDescription Machine Error Description")
+        lines.append("# TYPE vastai_machine_ErrorDescription gauge")
+        for m in metrics.get('machines', []):
+            hostname = (m.get('hostname', '') or '').replace('"', '\\"')
+            machine_id = str(m.get('id', m.get('machine_id', 'unknown')))
+            error_desc = (m.get('error_description', '') or '').replace('"', '\\"')
+            lines.append(f'vastai_machine_ErrorDescription{{error_description="{error_desc}",hostname="{hostname}",machine_id="{machine_id}"}} 1')
+        
+        # GPU occupancy (parsed from string like "0/2" -> outputs for each GPU)
+        lines.append("")
+        lines.append("# HELP vastai_machine_gpu_occupancy GPU occupancy state per machine and GPU number.")
+        lines.append("# TYPE vastai_machine_gpu_occupancy gauge")
+        for m in metrics.get('machines', []):
+            hostname = (m.get('hostname', '') or '').replace('"', '\\"')
+            machine_id = str(m.get('id', m.get('machine_id', 'unknown')))
+            gpu_occupancy = m.get('gpu_occupancy', '') or ''
+            num_gpus = self._safe_int(m.get('num_gpus', 0))
+            
+            # Parse occupancy - could be "0/2" format or just a number
+            try:
+                if '/' in str(gpu_occupancy):
+                    rented, total = gpu_occupancy.split('/')
+                    rented = int(rented)
+                else:
+                    rented = int(gpu_occupancy) if gpu_occupancy else 0
+                
+                for i in range(num_gpus):
+                    occupied = 1 if i < rented else 0
+                    lines.append(f'vastai_machine_gpu_occupancy{{gpu_num="{i}",hostname="{hostname}",machine_id="{machine_id}"}} {occupied}')
+            except (ValueError, TypeError):
+                pass
+        
+        # GPU rented metrics
+        lines.append("")
+        lines.append("# HELP vastai_machine_gpu_rented_on_demand Number of GPUs rented on-demand")
+        lines.append("# TYPE vastai_machine_gpu_rented_on_demand gauge")
+        for m in metrics.get('machines', []):
+            labels = self._machine_labels(m)
+            # Estimate from rentals
+            rentals = self._safe_int(m.get('current_rentals_on_demand', 0))
+            lines.append(f'vastai_machine_gpu_rented_on_demand{{{labels}}} {rentals}')
+        
+        lines.append("")
+        lines.append("# HELP vastai_machine_gpu_idle Number of GPUs idle")
+        lines.append("# TYPE vastai_machine_gpu_idle gauge")
+        for m in metrics.get('machines', []):
+            labels = self._machine_labels(m)
+            num_gpus = self._safe_int(m.get('num_gpus', 0))
+            running = self._safe_int(m.get('current_rentals_running', 0))
+            idle = max(0, num_gpus - running)
+            lines.append(f'vastai_machine_gpu_idle{{{labels}}} {idle}')
+        
+        # Summary totals
+        total_gpu_earn = sum(self._safe_float(m.get('earn_day', 0)) for m in metrics.get('machines', []))
+        total_gpus = sum(self._safe_int(m.get('num_gpus', 0)) for m in metrics.get('machines', []))
+        
+        lines.append("")
+        lines.append("# HELP vastai_summary_total_gpu Total GPU earnings in summary")
+        lines.append("# TYPE vastai_summary_total_gpu gauge")
+        lines.append(f'vastai_summary_total_gpu {total_gpu_earn}')
         
         lines.append("")
         lines.append("# HELP vastai_account_gpus_total Total GPUs per account")
         lines.append("# TYPE vastai_account_gpus_total gauge")
-        for account, count in account_gpus.items():
-            lines.append(f'vastai_account_gpus_total{{account="{account}"}} {count}')
+        lines.append(f'vastai_account_gpus_total {total_gpus}')
         
         lines.append("")
         return "\n".join(lines)
     
     def _machine_labels(self, machine: Dict) -> str:
         """Generate Prometheus labels for a machine"""
-        account = machine.get('_account', 'default')
-        machine_id = str(machine.get('id', 'unknown'))
-        hostname = machine.get('hostname', '') or machine_id
-        gpu_name = machine.get('gpu_name', '') or ''
+        machine_id = str(machine.get('id', machine.get('machine_id', 'unknown')))
+        hostname = (machine.get('hostname', '') or machine_id).replace('"', '\\"')
         
-        # Escape quotes in labels
-        hostname = hostname.replace('"', '\\"')
-        gpu_name = gpu_name.replace('"', '\\"')
-        
-        return f'account="{account}",machine_id="{machine_id}",hostname="{hostname}",gpu_name="{gpu_name}"'
+        return f'hostname="{hostname}",machine_id="{machine_id}"'
 
 
 class MetricsHandler(BaseHTTPRequestHandler):
@@ -412,6 +546,12 @@ Examples:
         default=60,
         help='Metrics cache TTL in seconds (default: 60)'
     )
+    parser.add_argument(
+        '-listen-address', '--listen-address',
+        type=str,
+        default='0.0.0.0',
+        help='Address to listen on (default: 0.0.0.0)'
+    )
     
     args = parser.parse_args()
     
@@ -430,6 +570,7 @@ Examples:
         print("Error: No API keys provided. Use -api-key or set VASTAI_API_KEYS env var.")
         sys.exit(1)
     
+    logger.info(f"Starting vast.ai exporter on {args.listen_address}:{args.port}")
     logger.info(f"Configured {len(api_keys)} account(s): {[k[0] for k in api_keys]}")
     
     # Create collector
@@ -438,9 +579,8 @@ Examples:
     MetricsHandler.collector = collector
     
     # Start HTTP server
-    server = HTTPServer(('0.0.0.0', args.port), MetricsHandler)
-    logger.info(f"Vast.ai Exporter listening on port {args.port}")
-    logger.info(f"Metrics available at http://localhost:{args.port}/metrics")
+    server = HTTPServer((args.listen_address, args.port), MetricsHandler)
+    logger.info(f"Metrics available at http://{args.listen_address}:{args.port}/metrics")
     
     try:
         server.serve_forever()
