@@ -39,7 +39,7 @@ VOLUME_PATTERNS="dc-overview prometheus grafana ipmi vastai runpod cryptolabs-pr
 DC_NETWORKS="cryptolabs dc-overview_monitoring dc-overview_default"
 
 # Exporter services to remove (systemd services)
-EXPORTER_SERVICES="dc-exporter node_exporter vastai-exporter runpod-exporter vastai_exporter runpod_exporter"
+EXPORTER_SERVICES="dc-exporter node_exporter"
 
 # Legacy exporter files to remove
 LEGACY_EXPORTER_FILES="/opt/runpod_exporter.py /opt/vastai_exporter.py /opt/runpod-exporter /opt/vastai-exporter"

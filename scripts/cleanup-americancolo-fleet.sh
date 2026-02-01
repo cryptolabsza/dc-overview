@@ -47,8 +47,7 @@ CONTAINER_PATTERNS="grafana prometheus ipmi-monitor dc-overview cryptolabs-proxy
 # - dc-exporter: old dc-exporter (dc-overview will install dc-exporter-rs)
 # - gddr6-metrics-exporter: legacy (may already be cleared)
 # - dcgm, nvidia-dcgm: NVIDIA DCGM daemon (replaced by dc-exporter-rs for GPU metrics)
-# - vastai/runpod exporters: legacy host-based exporters
-EXPORTER_SERVICES="node_exporter dc-exporter dcgm-exporter gddr6-metrics-exporter dcgm nvidia-dcgm vastai-exporter runpod-exporter vastai_exporter runpod_exporter"
+EXPORTER_SERVICES="node_exporter dc-exporter dcgm-exporter gddr6-metrics-exporter dcgm nvidia-dcgm"
 
 # Legacy exporter files to remove
 LEGACY_EXPORTER_FILES="/opt/runpod_exporter.py /opt/vastai_exporter.py /opt/runpod-exporter /opt/vastai-exporter"

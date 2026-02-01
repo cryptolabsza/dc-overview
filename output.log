@@ -40,3 +40,12 @@ cryptolabs-proxy
     removed cryptolabs-proxy
 dc-overview
     removed dc-overview
+prometheus
+    removed prometheus
+grafana
+    removed grafana
+    removed vastai-exporter
+runpod-exporter
+    removed runpod-exporter
+    removed certbot
+./scripts/cleanup-americancolo-fleet.sh: line 187: syntax error near unexpected token `('
