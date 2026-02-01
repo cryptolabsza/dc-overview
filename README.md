@@ -24,7 +24,17 @@
 
 ---
 
-## What's New in v1.1.0
+## What's New in v1.2.0
+
+| Feature | Description |
+|---------|-------------|
+| **CryptoLabs Vast.ai Exporter** | Native Vast.ai exporter built by CryptoLabs with multi-account support |
+| **Multi-Account Support** | Both Vast.ai and RunPod exporters support multiple API keys with account labels |
+| **Fleet Management Updates** | Health API shows update status for all services including new exporters |
+| **Favicon Support** | Service icons use actual favicons for Grafana, Prometheus, RunPod, Vast.ai |
+| **Improved Update Logic** | Container restart after updates now preserves original configuration |
+
+### v1.1.0
 
 | Feature | Description |
 |---------|-------------|
@@ -32,7 +42,6 @@
 | **Site Name Branding** | Customize your landing page and IPMI Monitor with your datacenter name |
 | **Auto-Scaling Dashboards** | Grafana table panels automatically resize based on your server count |
 | **Vast.ai/RunPod Logs** | IPMI Monitor auto-collects daemon logs when exporters are enabled |
-| **Multi-API Key Support** | RunPod exporter supports multiple API keys with labels |
 | **Improved Dashboard Layout** | Machine column displays on the left for better readability |
 
 ---
@@ -154,18 +163,25 @@ components:
   vast_exporter: false    # Set to true if using Vast.ai
   runpod_exporter: false  # Set to true if using RunPod
 
-# Vast.ai API Key (only needed if vast_exporter is true)
+# Vast.ai API Keys (only needed if vast_exporter is true)
+# Supports multiple accounts with labels
 vast:
-  api_key: YOUR_VAST_API_KEY
+  api_keys:
+    - name: VastMain
+      key: YOUR_VAST_API_KEY
+    - name: VastSecondary
+      key: YOUR_SECOND_VAST_API_KEY
+  # Legacy single key format also supported:
+  # api_key: YOUR_VAST_API_KEY
 
 # RunPod API Keys (only needed if runpod_exporter is true)
 # Supports multiple accounts with labels
 runpod:
   api_keys:
-    - key: YOUR_RUNPOD_API_KEY
-      label: main-account
-    - key: YOUR_SECOND_RUNPOD_API_KEY
-      label: secondary-account
+    - name: RunpodCCC
+      key: YOUR_RUNPOD_API_KEY
+    - name: Brickbox
+      key: YOUR_SECOND_RUNPOD_API_KEY
 
 # Servers to monitor
 servers:
@@ -444,6 +460,65 @@ docker exec cryptolabs-proxy nginx -s reload  # Reload
 
 ---
 
+## Marketplace Exporters
+
+### Vast.ai Exporter
+
+CryptoLabs-built Prometheus exporter for Vast.ai host metrics.
+
+```bash
+# Single account
+docker run -d --name vastai-exporter \
+  -p 8622:8622 \
+  ghcr.io/cryptolabsza/vastai-exporter:latest \
+  -api-key YOUR_API_KEY
+
+# Multiple accounts
+docker run -d --name vastai-exporter \
+  -p 8622:8622 \
+  ghcr.io/cryptolabsza/vastai-exporter:latest \
+  -api-key VastMain:KEY1 \
+  -api-key VastSecondary:KEY2
+
+# Using environment variable
+docker run -d --name vastai-exporter \
+  -p 8622:8622 \
+  -e VASTAI_API_KEYS="VastMain:KEY1,VastSecondary:KEY2" \
+  ghcr.io/cryptolabsza/vastai-exporter:latest
+```
+
+**Metrics exposed:**
+- `vastai_account_balance` - Account balance in USD
+- `vast_machine_*` - Machine status (Listed, Verified, Reliability, timeout)
+- `vastai_machine_*` - Detailed metrics (disk, inet, rentals, earnings)
+- `vastai_machine_gpu_occupancy` - Per-GPU occupancy state
+
+### RunPod Exporter
+
+CryptoLabs-built Prometheus exporter for RunPod host metrics.
+
+```bash
+# Single account
+docker run -d --name runpod-exporter \
+  -p 8623:8623 \
+  ghcr.io/cryptolabsza/runpod-exporter:latest \
+  -api-key YOUR_API_KEY
+
+# Multiple accounts
+docker run -d --name runpod-exporter \
+  -p 8623:8623 \
+  ghcr.io/cryptolabsza/runpod-exporter:latest \
+  -api-key RunpodCCC:KEY1 \
+  -api-key Brickbox:KEY2
+```
+
+**Metrics exposed:**
+- `runpod_host_balance` - Host balance per account
+- `runpod_machine_*` - GPU counts, earnings, uptime, listings
+- `runpod_account_*` - Account-level totals
+
+---
+
 ## Related Projects
 
 | Project | Description |
@@ -451,6 +526,8 @@ docker exec cryptolabs-proxy nginx -s reload  # Reload
 | [ipmi-monitor](https://github.com/cryptolabsza/ipmi-monitor) | BMC/IPMI health monitoring |
 | [dc-exporter](https://github.com/cryptolabsza/dc-exporter) | GPU VRAM temperature exporter |
 | [cryptolabs-proxy](https://github.com/cryptolabsza/cryptolabs-proxy) | Unified reverse proxy with auth |
+| [vastai-exporter](https://github.com/cryptolabsza/dc-overview/tree/dev/vastai-exporter) | Vast.ai host metrics exporter |
+| [runpod-exporter](https://github.com/cryptolabsza/dc-overview/tree/dev/runpod-exporter) | RunPod host metrics exporter |
 
 ---
 
