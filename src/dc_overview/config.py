@@ -1,12 +1,88 @@
 """
 DC Overview Configuration - Manage prometheus.yml and targets
+
+Also includes CryptoLabs Alert System configuration for push notifications
+to the CryptoLabs app, email, and web browser (v1.1.0+).
 """
 
 import os
+import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+from dataclasses import dataclass, field
 
 import yaml
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# CryptoLabs Alert System Configuration (v1.1.0+)
+# =============================================================================
+
+@dataclass
+class NotificationConfig:
+    """Configuration for CryptoLabs Alert System notifications.
+    
+    This prepares DC Overview for future integration with the CryptoLabs
+    Alert API, allowing push notifications to the CryptoLabs app, email,
+    and web browser when deployment or monitoring issues occur.
+    """
+    # Master enable/disable for notifications
+    enabled: bool = False
+    
+    # CryptoLabs API key for authentication with Alert API
+    # Users will link their CryptoLabs account to get this key
+    cryptolabs_api_key: str = ""
+    
+    # Alert API endpoint
+    alert_endpoint: str = "https://ipmi-ai.cryptolabs.co.za/api/v1/alerts/send"
+    
+    # Rate limiting - minimum minutes between alerts of same type for same server
+    rate_limit_minutes: int = 5
+    
+    # Which alert types to send
+    alert_types: Dict[str, bool] = field(default_factory=lambda: {
+        'exporter_down': True,
+        'exporter_failed': True,
+        'deployment_failed': True,
+        'worker_unreachable': True,
+        'high_temperature': True,
+        'gpu_error': True,
+        'container_unhealthy': True,
+    })
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'NotificationConfig':
+        """Create NotificationConfig from dictionary."""
+        if not data:
+            return cls()
+        
+        config = cls()
+        config.enabled = data.get('enabled', False)
+        config.cryptolabs_api_key = data.get('cryptolabs_api_key', '')
+        config.alert_endpoint = data.get('alert_endpoint', config.alert_endpoint)
+        config.rate_limit_minutes = data.get('rate_limit_minutes', 5)
+        
+        # Merge alert types
+        if 'alert_types' in data:
+            config.alert_types.update(data['alert_types'])
+        
+        return config
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            'enabled': self.enabled,
+            'cryptolabs_api_key': self.cryptolabs_api_key,
+            'alert_endpoint': self.alert_endpoint,
+            'rate_limit_minutes': self.rate_limit_minutes,
+            'alert_types': self.alert_types,
+        }
+    
+    def is_alert_type_enabled(self, alert_type: str) -> bool:
+        """Check if a specific alert type is enabled."""
+        return self.enabled and self.alert_types.get(alert_type, False)
 
 
 class PrometheusConfig:
@@ -129,7 +205,10 @@ class Config:
                 "dc_exporter": True,  # Provides DCGM-compatible metrics + VRAM/hotspot temps
             },
             "vast_api_key": None,
+            # CryptoLabs Alert System (v1.1.0+)
+            "notifications": {},
         }
+        self._notifications: Optional[NotificationConfig] = None
     
     @classmethod
     def load(cls, config_dir: Path) -> "Config":
@@ -141,11 +220,28 @@ class Config:
                 data = yaml.safe_load(f) or {}
                 instance._data.update(data)
         
+        # Load notifications config
+        instance._notifications = NotificationConfig.from_dict(
+            instance._data.get("notifications", {})
+        )
+        
+        # Also check environment variables for notification settings
+        if os.environ.get('NOTIFICATIONS_ENABLED'):
+            instance._notifications.enabled = os.environ['NOTIFICATIONS_ENABLED'].lower() == 'true'
+        if os.environ.get('CRYPTOLABS_API_KEY'):
+            instance._notifications.cryptolabs_api_key = os.environ['CRYPTOLABS_API_KEY']
+        if os.environ.get('ALERT_ENDPOINT'):
+            instance._notifications.alert_endpoint = os.environ['ALERT_ENDPOINT']
+        
         return instance
     
     def save(self):
         """Save configuration to file."""
         self.config_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Include notifications in saved data
+        if self._notifications:
+            self._data["notifications"] = self._notifications.to_dict()
         
         with open(self.config_file, "w") as f:
             yaml.dump(self._data, f, default_flow_style=False, sort_keys=False)
@@ -176,3 +272,10 @@ class Config:
     @property
     def prometheus_port(self) -> int:
         return self._data.get("master", {}).get("prometheus_port", 9090)
+    
+    @property
+    def notifications(self) -> NotificationConfig:
+        """Get notification configuration (CryptoLabs Alert System v1.1.0+)."""
+        if self._notifications is None:
+            self._notifications = NotificationConfig()
+        return self._notifications

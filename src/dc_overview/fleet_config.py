@@ -85,10 +85,33 @@ class ComponentConfig:
 
 
 @dataclass
+class VastApiKey:
+    """A single Vast.ai API key with account name."""
+    name: str  # Account name (e.g., "VastMain", "VastSecondary")
+    key: str   # API key
+
+
+@dataclass
 class VastConfig:
-    """Vast.ai configuration."""
+    """Vast.ai configuration - supports multiple accounts."""
     enabled: bool = False
+    api_keys: List['VastApiKey'] = field(default_factory=list)
+    port: int = 8622  # Exporter port
+    
+    # Legacy single key support (for backwards compatibility)
     api_key: Optional[str] = None
+    
+    def add_key(self, name: str, key: str) -> None:
+        """Add an API key."""
+        self.api_keys.append(VastApiKey(name=name, key=key))
+    
+    def get_all_keys(self) -> List['VastApiKey']:
+        """Get all API keys (including legacy single key if set)."""
+        keys = list(self.api_keys)
+        # Include legacy api_key if set and not already in list
+        if self.api_key and not any(k.key == self.api_key for k in keys):
+            keys.insert(0, VastApiKey(name="default", key=self.api_key))
+        return keys
 
 
 @dataclass
@@ -301,6 +324,7 @@ class FleetConfig:
             },
             "vast": {
                 "enabled": self.vast.enabled,
+                "port": self.vast.port,
             },
             "runpod": {
                 "enabled": self.runpod.enabled,
@@ -325,7 +349,12 @@ class FleetConfig:
             data["bmc"]["password"] = self.bmc.password
             data["grafana"]["admin_password"] = self.grafana.admin_password
             data["ipmi_monitor"]["admin_password"] = self.ipmi_monitor.admin_password
-            data["vast"]["api_key"] = self.vast.api_key
+            data["vast"]["api_keys"] = [
+                {"name": k.name, "key": k.key} for k in self.vast.api_keys
+            ]
+            # Legacy single key for backwards compatibility
+            if self.vast.api_key and not self.vast.api_keys:
+                data["vast"]["api_key"] = self.vast.api_key
             data["runpod"]["api_keys"] = [
                 {"name": k.name, "key": k.key} for k in self.runpod.api_keys
             ]
@@ -341,7 +370,7 @@ class FleetConfig:
             "bmc_password": self.bmc.password,
             "grafana_password": self.grafana.admin_password,
             "ipmi_monitor_password": self.ipmi_monitor.admin_password,
-            "vast_api_key": self.vast.api_key,
+            "vast_api_keys": [{"name": k.name, "key": k.key} for k in self.vast.get_all_keys()],
             "ipmi_ai_license": self.ipmi_monitor.ai_license_key,
             "runpod_api_keys": [{"name": k.name, "key": k.key} for k in self.runpod.api_keys],
         }
@@ -415,6 +444,7 @@ class FleetConfig:
             
             vast = data.get("vast", {})
             config.vast.enabled = vast.get("enabled", False)
+            config.vast.port = vast.get("port", 8622)
             
             # RunPod (supports multiple API keys)
             runpod = data.get("runpod", {})
@@ -450,7 +480,17 @@ class FleetConfig:
             config.bmc.password = secrets.get("bmc_password")
             config.grafana.admin_password = secrets.get("grafana_password", "admin")
             config.ipmi_monitor.admin_password = secrets.get("ipmi_monitor_password")
-            config.vast.api_key = secrets.get("vast_api_key")
+            # Load Vast API keys from secrets (supports multiple or legacy single key)
+            for api_key_data in secrets.get("vast_api_keys", []):
+                if isinstance(api_key_data, dict):
+                    config.vast.add_key(
+                        name=api_key_data.get("name", "default"),
+                        key=api_key_data.get("key", "")
+                    )
+            # Legacy single key support
+            if secrets.get("vast_api_key") and not config.vast.api_keys:
+                config.vast.api_key = secrets.get("vast_api_key")
+            
             config.ipmi_monitor.ai_license_key = secrets.get("ipmi_ai_license")
             
             # Load RunPod API keys from secrets

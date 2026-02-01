@@ -1934,15 +1934,44 @@ def update_prometheus_targets(machines: List[Dict[str, str]]):
 
 
 def setup_vastai_exporter():
-    """Set up Vast.ai exporter."""
+    """Set up Vast.ai exporter with multi-account support."""
     console.print("\n[dim]Get your API key from: https://cloud.vast.ai/account/[/dim]")
+    console.print("[dim]Supports multiple accounts - add one at a time[/dim]\n")
     
-    api_key = questionary.password(
-        "Vast.ai API Key:",
-        style=custom_style
-    ).ask()
+    api_keys = []
     
-    if not api_key:
+    while True:
+        # Ask for account name
+        account_name = questionary.text(
+            "Account name (e.g., 'VastMain', 'VastSecondary'):" if not api_keys else "Add another account name (or Enter to finish):",
+            style=custom_style
+        ).ask()
+        
+        if not account_name:
+            if not api_keys:
+                console.print("[dim]Skipping Vast.ai setup[/dim]")
+                return
+            break
+        
+        # Ask for API key
+        api_key = questionary.password(
+            f"Vast.ai API Key for {account_name}:",
+            style=custom_style
+        ).ask()
+        
+        if api_key:
+            api_keys.append((account_name, api_key))
+            console.print(f"[green]✓[/green] Added account: {account_name}")
+        
+        # Ask if more accounts
+        if not questionary.confirm(
+            "Add another Vast.ai account?",
+            default=False,
+            style=custom_style
+        ).ask():
+            break
+    
+    if not api_keys:
         console.print("[dim]Skipping Vast.ai setup[/dim]")
         return
     
@@ -1954,21 +1983,38 @@ def setup_vastai_exporter():
     with Progress(SpinnerColumn(), TextColumn("Starting Vast.ai exporter..."), console=console) as progress:
         progress.add_task("", total=None)
         
-        # Stop existing
+        # Stop existing Docker container
         subprocess.run(["docker", "rm", "-f", "vastai-exporter"], capture_output=True)
         
-        # Start new
-        result = subprocess.run([
+        # Kill any host-based vast exporter using port 8622 (from older installations)
+        try:
+            result = subprocess.run(
+                ["lsof", "-t", "-i", ":8622"],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                for pid in result.stdout.strip().split('\n'):
+                    if pid:
+                        subprocess.run(["kill", "-9", pid], capture_output=True)
+        except Exception:
+            pass  # lsof might not be available
+        
+        # Build command with all API keys
+        cmd = [
             "docker", "run", "-d",
             "--name", "vastai-exporter",
             "--restart", "unless-stopped",
             "-p", "8622:8622",
-            "ghcr.io/cryptolabsza/vastai-exporter:latest",
-            "-api-key", api_key
-        ], capture_output=True)
+            "ghcr.io/cryptolabsza/vastai-exporter:latest"
+        ]
+        
+        for account_name, api_key in api_keys:
+            cmd.extend(["-api-key", f"{account_name}:{api_key}"])
+        
+        result = subprocess.run(cmd, capture_output=True)
     
     if result.returncode == 0:
-        console.print("[green]✓[/green] Vast.ai exporter running on port 8622")
+        console.print(f"[green]✓[/green] Vast.ai exporter running on port 8622 ({len(api_keys)} account(s))")
         
         # Add to Prometheus
         config_dir = Path("/etc/dc-overview")

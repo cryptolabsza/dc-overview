@@ -243,7 +243,7 @@ class FleetManager:
                         )
             
             # Step 8: Vast.ai exporter (if enabled)
-            if self.config.components.vast_exporter and self.config.vast.api_key:
+            if self.config.components.vast_exporter and self.config.vast.get_all_keys():
                 self._deploy_vast_exporter()
             
             # Step 8b: RunPod exporter (if enabled)
@@ -993,7 +993,7 @@ echo "Exporters installed successfully"
                 })
         
         # Add Vast.ai exporter if enabled
-        if self.config.components.vast_exporter and self.config.vast.api_key:
+        if self.config.components.vast_exporter and self.config.vast.get_all_keys():
             scrape_configs.append({
                 "job_name": "vastai",
                 "scrape_interval": "60s",
@@ -2011,8 +2011,9 @@ except Exception as e:
     # ============ Step 8: Vast.ai Exporter ============
     
     def _deploy_vast_exporter(self):
-        """Deploy Vast.ai exporter."""
-        if not self.config.vast.api_key:
+        """Deploy Vast.ai exporter with multi-account support."""
+        api_keys = self.config.vast.get_all_keys()
+        if not api_keys:
             return
         
         console.print("\n[bold]Step 8: Starting Vast.ai Exporter[/bold]\n")
@@ -2034,18 +2035,22 @@ except Exception as e:
         except Exception:
             pass  # lsof might not be available
         
-        # Start new container
-        result = subprocess.run([
+        # Build command with all API keys
+        cmd = [
             "docker", "run", "-d",
             "--name", "vastai-exporter",
             "--restart", "unless-stopped",
-            "-p", "8622:8622",
-            "ghcr.io/cryptolabsza/vastai-exporter:latest",
-            "-api-key", self.config.vast.api_key
-        ], capture_output=True, text=True)
+            "-p", f"{self.config.vast.port}:{self.config.vast.port}",
+            "ghcr.io/cryptolabsza/vastai-exporter:latest"
+        ]
+        
+        for api_key in api_keys:
+            cmd.extend(["-api-key", f"{api_key.name}:{api_key.key}"])
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
         
         if result.returncode == 0:
-            console.print("[green]✓[/green] Vast.ai exporter running on port 8622")
+            console.print(f"[green]✓[/green] Vast.ai exporter running on port {self.config.vast.port} ({len(api_keys)} account(s))")
         else:
             console.print(f"[yellow]⚠[/yellow] Vast.ai exporter failed: {result.stderr[:100]}")
     
