@@ -64,9 +64,9 @@ dc-overview_prometheus-data
   Removing volumes by pattern...
   Pruning unused volumes...
 Deleted Volumes:
-0b53c88779d319e8d3cee5b74f4b74f1bbf1320c536800814024aeb98e8fe8de
-0ea8bbcb44ec29a4c5536025136bd2decb321c404e716c4044055abf80231554
-3fb66c68108c69cb2497481c57e445663841ecd184b47e87030023d076db1470
+77dca18665fc5598d621f406ab0a91ae3eef60ef617feb42f59eaacf03461302
+93ab0663884ae240b1537d09af5c0834b3725e6363b89edc424b88747874b88a
+51813fbd536d6984f19ac51e7d5f6f5b22b2a715197f0ee0a2ea987fa4e87121
 
 Total reclaimed space: 0B
   Removing monitoring networks...
@@ -76,38 +76,38 @@ cryptolabs
   Pruning unused networks...
   Removing monitoring images...
 Untagged: ghcr.io/cryptolabsza/ipmi-monitor:dev
-Untagged: ghcr.io/cryptolabsza/ipmi-monitor@sha256:c38fe314d886932c3a4e83ef86e12b0aad0cbd598f9de798ed53a6d30fa14677
-Deleted: sha256:e1583cdd1c892f53d7c73222a6dbfb6d2ce2d9cb578a3fc9dbfb574003339f0f
-Deleted: sha256:03314052300b47bd43aeba61f927800186caaca776956774a2b4f1c098cb3749
-Deleted: sha256:f7a269a3852cea6ea85e96abdd2523b52edbc4534ef803ea335b250ba2dab27f
-Deleted: sha256:efd7ea40d68a6215660bf5a10ed5d09284fd893a00cff8e4037d70d9b5edd886
-Deleted: sha256:ccf7bbee7e71bd07a26a1a78950a2505f167405b637237803ee5a46599bbb87d
-Deleted: sha256:462baacb1210f958246f62bfff42160787981b4358b9284f88d1f8f070214bc9
-Deleted: sha256:dcdf2445d001edc4f988cf5c045bd94fabdde82bcd8f2858c1cea3d16a53519f
+Untagged: ghcr.io/cryptolabsza/ipmi-monitor@sha256:238a5d7ae96f909ccdefe3be15472d58a57e5b974841c80a3fd5ab41f859d7d7
+Deleted: sha256:fe844c08dff0f3166775d9a99defce6793b7cf923ced2cb6ed259a8dd456bf86
+Deleted: sha256:f152462ea5200776cbab7874a6ecb2f26c37132ed35584cfd2a9c444a455f0cc
+Deleted: sha256:47a7d38a562fadc5c4d27c56f8c989f3af137723c877f08b52aeace3159eddb3
+Deleted: sha256:4e51bef1653fa23a6e0f093fb93bd37ee49f68bcdd473d0175549688b7531e7d
+Deleted: sha256:bdf740b30e899dfa22508c584e753e20fe8f81e7a3f8caa212767a64d4a95996
+Deleted: sha256:f447cad626e9f71c9de4b093f09044c78b761f9bbabcfd0aec81a16c124c16ff
+Deleted: sha256:7645146dfc6cd7211b1560e1f73f43b346d6512c04d43b1307be62aceb37d3d9
     removed ghcr.io/cryptolabsza/ipmi-monitor
 Untagged: ghcr.io/cryptolabsza/dc-overview:dev
-Untagged: ghcr.io/cryptolabsza/dc-overview@sha256:f000266aae535aa6a5322f641a27441f788fa70a89088fb050e0814d38ffc501
-Deleted: sha256:367c91d85f5915b5decdfda373025f6284365d21eec9b70f0ec495ebc3c5bd51
-Deleted: sha256:36e9217cf7fd37548b96d3ff8e6fe1c6b707ca5bcfc2b29ce6a1e8bc25908121
-Deleted: sha256:e17f26804aa07986bf45fdb1f0ae70dc38daef4a8da69de1e07552d59a3eed78
+Untagged: ghcr.io/cryptolabsza/dc-overview@sha256:2f7d715a8dc596c7aeac2f38d173226143511ca1b6fec1e3fe4d3a288af970a8
+Deleted: sha256:df412745a06c53b55271e1257c24522447925ef1a6dfa2a455e66c26f8cef3a0
+Deleted: sha256:898900a642d70046c24e4e1944b56b0de41bfc08ff3e373962eb67aab0930c5d
+Deleted: sha256:effab1eb262dbef0188ab52fe60ee46e9cacb7d8dffc1ed22e5cd06976ab5ba2
 Deleted: sha256:aec9efc3a4730d33a14102ac3ac347fedbfa3e8b67af22aed85bed2b67422031
 Deleted: sha256:9c2742784a27bb7112d09f611119b9750f1418159201f8347b8587aa5971b11f
 Deleted: sha256:277ba1e1d8e12f1bd2d77d8f91d6ff5526fa614a78ba52aa3cc6532b9d78f98f
     removed ghcr.io/cryptolabsza/dc-overview
 Untagged: ghcr.io/cryptolabsza/cryptolabs-proxy:dev
-Untagged: ghcr.io/cryptolabsza/cryptolabs-proxy@sha256:1e14c359dd6fea01694e7f38052ec83151a028819b10078fb2ec920e3f726e70
-Deleted: sha256:50af3b6d041f9756c829e6185a61d497170f7d750fb386bc08fabda025eb20aa
-Deleted: sha256:a8cc0aa5f46cec2c041d0335456bab39ac2222549a9e9b8aa6e90595a6385ade
-Deleted: sha256:8b29fe5169a4e3813864b4fb96a40474a9bceabfb9ad618f82504f53c24a8728
-Deleted: sha256:8cf2a8805bb4bbd5c522a24b3bec09b06c46a518a9e8c5054c1396e38b23bf05
-Deleted: sha256:7c69dbfa7b28f12b33db0aeeaabeeab1a9aa19b71dae71e60e899350373eafb6
-Deleted: sha256:ba5d962d3b65c2435535fbe5fdda86f236b581031fec0599c119c30e740d5d0c
-Deleted: sha256:c2f7d16d03c55edd6dc3f7bed1043240d5ab5799576374028e6cd0c201f4edb2
-Deleted: sha256:5ead4999f57c9ed8e6d263a8c3237718609cd4bb375b8a63d56035835f5c66c7
-Deleted: sha256:5bb397c937b29d5d1cec3c952d8199c9bef67bc751146264001017d6342cb07d
-Deleted: sha256:0388e6f0e6edbbc60707520942b4f46bd78ae34ab59b2786daffebd9f89bfffc
-Deleted: sha256:ab0838fa40403900f77e23871240d04eebd5f9911736f25948a821f3f3a8fef0
-Deleted: sha256:fa5ecaf75ea6bdf679089e1dd3d58a85e42a6d451941be131966ee00ca034603
+Untagged: ghcr.io/cryptolabsza/cryptolabs-proxy@sha256:ceb5fcdc2e9ba3f437bce19ee54aaf8c544dc50a03202c3708e946fc7b0ce9a4
+Deleted: sha256:3c052cd9f9d3bc5b54603fa9dd5d1c56db7f0ec170dc4caab5e69f251fd417fa
+Deleted: sha256:c3261be58ae4b80cb15901b54e64886a11f6f66264b06cb209b43b1951052c02
+Deleted: sha256:09159b91f1362271fb8a9570036e04b672c465bd36b6ec76a7fe3949fa54a7bd
+Deleted: sha256:0c0425a9866ec91d2c76e555a1f4e54960eb9049dd1187a629e19a0b1ad3cb87
+Deleted: sha256:6911fec07d4b64a44d259a36573b0f98d57b09e1a82e82f1efe0e68f4913f7d6
+Deleted: sha256:4edf0d07ad1e8bd5e945b7d91d716cfc7209f27811053e35014e36a72e58096e
+Deleted: sha256:b0ffd108edfe9a93d37d1947ef301cbc0fe5c1897525efd04500738921c7c5c6
+Deleted: sha256:2503d4d03ba9d8a5b22d312b72a91d8a546ef0c1140717e31a7327dbd1e991f0
+Deleted: sha256:1ea5316ceb098c0b2dbcc6cedb84de6cad2db506e5d7dd4bed1e613df41894f0
+Deleted: sha256:aee8fd0712c35d763033e962d6392fa75c80e939d0dbe41712bf0eec5700a7e1
+Deleted: sha256:809600203eca88d24994016eb965fd436dece7776bf588f047429944322a025b
+Deleted: sha256:f3a23bc2b9f134db5c7127ed475ad3c9dd8f0719cdc002944059e18cf8618d10
 Deleted: sha256:ebe1b7ac8c860ce51c852bd1333ac2bb49ef54a2af57517ef1684202d05d1df3
 Deleted: sha256:bad170219b4234284a18bfb6ad8998d70a818f09c133c95d8bfeefc38c1a02cb
 Deleted: sha256:5b4d37fb62dbae255ea62b228ea0142a53fba05b85920e59ccc3c2ed69547fc2
@@ -119,11 +119,11 @@ Deleted: sha256:989e799e634906e94dc9a5ee2ee26fc92ad260522990f26e707861a5f52bf64e
     removed ghcr.io/cryptolabsza/cryptolabs-proxy
     removed ghcr.io/cryptolabsza/vastai-exporter
 Untagged: ghcr.io/cryptolabsza/runpod-exporter:latest
-Untagged: ghcr.io/cryptolabsza/runpod-exporter@sha256:1932336dca7356f799936347d201d7b686a543672d76030667494f801f56a6c0
-Deleted: sha256:fd4158bda0d470b6c4519c67ed7e3ee3a69e5c1ca23e79290e33813e42b11d96
-Deleted: sha256:b787e25fd9477521bf92241a26389e02b699bb9a3d0fceee85ef96012dfedc2f
-Deleted: sha256:de82dd784bcf44ad784e67606477dc1b1c12c610ca451f5edd137d05e31c5c5f
-Deleted: sha256:c66db9e6e90eb1603aaeec9a315eb41071efa1fa7d04c3a5d308f5e474615ccb
+Untagged: ghcr.io/cryptolabsza/runpod-exporter@sha256:6adbc3cdd1b60b9ea872ba45ef73e10d7fbd35761421d12d54370c64b0b88138
+Deleted: sha256:6e76ce332eaef4b62e575f2a787b5dec5b542abbf5810a1f196d0f502289395b
+Deleted: sha256:63eaf7588fb92e06805f9d9097b0914ab1af3cbeb3b0c506ab141fc6314065aa
+Deleted: sha256:3876814f916649efc5701d08b1336fb760695d2262bfec47ac82c54892c46cbd
+Deleted: sha256:1c6cf4f936cf100b33a148493068e9fc1d706e8d094322f188f0614feb36dee8
 Deleted: sha256:4848620b4f05c1bab648b71b2db717c7d2b96fdf4d91bf68b1b701f1f486155d
 Deleted: sha256:aaa0749783d8f0c89f0e3c84610c7e8a3c0d4aaeb0ff4f51eba5ea85a7db3d78
 Deleted: sha256:de6edbcec1fcef89176db9f9e8105fb0869502e288508ed4255e8269cdf65841
@@ -163,7 +163,7 @@ Total reclaimed space: 0B
 
   Remaining containers on master:
 NAMES        STATUS
-netbootxyz   Up 46 hours (healthy)
+netbootxyz   Up 2 days (healthy)
 registry     Up 4 weeks
 
 [1;33mStep 2: Cleaning exporter services on workers...[0m
@@ -218,7 +218,7 @@ registry     Up 4 weeks
 
   Master containers (should see registry, netbootxyz only):
 NAMES        IMAGE                           STATUS
-netbootxyz   ghcr.io/netbootxyz/netbootxyz   Up 46 hours (healthy)
+netbootxyz   ghcr.io/netbootxyz/netbootxyz   Up 2 days (healthy)
 registry     registry:2                      Up 4 weeks
 
   Sample worker check (88.0.1.1):

@@ -5,6 +5,16 @@ LABEL org.opencontainers.image.description="Prometheus exporter for RunPod host 
 LABEL org.opencontainers.image.source="https://github.com/cryptolabsza/dc-overview"
 LABEL org.opencontainers.image.vendor="CryptoLabs"
 
+# Build arguments for version info
+ARG GIT_COMMIT=unknown
+ARG GIT_BRANCH=unknown
+ARG BUILD_TIME=unknown
+
+# Set as environment variables (available at runtime)
+ENV GIT_COMMIT=${GIT_COMMIT}
+ENV GIT_BRANCH=${GIT_BRANCH}
+ENV BUILD_TIME=${BUILD_TIME}
+
 WORKDIR /app
 
 # Copy exporter script

@@ -2042,8 +2042,21 @@ def setup_runpod_exporter():
     with Progress(SpinnerColumn(), TextColumn("Starting RunPod exporter..."), console=console) as progress:
         progress.add_task("", total=None)
         
-        # Stop existing
+        # Stop existing Docker container
         subprocess.run(["docker", "rm", "-f", "runpod-exporter"], capture_output=True)
+        
+        # Kill any host-based runpod exporter using port 8623 (from older installations)
+        try:
+            result = subprocess.run(
+                ["lsof", "-t", "-i", ":8623"],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                for pid in result.stdout.strip().split('\n'):
+                    if pid:
+                        subprocess.run(["kill", "-9", pid], capture_output=True)
+        except Exception:
+            pass  # lsof might not be available
         
         # Build command with all API keys
         cmd = [

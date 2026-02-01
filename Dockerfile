@@ -9,6 +9,16 @@ LABEL org.opencontainers.image.source="https://github.com/cryptolabsza/dc-overvi
 LABEL org.opencontainers.image.description="GPU Datacenter Monitoring - Server Management & Prometheus Targets"
 LABEL org.opencontainers.image.licenses="MIT"
 
+# Build arguments for version info
+ARG GIT_COMMIT=unknown
+ARG GIT_BRANCH=unknown
+ARG BUILD_TIME=unknown
+
+# Set as environment variables (available at runtime)
+ENV GIT_COMMIT=${GIT_COMMIT}
+ENV GIT_BRANCH=${GIT_BRANCH}
+ENV BUILD_TIME=${BUILD_TIME}
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \

@@ -1976,6 +1976,20 @@ except Exception as e:
         # Stop existing container
         subprocess.run(["docker", "rm", "-f", "vastai-exporter"], capture_output=True)
         
+        # Kill any host-based vast exporter using port 8622 (from older installations)
+        try:
+            result = subprocess.run(
+                ["lsof", "-t", "-i", ":8622"],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                for pid in result.stdout.strip().split('\n'):
+                    if pid:
+                        subprocess.run(["kill", "-9", pid], capture_output=True)
+                        console.print(f"[dim]  Stopped legacy vast exporter (PID {pid})[/dim]")
+        except Exception:
+            pass  # lsof might not be available
+        
         # Start new container
         result = subprocess.run([
             "docker", "run", "-d",
@@ -2000,6 +2014,22 @@ except Exception as e:
         
         # Stop existing container
         subprocess.run(["docker", "rm", "-f", "runpod-exporter"], capture_output=True)
+        
+        # Kill any host-based runpod exporter using port 8623 (from older installations)
+        # This prevents "address already in use" errors when switching to Docker-based exporter
+        try:
+            result = subprocess.run(
+                ["lsof", "-t", "-i", ":8623"],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                pids = result.stdout.strip().split('\n')
+                for pid in pids:
+                    if pid:
+                        subprocess.run(["kill", "-9", pid], capture_output=True)
+                        console.print(f"[dim]  Stopped legacy runpod exporter (PID {pid})[/dim]")
+        except Exception:
+            pass  # lsof might not be available, continue anyway
         
         # Build command with all API keys
         cmd = [
