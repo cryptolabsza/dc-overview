@@ -250,8 +250,8 @@ class FleetManager:
             if self.config.components.runpod_exporter and self.config.runpod.api_keys:
                 self._deploy_runpod_exporter()
             
-            # Step 8c: DC Watchdog agent (if enabled)
-            if self.config.components.dc_watchdog and self.config.watchdog.enabled:
+            # Step 8c: DC Watchdog agent (if enabled via components.dc_watchdog)
+            if self.config.components.dc_watchdog:
                 if self.config.watchdog.api_key:
                     self._deploy_watchdog_agents()
                 else:
@@ -2112,7 +2112,7 @@ except Exception as e:
     
     def _deploy_watchdog_agents(self):
         """Deploy DC Watchdog agents to all workers for external uptime monitoring."""
-        if not self.config.watchdog.enabled or not self.config.watchdog.api_key:
+        if not self.config.components.dc_watchdog or not self.config.watchdog.api_key:
             return
         
         console.print("\n[bold]Step 8c: Installing DC Watchdog Agents[/bold]\n")

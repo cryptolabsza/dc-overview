@@ -171,7 +171,6 @@ class IPMIMonitorConfig:
 
 
 @dataclass
-@dataclass
 class WatchdogConfig:
     """DC Watchdog configuration for external uptime monitoring.
     
@@ -180,8 +179,10 @@ class WatchdogConfig:
     when internal monitoring (Prometheus/Grafana) would also be down.
     
     Requires active CryptoLabs subscription.
+    
+    Note: Whether DC Watchdog is enabled is controlled by components.dc_watchdog,
+    NOT by a separate 'enabled' field here. This keeps the config DRY.
     """
-    enabled: bool = False
     server_url: str = "https://watchdog.cryptolabs.co.za"
     api_key: Optional[str] = None  # From WordPress SSO (sk-ipmi-XXX)
     ping_interval: int = 30  # Seconds between heartbeats
@@ -360,7 +361,7 @@ class FleetConfig:
                 "port": self.runpod.port,
             },
             "watchdog": {
-                "enabled": self.watchdog.enabled,
+                # Note: 'enabled' is controlled by components.dc_watchdog, not here
                 "server_url": self.watchdog.server_url,
                 "ping_interval": self.watchdog.ping_interval,
                 "fail_timeout": self.watchdog.fail_timeout,
@@ -497,8 +498,8 @@ class FleetConfig:
                     )
             
             # DC Watchdog (external uptime monitoring)
+            # Note: whether watchdog is enabled is controlled by components.dc_watchdog
             watchdog = data.get("watchdog", {})
-            config.watchdog.enabled = watchdog.get("enabled", False)
             config.watchdog.server_url = watchdog.get("server_url", "https://watchdog.cryptolabs.co.za")
             config.watchdog.ping_interval = watchdog.get("ping_interval", 30)
             config.watchdog.fail_timeout = watchdog.get("fail_timeout", 120)

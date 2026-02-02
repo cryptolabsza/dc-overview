@@ -23,9 +23,8 @@ ssh:
   port: 100  # Custom SSH port
   key_path: ~/.ssh/ubuntu_key
 
-# DC Watchdog Settings
+# DC Watchdog Settings (enabled via components.dc_watchdog above)
 watchdog:
-  enabled: true
   server_url: https://watchdog.cryptolabs.co.za
   ping_interval: 30    # Seconds between heartbeats
   fail_timeout: 120    # Seconds before marked DOWN
