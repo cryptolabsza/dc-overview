@@ -1,0 +1,39 @@
+# DC Overview Test Configuration
+# Use with: sudo dc-overview quickstart -c test-config.yaml -y
+
+site_name: "Test Fleet"
+
+# Enable DC Watchdog for external uptime monitoring
+components:
+  dc_overview: true
+  ipmi_monitor: false
+  dc_watchdog: true
+  vast_exporter: false
+  runpod_exporter: false
+
+# SSL Configuration
+ssl:
+  mode: self_signed  # or "letsencrypt" for production
+  external_port: 443
+
+# SSH Configuration for worker deployment
+ssh:
+  username: root
+  auth_method: key  # or "password"
+  port: 100  # Custom SSH port
+  key_path: ~/.ssh/ubuntu_key
+
+# DC Watchdog Settings
+watchdog:
+  enabled: true
+  server_url: https://watchdog.cryptolabs.co.za
+  ping_interval: 30    # Seconds between heartbeats
+  fail_timeout: 120    # Seconds before marked DOWN
+  install_agent: true  # Deploy agent to workers
+  agent_use_mtr: true  # Enable MTR for route tracing
+
+# Servers to monitor
+servers:
+  - name: test-server-1
+    server_ip: 41.193.204.66
+    has_gpu: true

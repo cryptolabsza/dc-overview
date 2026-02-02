@@ -443,6 +443,7 @@ class FleetConfig:
             comp = data.get("components", {})
             config.components.dc_overview = comp.get("dc_overview", True)
             config.components.ipmi_monitor = comp.get("ipmi_monitor", False)
+            config.components.dc_watchdog = comp.get("dc_watchdog", False)
             config.components.vast_exporter = comp.get("vast_exporter", False)
             config.components.runpod_exporter = comp.get("runpod_exporter", False)
             
