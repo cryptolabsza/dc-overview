@@ -2299,6 +2299,8 @@ echo "DC Watchdog agent installed and running"
                 fleet_admin_user=self.config.fleet_admin_user,
                 fleet_admin_pass=self.config.fleet_admin_pass,
                 site_name=self.config.site_name,
+                watchdog_api_key=self.config.watchdog.api_key or "",
+                watchdog_url=self.config.watchdog.server_url,
             )
             
             def log_callback(msg: str):
@@ -2753,6 +2755,8 @@ echo "DC Watchdog agent installed and running"
                     use_letsencrypt=(self.config.ssl.mode == SSLMode.LETSENCRYPT),
                     fleet_admin_user=self.config.fleet_admin_user,
                     fleet_admin_pass=self.config.fleet_admin_pass,
+                    watchdog_api_key=self.config.watchdog.api_key or "",
+                    watchdog_url=self.config.watchdog.server_url,
                 )
                 success, message = proxy_setup(proxy_config)
                 if success:

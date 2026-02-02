@@ -203,6 +203,12 @@ class Server(db.Model):
     dcgm_exporter_auto_update = db.Column(db.Boolean, default=False)
     exporter_update_branch = db.Column(db.String(20), default='main')  # 'main' or 'dev'
     
+    # DC Watchdog agent status
+    watchdog_agent_installed = db.Column(db.Boolean, default=False)
+    watchdog_agent_enabled = db.Column(db.Boolean, default=True)
+    watchdog_agent_version = db.Column(db.String(50), nullable=True)
+    watchdog_agent_last_seen = db.Column(db.DateTime, nullable=True)
+    
     # Monitoring status
     last_seen = db.Column(db.DateTime, nullable=True)
     status = db.Column(db.String(20), default='unknown')  # online, offline, unknown
@@ -436,7 +442,12 @@ def api_servers():
         'dc_exporter_auto_update': s.dc_exporter_auto_update,
         'dcgm_exporter_auto_update': s.dcgm_exporter_auto_update,
         'exporter_update_branch': s.exporter_update_branch,
-        'last_seen': s.last_seen.isoformat() if s.last_seen else None
+        'last_seen': s.last_seen.isoformat() if s.last_seen else None,
+        # DC Watchdog agent status
+        'watchdog_agent': s.watchdog_agent_installed,
+        'watchdog_agent_enabled': s.watchdog_agent_enabled,
+        'watchdog_agent_version': s.watchdog_agent_version,
+        'watchdog_agent_last_seen': s.watchdog_agent_last_seen.isoformat() if s.watchdog_agent_last_seen else None
     } for s in servers])
 
 @app.route('/api/servers', methods=['POST'])
@@ -511,13 +522,15 @@ def api_check_server(server_id):
         'ssh': check_ssh_connection(server),
         'node_exporter': check_exporter(server.server_ip, 9100),
         'dc_exporter': check_exporter(server.server_ip, 9835),
-        'dcgm_exporter': check_exporter(server.server_ip, 9400)
+        'dcgm_exporter': check_exporter(server.server_ip, 9400),
+        'watchdog_agent': check_watchdog_agent(server)
     }
     
     # Update server status
     server.node_exporter_installed = results['node_exporter']['running']
     server.dc_exporter_installed = results['dc_exporter']['running']
     server.dcgm_exporter_installed = results['dcgm_exporter']['running']
+    server.watchdog_agent_installed = results['watchdog_agent']['running']
     
     if any([results['node_exporter']['running'], results['dc_exporter']['running']]):
         server.status = 'online'
@@ -865,6 +878,87 @@ def api_update_exporter_settings(server_id):
             'exporter_update_branch': server.exporter_update_branch
         }
     })
+
+
+# =============================================================================
+# DC WATCHDOG AGENT API
+# =============================================================================
+
+@app.route('/api/servers/<int:server_id>/watchdog/status')
+@login_required
+def api_watchdog_status(server_id):
+    """Get DC Watchdog agent status for a server."""
+    server = Server.query.get_or_404(server_id)
+    status = check_watchdog_agent(server)
+    
+    # Update server record
+    server.watchdog_agent_installed = status.get('installed', False)
+    db.session.commit()
+    
+    return jsonify({
+        'server_id': server.id,
+        'server_name': server.name,
+        'watchdog_agent': status,
+        'last_seen': server.watchdog_agent_last_seen.isoformat() if server.watchdog_agent_last_seen else None
+    })
+
+
+@app.route('/api/servers/<int:server_id>/watchdog/toggle', methods=['POST'])
+@csrf.exempt
+@write_required
+def api_toggle_watchdog(server_id):
+    """Enable or disable DC Watchdog agent on a server."""
+    server = Server.query.get_or_404(server_id)
+    
+    data = request.json or {}
+    enabled = data.get('enabled')
+    
+    # If enabled not specified, toggle current state
+    if enabled is None:
+        enabled = not server.watchdog_agent_enabled
+    
+    # Control the service via SSH
+    success = toggle_watchdog_service(server, enabled)
+    
+    if success:
+        server.watchdog_agent_enabled = enabled
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'enabled': enabled,
+            'message': f'DC Watchdog agent {"enabled" if enabled else "disabled"}'
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to {"start" if enabled else "stop"} watchdog agent'
+        }), 500
+
+
+def toggle_watchdog_service(server, enabled: bool) -> bool:
+    """Start or stop dc-watchdog-agent service on a server via SSH."""
+    try:
+        cmd = [
+            'ssh', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=no',
+            '-o', 'BatchMode=yes', '-p', str(server.ssh_port)
+        ]
+        
+        if server.ssh_key:
+            cmd.extend(['-i', server.ssh_key.key_path])
+        
+        cmd.append(f'{server.ssh_user}@{server.server_ip}')
+        
+        if enabled:
+            cmd.append('systemctl start dc-watchdog-agent')
+        else:
+            cmd.append('systemctl stop dc-watchdog-agent')
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        return result.returncode == 0
+    except Exception as e:
+        app.logger.error(f"Error toggling watchdog agent on {server.name}: {e}")
+        return False
 
 
 @app.route('/api/exporters/updates')
@@ -1397,6 +1491,8 @@ def prometheus_metrics():
             1 if server.dc_exporter_installed else 0)
         dc_exporters_installed.labels(server=server.name, exporter='dcgm').set(
             1 if server.dcgm_exporter_installed else 0)
+        dc_exporters_installed.labels(server=server.name, exporter='watchdog').set(
+            1 if server.watchdog_agent_installed else 0)
     
     return Response(generate_latest(registry), mimetype=CONTENT_TYPE_LATEST)
 
@@ -1528,6 +1624,42 @@ def check_exporter(ip, port):
         return {'running': result == 0, 'port': port}
     except Exception as e:
         return {'running': False, 'port': port, 'error': str(e)}
+
+def check_watchdog_agent(server):
+    """Check if dc-watchdog-agent service is running via SSH."""
+    try:
+        cmd = [
+            'ssh', '-o', 'ConnectTimeout=5', '-o', 'StrictHostKeyChecking=no',
+            '-o', 'BatchMode=yes', '-p', str(server.ssh_port)
+        ]
+        
+        if server.ssh_key:
+            cmd.extend(['-i', server.ssh_key.key_path])
+        
+        # Check if service is active and get its status
+        check_script = '''
+        if systemctl is-active dc-watchdog-agent >/dev/null 2>&1; then
+            echo "RUNNING"
+        elif [ -f /opt/dc-watchdog/dc-watchdog-agent.sh ]; then
+            echo "INSTALLED_NOT_RUNNING"
+        else
+            echo "NOT_INSTALLED"
+        fi
+        '''
+        
+        cmd.extend([f'{server.ssh_user}@{server.server_ip}', check_script])
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        output = result.stdout.strip()
+        
+        if output == "RUNNING":
+            return {'running': True, 'installed': True, 'status': 'running'}
+        elif output == "INSTALLED_NOT_RUNNING":
+            return {'running': False, 'installed': True, 'status': 'stopped'}
+        else:
+            return {'running': False, 'installed': False, 'status': 'not_installed'}
+    except Exception as e:
+        return {'running': False, 'installed': False, 'status': 'unknown', 'error': str(e)}
 
 def install_exporter_remote(server, exporter_name):
     """Install an exporter on a remote server via SSH."""
