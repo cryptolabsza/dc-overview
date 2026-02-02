@@ -19,7 +19,7 @@ env:
 
 jobs:
   build:
-    runs-on: [self-hosted, linux]
+    runs-on: self-hosted
     permissions:
       contents: read
       packages: write
@@ -132,7 +132,7 @@ jobs:
 
   # Build RunPod Exporter image
   build-runpod-exporter:
-    runs-on: [self-hosted, linux]
+    runs-on: self-hosted
     permissions:
       contents: read
       packages: write
@@ -203,7 +203,7 @@ jobs:
 
   # Build Vast.ai Exporter image
   build-vastai-exporter:
-    runs-on: [self-hosted, linux]
+    runs-on: self-hosted
     permissions:
       contents: read
       packages: write
