@@ -39,7 +39,10 @@ VOLUME_PATTERNS="dc-overview prometheus grafana ipmi vastai runpod cryptolabs-pr
 DC_NETWORKS="cryptolabs dc-overview_monitoring dc-overview_default"
 
 # Exporter services to remove (systemd services)
-EXPORTER_SERVICES="dc-exporter node_exporter"
+EXPORTER_SERVICES="dc-exporter node_exporter dc-watchdog-agent"
+
+# DC Watchdog agent directories to remove
+DC_WATCHDOG_DIRS="/opt/dc-watchdog /etc/dc-watchdog"
 
 # Legacy exporter files to remove
 LEGACY_EXPORTER_FILES="/opt/runpod_exporter.py /opt/vastai_exporter.py /opt/runpod-exporter /opt/vastai-exporter"
@@ -126,6 +129,12 @@ for file in ${LEGACY_EXPORTER_FILES}; do
     ssh_cmd ${MASTER_PORT} "rm -f ${file} 2>/dev/null && echo \"    removed ${file}\" || true"
 done
 
+# Remove DC Watchdog agent directories
+echo "  Removing DC Watchdog agent..."
+for dir in ${DC_WATCHDOG_DIRS}; do
+    ssh_cmd ${MASTER_PORT} "rm -rf ${dir} 2>/dev/null && echo \"    removed ${dir}\" || true"
+done
+
 # Remove dc-overview related images ONLY (ensures fresh pull on next deploy)
 # PRESERVES: minecraft, watchtower images
 echo "  Removing monitoring images..."
@@ -162,6 +171,12 @@ for svc in ${EXPORTER_SERVICES}; do
 done
 ssh_cmd ${WK01_PORT} "systemctl daemon-reload"
 
+# Remove DC Watchdog agent directories on wk01
+echo "  Removing DC Watchdog agent..."
+for dir in ${DC_WATCHDOG_DIRS}; do
+    ssh_cmd ${WK01_PORT} "rm -rf ${dir} 2>/dev/null && echo \"    removed ${dir}\" || true"
+done
+
 echo -e "${GREEN}  ✓ wk01 cleaned${NC}"
 
 echo ""
@@ -174,6 +189,12 @@ for svc in ${EXPORTER_SERVICES}; do
     ssh_cmd ${WK03_PORT} "rm -f /etc/systemd/system/${svc}.service 2>/dev/null || true"
 done
 ssh_cmd ${WK03_PORT} "systemctl daemon-reload"
+
+# Remove DC Watchdog agent directories on wk03
+echo "  Removing DC Watchdog agent..."
+for dir in ${DC_WATCHDOG_DIRS}; do
+    ssh_cmd ${WK03_PORT} "rm -rf ${dir} 2>/dev/null && echo \"    removed ${dir}\" || true"
+done
 
 echo -e "${GREEN}  ✓ wk03 cleaned${NC}"
 
@@ -197,6 +218,7 @@ echo ""
 echo "Summary:"
 echo "  • Master: Removed monitoring containers, volumes, networks, and images"
 echo "  • Workers: Removed exporter systemd services (wk01, wk03)"
+echo "  • All nodes: Removed DC Watchdog agent (/opt/dc-watchdog, /etc/dc-watchdog)"
 echo "  • Preserved: minecraft, watchtower (if not dc-overview related)"
 echo "  • Next deploy will pull fresh monitoring images"
 echo ""

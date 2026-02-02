@@ -829,11 +829,22 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     config.components.ipmi_monitor = components.get('ipmi_monitor', False)
     config.components.vast_exporter = components.get('vast_exporter', False)
     config.components.runpod_exporter = components.get('runpod_exporter', False)
+    config.components.dc_watchdog = components.get('dc_watchdog', False)
     
     # Vast.ai
     vast = data.get('vast', {})
     config.vast.enabled = config.components.vast_exporter
     config.vast.api_key = vast.get('api_key')
+    # Support api_keys list with name/key pairs (multi-account)
+    for api_key_data in vast.get('api_keys', []):
+        if isinstance(api_key_data, dict):
+            config.vast.add_key(
+                name=api_key_data.get('name', 'default'),
+                key=api_key_data.get('key', '')
+            )
+    # If Vast is enabled via api_keys, also set the component flag
+    if config.vast.api_keys or config.vast.api_key:
+        config.vast.enabled = True
     
     # RunPod (supports multiple API keys)
     runpod = data.get('runpod', {})
@@ -864,6 +875,16 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     config.ipmi_monitor.ai_license_key = ipmi.get('ai_license_key')
     config.ipmi_monitor.enable_ssh_inventory = ipmi.get('enable_ssh_inventory', True)
     config.ipmi_monitor.enable_ssh_logs = ipmi.get('enable_ssh_logs', False)
+    
+    # DC Watchdog (external uptime monitoring)
+    watchdog = data.get('watchdog', {})
+    config.watchdog.server_url = watchdog.get('server_url', 'https://watchdog.cryptolabs.co.za')
+    config.watchdog.ping_interval = watchdog.get('ping_interval', 30)
+    config.watchdog.fail_timeout = watchdog.get('fail_timeout', 120)
+    config.watchdog.install_agent = watchdog.get('install_agent', True)
+    config.watchdog.agent_use_mtr = watchdog.get('agent_use_mtr', True)
+    # API key: use watchdog.api_key, or fallback to ipmi_monitor.ai_license_key
+    config.watchdog.api_key = watchdog.get('api_key') or ipmi.get('ai_license_key')
     
     # Security / Firewall
     security = data.get('security', {})
