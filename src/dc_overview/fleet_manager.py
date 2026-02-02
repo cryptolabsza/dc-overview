@@ -2242,11 +2242,11 @@ echo "DC Watchdog agent installed and running"
                     command=install_script
                 )
                 
-                if result.returncode == 0:
+                if result.success or result.exit_code == 0:
                     console.print(f"[green]✓[/green] {server.name} ({server.server_ip}): agent installed")
                     success_count += 1
                 else:
-                    console.print(f"[yellow]⚠[/yellow] {server.name}: install failed - {result.stderr[:50]}")
+                    console.print(f"[yellow]⚠[/yellow] {server.name}: install failed - {result.output[:50]}")
                     fail_count += 1
                     
             except Exception as e:
