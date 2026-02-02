@@ -82,6 +82,7 @@ class ComponentConfig:
     ipmi_monitor: bool = False  # IPMI/BMC monitoring
     vast_exporter: bool = False  # Vast.ai earnings/reliability
     runpod_exporter: bool = False  # RunPod earnings/reliability
+    dc_watchdog: bool = False  # External uptime monitoring (requires CryptoLabs subscription)
 
 
 @dataclass
@@ -170,6 +171,27 @@ class IPMIMonitorConfig:
 
 
 @dataclass
+class WatchdogConfig:
+    """DC Watchdog configuration for external uptime monitoring.
+    
+    DC Watchdog runs externally (watchdog.cryptolabs.co.za) and monitors
+    servers from outside the datacenter. Useful for detecting DC-wide outages
+    when internal monitoring (Prometheus/Grafana) would also be down.
+    
+    Requires active CryptoLabs subscription.
+    """
+    enabled: bool = False
+    server_url: str = "https://watchdog.cryptolabs.co.za"
+    api_key: Optional[str] = None  # From WordPress SSO (sk-ipmi-XXX)
+    ping_interval: int = 30  # Seconds between heartbeats
+    fail_timeout: int = 120  # Seconds before server marked DOWN
+    
+    # Agent settings
+    install_agent: bool = True  # Deploy dc-watchdog-agent to workers
+    agent_use_mtr: bool = True  # Include MTR hop data for root cause analysis
+
+
+@dataclass
 class SecurityConfig:
     """Security and firewall configuration."""
     ufw_enabled: bool = True  # Enable UFW firewall
@@ -209,6 +231,7 @@ class FleetConfig:
     ipmi_monitor: IPMIMonitorConfig = field(default_factory=IPMIMonitorConfig)
     vast: VastConfig = field(default_factory=VastConfig)
     runpod: RunPodConfig = field(default_factory=RunPodConfig)
+    watchdog: WatchdogConfig = field(default_factory=WatchdogConfig)
     
     # Security
     security: SecurityConfig = field(default_factory=SecurityConfig)
@@ -291,6 +314,7 @@ class FleetConfig:
                 "ipmi_monitor": self.components.ipmi_monitor,
                 "vast_exporter": self.components.vast_exporter,
                 "runpod_exporter": self.components.runpod_exporter,
+                "dc_watchdog": self.components.dc_watchdog,
             },
             "ssl": {
                 "mode": self.ssl.mode.value,
@@ -329,6 +353,14 @@ class FleetConfig:
             "runpod": {
                 "enabled": self.runpod.enabled,
                 "port": self.runpod.port,
+            },
+            "watchdog": {
+                "enabled": self.watchdog.enabled,
+                "server_url": self.watchdog.server_url,
+                "ping_interval": self.watchdog.ping_interval,
+                "fail_timeout": self.watchdog.fail_timeout,
+                "install_agent": self.watchdog.install_agent,
+                "agent_use_mtr": self.watchdog.agent_use_mtr,
             },
             "servers": [
                 {
@@ -373,6 +405,7 @@ class FleetConfig:
             "vast_api_keys": [{"name": k.name, "key": k.key} for k in self.vast.get_all_keys()],
             "ipmi_ai_license": self.ipmi_monitor.ai_license_key,
             "runpod_api_keys": [{"name": k.name, "key": k.key} for k in self.runpod.api_keys],
+            "watchdog_api_key": self.watchdog.api_key,
         }
         
         # Add per-server BMC passwords
@@ -457,6 +490,15 @@ class FleetConfig:
                         key=api_key_data.get("key", "")
                     )
             
+            # DC Watchdog (external uptime monitoring)
+            watchdog = data.get("watchdog", {})
+            config.watchdog.enabled = watchdog.get("enabled", False)
+            config.watchdog.server_url = watchdog.get("server_url", "https://watchdog.cryptolabs.co.za")
+            config.watchdog.ping_interval = watchdog.get("ping_interval", 30)
+            config.watchdog.fail_timeout = watchdog.get("fail_timeout", 120)
+            config.watchdog.install_agent = watchdog.get("install_agent", True)
+            config.watchdog.agent_use_mtr = watchdog.get("agent_use_mtr", True)
+            
             # Servers
             for s in data.get("servers", []):
                 config.servers.append(Server(
@@ -500,6 +542,9 @@ class FleetConfig:
                         name=api_key_data.get("name", "default"),
                         key=api_key_data.get("key", "")
                     )
+            
+            # Load DC Watchdog API key from secrets
+            config.watchdog.api_key = secrets.get("watchdog_api_key")
             
             # Load per-server BMC passwords
             server_bmc_passwords = secrets.get("server_bmc_passwords", {})

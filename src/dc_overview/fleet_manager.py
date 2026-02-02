@@ -250,6 +250,14 @@ class FleetManager:
             if self.config.components.runpod_exporter and self.config.runpod.api_keys:
                 self._deploy_runpod_exporter()
             
+            # Step 8c: DC Watchdog agent (if enabled)
+            if self.config.components.dc_watchdog and self.config.watchdog.enabled:
+                if self.config.watchdog.api_key:
+                    self._deploy_watchdog_agents()
+                else:
+                    console.print("[yellow]DC Watchdog enabled but no API key configured[/yellow]")
+                    console.print("  Get your API key from https://www.cryptolabs.co.za/account/")
+            
             # Step 9: Proxy Integration (skip if using existing cryptolabs-proxy)
             if not getattr(self.config.ssl, 'use_existing_proxy', False):
                 self._setup_reverse_proxy()
@@ -2099,6 +2107,145 @@ except Exception as e:
             console.print(f"[green]✓[/green] RunPod exporter running on port 8623 ({len(self.config.runpod.api_keys)} account(s))")
         else:
             console.print(f"[yellow]⚠[/yellow] RunPod exporter failed: {result.stderr[:100]}")
+    
+    # ============ Step 8c: DC Watchdog ============
+    
+    def _deploy_watchdog_agents(self):
+        """Deploy DC Watchdog agents to all workers for external uptime monitoring."""
+        if not self.config.watchdog.enabled or not self.config.watchdog.api_key:
+            return
+        
+        console.print("\n[bold]Step 8c: Installing DC Watchdog Agents[/bold]\n")
+        console.print("  DC Watchdog provides external uptime monitoring from watchdog.cryptolabs.co.za")
+        console.print("  Agents send heartbeats every 30 seconds; alerts are sent when servers go offline.\n")
+        
+        if not self.config.servers:
+            console.print("[yellow]  No servers configured, skipping watchdog agent deployment[/yellow]")
+            return
+        
+        # Installation script for each worker
+        install_script = f'''#!/bin/bash
+set -e
+
+INSTALL_DIR="/opt/dc-watchdog"
+AGENT_SCRIPT="${{INSTALL_DIR}}/dc-watchdog-agent.sh"
+SERVICE_FILE="/etc/systemd/system/dc-watchdog-agent.service"
+ENV_FILE="${{INSTALL_DIR}}/agent.env"
+
+# Create directory
+mkdir -p "${{INSTALL_DIR}}"
+
+# Configuration
+cat > "${{ENV_FILE}}" << 'EOF'
+SERVER_ADDR={self.config.watchdog.server_url.replace('https://', '').replace('http://', '')}
+SERVER_PORT=443
+API_KEY={self.config.watchdog.api_key}
+PING_INTERVAL={self.config.watchdog.ping_interval}
+USE_MTR={'true' if self.config.watchdog.agent_use_mtr else 'false'}
+WORKER_NAME=$(hostname)
+EOF
+chmod 600 "${{ENV_FILE}}"
+
+# Install mtr if enabled
+if [ "{self.config.watchdog.agent_use_mtr}" = "True" ]; then
+    if command -v apt-get &> /dev/null; then
+        apt-get update -qq && apt-get install -y -qq mtr-tiny 2>/dev/null || true
+    elif command -v yum &> /dev/null; then
+        yum install -y -q mtr 2>/dev/null || true
+    fi
+fi
+
+# Agent script
+cat > "${{AGENT_SCRIPT}}" << 'AGENT'
+#!/bin/bash
+source /opt/dc-watchdog/agent.env
+ping_count=0
+MTR_INTERVAL=5
+
+run_mtr() {{
+    if command -v mtr &> /dev/null; then
+        mtr -r -c 3 -n "$1" 2>/dev/null | tail -n +2 | awk '{{print "{{\\"hop\\":" $1 ",\\"host\\":\\"" $2 "\\",\\"loss\\":" $3 ",\\"avg\\":" $6 "}}"}}' | paste -sd, - | sed 's/^/[/;s/$/]/'
+    else
+        echo "[]"
+    fi
+}}
+
+while true; do
+    ping_count=$((ping_count + 1))
+    PUBLIC_IP=$(curl -sf --max-time 5 https://ifconfig.me 2>/dev/null || echo "")
+    
+    if [ $((ping_count % MTR_INTERVAL)) -eq 1 ] && [ "$USE_MTR" = "true" ]; then
+        HOPS=$(run_mtr "${{SERVER_ADDR}}")
+        DATA="{{\\"public_ip\\":\\"${{PUBLIC_IP}}\\",\\"hops\\":${{HOPS}}}}"
+    else
+        DATA="{{\\"public_ip\\":\\"${{PUBLIC_IP}}\\"}}"
+    fi
+    
+    curl -sf --max-time 10 -X POST -H "Content-Type: application/json" \\
+        -d "${{DATA}}" \\
+        "https://${{SERVER_ADDR}}:${{SERVER_PORT}}/ping/${{WORKER_NAME}}?api_key=${{API_KEY}}" 2>/dev/null || true
+    
+    sleep "${{PING_INTERVAL}}"
+done
+AGENT
+chmod +x "${{AGENT_SCRIPT}}"
+
+# Systemd service
+cat > "${{SERVICE_FILE}}" << 'SERVICE'
+[Unit]
+Description=DC Watchdog Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/opt/dc-watchdog/agent.env
+ExecStart=/opt/dc-watchdog/dc-watchdog-agent.sh
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+systemctl daemon-reload
+systemctl enable dc-watchdog-agent
+systemctl restart dc-watchdog-agent
+
+echo "DC Watchdog agent installed and running"
+'''
+        
+        success_count = 0
+        fail_count = 0
+        
+        for server in self.config.servers:
+            creds = self.config.get_server_ssh_creds(server)
+            ssh_key = creds.key_path or self.config.ssh.key_path
+            
+            try:
+                # Run installation script via SSH
+                result = self.ssh.run_command(
+                    host=server.server_ip,
+                    username=creds.username,
+                    port=creds.port,
+                    key_path=ssh_key,
+                    command=install_script
+                )
+                
+                if result.returncode == 0:
+                    console.print(f"[green]✓[/green] {server.name} ({server.server_ip}): agent installed")
+                    success_count += 1
+                else:
+                    console.print(f"[yellow]⚠[/yellow] {server.name}: install failed - {result.stderr[:50]}")
+                    fail_count += 1
+                    
+            except Exception as e:
+                console.print(f"[red]✗[/red] {server.name}: {str(e)[:50]}")
+                fail_count += 1
+        
+        console.print(f"\n  DC Watchdog agents: {success_count} installed, {fail_count} failed")
+        if success_count > 0:
+            console.print(f"  Dashboard: {self.config.watchdog.server_url}/dashboard")
     
     # ============ Step 9: Reverse Proxy ============
     
