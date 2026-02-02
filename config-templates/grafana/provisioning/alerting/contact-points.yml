@@ -1,0 +1,27 @@
+# Grafana Contact Points for DC Watchdog Integration
+# These are provisioned automatically when Grafana starts
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: CryptoLabs-Watchdog
+    receivers:
+      - uid: dc-watchdog-webhook
+        type: webhook
+        settings:
+          url: https://dc-watchdog.cryptolabs.co.za/api/event
+          httpMethod: POST
+          authorizationScheme: Bearer
+          authorizationCredentials: ${CRYPTOLABS_API_KEY}
+          maxAlerts: 10
+        disableResolveMessage: false
+
+  - orgId: 1
+    name: CryptoLabs-Email
+    receivers:
+      - uid: cryptolabs-email
+        type: email
+        settings:
+          addresses: alerts@cryptolabs.co.za
+          singleEmail: false
+        disableResolveMessage: false

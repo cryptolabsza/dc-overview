@@ -1,0 +1,283 @@
+[1;33m=== DC Overview Dev Fleet Cleanup ===[0m
+
+[1;33mStep 1: Cleaning master node (port 100)...[0m
+  Stopping containers...
+cryptolabs-proxy
+grafana
+prometheus
+vastai-exporter
+  Stopping containers by pattern...
+grafana
+prometheus
+cryptolabs-proxy
+vastai-exporter
+  Removing containers...
+cryptolabs-proxy
+grafana
+prometheus
+vastai-exporter
+  Removing containers by pattern...
+  Removing volumes...
+dc-overview-data
+ipmi-monitor-data
+dc-overview_grafana-data
+dc-overview_prometheus-data
+fleet-auth-data
+  Removing volumes by pattern...
+  Pruning unused volumes...
+Deleted Volumes:
+e29fd9aae588732dd5c6ef837b5df4ce38ef4dc4f77dd85a7c39031c81efc07c
+994d03ac01fbdb1e5db83d0bc995d6aafbd06bd2611588bfe8f40d52044eb087
+83a868a236ddfbbb9882120261ab1df6dd51c61dd5036185f8fb6e10ef9fa426
+471336d8f292e4e59d4dc49ff138355d10d020ca179ef6494f7ad54dd1dcb2fc
+62776d90dd57380945ecef4d3b03c20fbc9ce2df37239ac95d1e30efa1f8beac
+e0f9b8e12e28fa9ee0c2490910a279345fad2c361337b6d85b23b93113960d99
+c33bf740685ee120eb1429fcf924797fc6e0bc3c73770b91fac977978409088a
+34b2acd35e3865a57fddb438dc0b909648c01ad6740f0cafcb3c113b91fd351f
+4048348b7e63919623895530f0652233509afdbc969b8f5e12a29dcde44bc798
+4285ea662421b6f2a58be41d45f01321e51c91ef4aba5ea1b509992c7cd407d4
+
+Total reclaimed space: 0B
+  Removing networks...
+cryptolabs
+  Removing networks by pattern...
+  Pruning unused networks...
+  Removing exporter services...
+  Killing legacy host-based exporters...
+    killed process on port 8622
+    killed process on port 8623
+  Removing legacy exporter files...
+    removed /opt/runpod_exporter.py
+    removed /opt/vastai_exporter.py
+    removed /opt/runpod-exporter
+    removed /opt/vastai-exporter
+  Removing monitoring images...
+Untagged: ghcr.io/cryptolabsza/ipmi-monitor:dev
+Untagged: ghcr.io/cryptolabsza/ipmi-monitor@sha256:238a5d7ae96f909ccdefe3be15472d58a57e5b974841c80a3fd5ab41f859d7d7
+Deleted: sha256:fe844c08dff0f3166775d9a99defce6793b7cf923ced2cb6ed259a8dd456bf86
+Deleted: sha256:f152462ea5200776cbab7874a6ecb2f26c37132ed35584cfd2a9c444a455f0cc
+Deleted: sha256:47a7d38a562fadc5c4d27c56f8c989f3af137723c877f08b52aeace3159eddb3
+Deleted: sha256:4e51bef1653fa23a6e0f093fb93bd37ee49f68bcdd473d0175549688b7531e7d
+Deleted: sha256:bdf740b30e899dfa22508c584e753e20fe8f81e7a3f8caa212767a64d4a95996
+Deleted: sha256:f447cad626e9f71c9de4b093f09044c78b761f9bbabcfd0aec81a16c124c16ff
+Deleted: sha256:7645146dfc6cd7211b1560e1f73f43b346d6512c04d43b1307be62aceb37d3d9
+    removed ghcr.io/cryptolabsza/ipmi-monitor
+Untagged: ghcr.io/cryptolabsza/dc-overview:dev
+Untagged: ghcr.io/cryptolabsza/dc-overview@sha256:e0d3a7ab201d2a3ca643d5924d361f7d41e5ac6c82618cd2002895255ec97a5c
+Deleted: sha256:5aa96d6fc85215f98152109ef318b12307a504f49e52c275faed8b5252f1d244
+Deleted: sha256:0ae490182b7337f1d6d0dec6ca1d812914eb92efad347ebafdc7e3bf441a7aca
+Deleted: sha256:8c674371fee3b9590a9111be511466547090ac70ddb6d2e45fe408a1460d75c5
+Deleted: sha256:2abfc3b9efd44fcc53ab14feaa15067a856d76a8d955927661e27882c6b5b482
+Deleted: sha256:a8907084992290d15d530ff1c3c541908760ae9edd1287b674a1bff1aea96582
+Deleted: sha256:aa3bedaf6a566603c6dddfb61bcd45fd1810346805906ec57a52355d1c6f41a3
+    removed ghcr.io/cryptolabsza/dc-overview
+Untagged: ghcr.io/cryptolabsza/cryptolabs-proxy:dev
+Untagged: ghcr.io/cryptolabsza/cryptolabs-proxy@sha256:49d07c719dfe99217926650f351da2d891d887452f9b0c5494fe30ac2e4e0d04
+Deleted: sha256:d25dc558d67fdf18dc10cea5a85489f161d1448c123ddaf8503d0f2a07d67c40
+Deleted: sha256:17332f0c62c9910490ad4746cb54611c0e05cfccbc0eee5c11a96a2dc933a144
+Deleted: sha256:34fabbc02daf12cbc70f737535a667babf58a53bec348c97f89936d3d993037f
+Deleted: sha256:c700bdc2121b1bb4437a5416c9a41e1bdbf9f5584a47e2cacbc676d4d98b8203
+Deleted: sha256:7823cd04e2873def5e344b1c5a30152af03d13b77700e3471971e6eab1b99b9a
+Deleted: sha256:e2793a152cd5965dc6cdc95b27f53c053317c85399e18ee9e2a6ae8930b303c8
+Deleted: sha256:3347b9f8511426d937bdfacb83b494fdddb95f80c1ea531c940b4da1c5a24683
+Deleted: sha256:2ee0d109fea715c9f69942c6d0f8699fec3c2dcb0613d3398a29f39daae37ac6
+Deleted: sha256:9c6ef6380ae4e16d380576556c0abd0afce2f5ec099cc46cb5a8200f4c70ff06
+Deleted: sha256:0c1efc68ce91f6126a11ab69aec34b3d6dedc4218cf54bd048295bbcd012aa7f
+Deleted: sha256:4f559e279dfef3792a048650b76bdb4a6e1c871e1b58a311ab99cb4568ca8938
+Deleted: sha256:e2fd4c9c4ee95d20248ffb04e6e9edf6fdea95ae8d82a51716b63f4c5ee5323b
+    removed ghcr.io/cryptolabsza/vastai-exporter
+Untagged: ghcr.io/cryptolabsza/runpod-exporter:dev
+Untagged: ghcr.io/cryptolabsza/runpod-exporter@sha256:cffeefec8f0b005d9204439d4dd540c464c4215c37e4c581a75eb46d73046a78
+Deleted: sha256:6c66c7594726eafff5f581161d1a60f35409f50ff53d420ceef3992434b7ec2b
+Deleted: sha256:b4b8b6a96c99bfc950ee2afe8a11ddf8657735e65281b877132e165180a06fe7
+Deleted: sha256:1577a4342b79a55e56928c528a0e68648f52906567c25e1978baa1fcd571f8b1
+Deleted: sha256:4516d5c9cace2852d4d745065263a9fb4e242d4f89b3fee0c66b289d123dce31
+Deleted: sha256:4848620b4f05c1bab648b71b2db717c7d2b96fdf4d91bf68b1b701f1f486155d
+Deleted: sha256:aaa0749783d8f0c89f0e3c84610c7e8a3c0d4aaeb0ff4f51eba5ea85a7db3d78
+Deleted: sha256:de6edbcec1fcef89176db9f9e8105fb0869502e288508ed4255e8269cdf65841
+Deleted: sha256:e50a58335e1366e2581fe61794c1651afe2fe04e881e795aa166f24f4fc78d92
+    removed ghcr.io/cryptolabsza/runpod-exporter
+Untagged: prom/prometheus:latest
+Untagged: prom/prometheus@sha256:1f0f50f06acaceb0f5670d2c8a658a599affe7b0d8e78b898c1035653849a702
+Deleted: sha256:937690d77350877cc773f574d6150bc9d1fbcb1a2e23a5ae9c1553d5d29465a5
+Deleted: sha256:5f7c8ce5d4797988cc2d1959987818471ea3cdbe77a8dcd5bf1ccd551d5fb9ae
+Deleted: sha256:908c8e708ad1307871da43cb6f446bf408930d266e67ed3c1b36e11c71d4cb93
+Deleted: sha256:c408bc4ee9a6654a9c0f9f2ab397768a22a0b9d418f30bbc907a5224a22d1f37
+Deleted: sha256:bd9d4664f112398405a3a3238e3d7863c19b7f5f8064e716018c6f10655e30ea
+Deleted: sha256:483c144aa7782eb69425d482cd8217c346340babd4fb71277ee1f17c204eed42
+Deleted: sha256:0892b290aa843b01800b385c6ead85efc466268bfa47b4fc5add291502b350b5
+Deleted: sha256:d8ff67723e8a48ed7d2b9a09cb1b39f64a8d217dd703b548a431dca9889b4fbc
+Deleted: sha256:01b3605fd94917e5fdcd29218be367917241aea1193f7f4a16cc66de4b51f545
+Deleted: sha256:84206608dd77b849a42c68c579ecf082a485eea1bbdec40618c779c373c27b7b
+Deleted: sha256:b92437a87bb9fdba549cccb225042bb05b8789d69defffc21554e626c60f99d8
+    removed prom/prometheus
+Untagged: grafana/grafana:latest
+Untagged: grafana/grafana@sha256:ba93c9d192e58b23e064c7f501d453426ccf4a85065bf25b705ab1e98602bfb1
+Deleted: sha256:aa786575ad9455f06cde03137668886e642e3a6a012326c2f0cc8ea249502873
+Deleted: sha256:45773a06086e9b2b5621cb30e825fe797de7675e6ef12408bc30d57388bfd66f
+Deleted: sha256:ffdea98865093e02b574a56bf3ced9dcc809c3dd5e0ab4936de603ee25573ad7
+Deleted: sha256:74e06adb4b162afdff0bd6589096b4f8e4209ad8231c7ed516413577b03a95f2
+Deleted: sha256:a806d655c5ee55951ef51c7be93af5ea7d053a902e9c7db171c1b313133c3e0e
+Deleted: sha256:dbb3dbc89faf6fce179c1df1af1f1c0cfa1d7281f2d62f3e3b3b423a0dec218f
+Deleted: sha256:f957ecc92cf1e0d009855458675b6253f41580c8d6aa6489c9ac74a03b80b645
+Deleted: sha256:cd9b46ff132dda6a8595f733367599744c25bfcf999d5db2139e1cf9a70f51a2
+Deleted: sha256:eda7ea93fed060001d6d617d88ece34152664defd5c86a76ad2ad94000033077
+Deleted: sha256:f9fbc7b1154b6af929585163a70cb6acdf90e2ba42ced4a6dfdf273e679dbede
+Deleted: sha256:5aa68bbbc67e405a7cfa11466b02f1c9597add532909fb9a4d0f6f58a30b044e
+    removed grafana/grafana
+  Pruning dangling images...
+Deleted Images:
+untagged: ghcr.io/cryptolabsza/cryptolabs-proxy@sha256:ceb5fcdc2e9ba3f437bce19ee54aaf8c544dc50a03202c3708e946fc7b0ce9a4
+deleted: sha256:3c052cd9f9d3bc5b54603fa9dd5d1c56db7f0ec170dc4caab5e69f251fd417fa
+deleted: sha256:c3261be58ae4b80cb15901b54e64886a11f6f66264b06cb209b43b1951052c02
+deleted: sha256:09159b91f1362271fb8a9570036e04b672c465bd36b6ec76a7fe3949fa54a7bd
+deleted: sha256:0c0425a9866ec91d2c76e555a1f4e54960eb9049dd1187a629e19a0b1ad3cb87
+deleted: sha256:6911fec07d4b64a44d259a36573b0f98d57b09e1a82e82f1efe0e68f4913f7d6
+deleted: sha256:4edf0d07ad1e8bd5e945b7d91d716cfc7209f27811053e35014e36a72e58096e
+deleted: sha256:b0ffd108edfe9a93d37d1947ef301cbc0fe5c1897525efd04500738921c7c5c6
+deleted: sha256:2503d4d03ba9d8a5b22d312b72a91d8a546ef0c1140717e31a7327dbd1e991f0
+deleted: sha256:1ea5316ceb098c0b2dbcc6cedb84de6cad2db506e5d7dd4bed1e613df41894f0
+deleted: sha256:aee8fd0712c35d763033e962d6392fa75c80e939d0dbe41712bf0eec5700a7e1
+deleted: sha256:809600203eca88d24994016eb965fd436dece7776bf588f047429944322a025b
+deleted: sha256:f3a23bc2b9f134db5c7127ed475ad3c9dd8f0719cdc002944059e18cf8618d10
+deleted: sha256:ebe1b7ac8c860ce51c852bd1333ac2bb49ef54a2af57517ef1684202d05d1df3
+deleted: sha256:bad170219b4234284a18bfb6ad8998d70a818f09c133c95d8bfeefc38c1a02cb
+deleted: sha256:5b4d37fb62dbae255ea62b228ea0142a53fba05b85920e59ccc3c2ed69547fc2
+deleted: sha256:9f6e34003138c117804f71e85e6b1d359a9548e90d2ab4a75f9b486377be4025
+deleted: sha256:9fda47bb4cf4ff5f643f7e9d4de82f2b138a3078ba5b79c1fbc1f0b8ae05da95
+deleted: sha256:0785b5259ff0275515cdb109e663502f5e323ef1f669af71ad3112cd24d8cf48
+deleted: sha256:4c6d79669e7c8af6a1034cba0975ac1e13a390faed682069204603fa5175746d
+
+Total reclaimed space: 152.9MB
+  Cleaning certbot lock files...
+[1;33m=== DC Overview Dev Fleet Cleanup ===[0m
+
+[1;33mStep 1: Cleaning master node (port 100)...[0m
+  Stopping containers...
+cryptolabs-proxy
+grafana
+prometheus
+vastai-exporter
+  Stopping containers by pattern...
+grafana
+prometheus
+cryptolabs-proxy
+vastai-exporter
+  Removing containers...
+cryptolabs-proxy
+grafana
+prometheus
+vastai-exporter
+  Removing containers by pattern...
+  Removing volumes...
+dc-overview-data
+ipmi-monitor-data
+dc-overview_grafana-data
+dc-overview_prometheus-data
+fleet-auth-data
+  Removing volumes by pattern...
+  Pruning unused volumes...
+Deleted Volumes:
+95c9142151eaeb5b124f3e4229ef94a4d7171a86038ddcda309452d662a6da6d
+97c98dbc3ddcf100702c7b67a4ec2041cdec3c1dd04dd3f8c34db55ebf2eec42
+311cfcfff9c433ac3d13a371a76d572da69e0223cca659021f13ccb6a31eb781
+
+Total reclaimed space: 0B
+  Removing networks...
+cryptolabs
+  Removing networks by pattern...
+  Pruning unused networks...
+  Removing exporter services...
+  Killing legacy host-based exporters...
+    killed process on port 8622
+    killed process on port 8623
+  Removing legacy exporter files...
+    removed /opt/runpod_exporter.py
+    removed /opt/vastai_exporter.py
+    removed /opt/runpod-exporter
+    removed /opt/vastai-exporter
+  Removing monitoring images...
+Untagged: ghcr.io/cryptolabsza/ipmi-monitor:dev
+Untagged: ghcr.io/cryptolabsza/ipmi-monitor@sha256:238a5d7ae96f909ccdefe3be15472d58a57e5b974841c80a3fd5ab41f859d7d7
+Deleted: sha256:fe844c08dff0f3166775d9a99defce6793b7cf923ced2cb6ed259a8dd456bf86
+Deleted: sha256:f152462ea5200776cbab7874a6ecb2f26c37132ed35584cfd2a9c444a455f0cc
+Deleted: sha256:47a7d38a562fadc5c4d27c56f8c989f3af137723c877f08b52aeace3159eddb3
+Deleted: sha256:4e51bef1653fa23a6e0f093fb93bd37ee49f68bcdd473d0175549688b7531e7d
+Deleted: sha256:bdf740b30e899dfa22508c584e753e20fe8f81e7a3f8caa212767a64d4a95996
+Deleted: sha256:f447cad626e9f71c9de4b093f09044c78b761f9bbabcfd0aec81a16c124c16ff
+Deleted: sha256:7645146dfc6cd7211b1560e1f73f43b346d6512c04d43b1307be62aceb37d3d9
+    removed ghcr.io/cryptolabsza/ipmi-monitor
+Untagged: ghcr.io/cryptolabsza/dc-overview:dev
+Untagged: ghcr.io/cryptolabsza/dc-overview@sha256:e0d3a7ab201d2a3ca643d5924d361f7d41e5ac6c82618cd2002895255ec97a5c
+Deleted: sha256:5aa96d6fc85215f98152109ef318b12307a504f49e52c275faed8b5252f1d244
+Deleted: sha256:0ae490182b7337f1d6d0dec6ca1d812914eb92efad347ebafdc7e3bf441a7aca
+Deleted: sha256:8c674371fee3b9590a9111be511466547090ac70ddb6d2e45fe408a1460d75c5
+Deleted: sha256:2abfc3b9efd44fcc53ab14feaa15067a856d76a8d955927661e27882c6b5b482
+Deleted: sha256:a8907084992290d15d530ff1c3c541908760ae9edd1287b674a1bff1aea96582
+Deleted: sha256:aa3bedaf6a566603c6dddfb61bcd45fd1810346805906ec57a52355d1c6f41a3
+    removed ghcr.io/cryptolabsza/dc-overview
+Untagged: ghcr.io/cryptolabsza/cryptolabs-proxy:dev
+Untagged: ghcr.io/cryptolabsza/cryptolabs-proxy@sha256:49d07c719dfe99217926650f351da2d891d887452f9b0c5494fe30ac2e4e0d04
+Deleted: sha256:d25dc558d67fdf18dc10cea5a85489f161d1448c123ddaf8503d0f2a07d67c40
+Deleted: sha256:17332f0c62c9910490ad4746cb54611c0e05cfccbc0eee5c11a96a2dc933a144
+Deleted: sha256:34fabbc02daf12cbc70f737535a667babf58a53bec348c97f89936d3d993037f
+Deleted: sha256:c700bdc2121b1bb4437a5416c9a41e1bdbf9f5584a47e2cacbc676d4d98b8203
+Deleted: sha256:7823cd04e2873def5e344b1c5a30152af03d13b77700e3471971e6eab1b99b9a
+Deleted: sha256:e2793a152cd5965dc6cdc95b27f53c053317c85399e18ee9e2a6ae8930b303c8
+Deleted: sha256:3347b9f8511426d937bdfacb83b494fdddb95f80c1ea531c940b4da1c5a24683
+Deleted: sha256:2ee0d109fea715c9f69942c6d0f8699fec3c2dcb0613d3398a29f39daae37ac6
+Deleted: sha256:9c6ef6380ae4e16d380576556c0abd0afce2f5ec099cc46cb5a8200f4c70ff06
+Deleted: sha256:0c1efc68ce91f6126a11ab69aec34b3d6dedc4218cf54bd048295bbcd012aa7f
+Deleted: sha256:4f559e279dfef3792a048650b76bdb4a6e1c871e1b58a311ab99cb4568ca8938
+Deleted: sha256:e2fd4c9c4ee95d20248ffb04e6e9edf6fdea95ae8d82a51716b63f4c5ee5323b
+Deleted: sha256:ebe1b7ac8c860ce51c852bd1333ac2bb49ef54a2af57517ef1684202d05d1df3
+Deleted: sha256:bad170219b4234284a18bfb6ad8998d70a818f09c133c95d8bfeefc38c1a02cb
+Deleted: sha256:5b4d37fb62dbae255ea62b228ea0142a53fba05b85920e59ccc3c2ed69547fc2
+Deleted: sha256:9f6e34003138c117804f71e85e6b1d359a9548e90d2ab4a75f9b486377be4025
+Deleted: sha256:9fda47bb4cf4ff5f643f7e9d4de82f2b138a3078ba5b79c1fbc1f0b8ae05da95
+Deleted: sha256:0785b5259ff0275515cdb109e663502f5e323ef1f669af71ad3112cd24d8cf48
+Deleted: sha256:4c6d79669e7c8af6a1034cba0975ac1e13a390faed682069204603fa5175746d
+    removed ghcr.io/cryptolabsza/cryptolabs-proxy
+    removed ghcr.io/cryptolabsza/vastai-exporter
+Untagged: ghcr.io/cryptolabsza/runpod-exporter:dev
+Untagged: ghcr.io/cryptolabsza/runpod-exporter@sha256:cffeefec8f0b005d9204439d4dd540c464c4215c37e4c581a75eb46d73046a78
+Deleted: sha256:6c66c7594726eafff5f581161d1a60f35409f50ff53d420ceef3992434b7ec2b
+Deleted: sha256:b4b8b6a96c99bfc950ee2afe8a11ddf8657735e65281b877132e165180a06fe7
+Deleted: sha256:1577a4342b79a55e56928c528a0e68648f52906567c25e1978baa1fcd571f8b1
+Deleted: sha256:4516d5c9cace2852d4d745065263a9fb4e242d4f89b3fee0c66b289d123dce31
+Deleted: sha256:4848620b4f05c1bab648b71b2db717c7d2b96fdf4d91bf68b1b701f1f486155d
+Deleted: sha256:aaa0749783d8f0c89f0e3c84610c7e8a3c0d4aaeb0ff4f51eba5ea85a7db3d78
+Deleted: sha256:de6edbcec1fcef89176db9f9e8105fb0869502e288508ed4255e8269cdf65841
+Deleted: sha256:e50a58335e1366e2581fe61794c1651afe2fe04e881e795aa166f24f4fc78d92
+    removed ghcr.io/cryptolabsza/runpod-exporter
+Untagged: prom/prometheus:latest
+Untagged: prom/prometheus@sha256:1f0f50f06acaceb0f5670d2c8a658a599affe7b0d8e78b898c1035653849a702
+Deleted: sha256:937690d77350877cc773f574d6150bc9d1fbcb1a2e23a5ae9c1553d5d29465a5
+Deleted: sha256:5f7c8ce5d4797988cc2d1959987818471ea3cdbe77a8dcd5bf1ccd551d5fb9ae
+Deleted: sha256:908c8e708ad1307871da43cb6f446bf408930d266e67ed3c1b36e11c71d4cb93
+Deleted: sha256:c408bc4ee9a6654a9c0f9f2ab397768a22a0b9d418f30bbc907a5224a22d1f37
+Deleted: sha256:bd9d4664f112398405a3a3238e3d7863c19b7f5f8064e716018c6f10655e30ea
+Deleted: sha256:483c144aa7782eb69425d482cd8217c346340babd4fb71277ee1f17c204eed42
+Deleted: sha256:0892b290aa843b01800b385c6ead85efc466268bfa47b4fc5add291502b350b5
+Deleted: sha256:d8ff67723e8a48ed7d2b9a09cb1b39f64a8d217dd703b548a431dca9889b4fbc
+Deleted: sha256:01b3605fd94917e5fdcd29218be367917241aea1193f7f4a16cc66de4b51f545
+Deleted: sha256:84206608dd77b849a42c68c579ecf082a485eea1bbdec40618c779c373c27b7b
+Deleted: sha256:b92437a87bb9fdba549cccb225042bb05b8789d69defffc21554e626c60f99d8
+    removed prom/prometheus
+Untagged: grafana/grafana:latest
+Untagged: grafana/grafana@sha256:ba93c9d192e58b23e064c7f501d453426ccf4a85065bf25b705ab1e98602bfb1
+Deleted: sha256:aa786575ad9455f06cde03137668886e642e3a6a012326c2f0cc8ea249502873
+Deleted: sha256:45773a06086e9b2b5621cb30e825fe797de7675e6ef12408bc30d57388bfd66f
+Deleted: sha256:ffdea98865093e02b574a56bf3ced9dcc809c3dd5e0ab4936de603ee25573ad7
+Deleted: sha256:74e06adb4b162afdff0bd6589096b4f8e4209ad8231c7ed516413577b03a95f2
+Deleted: sha256:a806d655c5ee55951ef51c7be93af5ea7d053a902e9c7db171c1b313133c3e0e
+Deleted: sha256:dbb3dbc89faf6fce179c1df1af1f1c0cfa1d7281f2d62f3e3b3b423a0dec218f
+Deleted: sha256:f957ecc92cf1e0d009855458675b6253f41580c8d6aa6489c9ac74a03b80b645
+Deleted: sha256:cd9b46ff132dda6a8595f733367599744c25bfcf999d5db2139e1cf9a70f51a2
+Deleted: sha256:eda7ea93fed060001d6d617d88ece34152664defd5c86a76ad2ad94000033077
+Deleted: sha256:f9fbc7b1154b6af929585163a70cb6acdf90e2ba42ced4a6dfdf273e679dbede
+Deleted: sha256:5aa68bbbc67e405a7cfa11466b02f1c9597add532909fb9a4d0f6f58a30b044e
+    removed grafana/grafana
+  Pruning dangling images...
+Total reclaimed space: 0B
+  Cleaning certbot lock files...

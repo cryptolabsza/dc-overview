@@ -171,6 +171,7 @@ class IPMIMonitorConfig:
 
 
 @dataclass
+@dataclass
 class WatchdogConfig:
     """DC Watchdog configuration for external uptime monitoring.
     
@@ -186,9 +187,13 @@ class WatchdogConfig:
     ping_interval: int = 30  # Seconds between heartbeats
     fail_timeout: int = 120  # Seconds before server marked DOWN
     
+    # Subscription limits (from WordPress validation)
+    max_servers: int = 50  # Max servers allowed by subscription tier
+    
     # Agent settings
     install_agent: bool = True  # Deploy dc-watchdog-agent to workers
     agent_use_mtr: bool = True  # Include MTR hop data for root cause analysis
+    agent_monitoring_level: str = "standard"  # basic, standard, advanced
 
 
 @dataclass

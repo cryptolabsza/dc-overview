@@ -2123,6 +2123,16 @@ except Exception as e:
             console.print("[yellow]  No servers configured, skipping watchdog agent deployment[/yellow]")
             return
         
+        # Check subscription server limit
+        max_servers = self.config.watchdog.max_servers or 50
+        if len(self.config.servers) > max_servers:
+            console.print(f"[yellow]⚠ Your subscription allows {max_servers} servers, but {len(self.config.servers)} are configured.[/yellow]")
+            console.print(f"[yellow]  DC Watchdog will be installed on the first {max_servers} servers only.[/yellow]")
+            console.print(f"[dim]  Upgrade your plan at https://www.cryptolabs.co.za/account/ to monitor more servers.[/dim]")
+            servers_to_install = self.config.servers[:max_servers]
+        else:
+            servers_to_install = self.config.servers
+        
         # Installation script for each worker
         install_script = f'''#!/bin/bash
 set -e
@@ -2218,7 +2228,7 @@ echo "DC Watchdog agent installed and running"
         success_count = 0
         fail_count = 0
         
-        for server in self.config.servers:
+        for server in servers_to_install:
             creds = self.config.get_server_ssh_creds(server)
             ssh_key = creds.key_path or self.config.ssh.key_path
             

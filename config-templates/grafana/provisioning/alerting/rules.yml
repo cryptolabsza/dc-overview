@@ -1,0 +1,350 @@
+# Grafana Alert Rules for GPU/Server Monitoring
+# These rules are provisioned automatically
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: Infrastructure Alerts
+    folder: CryptoLabs Alerts
+    interval: 1m
+    rules:
+      # Node Exporter Down
+      - uid: node-down
+        title: Node Exporter Unreachable
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: up{job="node"} == 0
+              instant: true
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+              refId: C
+              type: classic_conditions
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 2m
+        annotations:
+          summary: "Node exporter is down on {{ $labels.instance }}"
+          description: "Node exporter on {{ $labels.instance }} has been unreachable for more than 2 minutes."
+        labels:
+          severity: critical
+          alert_type: server_down
+
+      # High CPU Usage
+      - uid: high-cpu
+        title: High CPU Usage
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 90
+              instant: true
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+              refId: C
+              type: classic_conditions
+        noDataState: OK
+        execErrState: OK
+        for: 5m
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage has been above 90% for more than 5 minutes on {{ $labels.instance }}"
+        labels:
+          severity: warning
+          alert_type: general
+
+      # High Memory Usage
+      - uid: high-memory
+        title: High Memory Usage
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 95
+              instant: true
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+              refId: C
+              type: classic_conditions
+        noDataState: OK
+        execErrState: OK
+        for: 5m
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage has been above 95% for more than 5 minutes on {{ $labels.instance }}"
+        labels:
+          severity: warning
+          alert_type: memory
+
+      # High Disk Usage
+      - uid: high-disk
+        title: High Disk Usage
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"})) * 100 > 90
+              instant: true
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+              refId: C
+              type: classic_conditions
+        noDataState: OK
+        execErrState: OK
+        for: 10m
+        annotations:
+          summary: "High disk usage on {{ $labels.instance }}"
+          description: "Disk {{ $labels.mountpoint }} usage is above 90% on {{ $labels.instance }}"
+        labels:
+          severity: warning
+          alert_type: disk
+
+  - orgId: 1
+    name: GPU Alerts
+    folder: CryptoLabs Alerts
+    interval: 30s
+    rules:
+      # GPU Temperature High
+      - uid: gpu-temp-high
+        title: GPU Temperature High
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: nvidia_smi_temperature_gpu > 85
+              instant: true
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+              refId: C
+              type: classic_conditions
+        noDataState: OK
+        execErrState: OK
+        for: 2m
+        annotations:
+          summary: "GPU temperature high on {{ $labels.instance }}"
+          description: "GPU {{ $labels.gpu }} temperature is {{ $value }}°C on {{ $labels.instance }}"
+        labels:
+          severity: warning
+          alert_type: temperature
+
+      # GPU Temperature Critical
+      - uid: gpu-temp-critical
+        title: GPU Temperature Critical
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: nvidia_smi_temperature_gpu > 90
+              instant: true
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+              refId: C
+              type: classic_conditions
+        noDataState: OK
+        execErrState: OK
+        for: 1m
+        annotations:
+          summary: "GPU temperature CRITICAL on {{ $labels.instance }}"
+          description: "GPU {{ $labels.gpu }} temperature is {{ $value }}°C on {{ $labels.instance }} - immediate action required!"
+        labels:
+          severity: critical
+          alert_type: temperature
+
+      # GPU Memory Errors
+      - uid: gpu-memory-errors
+        title: GPU Memory Errors Detected
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: increase(nvidia_smi_ecc_error_corrected_total[10m]) > 10
+              instant: true
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+              refId: C
+              type: classic_conditions
+        noDataState: OK
+        execErrState: OK
+        for: 1m
+        annotations:
+          summary: "GPU memory errors on {{ $labels.instance }}"
+          description: "GPU {{ $labels.gpu }} has detected correctable ECC errors on {{ $labels.instance }}"
+        labels:
+          severity: warning
+          alert_type: memory
+
+      # GPU Uncorrectable Errors
+      - uid: gpu-uncorrectable-errors
+        title: GPU Uncorrectable Memory Errors
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: increase(nvidia_smi_ecc_error_uncorrected_total[10m]) > 0
+              instant: true
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+              refId: C
+              type: classic_conditions
+        noDataState: OK
+        execErrState: OK
+        for: 0s
+        annotations:
+          summary: "GPU uncorrectable errors on {{ $labels.instance }}"
+          description: "GPU {{ $labels.gpu }} has detected UNCORRECTABLE ECC errors on {{ $labels.instance }} - hardware failure likely!"
+        labels:
+          severity: critical
+          alert_type: critical_event

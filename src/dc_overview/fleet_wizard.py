@@ -8,6 +8,7 @@ import os
 import subprocess
 import shutil
 import sqlite3
+import json
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -18,11 +19,22 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.prompt import Prompt
 
+try:
+    import requests
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
+
 from .fleet_config import (
     FleetConfig, Server, SSLConfig, SSLMode, SSHCredentials,
     BMCCredentials, AuthMethod, ComponentConfig, VastConfig,
-    GrafanaConfig, IPMIMonitorConfig, SecurityConfig, get_local_ip
+    GrafanaConfig, IPMIMonitorConfig, SecurityConfig, WatchdogConfig, get_local_ip
 )
+
+# CryptoLabs WordPress API endpoints
+CRYPTOLABS_API_BASE = "https://www.cryptolabs.co.za/wp-json/cryptolabs/v1"
+CRYPTOLABS_VALIDATE_ENDPOINT = f"{CRYPTOLABS_API_BASE}/ipmi/validate"
+CRYPTOLABS_ACCOUNT_URL = "https://www.cryptolabs.co.za/account/"
 
 console = Console()
 
@@ -201,6 +213,11 @@ class FleetWizard:
                     checked=ipmi_already_installed  # Auto-check if already installed
                 ),
                 questionary.Choice(
+                    "DC Watchdog (External uptime monitoring & alerts)",
+                    value="dc_watchdog",
+                    checked=False
+                ),
+                questionary.Choice(
                     "Vast.ai Integration (Earnings & reliability metrics)",
                     value="vast_exporter",
                     checked=False
@@ -219,13 +236,19 @@ class FleetWizard:
         
         self.config.components.dc_overview = "dc_overview" in components
         self.config.components.ipmi_monitor = "ipmi_monitor" in components
+        self.config.components.dc_watchdog = "dc_watchdog" in components
         self.config.components.vast_exporter = "vast_exporter" in components
         self.config.components.runpod_exporter = "runpod_exporter" in components
         
         # Update dependent configs
         self.config.ipmi_monitor.enabled = self.config.components.ipmi_monitor
+        self.config.watchdog.enabled = self.config.components.dc_watchdog
         self.config.vast.enabled = self.config.components.vast_exporter
         self.config.runpod.enabled = self.config.components.runpod_exporter
+        
+        # If DC Watchdog is selected, we'll collect credentials later
+        if self.config.components.dc_watchdog:
+            console.print("[dim]DC Watchdog requires a CryptoLabs account. We'll set this up later.[/dim]")
         
         console.print()
     
@@ -651,7 +674,184 @@ class FleetWizard:
                 ).ask():
                     break
         
+        # DC Watchdog (CryptoLabs subscription)
+        if self.config.components.dc_watchdog:
+            self._collect_watchdog_credentials()
+        
         console.print()
+    
+    def _collect_watchdog_credentials(self):
+        """Collect DC Watchdog credentials and validate with WordPress API."""
+        console.print("\n[bold]DC Watchdog - Uptime Monitoring[/bold]")
+        console.print("[dim]DC Watchdog monitors your servers and sends alerts when they go offline.[/dim]")
+        console.print("[dim]This requires a CryptoLabs subscription.[/dim]\n")
+        
+        # Check if user has an account
+        has_account = questionary.confirm(
+            "Do you have a CryptoLabs account?",
+            default=False,
+            style=custom_style
+        ).ask()
+        
+        if not has_account:
+            console.print()
+            console.print("[bold cyan]Get started with a free trial:[/bold cyan]")
+            console.print(f"  1. Visit [cyan]{CRYPTOLABS_ACCOUNT_URL}[/cyan]")
+            console.print("  2. Create a free account")
+            console.print("  3. Start your 14-day trial (up to 50 servers)")
+            console.print("  4. Copy your API key and run this wizard again")
+            console.print()
+            
+            open_browser = questionary.confirm(
+                "Open registration page in browser?",
+                default=True,
+                style=custom_style
+            ).ask()
+            
+            if open_browser:
+                try:
+                    import webbrowser
+                    webbrowser.open(CRYPTOLABS_ACCOUNT_URL)
+                except Exception:
+                    pass
+            
+            # Ask if they want to continue without watchdog
+            continue_without = questionary.confirm(
+                "Continue without DC Watchdog for now?",
+                default=True,
+                style=custom_style
+            ).ask()
+            
+            if continue_without:
+                self.config.components.dc_watchdog = False
+                self.config.watchdog.enabled = False
+                console.print("[dim]DC Watchdog disabled. You can enable it later.[/dim]")
+                return
+        
+        # Get API key
+        console.print()
+        console.print("[dim]Find your API key at: https://www.cryptolabs.co.za/account/ → API Keys[/dim]")
+        console.print("[dim]Look for a key starting with 'sk-ipmi-'[/dim]\n")
+        
+        api_key = questionary.password(
+            "CryptoLabs API Key (sk-ipmi-...):",
+            style=custom_style
+        ).ask()
+        
+        if not api_key:
+            console.print("[yellow]⚠[/yellow] No API key provided. DC Watchdog will be disabled.")
+            self.config.components.dc_watchdog = False
+            self.config.watchdog.enabled = False
+            return
+        
+        # Validate the API key with WordPress
+        console.print("[dim]Validating API key...[/dim]")
+        validation = self._validate_cryptolabs_api_key(api_key)
+        
+        if validation.get("valid"):
+            console.print(f"[green]✓[/green] API key validated!")
+            console.print(f"[dim]  Account: {validation.get('email', 'Unknown')}[/dim]")
+            console.print(f"[dim]  Plan: {validation.get('subscription', 'Unknown')}[/dim]")
+            console.print(f"[dim]  Max servers: {validation.get('max_servers', 50)}[/dim]")
+            
+            # Check trial expiration
+            if validation.get("trial_ends"):
+                console.print(f"[dim]  Trial ends: {validation.get('trial_ends')}[/dim]")
+            
+            if validation.get("frozen"):
+                console.print("[yellow]⚠[/yellow] Your account is frozen. Please update payment.")
+            
+            # Store the validated config
+            self.config.watchdog.api_key = api_key
+            self.config.watchdog.enabled = True
+            self.config.watchdog.max_servers = validation.get("max_servers", 50)
+            
+            # Ask for monitoring preferences
+            console.print()
+            use_mtr = questionary.confirm(
+                "Enable MTR route tracing? (helps diagnose network issues)",
+                default=True,
+                style=custom_style
+            ).ask()
+            self.config.watchdog.agent_use_mtr = use_mtr
+            
+            # Ask for ping interval
+            interval = questionary.select(
+                "Heartbeat interval:",
+                choices=[
+                    questionary.Choice("Every 10 seconds (fastest)", value=10),
+                    questionary.Choice("Every 30 seconds (recommended)", value=30),
+                    questionary.Choice("Every 60 seconds (low bandwidth)", value=60),
+                ],
+                default="Every 30 seconds (recommended)",
+                style=custom_style
+            ).ask()
+            self.config.watchdog.ping_interval = interval
+            
+        else:
+            error_msg = validation.get("error", "Unknown error")
+            console.print(f"[red]✗[/red] API key validation failed: {error_msg}")
+            
+            if validation.get("needs_verification"):
+                console.print("[yellow]⚠[/yellow] Please check your email and verify your account.")
+            if validation.get("trial_expired"):
+                console.print("[yellow]⚠[/yellow] Your trial has expired. Please upgrade to continue.")
+            
+            retry = questionary.confirm(
+                "Try a different API key?",
+                default=True,
+                style=custom_style
+            ).ask()
+            
+            if retry:
+                return self._collect_watchdog_credentials()
+            else:
+                console.print("[dim]DC Watchdog disabled. You can enable it later.[/dim]")
+                self.config.components.dc_watchdog = False
+                self.config.watchdog.enabled = False
+    
+    def _validate_cryptolabs_api_key(self, api_key: str) -> Dict[str, Any]:
+        """Validate an API key with the CryptoLabs WordPress API.
+        
+        Returns:
+            Dictionary with validation result and subscription info
+        """
+        if not HAS_REQUESTS:
+            # requests not installed - skip validation
+            console.print("[yellow]⚠[/yellow] requests library not installed - skipping validation")
+            return {"valid": True, "subscription": "unknown", "max_servers": 50}
+        
+        try:
+            response = requests.post(
+                CRYPTOLABS_VALIDATE_ENDPOINT,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={"api_key": api_key},
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return data
+            elif response.status_code == 401:
+                return {"valid": False, "error": "Invalid API key"}
+            elif response.status_code == 403:
+                data = response.json()
+                return data
+            else:
+                return {"valid": False, "error": f"Server returned {response.status_code}"}
+                
+        except requests.exceptions.Timeout:
+            console.print("[yellow]⚠[/yellow] Connection timed out - skipping validation")
+            return {"valid": True, "subscription": "unknown", "max_servers": 50}
+        except requests.exceptions.RequestException as e:
+            console.print(f"[yellow]⚠[/yellow] Could not reach CryptoLabs server: {e}")
+            # Allow offline mode - trust the key format
+            if api_key.startswith("sk-ipmi-"):
+                return {"valid": True, "subscription": "unknown", "max_servers": 50}
+            return {"valid": False, "error": "Could not validate key"}
     
     # ============ Step 3: Servers ============
 
@@ -1506,6 +1706,15 @@ class FleetWizard:
             "IPMI Monitor",
             "[green]✓ Enabled[/green]" if self.config.components.ipmi_monitor else "[dim]Disabled[/dim]"
         )
+        # DC Watchdog
+        if self.config.components.dc_watchdog and self.config.watchdog.enabled:
+            watchdog_status = f"[green]✓ Enabled (max {self.config.watchdog.max_servers} servers)[/green]"
+        elif self.config.components.dc_watchdog:
+            watchdog_status = "[yellow]⚠ Enabled (no API key)[/yellow]"
+        else:
+            watchdog_status = "[dim]Disabled[/dim]"
+        comp_table.add_row("DC Watchdog (External Uptime)", watchdog_status)
+        
         comp_table.add_row(
             "Vast.ai Integration",
             "[green]✓ Enabled[/green]" if self.config.components.vast_exporter else "[dim]Disabled[/dim]"
