@@ -305,13 +305,14 @@ class FleetWizard:
             self.config.fleet_admin_pass = secrets.token_urlsafe(12)
             console.print(f"[dim]Generated password: {self.config.fleet_admin_pass}[/dim]")
         
-        # Grafana password
+        # Grafana password (optional - defaults to fleet admin password)
         console.print("\n[bold]Grafana Dashboard[/bold]")
-        self.config.grafana.admin_password = questionary.password(
-            "Grafana admin password:",
-            validate=lambda x: len(x) >= 4 or "Password must be at least 4 characters",
+        console.print("[dim]Press Enter to use fleet admin password[/dim]")
+        grafana_pass = questionary.password(
+            "Grafana admin password (optional):",
             style=custom_style
-        ).ask() or "admin"
+        ).ask()
+        self.config.grafana.admin_password = grafana_pass if grafana_pass else self.config.fleet_admin_pass
         
         # Grafana home dashboard
         home_dashboard_choices = [
@@ -331,13 +332,14 @@ class FleetWizard:
         # IPMI Monitor password (only if enabled AND not already installed)
         if self.config.components.ipmi_monitor and not self._detect_existing_ipmi():
             console.print("\n[bold]IPMI Monitor[/bold]")
-            console.print("[dim]Setting up a new IPMI Monitor installation[/dim]\n")
+            console.print("[dim]Setting up a new IPMI Monitor installation[/dim]")
+            console.print("[dim]Press Enter to use fleet admin password[/dim]\n")
 
-            self.config.ipmi_monitor.admin_password = questionary.password(
-                "IPMI Monitor admin password:",
-                validate=lambda x: len(x) >= 4 or "Password must be at least 4 characters",
+            ipmi_pass = questionary.password(
+                "IPMI Monitor admin password (optional):",
                 style=custom_style
             ).ask()
+            self.config.ipmi_monitor.admin_password = ipmi_pass if ipmi_pass else self.config.fleet_admin_pass
 
             # AI License (optional)
             console.print("\n[dim]AI Insights provides intelligent diagnostics (optional)[/dim]")

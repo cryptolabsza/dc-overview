@@ -526,8 +526,11 @@ class FleetConfig:
             config.fleet_admin_pass = secrets.get("fleet_admin_pass")
             config.ssh.password = secrets.get("ssh_password")
             config.bmc.password = secrets.get("bmc_password")
-            config.grafana.admin_password = secrets.get("grafana_password", "admin")
-            config.ipmi_monitor.admin_password = secrets.get("ipmi_monitor_password")
+            
+            # Use fleet_admin_pass as default for service passwords (optional overrides)
+            default_pass = config.fleet_admin_pass or "admin"
+            config.grafana.admin_password = secrets.get("grafana_password") or default_pass
+            config.ipmi_monitor.admin_password = secrets.get("ipmi_monitor_password") or default_pass
             # Load Vast API keys from secrets (supports multiple or legacy single key)
             for api_key_data in secrets.get("vast_api_keys", []):
                 if isinstance(api_key_data, dict):
