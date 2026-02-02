@@ -550,7 +550,12 @@ class FleetConfig:
                     )
             
             # Load DC Watchdog API key from secrets
-            config.watchdog.api_key = secrets.get("watchdog_api_key")
+            # Falls back to ipmi_ai_license since they use the same sk-ipmi-xxx key
+            config.watchdog.api_key = (
+                secrets.get("watchdog_api_key") or 
+                secrets.get("ipmi_ai_license") or
+                secrets.get("cryptolabs_api_key")  # Generic key name
+            )
             
             # Load per-server BMC passwords
             server_bmc_passwords = secrets.get("server_bmc_passwords", {})
