@@ -5,7 +5,8 @@
 # Does NOT reboot any machines
 # Designed for testing - ensures fresh images on next deploy
 
-set -e
+# NOTE: We do NOT use 'set -e' because cleanup commands may fail (e.g., item doesn't exist)
+# and we want to continue cleaning up everything regardless
 
 # Configuration
 MASTER_IP="88.0.33.141"
@@ -47,7 +48,11 @@ CONTAINER_PATTERNS="grafana prometheus ipmi-monitor dc-overview cryptolabs-proxy
 # - dc-exporter: old dc-exporter (dc-overview will install dc-exporter-rs)
 # - gddr6-metrics-exporter: legacy (may already be cleared)
 # - dcgm, nvidia-dcgm: NVIDIA DCGM daemon (replaced by dc-exporter-rs for GPU metrics)
-EXPORTER_SERVICES="node_exporter dc-exporter dcgm-exporter gddr6-metrics-exporter dcgm nvidia-dcgm"
+# - dc-watchdog-agent: DC Watchdog external monitoring agent
+EXPORTER_SERVICES="node_exporter dc-exporter dcgm-exporter gddr6-metrics-exporter dcgm nvidia-dcgm dc-watchdog-agent"
+
+# DC Watchdog agent directories to remove
+DC_WATCHDOG_DIRS="/opt/dc-watchdog /etc/dc-watchdog"
 
 # Legacy exporter files to remove
 LEGACY_EXPORTER_FILES="/opt/runpod_exporter.py /opt/vastai_exporter.py /opt/runpod-exporter /opt/vastai-exporter"
@@ -130,6 +135,12 @@ done
 echo "  Removing legacy exporter files..."
 for file in ${LEGACY_EXPORTER_FILES}; do
     ssh_master "rm -f ${file} 2>/dev/null && echo \"    removed ${file}\" || true"
+done
+
+# Remove DC Watchdog agent directories on master
+echo "  Removing DC Watchdog agent..."
+for dir in ${DC_WATCHDOG_DIRS}; do
+    ssh_master "rm -rf ${dir} 2>/dev/null && echo \"    removed ${dir}\" || true"
 done
 
 # Remove dc-overview related volumes explicitly
@@ -222,13 +233,14 @@ clean_worker() {
     
     # Run all cleanup in a single SSH command for speed
     ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o BatchMode=yes -i ${SSH_KEY} ${SSH_USER}@${worker_ip} "
-        for svc in node_exporter dc-exporter dcgm-exporter gddr6-metrics-exporter dcgm nvidia-dcgm; do
+        for svc in node_exporter dc-exporter dcgm-exporter gddr6-metrics-exporter dcgm nvidia-dcgm dc-watchdog-agent; do
             systemctl stop \${svc} 2>/dev/null || true
             systemctl disable \${svc} 2>/dev/null || true
             rm -f /etc/systemd/system/\${svc}.service 2>/dev/null || true
         done
         systemctl daemon-reload 2>/dev/null || true
         rm -f /usr/local/bin/node_exporter /usr/local/bin/dc-exporter* /opt/dc-exporter/* 2>/dev/null || true
+        rm -rf /opt/dc-watchdog /etc/dc-watchdog 2>/dev/null || true
     " 2>/dev/null
     
     echo "OK:${hostname}" > "${result_file}"
@@ -302,8 +314,10 @@ echo ""
 echo "Summary:"
 echo "  • Master: Removed monitoring containers, volumes, and images"
 echo "  • Master: Freed ports 80/443 (stopped nginx/apache, killed processes)"
+echo "  • Master: Removed DC Watchdog agent"
 echo "  • Preserved: registry, netbootxyz, pxe containers and images"
 echo "  • Workers: Removed exporter systemd services, Docker containers untouched"
+echo "  • Workers: Removed DC Watchdog agent (/opt/dc-watchdog, /etc/dc-watchdog)"
 echo "  • No reboots performed"
 echo "  • Next deploy will pull fresh monitoring images"
 echo ""
