@@ -2292,19 +2292,40 @@ case $ARCH in
     *)       ARCH_SUFFIX="" ;;
 esac
 
-# Try to download Go agent binary
+# Try to download Go agent binary from the DC Watchdog server
 GO_AGENT_OK=false
 if [ -n "$ARCH_SUFFIX" ]; then
     echo "[+] Downloading Go agent for $ARCH_SUFFIX..."
-    RELEASE_URL="https://github.com/$GITHUB_REPO/releases/latest/download/dc-watchdog-agent-$ARCH_SUFFIX"
-    if curl -fsSL "$RELEASE_URL" -o "$INSTALL_DIR/dc-watchdog-agent.tmp" 2>/dev/null; then
-        mv "$INSTALL_DIR/dc-watchdog-agent.tmp" "$INSTALL_DIR/dc-watchdog-agent"
-        chmod +x "$INSTALL_DIR/dc-watchdog-agent"
-        if "$INSTALL_DIR/dc-watchdog-agent" -version 2>/dev/null; then
-            GO_AGENT_OK=true
-            echo "[+] Go agent downloaded successfully"
+    
+    # Primary: Download from DC Watchdog server (includes binary)
+    AGENT_URL="{base_watchdog_url}/agent/dc-watchdog-agent-$ARCH_SUFFIX"
+    if curl -fsSL "$AGENT_URL" -o "$INSTALL_DIR/dc-watchdog-agent.tmp" 2>/dev/null; then
+        if [ -s "$INSTALL_DIR/dc-watchdog-agent.tmp" ]; then
+            mv "$INSTALL_DIR/dc-watchdog-agent.tmp" "$INSTALL_DIR/dc-watchdog-agent"
+            chmod +x "$INSTALL_DIR/dc-watchdog-agent"
+            if "$INSTALL_DIR/dc-watchdog-agent" -version 2>/dev/null; then
+                GO_AGENT_OK=true
+                echo "[+] Go agent downloaded from watchdog server"
+            fi
         fi
     fi
+    
+    # Fallback: Try GitHub releases (works if repo is public or gh is authenticated)
+    if [ "$GO_AGENT_OK" = "false" ]; then
+        RELEASE_URL="https://github.com/$GITHUB_REPO/releases/latest/download/dc-watchdog-agent-$ARCH_SUFFIX"
+        if curl -fsSL "$RELEASE_URL" -o "$INSTALL_DIR/dc-watchdog-agent.tmp" 2>/dev/null; then
+            if [ -s "$INSTALL_DIR/dc-watchdog-agent.tmp" ]; then
+                mv "$INSTALL_DIR/dc-watchdog-agent.tmp" "$INSTALL_DIR/dc-watchdog-agent"
+                chmod +x "$INSTALL_DIR/dc-watchdog-agent"
+                if "$INSTALL_DIR/dc-watchdog-agent" -version 2>/dev/null; then
+                    GO_AGENT_OK=true
+                    echo "[+] Go agent downloaded from GitHub"
+                fi
+            fi
+        fi
+    fi
+    
+    rm -f "$INSTALL_DIR/dc-watchdog-agent.tmp" 2>/dev/null
 fi
 
 # Create configuration for Go agent
