@@ -2321,6 +2321,41 @@ echo "DC Watchdog agent installed and running"
             # Fallback to legacy inline setup (for backwards compatibility)
             self._deploy_cryptolabs_proxy_legacy(domain)
     
+    def _free_ports_80_443(self):
+        """Free up ports 80 and 443 before starting the proxy.
+        
+        This stops:
+        - Host nginx service (if running)
+        - Any existing cryptolabs-proxy container (including stuck/Created ones)
+        - Apache2 if running
+        """
+        import re
+        
+        # Stop host web servers
+        subprocess.run(["systemctl", "stop", "nginx"], capture_output=True)
+        subprocess.run(["systemctl", "disable", "nginx"], capture_output=True)
+        subprocess.run(["systemctl", "stop", "apache2"], capture_output=True)
+        subprocess.run(["systemctl", "disable", "apache2"], capture_output=True)
+        
+        # Force remove any existing proxy container (handles "Created" state too)
+        subprocess.run(["docker", "rm", "-f", "cryptolabs-proxy"], capture_output=True)
+        
+        # Give time for ports to be released
+        time.sleep(1)
+        
+        # Check if ports are actually free using ss
+        result = subprocess.run(["ss", "-tlnp"], capture_output=True, text=True)
+        if result.returncode == 0:
+            for line in result.stdout.split('\n'):
+                if ':80 ' in line or ':443 ' in line:
+                    # Try to identify and stop the process
+                    pid_match = re.search(r'pid=(\d+)', line)
+                    if pid_match:
+                        pid = pid_match.group(1)
+                        subprocess.run(["kill", "-9", pid], capture_output=True)
+        
+        time.sleep(1)
+    
     def _deploy_cryptolabs_proxy_legacy(self, domain: str):
         """Legacy proxy deployment - used when cryptolabs-proxy module not available."""
         import secrets as secrets_module
@@ -2340,11 +2375,14 @@ echo "DC Watchdog agent installed and running"
         else:
             self._generate_self_signed_cert(domain, ssl_dir)
         
+        # Free up ports 80/443 - stops nginx, apache, existing proxy containers
+        console.print("[dim]Freeing ports 80/443...[/dim]")
+        self._free_ports_80_443()
+        
         # Pull and start proxy
         console.print("[dim]Pulling cryptolabs-proxy image...[/dim]")
         subprocess.run(["docker", "pull", "ghcr.io/cryptolabsza/cryptolabs-proxy:dev"], 
                       capture_output=True, timeout=120)
-        subprocess.run(["docker", "rm", "-f", "cryptolabs-proxy"], capture_output=True)
         
         auth_secret = secrets_module.token_hex(32)
         cmd = [
@@ -2850,7 +2888,9 @@ echo "DC Watchdog agent installed and running"
                 console.print("[dim]Using self-signed certificate[/dim]")
             
             auth_secret = secrets_module.token_hex(32)
-            subprocess.run(["docker", "rm", "-f", "cryptolabs-proxy"], capture_output=True)
+            
+            # Free up ports 80/443 before starting
+            self._free_ports_80_443()
             _ensure_docker_network()
             
             cmd = [
