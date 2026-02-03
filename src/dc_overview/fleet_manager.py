@@ -53,7 +53,7 @@ except ImportError:
     HAS_PROXY_MODULE = False
     PROXY_NETWORK_NAME = "cryptolabs"
     PROXY_NETWORK_SUBNET = "172.30.0.0/16"
-    PROXY_STATIC_IP = "172.30.0.2"
+    PROXY_STATIC_IP = "172.30.0.10"  # Changed from .2 to .10 to avoid conflicts
 
 console = Console()
 
@@ -64,7 +64,7 @@ DOCKER_NETWORK_GATEWAY = "172.30.0.1"
 
 # Static IPs for all services - proxy IP is trusted by downstream services
 STATIC_IPS = {
-    "cryptolabs-proxy": "172.30.0.2",
+    "cryptolabs-proxy": "172.30.0.10",  # Changed from .2 to .10 to avoid conflicts
     "dc-overview": "172.30.0.3",
     "prometheus": "172.30.0.4",
     "grafana": "172.30.0.5",
