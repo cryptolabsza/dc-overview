@@ -186,6 +186,7 @@ class FleetManager:
         self.config = config
         self.ssh = SSHManager(config.config_dir)
         self.prerequisites = PrerequisitesInstaller()
+        self.deployment_errors = []  # Track non-fatal errors
     
     def deploy(self) -> bool:
         """
@@ -203,6 +204,8 @@ class FleetManager:
             border_style="cyan"
         ))
         console.print()
+        
+        self.deployment_errors = []  # Reset for this deploy
         
         try:
             # Step 1: Prerequisites
@@ -230,9 +233,9 @@ class FleetManager:
                 try:
                     self._deploy_ipmi_monitor()
                 except Exception as e:
+                    error_msg = f"IPMI Monitor: {e}"
+                    self.deployment_errors.append(error_msg)
                     console.print(f"[red]IPMI Monitor deployment failed:[/red] {e}")
-                    import traceback
-                    traceback.print_exc()
                     # CryptoLabs Alert System hook (v1.1.0+)
                     if _ALERTS_AVAILABLE:
                         _alerts_module.get_alert_manager().send_deployment_failed_alert(
@@ -244,11 +247,21 @@ class FleetManager:
             
             # Step 8: Vast.ai exporter (if enabled)
             if self.config.components.vast_exporter and self.config.vast.get_all_keys():
-                self._deploy_vast_exporter()
+                try:
+                    self._deploy_vast_exporter()
+                except Exception as e:
+                    error_msg = f"Vast.ai Exporter: {e}"
+                    self.deployment_errors.append(error_msg)
+                    console.print(f"[red]✗[/red] Vast.ai exporter failed: {e}")
             
             # Step 8b: RunPod exporter (if enabled)
             if self.config.components.runpod_exporter and self.config.runpod.api_keys:
-                self._deploy_runpod_exporter()
+                try:
+                    self._deploy_runpod_exporter()
+                except Exception as e:
+                    error_msg = f"RunPod Exporter: {e}"
+                    self.deployment_errors.append(error_msg)
+                    console.print(f"[red]✗[/red] RunPod exporter failed: {e}")
             
             # Step 8c: DC Watchdog agent (if enabled via components.dc_watchdog)
             if self.config.components.dc_watchdog:
@@ -260,15 +273,28 @@ class FleetManager:
             
             # Step 9: Proxy Integration (skip if using existing cryptolabs-proxy)
             if not getattr(self.config.ssl, 'use_existing_proxy', False):
-                self._setup_reverse_proxy()
+                try:
+                    self._setup_reverse_proxy()
+                except Exception as e:
+                    error_msg = f"Reverse Proxy: {e}"
+                    self.deployment_errors.append(error_msg)
+                    console.print(f"[red]✗[/red] Reverse proxy setup failed: {e}")
             else:
-                self._integrate_with_proxy()
+                try:
+                    self._integrate_with_proxy()
+                except Exception as e:
+                    error_msg = f"Proxy Integration: {e}"
+                    self.deployment_errors.append(error_msg)
+                    console.print(f"[red]✗[/red] Proxy integration failed: {e}")
             
             # Step 10: Security Hardening (firewall setup)
             self._setup_security_hardening()
             
-            # Done!
+            # Done - show completion with warnings if any errors occurred
             self._show_completion()
+            
+            if self.deployment_errors:
+                return False  # Deployment had errors
             return True
             
         except Exception as e:
@@ -300,6 +326,52 @@ class FleetManager:
             ipmitool=self.config.components.ipmi_monitor,
             certbot=self.config.ssl.mode == SSLMode.LETSENCRYPT and not use_existing_proxy,
         )
+        
+        # Authenticate with GHCR if PAT is available
+        self._authenticate_ghcr()
+    
+    def _authenticate_ghcr(self):
+        """Authenticate with GitHub Container Registry if credentials are available.
+        
+        Checks for GHCR_PAT environment variable or ghcr_pat in config.
+        If not available, checks if current docker credentials work.
+        """
+        import os
+        
+        # Check for PAT in environment or config
+        ghcr_pat = os.environ.get('GHCR_PAT') or os.environ.get('GITHUB_TOKEN')
+        ghcr_user = os.environ.get('GHCR_USER', 'cryptolabsza')
+        
+        if not ghcr_pat:
+            # Check if docker is already authenticated
+            result = subprocess.run(
+                ["docker", "pull", "ghcr.io/cryptolabsza/cryptolabs-proxy:dev"],
+                capture_output=True, text=True, timeout=60
+            )
+            if result.returncode == 0:
+                console.print("[green]✓[/green] GHCR authentication verified")
+                return
+            elif "denied" in result.stderr.lower() or "unauthorized" in result.stderr.lower():
+                console.print("[yellow]⚠[/yellow] GHCR authentication required but no PAT found")
+                console.print("  [dim]Set GHCR_PAT or GITHUB_TOKEN environment variable[/dim]")
+                console.print("  [dim]Or run: echo 'YOUR_PAT' | docker login ghcr.io -u USERNAME --password-stdin[/dim]")
+                return
+            # Other errors (network, etc) - don't fail here
+            return
+        
+        # Authenticate with GHCR
+        console.print("[dim]Authenticating with GitHub Container Registry...[/dim]")
+        result = subprocess.run(
+            ["docker", "login", "ghcr.io", "-u", ghcr_user, "--password-stdin"],
+            input=ghcr_pat,
+            capture_output=True, text=True, timeout=30
+        )
+        
+        if result.returncode == 0:
+            console.print("[green]✓[/green] GHCR authentication successful")
+        else:
+            console.print(f"[yellow]⚠[/yellow] GHCR authentication failed: {result.stderr[:100]}")
+            console.print("  [dim]Image pulls may fail for private packages[/dim]")
     
     # ============ Step 2: SSH Keys ============
     
@@ -1775,7 +1847,9 @@ echo "Exporters installed successfully"
             self._import_ssh_key_to_ipmi_monitor()
             self._activate_ai_license_in_ipmi_monitor()
         else:
-            console.print(f"[yellow]⚠[/yellow] Failed to start IPMI Monitor: {result.stderr[:100]}")
+            error_msg = result.stderr[:200] if result.stderr else "Unknown error"
+            console.print(f"[yellow]⚠[/yellow] Failed to start IPMI Monitor: {error_msg[:100]}")
+            raise RuntimeError(f"Failed to start IPMI Monitor container: {error_msg}")
     
     def _wait_for_ipmi_monitor_ready(self, timeout: int = 60):
         """Wait for IPMI Monitor container to be healthy and database ready."""
@@ -2064,7 +2138,9 @@ except Exception as e:
         if result.returncode == 0:
             console.print(f"[green]✓[/green] Vast.ai exporter running on port {self.config.vast.port} ({len(api_keys)} account(s))")
         else:
-            console.print(f"[yellow]⚠[/yellow] Vast.ai exporter failed: {result.stderr[:100]}")
+            error_msg = result.stderr[:200] if result.stderr else "Unknown error"
+            console.print(f"[yellow]⚠[/yellow] Vast.ai exporter failed: {error_msg[:100]}")
+            raise RuntimeError(f"Failed to start Vast.ai exporter: {error_msg}")
     
     def _deploy_runpod_exporter(self):
         """Deploy RunPod exporter with multi-account support."""
@@ -2110,7 +2186,9 @@ except Exception as e:
         if result.returncode == 0:
             console.print(f"[green]✓[/green] RunPod exporter running on port 8623 ({len(self.config.runpod.api_keys)} account(s))")
         else:
-            console.print(f"[yellow]⚠[/yellow] RunPod exporter failed: {result.stderr[:100]}")
+            error_msg = result.stderr[:200] if result.stderr else "Unknown error"
+            console.print(f"[yellow]⚠[/yellow] RunPod exporter failed: {error_msg[:100]}")
+            raise RuntimeError(f"Failed to start RunPod exporter: {error_msg}")
     
     # ============ Step 8c: DC Watchdog ============
     
@@ -2354,6 +2432,7 @@ echo "DC Watchdog agent installed and running"
                 console.print(f"\n  Login: [cyan]{self.config.fleet_admin_user}[/cyan] / [dim](password you set)[/dim]")
             else:
                 console.print(f"[red]✗[/red] Failed to start proxy: {message}")
+                raise RuntimeError(f"Failed to start CryptoLabs Proxy: {message}")
         else:
             # Fallback to legacy inline setup (for backwards compatibility)
             self._deploy_cryptolabs_proxy_legacy(domain)
@@ -2442,13 +2521,14 @@ echo "DC Watchdog agent installed and running"
         
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            console.print(f"[red]✗[/red] Failed to start proxy: {result.stderr[:200]}")
-            return
+            error_msg = result.stderr[:200] if result.stderr else "Unknown error"
+            console.print(f"[red]✗[/red] Failed to start proxy: {error_msg}")
+            raise RuntimeError(f"Failed to start CryptoLabs Proxy: {error_msg}")
         
         # Wait for proxy to be healthy (up to 2 minutes)
         if not self._wait_for_container("cryptolabs-proxy", timeout=120, require_healthy=True):
             console.print("[red]✗[/red] Proxy failed to become healthy")
-            return
+            raise RuntimeError("CryptoLabs Proxy container failed to become healthy")
         
         console.print("[green]✓[/green] CryptoLabs Proxy started")
         console.print(f"\n  Fleet Management: [cyan]https://{domain}/[/cyan]")
@@ -2492,8 +2572,9 @@ echo "DC Watchdog agent installed and running"
         
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            console.print(f"[red]✗[/red] Failed to start dc-overview: {result.stderr[:200]}")
-            return
+            error_msg = result.stderr[:200] if result.stderr else "Unknown error"
+            console.print(f"[red]✗[/red] Failed to start dc-overview: {error_msg}")
+            raise RuntimeError(f"Failed to start DC Overview container: {error_msg}")
         
         # Wait for container to be healthy (up to 2 minutes)
         console.print("[dim]Waiting for DC Overview to be healthy...[/dim]")
@@ -3158,10 +3239,24 @@ echo "DC Watchdog agent installed and running"
     def _show_completion(self):
         """Show deployment completion summary."""
         console.print()
-        console.print(Panel(
-            "[bold green]✓ Deployment Complete![/bold green]",
-            border_style="green"
-        ))
+        
+        # Show appropriate completion status based on errors
+        if self.deployment_errors:
+            console.print(Panel(
+                "[bold yellow]⚠ Deployment Completed with Errors[/bold yellow]\n\n"
+                "Some components failed to deploy. See details below.",
+                border_style="yellow"
+            ))
+            console.print()
+            console.print("[bold red]Failed Components:[/bold red]")
+            for error in self.deployment_errors:
+                console.print(f"  [red]✗[/red] {error}")
+            console.print()
+        else:
+            console.print(Panel(
+                "[bold green]✓ Deployment Complete![/bold green]",
+                border_style="green"
+            ))
         
         master_ip = self.config.master_ip or get_local_ip()
         domain = self.config.ssl.domain or master_ip
