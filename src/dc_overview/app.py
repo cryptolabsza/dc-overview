@@ -738,11 +738,21 @@ def api_get_exporter_versions(server_id):
     
     db.session.commit()
     
+    # Also get watchdog agent status
+    watchdog_status = check_watchdog_agent(server)
+    server.watchdog_agent_installed = watchdog_status.get('installed', False)
+    db.session.commit()
+    
     return jsonify({
         'server_id': server_id,
         'server_name': server.name,
         'versions': versions,
-        'updates': updates
+        'updates': updates,
+        'watchdog_agent': {
+            'installed': server.watchdog_agent_installed,
+            'enabled': server.watchdog_agent_enabled,
+            'version': server.watchdog_agent_version
+        }
     })
 
 
@@ -958,6 +968,227 @@ def toggle_watchdog_service(server, enabled: bool) -> bool:
         return result.returncode == 0
     except Exception as e:
         app.logger.error(f"Error toggling watchdog agent on {server.name}: {e}")
+        return False
+
+
+# New watchdog-agent endpoints (for UI consistency)
+@app.route('/api/servers/<int:server_id>/watchdog-agent/toggle', methods=['POST'])
+@csrf.exempt
+@write_required
+def api_toggle_watchdog_agent(server_id):
+    """Toggle DC Watchdog agent on a server (alias for /watchdog/toggle)."""
+    return api_toggle_watchdog(server_id)
+
+
+@app.route('/api/servers/<int:server_id>/watchdog-agent/install', methods=['POST'])
+@csrf.exempt
+@write_required
+def api_install_watchdog_agent(server_id):
+    """Install DC Watchdog agent on a server."""
+    server = Server.query.get_or_404(server_id)
+    
+    # Get watchdog API key from settings or environment
+    api_key = os.environ.get('WATCHDOG_API_KEY', '')
+    if not api_key:
+        # Try to load from config file
+        config_path = '/etc/dc-overview/config.yaml'
+        if os.path.exists(config_path):
+            try:
+                import yaml
+                with open(config_path) as f:
+                    cfg = yaml.safe_load(f)
+                    api_key = cfg.get('watchdog', {}).get('api_key', '')
+            except Exception:
+                pass
+    
+    if not api_key:
+        return jsonify({
+            'success': False,
+            'error': 'DC Watchdog API key not configured'
+        }), 400
+    
+    success, error = install_watchdog_agent_remote(server, api_key)
+    
+    if success:
+        server.watchdog_agent_installed = True
+        server.watchdog_agent_enabled = True
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'DC Watchdog agent installed'})
+    else:
+        return jsonify({'success': False, 'error': error}), 500
+
+
+@app.route('/api/servers/<int:server_id>/watchdog-agent/reinstall', methods=['POST'])
+@csrf.exempt
+@write_required
+def api_reinstall_watchdog_agent(server_id):
+    """Reinstall DC Watchdog agent on a server."""
+    server = Server.query.get_or_404(server_id)
+    
+    # First remove, then install
+    remove_watchdog_agent_remote(server)
+    
+    # Get API key and reinstall
+    api_key = os.environ.get('WATCHDOG_API_KEY', '')
+    if not api_key:
+        config_path = '/etc/dc-overview/config.yaml'
+        if os.path.exists(config_path):
+            try:
+                import yaml
+                with open(config_path) as f:
+                    cfg = yaml.safe_load(f)
+                    api_key = cfg.get('watchdog', {}).get('api_key', '')
+            except Exception:
+                pass
+    
+    if not api_key:
+        return jsonify({
+            'success': False,
+            'error': 'DC Watchdog API key not configured'
+        }), 400
+    
+    success, error = install_watchdog_agent_remote(server, api_key)
+    
+    if success:
+        server.watchdog_agent_installed = True
+        server.watchdog_agent_enabled = True
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'DC Watchdog agent reinstalled'})
+    else:
+        return jsonify({'success': False, 'error': error}), 500
+
+
+@app.route('/api/servers/<int:server_id>/watchdog-agent/remove', methods=['POST'])
+@csrf.exempt
+@write_required
+def api_remove_watchdog_agent(server_id):
+    """Remove DC Watchdog agent from a server."""
+    server = Server.query.get_or_404(server_id)
+    
+    success = remove_watchdog_agent_remote(server)
+    
+    if success:
+        server.watchdog_agent_installed = False
+        server.watchdog_agent_enabled = False
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'DC Watchdog agent removed'})
+    else:
+        return jsonify({'success': False, 'error': 'Failed to remove agent'}), 500
+
+
+def install_watchdog_agent_remote(server, api_key: str) -> tuple:
+    """Install DC Watchdog agent on a remote server via SSH."""
+    try:
+        cmd = [
+            'ssh', '-o', 'ConnectTimeout=30', '-o', 'StrictHostKeyChecking=no',
+            '-o', 'BatchMode=yes', '-p', str(server.ssh_port)
+        ]
+        
+        if server.ssh_key:
+            cmd.extend(['-i', server.ssh_key.key_path])
+        
+        cmd.append(f'{server.ssh_user}@{server.server_ip}')
+        
+        # Install script - same as fleet_manager._deploy_watchdog_agents
+        install_script = f'''
+set -e
+INSTALL_DIR="/opt/dc-watchdog"
+mkdir -p "$INSTALL_DIR"
+
+# Create environment file
+cat > "$INSTALL_DIR/agent.env" << 'ENVEOF'
+WATCHDOG_SERVER="https://watchdog.cryptolabs.co.za"
+HEARTBEAT_INTERVAL=30
+API_KEY="{api_key}"
+WORKER_ID="{server.name}"
+USE_MTR=true
+ENVEOF
+
+# Install mtr if available
+apt-get update -qq && apt-get install -y -qq mtr-tiny 2>/dev/null || yum install -y -q mtr 2>/dev/null || true
+
+# Create agent script
+cat > "$INSTALL_DIR/dc-watchdog-agent.sh" << 'AGENTEOF'
+#!/bin/bash
+source /opt/dc-watchdog/agent.env
+while true; do
+    PAYLOAD=$(cat << EOF
+{{"worker_id": "$WORKER_ID", "api_key": "$API_KEY", "timestamp": $(date +%s)}}
+EOF
+)
+    curl -s -X POST "$WATCHDOG_SERVER/api/heartbeat" \\
+        -H "Content-Type: application/json" \\
+        -d "$PAYLOAD" > /dev/null 2>&1
+    sleep $HEARTBEAT_INTERVAL
+done
+AGENTEOF
+chmod +x "$INSTALL_DIR/dc-watchdog-agent.sh"
+
+# Create systemd service
+cat > /etc/systemd/system/dc-watchdog-agent.service << 'SVCEOF'
+[Unit]
+Description=DC Watchdog Agent
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/opt/dc-watchdog/agent.env
+ExecStart=/opt/dc-watchdog/dc-watchdog-agent.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+systemctl daemon-reload
+systemctl enable dc-watchdog-agent
+systemctl restart dc-watchdog-agent
+echo "INSTALL_SUCCESS"
+'''
+        cmd.append(install_script)
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        
+        if result.returncode == 0 and 'INSTALL_SUCCESS' in result.stdout:
+            return True, None
+        else:
+            error = result.stderr.strip() or result.stdout.strip() or 'Unknown error'
+            return False, error[:200]
+    except subprocess.TimeoutExpired:
+        return False, 'SSH connection timed out'
+    except Exception as e:
+        app.logger.exception(f"Error installing watchdog agent on {server.name}")
+        return False, str(e)[:200]
+
+
+def remove_watchdog_agent_remote(server) -> bool:
+    """Remove DC Watchdog agent from a remote server via SSH."""
+    try:
+        cmd = [
+            'ssh', '-o', 'ConnectTimeout=15', '-o', 'StrictHostKeyChecking=no',
+            '-o', 'BatchMode=yes', '-p', str(server.ssh_port)
+        ]
+        
+        if server.ssh_key:
+            cmd.extend(['-i', server.ssh_key.key_path])
+        
+        cmd.append(f'{server.ssh_user}@{server.server_ip}')
+        
+        remove_script = '''
+systemctl stop dc-watchdog-agent 2>/dev/null || true
+systemctl disable dc-watchdog-agent 2>/dev/null || true
+rm -f /etc/systemd/system/dc-watchdog-agent.service
+rm -rf /opt/dc-watchdog
+systemctl daemon-reload
+echo "REMOVE_SUCCESS"
+'''
+        cmd.append(remove_script)
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        return result.returncode == 0 and 'REMOVE_SUCCESS' in result.stdout
+    except Exception as e:
+        app.logger.error(f"Error removing watchdog agent on {server.name}: {e}")
         return False
 
 
@@ -2617,7 +2848,8 @@ SERVERS_TEMPLATE = """
         const exporters = [
             { key: 'node_exporter', name: 'Node Exporter', port: 9100 },
             { key: 'dc_exporter', name: 'DC Exporter', port: 9835 },
-            { key: 'dcgm_exporter', name: 'DCGM Exporter', port: 9400 }
+            { key: 'dcgm_exporter', name: 'DCGM Exporter', port: 9400 },
+            { key: 'watchdog_agent', name: 'DC Watchdog Agent', port: null, isWatchdog: true }
         ];
         
         const canWrite = userPermissions.can_write;
@@ -2635,27 +2867,59 @@ SERVERS_TEMPLATE = """
             const updateInfo = data.updates[exp.key];
             const hasUpdate = updateInfo && updateInfo.update_available;
             
-            html += `
-            <div class="exporter-card" data-exporter="${exp.key}">
-                <div class="exporter-header">
-                    <span class="exporter-name">${exp.name} <small style="color:var(--text-secondary)">(port ${exp.port})</small></span>
-                    <label class="toggle-switch">
-                        <input type="checkbox" ${version ? 'checked' : ''} ${canWrite ? '' : 'disabled'} onchange="toggleExporter('${exp.key}', this.checked)">
-                        <span class="toggle-slider" style="${canWrite ? '' : 'opacity: 0.5; cursor: not-allowed;'}"></span>
-                    </label>
+            // Special handling for DC Watchdog agent
+            if (exp.isWatchdog) {
+                const watchdogData = data.watchdog_agent || {};
+                const isInstalled = watchdogData.installed || false;
+                const isEnabled = watchdogData.enabled !== false;
+                const wdVersion = watchdogData.version || null;
+                
+                html += `
+                <div class="exporter-card" data-exporter="${exp.key}" style="border-color: var(--accent-cyan); background: linear-gradient(135deg, var(--bg-card), rgba(0, 212, 255, 0.05));">
+                    <div class="exporter-header">
+                        <span class="exporter-name">📡 ${exp.name} <small style="color:var(--text-secondary)">(external uptime)</small></span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" ${isInstalled && isEnabled ? 'checked' : ''} ${canWrite && isInstalled ? '' : 'disabled'} onchange="toggleWatchdogAgent(this.checked)">
+                            <span class="toggle-slider" style="${canWrite && isInstalled ? '' : 'opacity: 0.5; cursor: not-allowed;'}"></span>
+                        </label>
+                    </div>
+                    <div class="version-info">
+                        <span>Status:</span>
+                        <span class="version-badge" style="${isInstalled ? 'background: var(--accent-green);' : ''}">${isInstalled ? (isEnabled ? 'Running' : 'Stopped') : 'Not installed'}</span>
+                        ${wdVersion ? `<span style="color: var(--text-secondary); margin-left: 8px;">v${wdVersion}</span>` : ''}
+                    </div>
+                    ${canWrite ? `
+                    <div style="margin-top: 10px; display: flex; gap: 8px;">
+                        ${!isInstalled ? `<button class="btn btn-primary btn-sm" onclick="installWatchdogAgent()">Install Agent</button>` : ''}
+                        ${isInstalled ? `<button class="btn btn-secondary btn-sm" onclick="reinstallWatchdogAgent()">Reinstall</button>` : ''}
+                        ${isInstalled ? `<button class="btn btn-warning btn-sm" onclick="removeWatchdogAgent()">Remove</button>` : ''}
+                    </div>
+                    ` : ''}
                 </div>
-                <div class="version-info">
-                    <span>Version:</span>
-                    <span class="version-badge">${version || 'Not installed'}</span>
-                    ${hasUpdate && canWrite ? `<span class="update-badge" onclick="updateExporter('${exp.key}')">Update to ${updateInfo.latest}</span>` : ''}
-                    ${hasUpdate && !canWrite ? `<span style="color: var(--accent-yellow); font-size: 11px;">Update available: ${updateInfo.latest}</span>` : ''}
+                `;
+            } else {
+                html += `
+                <div class="exporter-card" data-exporter="${exp.key}">
+                    <div class="exporter-header">
+                        <span class="exporter-name">${exp.name} <small style="color:var(--text-secondary)">(port ${exp.port})</small></span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" ${version ? 'checked' : ''} ${canWrite ? '' : 'disabled'} onchange="toggleExporter('${exp.key}', this.checked)">
+                            <span class="toggle-slider" style="${canWrite ? '' : 'opacity: 0.5; cursor: not-allowed;'}"></span>
+                        </label>
+                    </div>
+                    <div class="version-info">
+                        <span>Version:</span>
+                        <span class="version-badge">${version || 'Not installed'}</span>
+                        ${hasUpdate && canWrite ? `<span class="update-badge" onclick="updateExporter('${exp.key}')">Update to ${updateInfo.latest}</span>` : ''}
+                        ${hasUpdate && !canWrite ? `<span style="color: var(--accent-yellow); font-size: 11px;">Update available: ${updateInfo.latest}</span>` : ''}
+                    </div>
+                    <div class="auto-update-row">
+                        <input type="checkbox" id="auto-${exp.key}" ${canWrite ? '' : 'disabled'} onchange="updateAutoSetting('${exp.key}', this.checked)">
+                        <label for="auto-${exp.key}">Auto-update</label>
+                    </div>
                 </div>
-                <div class="auto-update-row">
-                    <input type="checkbox" id="auto-${exp.key}" ${canWrite ? '' : 'disabled'} onchange="updateAutoSetting('${exp.key}', this.checked)">
-                    <label for="auto-${exp.key}">Auto-update</label>
-                </div>
-            </div>
-            `;
+                `;
+            }
         }
         
         html += `
@@ -2736,6 +3000,87 @@ SERVERS_TEMPLATE = """
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({exporter_update_branch: branch})
         });
+    }
+    
+    // DC Watchdog Agent management functions
+    async function toggleWatchdogAgent(enabled) {
+        const response = await fetch(`${basePath}/api/servers/${currentServerId}/watchdog-agent/toggle`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({enabled})
+        });
+        
+        const result = await response.json();
+        if (!result.success) {
+            alert('Failed to toggle watchdog agent: ' + (result.error || 'Unknown error'));
+            openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
+        }
+    }
+    
+    async function installWatchdogAgent() {
+        if (!confirm('Install DC Watchdog agent on this server?\\n\\nThis will enable external uptime monitoring from watchdog.cryptolabs.co.za')) return;
+        
+        const btn = event.target;
+        btn.disabled = true;
+        btn.textContent = 'Installing...';
+        
+        const response = await fetch(`${basePath}/api/servers/${currentServerId}/watchdog-agent/install`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            alert('DC Watchdog agent installed successfully');
+            openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
+        } else {
+            alert('Installation failed: ' + (result.error || 'Unknown error'));
+            btn.disabled = false;
+            btn.textContent = 'Install Agent';
+        }
+    }
+    
+    async function reinstallWatchdogAgent() {
+        if (!confirm('Reinstall DC Watchdog agent? This will stop and reinstall the agent.')) return;
+        
+        const btn = event.target;
+        btn.disabled = true;
+        btn.textContent = 'Reinstalling...';
+        
+        const response = await fetch(`${basePath}/api/servers/${currentServerId}/watchdog-agent/reinstall`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            alert('DC Watchdog agent reinstalled successfully');
+            openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
+        } else {
+            alert('Reinstall failed: ' + (result.error || 'Unknown error'));
+            btn.disabled = false;
+            btn.textContent = 'Reinstall';
+        }
+    }
+    
+    async function removeWatchdogAgent() {
+        if (!confirm('Remove DC Watchdog agent from this server?\\n\\nThe server will no longer be monitored for uptime.')) return;
+        
+        const btn = event.target;
+        btn.disabled = true;
+        btn.textContent = 'Removing...';
+        
+        const response = await fetch(`${basePath}/api/servers/${currentServerId}/watchdog-agent/remove`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            alert('DC Watchdog agent removed');
+            openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
+        } else {
+            alert('Removal failed: ' + (result.error || 'Unknown error'));
+            btn.disabled = false;
+            btn.textContent = 'Remove';
+        }
     }
     
     async function checkAllUpdates() {

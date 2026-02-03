@@ -4,7 +4,8 @@
 # while preserving unrelated services (minecraft, watchtower, etc.)
 # Designed for testing - ensures fresh images on next deploy
 
-set -e
+# NOTE: We do NOT use 'set -e' because cleanup commands may fail (e.g., item doesn't exist)
+# and we want to continue cleaning up everything regardless
 
 # Configuration
 MASTER_HOST="root@41.193.204.66"
@@ -17,7 +18,16 @@ SSH_KEY="~/.ssh/ubuntu_key"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
+
+# Track what was cleaned for summary
+CLEANED_CONTAINERS=0
+CLEANED_VOLUMES=0
+CLEANED_NETWORKS=0
+CLEANED_IMAGES=0
+CLEANED_SERVICES=0
+ERRORS=0
 
 echo -e "${YELLOW}=== DC Overview Dev Fleet Cleanup ===${NC}"
 echo ""
@@ -213,17 +223,34 @@ echo "  Master networks:"
 ssh_cmd ${MASTER_PORT} "docker network ls"
 
 echo ""
-echo -e "${GREEN}=== Cleanup Complete ===${NC}"
+echo -e "${GREEN}╔══════════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║                     CLEANUP COMPLETE                             ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo "Summary:"
-echo "  • Master: Removed monitoring containers, volumes, networks, and images"
-echo "  • Workers: Removed exporter systemd services (wk01, wk03)"
-echo "  • All nodes: Removed DC Watchdog agent (/opt/dc-watchdog, /etc/dc-watchdog)"
-echo "  • Preserved: minecraft, watchtower (if not dc-overview related)"
-echo "  • Next deploy will pull fresh monitoring images"
+echo -e "${CYAN}Summary:${NC}"
+echo -e "  ${GREEN}•${NC} Master node (port ${MASTER_PORT}):"
+echo -e "      - Containers, volumes, networks removed"
+echo -e "      - Docker images pruned (fresh pull on next deploy)"
+echo -e "      - pip packages (dc-overview, ipmi-monitor) uninstalled"
 echo ""
-echo "To redeploy dc-overview:"
+echo -e "  ${GREEN}•${NC} Worker nodes (wk01:${WK01_PORT}, wk03:${WK03_PORT}):"
+echo -e "      - Exporter services stopped: ${EXPORTER_SERVICES}"
+echo ""
+echo -e "  ${GREEN}•${NC} All nodes:"
+echo -e "      - DC Watchdog agent removed (${DC_WATCHDOG_DIRS})"
+echo ""
+echo -e "  ${YELLOW}•${NC} Preserved:"
+echo -e "      - minecraft, watchtower (if not dc-overview related)"
+echo ""
+echo -e "${CYAN}To redeploy dc-overview:${NC}"
+echo ""
+echo -e "  ${YELLOW}# SSH to master${NC}"
 echo "  ssh ${MASTER_HOST} -p ${MASTER_PORT} -i ${SSH_KEY}"
+echo ""
+echo -e "  ${YELLOW}# Install latest dev versions${NC}"
 echo "  pip install --force-reinstall --no-cache-dir git+https://github.com/cryptolabsza/dc-overview.git@dev --break-system-packages"
 echo "  pip install --force-reinstall --no-cache-dir git+https://github.com/cryptolabsza/cryptolabs-proxy.git@dev --break-system-packages"
+echo ""
+echo -e "  ${YELLOW}# Deploy${NC}"
 echo "  dc-overview quickstart -c /root/test-config.yaml -y"
+echo ""
