@@ -1198,8 +1198,47 @@ def api_watchdog_agents_status():
 
 
 def install_watchdog_agent_remote(server, api_key: str) -> tuple:
-    """Install DC Watchdog agent on a remote server via SSH."""
+    """Install DC Watchdog agent on a remote server via SSH.
+    
+    Security: Instead of storing the API key on the worker, we first request
+    a worker-specific token from dc-watchdog. This token:
+    - Is unique to this worker
+    - Cannot be used to access the API key
+    - Can be revoked without changing the API key
+    - If compromised, only affects this specific worker
+    """
+    WATCHDOG_URL = "https://watchdog.cryptolabs.co.za"
+    
     try:
+        # Step 1: Request a worker token from dc-watchdog
+        # This requires the API key but returns a worker-specific token
+        import requests as req
+        
+        try:
+            token_resp = req.post(
+                f'{WATCHDOG_URL}/api/worker/register',
+                json={'worker_id': server.name},
+                params={'api_key': api_key},
+                timeout=30
+            )
+            
+            if token_resp.ok:
+                token_data = token_resp.json()
+                if token_data.get('success'):
+                    worker_token = token_data.get('worker_token')
+                    app.logger.info(f"Worker token obtained for {server.name}")
+                else:
+                    return False, token_data.get('error', 'Failed to get worker token')
+            else:
+                # Fallback: use API key directly if token endpoint not available
+                # (backward compatibility with older dc-watchdog versions)
+                app.logger.warning(f"Could not get worker token (status {token_resp.status_code}), using API key")
+                worker_token = None
+        except req.RequestException as e:
+            app.logger.warning(f"Could not reach dc-watchdog for token: {e}, using API key")
+            worker_token = None
+        
+        # Step 2: Deploy the agent with either worker token or API key
         cmd = [
             'ssh', '-o', 'ConnectTimeout=30', '-o', 'StrictHostKeyChecking=no',
             '-o', 'BatchMode=yes', '-p', str(server.ssh_port)
@@ -1210,36 +1249,42 @@ def install_watchdog_agent_remote(server, api_key: str) -> tuple:
         
         cmd.append(f'{server.ssh_user}@{server.server_ip}')
         
-        # Install script - same as fleet_manager._deploy_watchdog_agents
+        # Use worker token if available, otherwise fall back to API key
+        if worker_token:
+            # Secure mode: use worker token (recommended)
+            auth_var = f'WORKER_TOKEN="{worker_token}"'
+            auth_param = 'worker_token=$WORKER_TOKEN'
+        else:
+            # Legacy mode: use API key directly
+            auth_var = f'API_KEY="{api_key}"'
+            auth_param = 'api_key=$API_KEY'
+        
         install_script = f'''
 set -e
 INSTALL_DIR="/opt/dc-watchdog"
 mkdir -p "$INSTALL_DIR"
 
-# Create environment file
+# Create environment file with worker token (not API key)
 cat > "$INSTALL_DIR/agent.env" << 'ENVEOF'
-WATCHDOG_SERVER="https://watchdog.cryptolabs.co.za"
+WATCHDOG_SERVER="{WATCHDOG_URL}"
 HEARTBEAT_INTERVAL=30
-API_KEY="{api_key}"
+{auth_var}
 WORKER_ID="{server.name}"
 USE_MTR=true
 ENVEOF
+chmod 600 "$INSTALL_DIR/agent.env"
 
 # Install mtr if available
 apt-get update -qq && apt-get install -y -qq mtr-tiny 2>/dev/null || yum install -y -q mtr 2>/dev/null || true
 
-# Create agent script
+# Create agent script using worker token for authentication
 cat > "$INSTALL_DIR/dc-watchdog-agent.sh" << 'AGENTEOF'
 #!/bin/bash
 source /opt/dc-watchdog/agent.env
+
 while true; do
-    PAYLOAD=$(cat << EOF
-{{"worker_id": "$WORKER_ID", "api_key": "$API_KEY", "timestamp": $(date +%s)}}
-EOF
-)
-    curl -s -X POST "$WATCHDOG_SERVER/api/heartbeat" \\
-        -H "Content-Type: application/json" \\
-        -d "$PAYLOAD" > /dev/null 2>&1
+    # Send heartbeat using worker token (not API key)
+    curl -s -X GET "$WATCHDOG_SERVER/ping/$WORKER_ID?{auth_param}" > /dev/null 2>&1
     sleep $HEARTBEAT_INTERVAL
 done
 AGENTEOF

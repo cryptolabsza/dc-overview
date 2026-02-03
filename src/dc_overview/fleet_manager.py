@@ -2137,8 +2137,47 @@ except Exception as e:
         else:
             servers_to_install = self.config.servers
         
-        # Installation script for each worker
-        install_script = f'''#!/bin/bash
+        # Base installation script template - worker token will be injected per server
+        base_watchdog_url = self.config.watchdog.server_url
+        ping_interval = self.config.watchdog.ping_interval
+        use_mtr = 'true' if self.config.watchdog.agent_use_mtr else 'false'
+        api_key = self.config.watchdog.api_key
+        
+        success_count = 0
+        fail_count = 0
+        
+        for server in servers_to_install:
+            creds = self.config.get_server_ssh_creds(server)
+            ssh_key = creds.key_path or self.config.ssh.key_path
+            
+            try:
+                # Step 1: Request a worker token for this server (secure - doesn't expose API key)
+                worker_token = None
+                try:
+                    import requests
+                    token_resp = requests.post(
+                        f'{base_watchdog_url}/api/worker/register',
+                        json={'worker_id': server.name},
+                        params={'api_key': api_key},
+                        timeout=30
+                    )
+                    if token_resp.ok:
+                        token_data = token_resp.json()
+                        if token_data.get('success'):
+                            worker_token = token_data.get('worker_token')
+                except Exception as e:
+                    console.print(f"[dim]  Could not get worker token: {e}, using API key[/dim]")
+                
+                # Use worker token if available, otherwise fall back to API key
+                if worker_token:
+                    auth_config = f'WORKER_TOKEN="{worker_token}"'
+                    auth_param = 'worker_token=$WORKER_TOKEN'
+                else:
+                    auth_config = f'API_KEY="{api_key}"'
+                    auth_param = 'api_key=$API_KEY'
+                
+                # Step 2: Generate install script with worker token
+                install_script = f'''#!/bin/bash
 set -e
 
 INSTALL_DIR="/opt/dc-watchdog"
@@ -2149,19 +2188,19 @@ ENV_FILE="${{INSTALL_DIR}}/agent.env"
 # Create directory
 mkdir -p "${{INSTALL_DIR}}"
 
-# Configuration
+# Configuration - uses worker token instead of API key for security
 cat > "${{ENV_FILE}}" << 'EOF'
-SERVER_ADDR={self.config.watchdog.server_url.replace('https://', '').replace('http://', '')}
+SERVER_ADDR={base_watchdog_url.replace('https://', '').replace('http://', '')}
 SERVER_PORT=443
-API_KEY={self.config.watchdog.api_key}
-PING_INTERVAL={self.config.watchdog.ping_interval}
-USE_MTR={'true' if self.config.watchdog.agent_use_mtr else 'false'}
-WORKER_NAME=$(hostname)
+{auth_config}
+PING_INTERVAL={ping_interval}
+USE_MTR={use_mtr}
+WORKER_NAME={server.name}
 EOF
 chmod 600 "${{ENV_FILE}}"
 
 # Install mtr if enabled
-if [ "{self.config.watchdog.agent_use_mtr}" = "True" ]; then
+if [ "{use_mtr}" = "true" ]; then
     if command -v apt-get &> /dev/null; then
         apt-get update -qq && apt-get install -y -qq mtr-tiny 2>/dev/null || true
     elif command -v yum &> /dev/null; then
@@ -2169,7 +2208,7 @@ if [ "{self.config.watchdog.agent_use_mtr}" = "True" ]; then
     fi
 fi
 
-# Agent script
+# Agent script - authenticates with worker token (not API key)
 cat > "${{AGENT_SCRIPT}}" << 'AGENT'
 #!/bin/bash
 source /opt/dc-watchdog/agent.env
@@ -2195,9 +2234,10 @@ while true; do
         DATA="{{\\"public_ip\\":\\"${{PUBLIC_IP}}\\"}}"
     fi
     
+    # Use worker token for authentication (more secure than API key)
     curl -sf --max-time 10 -X POST -H "Content-Type: application/json" \\
         -d "${{DATA}}" \\
-        "https://${{SERVER_ADDR}}:${{SERVER_PORT}}/ping/${{WORKER_NAME}}?api_key=${{API_KEY}}" 2>/dev/null || true
+        "https://${{SERVER_ADDR}}:${{SERVER_PORT}}/ping/${{WORKER_NAME}}?{auth_param}" 2>/dev/null || true
     
     sleep "${{PING_INTERVAL}}"
 done
@@ -2228,16 +2268,8 @@ systemctl restart dc-watchdog-agent
 
 echo "DC Watchdog agent installed and running"
 '''
-        
-        success_count = 0
-        fail_count = 0
-        
-        for server in servers_to_install:
-            creds = self.config.get_server_ssh_creds(server)
-            ssh_key = creds.key_path or self.config.ssh.key_path
-            
-            try:
-                # Run installation script via SSH
+                
+                # Step 3: Run installation script via SSH
                 result = self.ssh.run_command(
                     host=server.server_ip,
                     username=creds.username,
@@ -2247,7 +2279,8 @@ echo "DC Watchdog agent installed and running"
                 )
                 
                 if result.success or result.exit_code == 0:
-                    console.print(f"[green]✓[/green] {server.name} ({server.server_ip}): agent installed")
+                    token_note = " (with worker token)" if worker_token else " (with API key)"
+                    console.print(f"[green]✓[/green] {server.name} ({server.server_ip}): agent installed{token_note}")
                     success_count += 1
                 else:
                     console.print(f"[yellow]⚠[/yellow] {server.name}: install failed - {result.output[:50]}")
