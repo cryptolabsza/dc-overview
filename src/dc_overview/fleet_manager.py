@@ -2193,13 +2193,22 @@ except Exception as e:
     # ============ Step 8c: DC Watchdog ============
     
     def _deploy_watchdog_agents(self):
-        """Deploy DC Watchdog agents to all workers for external uptime monitoring."""
+        """Deploy DC Watchdog Go agents to all workers for external uptime monitoring.
+        
+        The Go agent provides:
+        - GPU monitoring via NVML (count, state, driver health, VM passthrough detection)
+        - Service monitoring (Vast.ai, RunPod, Docker)
+        - MTR network diagnostics  
+        - Lightweight ~5MB binary with minimal resource usage
+        
+        Falls back to bash script if Go binary download fails.
+        """
         if not self.config.components.dc_watchdog or not self.config.watchdog.api_key:
             return
         
         console.print("\n[bold]Step 8c: Installing DC Watchdog Agents[/bold]\n")
         console.print("  DC Watchdog provides external uptime monitoring from watchdog.cryptolabs.co.za")
-        console.print("  Agents send heartbeats every 30 seconds; alerts are sent when servers go offline.\n")
+        console.print("  Go agents send GPU/service telemetry; alerts sent when servers go offline.\n")
         
         if not self.config.servers:
             console.print("[yellow]  No servers configured, skipping watchdog agent deployment[/yellow]")
@@ -2246,105 +2255,169 @@ except Exception as e:
                 except Exception as e:
                     console.print(f"[dim]  Could not get worker token: {e}, using API key[/dim]")
                 
-                # Use worker token if available, otherwise fall back to API key
-                if worker_token:
-                    auth_config = f'WORKER_TOKEN="{worker_token}"'
-                    auth_param = 'worker_token=$WORKER_TOKEN'
-                else:
-                    auth_config = f'API_KEY="{api_key}"'
-                    auth_param = 'api_key=$API_KEY'
+                # Step 2: Generate install script - downloads Go agent, falls back to bash
+                auth_key = worker_token if worker_token else api_key
+                auth_type = "worker_token" if worker_token else "api_key"
                 
-                # Step 2: Generate install script with worker token
                 install_script = f'''#!/bin/bash
 set -e
 
-INSTALL_DIR="/opt/dc-watchdog"
-AGENT_SCRIPT="${{INSTALL_DIR}}/dc-watchdog-agent.sh"
-SERVICE_FILE="/etc/systemd/system/dc-watchdog-agent.service"
-ENV_FILE="${{INSTALL_DIR}}/agent.env"
+INSTALL_DIR="/usr/local/bin"
+CONFIG_DIR="/etc/dc-watchdog"
+FALLBACK_DIR="/opt/dc-watchdog"
+GITHUB_REPO="cryptolabsza/dc-watchdog"
 
-# Create directory
-mkdir -p "${{INSTALL_DIR}}"
+echo "[+] Installing DC-Watchdog Agent..."
 
-# Configuration - uses worker token instead of API key for security
-cat > "${{ENV_FILE}}" << 'EOF'
-SERVER_ADDR={base_watchdog_url.replace('https://', '').replace('http://', '')}
-SERVER_PORT=443
-{auth_config}
-PING_INTERVAL={ping_interval}
-USE_MTR={use_mtr}
-WORKER_NAME={server.name}
-EOF
-chmod 600 "${{ENV_FILE}}"
+# Create directories
+mkdir -p "$CONFIG_DIR"
+mkdir -p "$FALLBACK_DIR"
 
-# Install mtr if enabled
-if [ "{use_mtr}" = "true" ]; then
-    if command -v apt-get &> /dev/null; then
-        apt-get update -qq && apt-get install -y -qq mtr-tiny 2>/dev/null || true
-    elif command -v yum &> /dev/null; then
-        yum install -y -q mtr 2>/dev/null || true
+# Install dependencies (mtr for network diagnostics)
+echo "[+] Installing dependencies..."
+if command -v apt-get &> /dev/null; then
+    apt-get update -qq 2>/dev/null || true
+    apt-get install -y -qq mtr-tiny curl 2>/dev/null || true
+elif command -v yum &> /dev/null; then
+    yum install -y -q mtr curl 2>/dev/null || true
+elif command -v dnf &> /dev/null; then
+    dnf install -y -q mtr curl 2>/dev/null || true
+fi
+
+# Detect architecture
+ARCH=$(uname -m)
+case $ARCH in
+    x86_64)  ARCH_SUFFIX="linux-amd64" ;;
+    aarch64) ARCH_SUFFIX="linux-arm64" ;;
+    *)       ARCH_SUFFIX="" ;;
+esac
+
+# Try to download Go agent binary
+GO_AGENT_OK=false
+if [ -n "$ARCH_SUFFIX" ]; then
+    echo "[+] Downloading Go agent for $ARCH_SUFFIX..."
+    RELEASE_URL="https://github.com/$GITHUB_REPO/releases/latest/download/dc-watchdog-agent-$ARCH_SUFFIX"
+    if curl -fsSL "$RELEASE_URL" -o "$INSTALL_DIR/dc-watchdog-agent.tmp" 2>/dev/null; then
+        mv "$INSTALL_DIR/dc-watchdog-agent.tmp" "$INSTALL_DIR/dc-watchdog-agent"
+        chmod +x "$INSTALL_DIR/dc-watchdog-agent"
+        if "$INSTALL_DIR/dc-watchdog-agent" -version 2>/dev/null; then
+            GO_AGENT_OK=true
+            echo "[+] Go agent downloaded successfully"
+        fi
     fi
 fi
 
-# Agent script - authenticates with worker token (not API key)
-cat > "${{AGENT_SCRIPT}}" << 'AGENT'
-#!/bin/bash
-source /opt/dc-watchdog/agent.env
-ping_count=0
-MTR_INTERVAL=5
+# Create configuration for Go agent
+echo "[+] Creating configuration..."
+cat > "$CONFIG_DIR/agent.yaml" << YAMLEOF
+# DC-Watchdog Agent Configuration
+server_url: "{base_watchdog_url}"
+{auth_type}: "{auth_key}"
+worker_name: "{server.name}"
+heartbeat_interval: 30s
+level: "standard"
 
-run_mtr() {{
-    if command -v mtr &> /dev/null; then
-        mtr -r -c 3 -n "$1" 2>/dev/null | tail -n +2 | awk '{{print "{{\\"hop\\":" $1 ",\\"host\\":\\"" $2 "\\",\\"loss\\":" $3 ",\\"avg\\":" $6 "}}"}}' | paste -sd, - | sed 's/^/[/;s/$/]/'
-    else
-        echo "[]"
-    fi
-}}
+gpu:
+  enabled: true
+  check_driver_health: true
+  detect_vm_passthrough: true
+  timeout_seconds: 5
+
+services:
+  vastai:
+    enabled: {str(getattr(server, 'has_vast', False)).lower()}
+  runpod:
+    enabled: false
+  docker:
+    enabled: false
+
+network:
+  mtr:
+    enabled: {use_mtr}
+    interval: 10
+    hops: 15
+
+log_level: info
+YAMLEOF
+chmod 600 "$CONFIG_DIR/agent.yaml"
+
+# Create bash fallback agent script
+cat > "$FALLBACK_DIR/dc-watchdog-agent.sh" << 'BASHAGENT'
+#!/bin/bash
+# Fallback bash agent - used if Go binary unavailable
+CONFIG_DIR="/etc/dc-watchdog"
+source <(grep -E '^(server_url|{auth_type}|worker_name):' "$CONFIG_DIR/agent.yaml" | sed 's/: /=/' | tr -d ' ')
 
 while true; do
-    ping_count=$((ping_count + 1))
     PUBLIC_IP=$(curl -sf --max-time 5 https://ifconfig.me 2>/dev/null || echo "")
-    
-    if [ $((ping_count % MTR_INTERVAL)) -eq 1 ] && [ "$USE_MTR" = "true" ]; then
-        HOPS=$(run_mtr "${{SERVER_ADDR}}")
-        DATA="{{\\"public_ip\\":\\"${{PUBLIC_IP}}\\",\\"hops\\":${{HOPS}}}}"
-    else
-        DATA="{{\\"public_ip\\":\\"${{PUBLIC_IP}}\\"}}"
-    fi
-    
-    # Use worker token for authentication (more secure than API key)
+    DATA="{{\\"public_ip\\":\\"$PUBLIC_IP\\",\\"agent_version\\":\\"bash-1.0\\"}}"
+    SERVER_HOST=$(echo "$server_url" | sed 's|https://||')
     curl -sf --max-time 10 -X POST -H "Content-Type: application/json" \\
-        -d "${{DATA}}" \\
-        "https://${{SERVER_ADDR}}:${{SERVER_PORT}}/ping/${{WORKER_NAME}}?{auth_param}" 2>/dev/null || true
-    
-    sleep "${{PING_INTERVAL}}"
+        -d "$DATA" \\
+        "${{server_url}}/ping/${{worker_name}}?{auth_type}=${{!auth_type:-${{worker_token:-${api_key}}}}}" 2>/dev/null || true
+    sleep 30
 done
-AGENT
-chmod +x "${{AGENT_SCRIPT}}"
+BASHAGENT
+chmod +x "$FALLBACK_DIR/dc-watchdog-agent.sh"
 
-# Systemd service
-cat > "${{SERVICE_FILE}}" << 'SERVICE'
+# Create systemd service
+echo "[+] Creating systemd service..."
+if [ "$GO_AGENT_OK" = "true" ]; then
+    cat > /etc/systemd/system/dc-watchdog-agent.service << 'GOSERVICE'
 [Unit]
-Description=DC Watchdog Agent
+Description=DC-Watchdog Agent
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-EnvironmentFile=/opt/dc-watchdog/agent.env
+User=root
+ExecStart=/usr/local/bin/dc-watchdog-agent -config /etc/dc-watchdog/agent.yaml
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+MemoryLimit=128M
+
+[Install]
+WantedBy=multi-user.target
+GOSERVICE
+else
+    echo "[!] Go agent not available, using bash fallback"
+    cat > /etc/systemd/system/dc-watchdog-agent.service << 'BASHSERVICE'
+[Unit]
+Description=DC-Watchdog Agent (Bash Fallback)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
 ExecStart=/opt/dc-watchdog/dc-watchdog-agent.sh
 Restart=always
 RestartSec=30
 
 [Install]
 WantedBy=multi-user.target
-SERVICE
+BASHSERVICE
+fi
 
+# Enable and start
 systemctl daemon-reload
 systemctl enable dc-watchdog-agent
 systemctl restart dc-watchdog-agent
 
-echo "DC Watchdog agent installed and running"
+# Verify
+sleep 2
+if systemctl is-active --quiet dc-watchdog-agent; then
+    if [ "$GO_AGENT_OK" = "true" ]; then
+        VERSION=$("$INSTALL_DIR/dc-watchdog-agent" -version 2>&1 | head -1 || echo "unknown")
+        echo "[+] DC Watchdog Go agent running ($VERSION)"
+    else
+        echo "[+] DC Watchdog bash agent running"
+    fi
+else
+    echo "[!] Agent service started"
+fi
 '''
                 
                 # Step 3: Run installation script via SSH
@@ -2357,7 +2430,7 @@ echo "DC Watchdog agent installed and running"
                 )
                 
                 if result.success or result.exit_code == 0:
-                    token_note = " (with worker token)" if worker_token else " (with API key)"
+                    token_note = " (token)" if worker_token else ""
                     console.print(f"[green]✓[/green] {server.name} ({server.server_ip}): agent installed{token_note}")
                     success_count += 1
                 else:
