@@ -133,6 +133,17 @@ for port in ${EXPORTER_PORTS}; do
     ssh_cmd ${MASTER_PORT} "lsof -t -i :${port} 2>/dev/null | xargs -r kill -9 && echo \"    killed process on port ${port}\" || true"
 done
 
+# Free ports 80/443 for proxy (stop nginx/apache, kill any processes)
+echo "  Freeing ports 80 and 443..."
+ssh_cmd ${MASTER_PORT} "systemctl stop nginx 2>/dev/null && echo '    stopped nginx' || true"
+ssh_cmd ${MASTER_PORT} "systemctl disable nginx 2>/dev/null || true"
+ssh_cmd ${MASTER_PORT} "systemctl stop apache2 2>/dev/null && echo '    stopped apache2' || true"
+ssh_cmd ${MASTER_PORT} "systemctl disable apache2 2>/dev/null || true"
+for port in 80 443; do
+    ssh_cmd ${MASTER_PORT} "lsof -t -i :${port} 2>/dev/null | xargs -r kill -9 && echo \"    killed process on port ${port}\" || true"
+    ssh_cmd ${MASTER_PORT} "fuser -k ${port}/tcp 2>/dev/null && echo \"    killed process on port ${port} (fuser)\" || true"
+done
+
 # Remove legacy exporter files
 echo "  Removing legacy exporter files..."
 for file in ${LEGACY_EXPORTER_FILES}; do
@@ -232,6 +243,7 @@ echo -e "  ${GREEN}•${NC} Master node (port ${MASTER_PORT}):"
 echo -e "      - Containers, volumes, networks removed"
 echo -e "      - Docker images pruned (fresh pull on next deploy)"
 echo -e "      - pip packages (dc-overview, ipmi-monitor) uninstalled"
+echo -e "      - Ports 80/443 freed (nginx/apache stopped, processes killed)"
 echo ""
 echo -e "  ${GREEN}•${NC} Worker nodes (wk01:${WK01_PORT}, wk03:${WK03_PORT}):"
 echo -e "      - Exporter services stopped: ${EXPORTER_SERVICES}"

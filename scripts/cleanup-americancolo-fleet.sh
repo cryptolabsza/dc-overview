@@ -115,6 +115,17 @@ for port in ${EXPORTER_PORTS}; do
     ssh_master "lsof -t -i :${port} 2>/dev/null | xargs -r kill -9 && echo \"    killed process on port ${port}\" || true"
 done
 
+# Free ports 80/443 for proxy (stop nginx/apache, kill any processes)
+echo "  Freeing ports 80 and 443..."
+ssh_master "systemctl stop nginx 2>/dev/null && echo '    stopped nginx' || true"
+ssh_master "systemctl disable nginx 2>/dev/null || true"
+ssh_master "systemctl stop apache2 2>/dev/null && echo '    stopped apache2' || true"
+ssh_master "systemctl disable apache2 2>/dev/null || true"
+for port in 80 443; do
+    ssh_master "lsof -t -i :${port} 2>/dev/null | xargs -r kill -9 && echo \"    killed process on port ${port}\" || true"
+    ssh_master "fuser -k ${port}/tcp 2>/dev/null && echo \"    killed process on port ${port} (fuser)\" || true"
+done
+
 # Remove legacy exporter files
 echo "  Removing legacy exporter files..."
 for file in ${LEGACY_EXPORTER_FILES}; do
@@ -290,6 +301,7 @@ echo -e "${GREEN}=== Cleanup Complete ===${NC}"
 echo ""
 echo "Summary:"
 echo "  • Master: Removed monitoring containers, volumes, and images"
+echo "  • Master: Freed ports 80/443 (stopped nginx/apache, killed processes)"
 echo "  • Preserved: registry, netbootxyz, pxe containers and images"
 echo "  • Workers: Removed exporter systemd services, Docker containers untouched"
 echo "  • No reboots performed"
