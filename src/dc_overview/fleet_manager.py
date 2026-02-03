@@ -2044,14 +2044,18 @@ except Exception as e:
             pass  # lsof might not be available
         
         # Build command with all API keys
+        # Note: API key args come AFTER the image name since they're container command args
         cmd = [
             "docker", "run", "-d",
             "--name", "vastai-exporter",
             "--restart", "unless-stopped",
+            "--network", "cryptolabs",
             "-p", f"{self.config.vast.port}:{self.config.vast.port}",
+            "--label", "com.centurylinklabs.watchtower.enable=true",
             "ghcr.io/cryptolabsza/vastai-exporter:latest"
         ]
         
+        # Add API keys as container command arguments (after image name)
         for api_key in api_keys:
             cmd.extend(["-api-key", f"{api_key.name}:{api_key.key}"])
         
