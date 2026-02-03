@@ -1076,6 +1076,127 @@ def api_remove_watchdog_agent(server_id):
         return jsonify({'success': False, 'error': 'Failed to remove agent'}), 500
 
 
+@app.route('/api/watchdog-agents/deploy-all', methods=['POST'])
+@csrf.exempt
+@write_required
+def api_deploy_watchdog_agents_all():
+    """Deploy DC Watchdog agents to all configured servers.
+    
+    This endpoint is called from the Fleet Management landing page
+    to deploy agents to all servers in bulk.
+    """
+    # Get watchdog API key from settings or environment
+    api_key = os.environ.get('WATCHDOG_API_KEY', '')
+    if not api_key:
+        config_path = '/etc/dc-overview/config.yaml'
+        if os.path.exists(config_path):
+            try:
+                import yaml
+                with open(config_path) as f:
+                    cfg = yaml.safe_load(f)
+                    api_key = cfg.get('watchdog', {}).get('api_key', '')
+                    if not api_key:
+                        api_key = cfg.get('ipmi_monitor', {}).get('ai_license_key', '')
+            except Exception:
+                pass
+    
+    if not api_key:
+        return jsonify({
+            'success': False,
+            'error': 'No API key configured. Set WATCHDOG_API_KEY or configure in yaml.'
+        }), 400
+    
+    # Get all servers
+    servers = Server.query.all()
+    if not servers:
+        return jsonify({
+            'success': False,
+            'error': 'No servers configured. Add servers first.'
+        }), 400
+    
+    results = {
+        'total': len(servers),
+        'installed': 0,
+        'failed': 0,
+        'skipped': 0,
+        'details': []
+    }
+    
+    for server in servers:
+        # Skip if already installed
+        if server.watchdog_agent_installed:
+            results['skipped'] += 1
+            results['details'].append({
+                'server': server.name,
+                'status': 'skipped',
+                'message': 'Already installed'
+            })
+            continue
+        
+        success, error = install_watchdog_agent_remote(server, api_key)
+        
+        if success:
+            server.watchdog_agent_installed = True
+            server.watchdog_agent_enabled = True
+            results['installed'] += 1
+            results['details'].append({
+                'server': server.name,
+                'status': 'installed',
+                'message': 'Agent installed successfully'
+            })
+        else:
+            results['failed'] += 1
+            results['details'].append({
+                'server': server.name,
+                'status': 'failed',
+                'message': error or 'Unknown error'
+            })
+    
+    db.session.commit()
+    
+    results['success'] = results['failed'] == 0
+    results['message'] = f"Installed: {results['installed']}, Skipped: {results['skipped']}, Failed: {results['failed']}"
+    
+    return jsonify(results)
+
+
+@app.route('/api/watchdog-agents/status', methods=['GET'])
+@csrf.exempt
+def api_watchdog_agents_status():
+    """Get status of DC Watchdog agents across all servers.
+    
+    Returns summary for the Fleet Management dashboard.
+    """
+    servers = Server.query.all()
+    
+    installed = sum(1 for s in servers if s.watchdog_agent_installed)
+    enabled = sum(1 for s in servers if s.watchdog_agent_installed and s.watchdog_agent_enabled)
+    
+    # Check if API key is configured
+    api_key = os.environ.get('WATCHDOG_API_KEY', '')
+    if not api_key:
+        config_path = '/etc/dc-overview/config.yaml'
+        if os.path.exists(config_path):
+            try:
+                import yaml
+                with open(config_path) as f:
+                    cfg = yaml.safe_load(f)
+                    api_key = cfg.get('watchdog', {}).get('api_key', '')
+                    if not api_key:
+                        api_key = cfg.get('ipmi_monitor', {}).get('ai_license_key', '')
+            except Exception:
+                pass
+    
+    return jsonify({
+        'configured': bool(api_key),
+        'has_api_key': bool(api_key),
+        'total_servers': len(servers),
+        'installed': installed,
+        'enabled': enabled,
+        'not_installed': len(servers) - installed
+    })
+
+
 def install_watchdog_agent_remote(server, api_key: str) -> tuple:
     """Install DC Watchdog agent on a remote server via SSH."""
     try:
