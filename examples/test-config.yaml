@@ -23,13 +23,17 @@ ssh:
   port: 100  # Custom SSH port
   key_path: ~/.ssh/ubuntu_key
 
-# DC Watchdog Settings (enabled via components.dc_watchdog above)
+# DC Watchdog (enabled via components.dc_watchdog above).
+# API key: set in .secrets.yaml as watchdog_api_key or ipmi_ai_license so quickstart can
+# install Go agents. Fleet Management still requires the user to enable DC Watchdog once
+# via "Link Account" + SSO; after that the validated key is used and agents get worker
+# tokens for identification and encrypted comms.
 watchdog:
   server_url: https://watchdog.cryptolabs.co.za
-  ping_interval: 30    # Seconds between heartbeats
-  fail_timeout: 120    # Seconds before marked DOWN
-  install_agent: true  # Deploy agent to workers
-  agent_use_mtr: true  # Enable MTR for route tracing
+  ping_interval: 30
+  fail_timeout: 120
+  install_agent: true
+  agent_use_mtr: true
 
 # Servers to monitor
 servers:
