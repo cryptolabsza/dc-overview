@@ -530,7 +530,10 @@ def api_check_server(server_id):
     server.node_exporter_installed = results['node_exporter']['running']
     server.dc_exporter_installed = results['dc_exporter']['running']
     server.dcgm_exporter_installed = results['dcgm_exporter']['running']
-    server.watchdog_agent_installed = results['watchdog_agent']['running']
+    server.watchdog_agent_installed = results['watchdog_agent'].get('installed', False)
+    server.watchdog_agent_enabled = results['watchdog_agent'].get('running', False)
+    if results['watchdog_agent'].get('version'):
+        server.watchdog_agent_version = results['watchdog_agent']['version']
     
     if any([results['node_exporter']['running'], results['dc_exporter']['running']]):
         server.status = 'online'
@@ -741,6 +744,9 @@ def api_get_exporter_versions(server_id):
     # Also get watchdog agent status
     watchdog_status = check_watchdog_agent(server)
     server.watchdog_agent_installed = watchdog_status.get('installed', False)
+    server.watchdog_agent_enabled = watchdog_status.get('running', False)
+    if watchdog_status.get('version'):
+        server.watchdog_agent_version = watchdog_status['version']
     db.session.commit()
     
     return jsonify({
@@ -751,7 +757,8 @@ def api_get_exporter_versions(server_id):
         'watchdog_agent': {
             'installed': server.watchdog_agent_installed,
             'enabled': server.watchdog_agent_enabled,
-            'version': server.watchdog_agent_version
+            'version': server.watchdog_agent_version,
+            'status': watchdog_status.get('status', 'unknown')
         }
     })
 
@@ -903,6 +910,9 @@ def api_watchdog_status(server_id):
     
     # Update server record
     server.watchdog_agent_installed = status.get('installed', False)
+    server.watchdog_agent_enabled = status.get('running', False)
+    if status.get('version'):
+        server.watchdog_agent_version = status['version']
     db.session.commit()
     
     return jsonify({
@@ -2034,13 +2044,27 @@ def check_watchdog_agent(server):
             cmd.extend(['-i', server.ssh_key.key_path])
         
         # Check if service is active and get its status
+        # Check for: systemd service, Go binary, bash fallback script
         check_script = '''
+        VERSION=""
+        # Try to get version from Go binary
+        if [ -x /usr/local/bin/dc-watchdog-agent ]; then
+            VERSION=$(/usr/local/bin/dc-watchdog-agent -version 2>/dev/null | head -1 || echo "")
+        fi
+        
         if systemctl is-active dc-watchdog-agent >/dev/null 2>&1; then
-            echo "RUNNING"
+            echo "RUNNING|$VERSION"
+        elif [ -f /etc/systemd/system/dc-watchdog-agent.service ]; then
+            # Service exists but not running
+            echo "INSTALLED_NOT_RUNNING|$VERSION"
+        elif [ -x /usr/local/bin/dc-watchdog-agent ]; then
+            # Go binary exists (installed via quickstart)
+            echo "INSTALLED_NOT_RUNNING|$VERSION"
         elif [ -f /opt/dc-watchdog/dc-watchdog-agent.sh ]; then
-            echo "INSTALLED_NOT_RUNNING"
+            # Bash fallback script exists
+            echo "INSTALLED_NOT_RUNNING|bash"
         else
-            echo "NOT_INSTALLED"
+            echo "NOT_INSTALLED|"
         fi
         '''
         
@@ -2049,14 +2073,19 @@ def check_watchdog_agent(server):
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         output = result.stdout.strip()
         
-        if output == "RUNNING":
-            return {'running': True, 'installed': True, 'status': 'running'}
-        elif output == "INSTALLED_NOT_RUNNING":
-            return {'running': False, 'installed': True, 'status': 'stopped'}
+        # Parse output: STATUS|VERSION
+        parts = output.split('|')
+        status_str = parts[0] if parts else "NOT_INSTALLED"
+        version = parts[1] if len(parts) > 1 and parts[1] else None
+        
+        if status_str == "RUNNING":
+            return {'running': True, 'installed': True, 'status': 'running', 'version': version}
+        elif status_str == "INSTALLED_NOT_RUNNING":
+            return {'running': False, 'installed': True, 'status': 'stopped', 'version': version}
         else:
-            return {'running': False, 'installed': False, 'status': 'not_installed'}
+            return {'running': False, 'installed': False, 'status': 'not_installed', 'version': None}
     except Exception as e:
-        return {'running': False, 'installed': False, 'status': 'unknown', 'error': str(e)}
+        return {'running': False, 'installed': False, 'status': 'unknown', 'version': None, 'error': str(e)}
 
 def install_exporter_remote(server, exporter_name):
     """Install an exporter on a remote server via SSH."""
@@ -2499,6 +2528,9 @@ DASHBOARD_TEMPLATE = """
                             <span class="exporter-badge {% if server.dcgm_exporter_installed and server.dcgm_exporter_enabled %}enabled{% elif server.dcgm_exporter_installed %}disabled{% else %}not-installed{% endif %}">
                                 dcgm{% if server.dcgm_exporter_version %} <span class="version-tag">{{ server.dcgm_exporter_version }}</span>{% endif %}
                             </span>
+                            <span class="exporter-badge {% if server.watchdog_agent_installed and server.watchdog_agent_enabled %}enabled{% elif server.watchdog_agent_installed %}disabled{% else %}not-installed{% endif %}" title="DC Watchdog Agent (external uptime)">
+                                wd{% if server.watchdog_agent_version %} <span class="version-tag">{{ server.watchdog_agent_version }}</span>{% endif %}
+                            </span>
                         </td>
                         <td class="lastseen-cell">{{ server.last_seen.strftime('%Y-%m-%d %H:%M') if server.last_seen else '—' }}</td>
                     </tr>
@@ -2561,11 +2593,13 @@ DASHBOARD_TEMPLATE = """
             const nodeClass = result.node_exporter?.running ? 'enabled' : 'not-installed';
             const dcClass = result.dc_exporter?.running ? 'enabled' : 'not-installed';
             const dcgmClass = result.dcgm_exporter?.running ? 'enabled' : 'not-installed';
+            const wdClass = result.watchdog_agent?.running ? 'enabled' : (result.watchdog_agent?.installed ? 'disabled' : 'not-installed');
             
             exporterCell.innerHTML = `
                 <span class="exporter-badge ${nodeClass}">node${result.node_exporter?.version ? ` <span class="version-tag">${result.node_exporter.version}</span>` : ''}</span>
                 <span class="exporter-badge ${dcClass}">dc${result.dc_exporter?.version ? ` <span class="version-tag">${result.dc_exporter.version}</span>` : ''}</span>
                 <span class="exporter-badge ${dcgmClass}">dcgm${result.dcgm_exporter?.version ? ` <span class="version-tag">${result.dcgm_exporter.version}</span>` : ''}</span>
+                <span class="exporter-badge ${wdClass}" title="DC Watchdog Agent (external uptime)">wd${result.watchdog_agent?.version ? ` <span class="version-tag">${result.watchdog_agent.version}</span>` : ''}</span>
             `;
         }
         
