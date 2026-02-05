@@ -117,6 +117,49 @@ def validate_ssh_username(username):
         raise ValueError(f"Invalid SSH username: {username}. Must be alphanumeric, starting with letter or underscore.")
     return username
 
+
+def get_watchdog_api_key() -> str:
+    """Get DC Watchdog API key from environment or config files.
+    
+    Searches in order:
+    1. WATCHDOG_API_KEY environment variable
+    2. /etc/dc-overview/.secrets.yaml (watchdog_api_key or ipmi_ai_license)
+    3. /etc/dc-overview/fleet-config.yaml (watchdog.api_key)
+    """
+    # 1. Check environment variable first
+    api_key = os.environ.get('WATCHDOG_API_KEY', '')
+    if api_key:
+        return api_key
+    
+    # 2. Check .secrets.yaml (has the actual keys)
+    secrets_path = '/etc/dc-overview/.secrets.yaml'
+    if os.path.exists(secrets_path):
+        try:
+            with open(secrets_path) as f:
+                secrets = yaml.safe_load(f) or {}
+                api_key = secrets.get('watchdog_api_key') or secrets.get('ipmi_ai_license')
+                if api_key:
+                    return api_key
+        except Exception:
+            pass
+    
+    # 3. Check fleet-config.yaml (legacy location)
+    config_paths = ['/etc/dc-overview/fleet-config.yaml', '/etc/dc-overview/config.yaml']
+    for config_path in config_paths:
+        if os.path.exists(config_path):
+            try:
+                with open(config_path) as f:
+                    cfg = yaml.safe_load(f) or {}
+                    api_key = cfg.get('watchdog', {}).get('api_key', '')
+                    if not api_key:
+                        api_key = cfg.get('ipmi_monitor', {}).get('ai_license_key', '')
+                    if api_key:
+                        return api_key
+            except Exception:
+                pass
+    
+    return ''
+
 def validate_hostname(hostname):
     """Validate hostname/server name format."""
     if not hostname:
@@ -998,18 +1041,7 @@ def api_install_watchdog_agent(server_id):
     server = Server.query.get_or_404(server_id)
     
     # Get watchdog API key from settings or environment
-    api_key = os.environ.get('WATCHDOG_API_KEY', '')
-    if not api_key:
-        # Try to load from config file
-        config_path = '/etc/dc-overview/config.yaml'
-        if os.path.exists(config_path):
-            try:
-                import yaml
-                with open(config_path) as f:
-                    cfg = yaml.safe_load(f)
-                    api_key = cfg.get('watchdog', {}).get('api_key', '')
-            except Exception:
-                pass
+    api_key = get_watchdog_api_key()
     
     if not api_key:
         return jsonify({
@@ -1039,17 +1071,7 @@ def api_reinstall_watchdog_agent(server_id):
     remove_watchdog_agent_remote(server)
     
     # Get API key and reinstall
-    api_key = os.environ.get('WATCHDOG_API_KEY', '')
-    if not api_key:
-        config_path = '/etc/dc-overview/config.yaml'
-        if os.path.exists(config_path):
-            try:
-                import yaml
-                with open(config_path) as f:
-                    cfg = yaml.safe_load(f)
-                    api_key = cfg.get('watchdog', {}).get('api_key', '')
-            except Exception:
-                pass
+    api_key = get_watchdog_api_key()
     
     if not api_key:
         return jsonify({
@@ -1096,19 +1118,7 @@ def api_deploy_watchdog_agents_all():
     to deploy agents to all servers in bulk.
     """
     # Get watchdog API key from settings or environment
-    api_key = os.environ.get('WATCHDOG_API_KEY', '')
-    if not api_key:
-        config_path = '/etc/dc-overview/config.yaml'
-        if os.path.exists(config_path):
-            try:
-                import yaml
-                with open(config_path) as f:
-                    cfg = yaml.safe_load(f)
-                    api_key = cfg.get('watchdog', {}).get('api_key', '')
-                    if not api_key:
-                        api_key = cfg.get('ipmi_monitor', {}).get('ai_license_key', '')
-            except Exception:
-                pass
+    api_key = get_watchdog_api_key()
     
     if not api_key:
         return jsonify({
@@ -1183,19 +1193,7 @@ def api_watchdog_agents_status():
     enabled = sum(1 for s in servers if s.watchdog_agent_installed and s.watchdog_agent_enabled)
     
     # Check if API key is configured
-    api_key = os.environ.get('WATCHDOG_API_KEY', '')
-    if not api_key:
-        config_path = '/etc/dc-overview/config.yaml'
-        if os.path.exists(config_path):
-            try:
-                import yaml
-                with open(config_path) as f:
-                    cfg = yaml.safe_load(f)
-                    api_key = cfg.get('watchdog', {}).get('api_key', '')
-                    if not api_key:
-                        api_key = cfg.get('ipmi_monitor', {}).get('ai_license_key', '')
-            except Exception:
-                pass
+    api_key = get_watchdog_api_key()
     
     return jsonify({
         'configured': bool(api_key),
