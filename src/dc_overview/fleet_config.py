@@ -308,6 +308,15 @@ class FleetConfig:
             yaml.dump(secrets, f, default_flow_style=False)
         os.chmod(secrets_path, 0o600)
         
+        # Set ownership to uid 1000 (dcuser in dc-overview container)
+        # This ensures the container can read the files even if quickstart runs as root
+        try:
+            os.chown(path, 1000, 1000)
+            os.chown(secrets_path, 1000, 1000)
+        except (OSError, PermissionError):
+            # May fail if not running as root - that's OK, container will still work
+            pass
+        
         return path
     
     def _to_dict(self, include_secrets: bool = False) -> Dict[str, Any]:

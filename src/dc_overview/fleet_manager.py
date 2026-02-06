@@ -2242,6 +2242,7 @@ except Exception as e:
             try:
                 # Step 1: Request a worker token for this server (secure - doesn't expose API key)
                 worker_token = None
+                token_error = None
                 try:
                     import requests
                     token_resp = requests.post(
@@ -2254,12 +2255,26 @@ except Exception as e:
                         token_data = token_resp.json()
                         if token_data.get('success'):
                             worker_token = token_data.get('worker_token')
+                        else:
+                            token_error = token_data.get('error', 'Unknown error from server')
+                    else:
+                        token_error = f"HTTP {token_resp.status_code}: {token_resp.text[:100]}"
                 except Exception as e:
-                    console.print(f"[dim]  Could not get worker token: {e}, using API key[/dim]")
+                    token_error = str(e)
                 
-                # Step 2: Generate install script - downloads Go agent, falls back to bash
+                # Step 2: Validate we have credentials to install
+                if not worker_token and not api_key:
+                    console.print(f"[red]✗[/red] {server.name}: No token or API key available")
+                    fail_count += 1
+                    continue
+                
+                if token_error:
+                    console.print(f"[dim]  {server.name}: Could not get worker token ({token_error}), using API key[/dim]")
+                
+                # Step 3: Generate install script - downloads Go agent, falls back to bash
+                # Note: api_key field is used for both worker tokens (wt_...) and API keys (sk-ipmi-...)
+                # The Go agent detects the type from the value prefix
                 auth_key = worker_token if worker_token else api_key
-                auth_type = "worker_token" if worker_token else "api_key"
                 
                 install_script = f'''#!/bin/bash
 set -e
@@ -2330,18 +2345,40 @@ if [ -n "$ARCH_SUFFIX" ]; then
     rm -f "$INSTALL_DIR/dc-watchdog-agent.tmp" 2>/dev/null
 fi
 
+# Detect if this server has GPUs (nvidia-smi responds quickly)
+echo "[+] Detecting GPU availability..."
+HAS_GPU=false
+if command -v nvidia-smi &> /dev/null; then
+    # nvidia-smi can hang on some systems, so timeout after 5 seconds
+    if timeout 5 nvidia-smi -L &> /dev/null; then
+        HAS_GPU=true
+        echo "[+] GPUs detected - using standard monitoring level"
+    else
+        echo "[!] nvidia-smi present but not responding - using basic level"
+    fi
+else
+    echo "[+] No GPUs detected - using basic monitoring level"
+fi
+
+# Set monitoring level based on GPU availability
+if [ "$HAS_GPU" = "true" ]; then
+    MONITOR_LEVEL="standard"
+else
+    MONITOR_LEVEL="basic"
+fi
+
 # Create configuration for Go agent
 echo "[+] Creating configuration..."
 cat > "$CONFIG_DIR/agent.yaml" << YAMLEOF
 # DC-Watchdog Agent Configuration
 server_url: "{base_watchdog_url}"
-{auth_type}: "{auth_key}"
+api_key: "{auth_key}"
 worker_name: "{server.name}"
 heartbeat_interval: 30s
-level: "standard"
+level: "$MONITOR_LEVEL"
 
 gpu:
-  enabled: true
+  enabled: $HAS_GPU
   check_driver_health: true
   detect_vm_passthrough: true
   timeout_seconds: 5
@@ -2369,15 +2406,16 @@ cat > "$FALLBACK_DIR/dc-watchdog-agent.sh" << 'BASHAGENT'
 #!/bin/bash
 # Fallback bash agent - used if Go binary unavailable
 CONFIG_DIR="/etc/dc-watchdog"
-source <(grep -E '^(server_url|{auth_type}|worker_name):' "$CONFIG_DIR/agent.yaml" | sed 's/: /=/' | tr -d ' ')
+source <(grep -E '^(server_url|api_key|worker_name):' "$CONFIG_DIR/agent.yaml" | sed 's/: /=/' | tr -d ' ')
 
 while true; do
     PUBLIC_IP=$(curl -sf --max-time 5 https://ifconfig.me 2>/dev/null || echo "")
     DATA="{{\\"public_ip\\":\\"$PUBLIC_IP\\",\\"agent_version\\":\\"bash-1.0\\"}}"
     SERVER_HOST=$(echo "$server_url" | sed 's|https://||')
+    # api_key can be either an API key (sk-ipmi-...) or worker token (wt_...)
     curl -sf --max-time 10 -X POST -H "Content-Type: application/json" \\
         -d "$DATA" \\
-        "${{server_url}}/ping/${{worker_name}}?{auth_type}=${{!auth_type:-${{worker_token:-${api_key}}}}}" 2>/dev/null || true
+        "${{server_url}}/ping/${{worker_name}}?api_key=${{api_key}}" 2>/dev/null || true
     sleep 30
 done
 BASHAGENT
@@ -2429,18 +2467,36 @@ systemctl daemon-reload
 systemctl enable dc-watchdog-agent
 systemctl restart dc-watchdog-agent
 
-# Verify
-sleep 2
-if systemctl is-active --quiet dc-watchdog-agent; then
-    if [ "$GO_AGENT_OK" = "true" ]; then
-        VERSION=$("$INSTALL_DIR/dc-watchdog-agent" -version 2>&1 | head -1 || echo "unknown")
-        echo "[+] DC Watchdog Go agent running ($VERSION)"
-    else
-        echo "[+] DC Watchdog bash agent running"
-    fi
-else
-    echo "[!] Agent service started"
+# Verify agent actually stays running (not just starts and immediately crashes)
+echo "[+] Verifying agent startup..."
+sleep 3
+
+# Check if still running after 3 seconds
+if ! systemctl is-active --quiet dc-watchdog-agent; then
+    echo "[!] ERROR: Agent failed to start or crashed immediately"
+    echo "[!] Recent logs:"
+    journalctl -u dc-watchdog-agent -n 10 --no-pager 2>/dev/null || true
+    exit 1
 fi
+
+# Wait a bit more and check again to catch delayed crashes
+sleep 5
+if ! systemctl is-active --quiet dc-watchdog-agent; then
+    echo "[!] ERROR: Agent crashed after startup"
+    echo "[!] Recent logs:"
+    journalctl -u dc-watchdog-agent -n 10 --no-pager 2>/dev/null || true
+    exit 1
+fi
+
+# Success - agent is running
+if [ "$GO_AGENT_OK" = "true" ]; then
+    VERSION=$("$INSTALL_DIR/dc-watchdog-agent" -version 2>&1 | head -1 || echo "unknown")
+    echo "[+] DC Watchdog Go agent running ($VERSION)"
+else
+    echo "[+] DC Watchdog bash agent running"
+fi
+
+echo "[+] Installation complete"
 '''
                 
                 # Step 3: Run installation script via SSH
@@ -2453,15 +2509,23 @@ fi
                 )
                 
                 if result.success or result.exit_code == 0:
-                    token_note = " (token)" if worker_token else ""
+                    token_note = " (token)" if worker_token else " (api-key)"
                     console.print(f"[green]✓[/green] {server.name} ({server.server_ip}): agent installed{token_note}")
                     success_count += 1
                 else:
-                    console.print(f"[yellow]⚠[/yellow] {server.name}: install failed - {result.output[:50]}")
+                    # Extract error details from output
+                    output_lines = (result.output or "").strip().split('\n')
+                    # Look for ERROR lines in output
+                    error_lines = [l for l in output_lines if 'ERROR' in l or 'crashed' in l.lower()]
+                    if error_lines:
+                        error_msg = error_lines[-1][:80]
+                    else:
+                        error_msg = output_lines[-1][:80] if output_lines else "Unknown error"
+                    console.print(f"[red]✗[/red] {server.name}: {error_msg}")
                     fail_count += 1
                     
             except Exception as e:
-                console.print(f"[red]✗[/red] {server.name}: {str(e)[:50]}")
+                console.print(f"[red]✗[/red] {server.name}: {str(e)[:80]}")
                 fail_count += 1
         
         console.print(f"\n  DC Watchdog agents: {success_count} installed, {fail_count} failed")
