@@ -240,7 +240,7 @@ class FleetManager:
                     if _ALERTS_AVAILABLE:
                         _alerts_module.get_alert_manager().send_deployment_failed_alert(
                             server_id=self.config.master_ip or "master",
-                            server_name=self.config.domain or "master",
+                            server_name=self.config.ssl.domain or "master",
                             component="ipmi-monitor",
                             error=str(e)
                         )
@@ -305,7 +305,7 @@ class FleetManager:
             if _ALERTS_AVAILABLE:
                 _alerts_module.get_alert_manager().send_deployment_failed_alert(
                     server_id=self.config.master_ip or "master",
-                    server_name=self.config.domain or "master",
+                    server_name=self.config.ssl.domain or "master",
                     component="dc-overview",
                     error=str(e)
                 )
@@ -2232,7 +2232,7 @@ except Exception as e:
         use_mtr = 'true' if self.config.watchdog.agent_use_mtr else 'false'
         api_key = self.config.watchdog.api_key
         # Site ID for multi-site support - use domain or master IP as site identifier
-        site_id = self.config.domain or self.config.master_ip or 'default'
+        site_id = self.config.ssl.domain or self.config.master_ip or 'default'
         
         success_count = 0
         fail_count = 0
