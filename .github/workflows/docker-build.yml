@@ -28,23 +28,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Clean up stale Docker buildx builders
-        run: |
-          # Remove any leftover buildx builders from previous runs to prevent
-          # "graceful_stop" errors from stale buildkit daemons
-          docker buildx ls | grep -v default | grep -v NAME | awk '{print $1}' | xargs -r -I {} docker buildx rm {} 2>/dev/null || true
-          docker system prune -f --filter "label=org.opencontainers.image.source" 2>/dev/null || true
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: |
-            network=host
-            env.BUILDKIT_STEP_LOG_MAX_SIZE=10485760
-
       - name: Log in to Container Registry
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
@@ -56,7 +39,6 @@ jobs:
       - name: Determine version info
         id: version
         run: |
-          # Get version from tag or generate from branch
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             VERSION="${{ github.ref_name }}"
             CHANNEL="stable"
@@ -70,87 +52,82 @@ jobs:
             VERSION="${{ github.ref_name }}"
             CHANNEL="feature"
           fi
-          
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "channel=$CHANNEL" >> $GITHUB_OUTPUT
-          echo "📦 Building: $VERSION ($CHANNEL channel)"
+          echo "Building: $VERSION ($CHANNEL channel)"
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            # For version tags (v1.0.0): create v1.0.0, 1.0.0, 1.0, latest
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-            type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-            
-            # For main branch: just 'main' tag (latest only from version tags)
-            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            
-            # For develop/dev branch: 'dev' and 'develop' tags
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/dev' }}
-            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/dev' }}
-            
-            # For PRs: pr-{number}
-            type=ref,event=pr
-            
-            # SHA for all builds (for debugging)
-            type=sha,prefix=sha-
-            
-            # Manual override tag
-            type=raw,value=${{ github.event.inputs.tag_override }},enable=${{ github.event.inputs.tag_override != '' }}
-
-      - name: Get build info
-        id: build_info
+      - name: Compute tags
+        id: tags
         run: |
-          echo "git_commit=${{ github.sha }}" >> $GITHUB_OUTPUT
-          echo "git_branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          echo "build_time=$(date -u '+%Y-%m-%d %H:%M UTC')" >> $GITHUB_OUTPUT
-          echo "version=${{ steps.version.outputs.version }}" >> $GITHUB_OUTPUT
+          REPO="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          REPO=$(echo "$REPO" | tr '[:upper:]' '[:lower:]')
+          SHA_SHORT=$(echo "${{ github.sha }}" | head -c 7)
+          TAGS=""
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            GIT_COMMIT=${{ steps.build_info.outputs.git_commit }}
-            GIT_BRANCH=${{ steps.build_info.outputs.git_branch }}
-            BUILD_TIME=${{ steps.build_info.outputs.build_time }}
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VER="${{ github.ref_name }}"
+            VER="${VER#v}"
+            MAJOR=$(echo "$VER" | cut -d. -f1)
+            MINOR=$(echo "$VER" | cut -d. -f1-2)
+            TAGS="$REPO:$VER,$REPO:$MINOR,$REPO:latest,$REPO:stable,$REPO:sha-$SHA_SHORT"
+            if [[ "$MAJOR" != "0" ]]; then
+              TAGS="$TAGS,$REPO:$MAJOR"
+            fi
+          elif [[ "${{ github.ref }}" == refs/heads/main ]] || [[ "${{ github.ref }}" == refs/heads/master ]]; then
+            TAGS="$REPO:main,$REPO:sha-$SHA_SHORT"
+          elif [[ "${{ github.ref }}" == refs/heads/develop ]] || [[ "${{ github.ref }}" == refs/heads/dev ]]; then
+            TAGS="$REPO:dev,$REPO:develop,$REPO:sha-$SHA_SHORT"
+          elif [[ "${{ github.ref }}" == refs/heads/* ]]; then
+            BRANCH="${{ github.ref_name }}"
+            TAGS="$REPO:$BRANCH,$REPO:sha-$SHA_SHORT"
+          else
+            TAGS="$REPO:sha-$SHA_SHORT"
+          fi
 
-      - name: Retry build on failure
-        if: failure()
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            GIT_COMMIT=${{ steps.build_info.outputs.git_commit }}
-            GIT_BRANCH=${{ steps.build_info.outputs.git_branch }}
-            BUILD_TIME=${{ steps.build_info.outputs.build_time }}
+          if [[ -n "${{ github.event.inputs.tag_override }}" ]]; then
+            TAGS="$TAGS,$REPO:${{ github.event.inputs.tag_override }}"
+          fi
+
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+          echo "primary=$(echo $TAGS | cut -d, -f1)" >> $GITHUB_OUTPUT
+          echo "Tags: $TAGS"
+
+      - name: Build Docker image
+        run: |
+          IFS=',' read -ra TAG_ARRAY <<< "${{ steps.tags.outputs.tags }}"
+          TAG_ARGS=""
+          for tag in "${TAG_ARRAY[@]}"; do
+            TAG_ARGS="$TAG_ARGS -t $tag"
+          done
+
+          docker build \
+            $TAG_ARGS \
+            --build-arg GIT_COMMIT=${{ github.sha }} \
+            --build-arg GIT_BRANCH=${{ github.ref_name }} \
+            --build-arg BUILD_TIME="$(date -u '+%Y-%m-%d %H:%M UTC')" \
+            .
+
+      - name: Push Docker image
+        if: github.event_name != 'pull_request'
+        run: |
+          IFS=',' read -ra TAG_ARRAY <<< "${{ steps.tags.outputs.tags }}"
+          for tag in "${TAG_ARRAY[@]}"; do
+            echo "Pushing $tag..."
+            docker push "$tag"
+          done
 
       - name: Summary
         run: |
-          echo "## 🐳 Docker Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "## Docker Build Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Channel:** ${{ steps.version.outputs.channel }}" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Platforms:** linux/amd64" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform:** linux/amd64" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Tags pushed:" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.tags.outputs.tags }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
   # Build RunPod Exporter image
@@ -164,20 +141,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Clean up stale Docker buildx builders
-        run: |
-          docker buildx ls | grep -v default | grep -v NAME | awk '{print $1}' | xargs -r -I {} docker buildx rm {} 2>/dev/null || true
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: |
-            network=host
-            env.BUILDKIT_STEP_LOG_MAX_SIZE=10485760
-
       - name: Log in to Container Registry
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
@@ -186,62 +149,61 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata for RunPod Exporter
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/cryptolabsza/runpod-exporter
-          tags: |
-            type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/develop' }}
-            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/dev' }}
-            type=ref,event=pr
-            type=sha,prefix=sha-
-
-      - name: Get build info
-        id: build_info
+      - name: Compute tags
+        id: tags
         run: |
-          echo "git_commit=${{ github.sha }}" >> $GITHUB_OUTPUT
-          echo "git_branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          echo "build_time=$(date -u '+%Y-%m-%d %H:%M UTC')" >> $GITHUB_OUTPUT
+          REPO="${{ env.REGISTRY }}/cryptolabsza/runpod-exporter"
+          SHA_SHORT=$(echo "${{ github.sha }}" | head -c 7)
+          TAGS=""
 
-      - name: Build and push RunPod Exporter
-        uses: docker/build-push-action@v5
-        with:
-          context: ./runpod-exporter
-          platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            GIT_COMMIT=${{ steps.build_info.outputs.git_commit }}
-            GIT_BRANCH=${{ steps.build_info.outputs.git_branch }}
-            BUILD_TIME=${{ steps.build_info.outputs.build_time }}
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VER="${{ github.ref_name }}"
+            VER="${VER#v}"
+            TAGS="$REPO:$VER,$REPO:latest,$REPO:sha-$SHA_SHORT"
+          elif [[ "${{ github.ref }}" == refs/heads/main ]]; then
+            TAGS="$REPO:main,$REPO:sha-$SHA_SHORT"
+          elif [[ "${{ github.ref }}" == refs/heads/develop ]] || [[ "${{ github.ref }}" == refs/heads/dev ]]; then
+            TAGS="$REPO:dev,$REPO:latest,$REPO:sha-$SHA_SHORT"
+          else
+            TAGS="$REPO:sha-$SHA_SHORT"
+          fi
 
-      - name: Retry build on failure
-        if: failure()
-        uses: docker/build-push-action@v5
-        with:
-          context: ./runpod-exporter
-          platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            GIT_COMMIT=${{ steps.build_info.outputs.git_commit }}
-            GIT_BRANCH=${{ steps.build_info.outputs.git_branch }}
-            BUILD_TIME=${{ steps.build_info.outputs.build_time }}
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+          echo "Tags: $TAGS"
+
+      - name: Build RunPod Exporter
+        run: |
+          IFS=',' read -ra TAG_ARRAY <<< "${{ steps.tags.outputs.tags }}"
+          TAG_ARGS=""
+          for tag in "${TAG_ARRAY[@]}"; do
+            TAG_ARGS="$TAG_ARGS -t $tag"
+          done
+
+          docker build \
+            $TAG_ARGS \
+            --build-arg GIT_COMMIT=${{ github.sha }} \
+            --build-arg GIT_BRANCH=${{ github.ref_name }} \
+            --build-arg BUILD_TIME="$(date -u '+%Y-%m-%d %H:%M UTC')" \
+            ./runpod-exporter
+
+      - name: Push RunPod Exporter
+        if: github.event_name != 'pull_request'
+        run: |
+          IFS=',' read -ra TAG_ARRAY <<< "${{ steps.tags.outputs.tags }}"
+          for tag in "${TAG_ARRAY[@]}"; do
+            echo "Pushing $tag..."
+            docker push "$tag"
+          done
 
       - name: Summary
         run: |
-          echo "## 🐳 RunPod Exporter Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "## RunPod Exporter Build Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Tags pushed:" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.tags.outputs.tags }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
   # Build Vast.ai Exporter image
@@ -255,20 +217,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Clean up stale Docker buildx builders
-        run: |
-          docker buildx ls | grep -v default | grep -v NAME | awk '{print $1}' | xargs -r -I {} docker buildx rm {} 2>/dev/null || true
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: |
-            network=host
-            env.BUILDKIT_STEP_LOG_MAX_SIZE=10485760
-
       - name: Log in to Container Registry
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
@@ -277,60 +225,59 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata for Vast.ai Exporter
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/cryptolabsza/vastai-exporter
-          tags: |
-            type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/develop' }}
-            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/dev' }}
-            type=ref,event=pr
-            type=sha,prefix=sha-
-
-      - name: Get build info
-        id: build_info
+      - name: Compute tags
+        id: tags
         run: |
-          echo "git_commit=${{ github.sha }}" >> $GITHUB_OUTPUT
-          echo "git_branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          echo "build_time=$(date -u '+%Y-%m-%d %H:%M UTC')" >> $GITHUB_OUTPUT
+          REPO="${{ env.REGISTRY }}/cryptolabsza/vastai-exporter"
+          SHA_SHORT=$(echo "${{ github.sha }}" | head -c 7)
+          TAGS=""
 
-      - name: Build and push Vast.ai Exporter
-        uses: docker/build-push-action@v5
-        with:
-          context: ./vastai-exporter
-          platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            GIT_COMMIT=${{ steps.build_info.outputs.git_commit }}
-            GIT_BRANCH=${{ steps.build_info.outputs.git_branch }}
-            BUILD_TIME=${{ steps.build_info.outputs.build_time }}
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VER="${{ github.ref_name }}"
+            VER="${VER#v}"
+            TAGS="$REPO:$VER,$REPO:latest,$REPO:sha-$SHA_SHORT"
+          elif [[ "${{ github.ref }}" == refs/heads/main ]]; then
+            TAGS="$REPO:main,$REPO:sha-$SHA_SHORT"
+          elif [[ "${{ github.ref }}" == refs/heads/develop ]] || [[ "${{ github.ref }}" == refs/heads/dev ]]; then
+            TAGS="$REPO:dev,$REPO:latest,$REPO:sha-$SHA_SHORT"
+          else
+            TAGS="$REPO:sha-$SHA_SHORT"
+          fi
 
-      - name: Retry build on failure
-        if: failure()
-        uses: docker/build-push-action@v5
-        with:
-          context: ./vastai-exporter
-          platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            GIT_COMMIT=${{ steps.build_info.outputs.git_commit }}
-            GIT_BRANCH=${{ steps.build_info.outputs.git_branch }}
-            BUILD_TIME=${{ steps.build_info.outputs.build_time }}
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+          echo "Tags: $TAGS"
+
+      - name: Build Vast.ai Exporter
+        run: |
+          IFS=',' read -ra TAG_ARRAY <<< "${{ steps.tags.outputs.tags }}"
+          TAG_ARGS=""
+          for tag in "${TAG_ARRAY[@]}"; do
+            TAG_ARGS="$TAG_ARGS -t $tag"
+          done
+
+          docker build \
+            $TAG_ARGS \
+            --build-arg GIT_COMMIT=${{ github.sha }} \
+            --build-arg GIT_BRANCH=${{ github.ref_name }} \
+            --build-arg BUILD_TIME="$(date -u '+%Y-%m-%d %H:%M UTC')" \
+            ./vastai-exporter
+
+      - name: Push Vast.ai Exporter
+        if: github.event_name != 'pull_request'
+        run: |
+          IFS=',' read -ra TAG_ARRAY <<< "${{ steps.tags.outputs.tags }}"
+          for tag in "${TAG_ARRAY[@]}"; do
+            echo "Pushing $tag..."
+            docker push "$tag"
+          done
 
       - name: Summary
         run: |
-          echo "## 🐳 Vast.ai Exporter Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "## Vast.ai Exporter Build Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Tags pushed:" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.tags.outputs.tags }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
