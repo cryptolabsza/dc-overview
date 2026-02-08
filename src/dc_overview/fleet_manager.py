@@ -2119,21 +2119,18 @@ except Exception as e:
         except Exception:
             pass  # lsof might not be available
         
-        # Build command with all API keys
-        # Note: API key args come AFTER the image name since they're container command args
+        # Build command with all API keys passed as env var (survives Watchtower recreations)
+        keys_csv = ",".join(f"{k.name}:{k.key}" for k in api_keys)
         cmd = [
             "docker", "run", "-d",
             "--name", "vastai-exporter",
             "--restart", "unless-stopped",
             "--network", "cryptolabs",
             "-p", f"{self.config.vast.port}:{self.config.vast.port}",
+            "-e", f"VASTAI_API_KEYS={keys_csv}",
             "--label", "com.centurylinklabs.watchtower.enable=true",
             "ghcr.io/cryptolabsza/vastai-exporter:latest"
         ]
-        
-        # Add API keys as container command arguments (after image name)
-        for api_key in api_keys:
-            cmd.extend(["-api-key", f"{api_key.name}:{api_key.key}"])
         
         result = subprocess.run(cmd, capture_output=True, text=True)
         
@@ -2170,18 +2167,16 @@ except Exception as e:
         except Exception:
             pass  # lsof might not be available, continue anyway
         
-        # Build command with all API keys
+        # Build command with all API keys passed as env var (survives Watchtower recreations)
+        keys_csv = ",".join(f"{k.name}:{k.key}" for k in self.config.runpod.api_keys)
         cmd = [
             "docker", "run", "-d",
             "--name", "runpod-exporter",
             "--restart", "unless-stopped",
             "-p", "8623:8623",
+            "-e", f"RUNPOD_API_KEYS={keys_csv}",
             "ghcr.io/cryptolabsza/runpod-exporter:latest"
         ]
-        
-        # Add each API key
-        for api_key in self.config.runpod.api_keys:
-            cmd.extend(["-api-key", f"{api_key.name}:{api_key.key}"])
         
         result = subprocess.run(cmd, capture_output=True, text=True)
         
