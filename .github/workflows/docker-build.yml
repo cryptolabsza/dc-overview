@@ -28,11 +28,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Clean up stale Docker buildx builders
+        run: |
+          # Remove any leftover buildx builders from previous runs to prevent
+          # "graceful_stop" errors from stale buildkit daemons
+          docker buildx ls | grep -v default | grep -v NAME | awk '{print $1}' | xargs -r -I {} docker buildx rm {} 2>/dev/null || true
+          docker system prune -f --filter "label=org.opencontainers.image.source" 2>/dev/null || true
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            network=host
+            env.BUILDKIT_STEP_LOG_MAX_SIZE=10485760
 
       - name: Log in to Container Registry
         if: github.event_name != 'pull_request'
@@ -109,8 +120,20 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # cache-from: type=gha  # Temporarily disabled - GHA cache issues
-          # cache-to: type=gha,mode=max
+          build-args: |
+            GIT_COMMIT=${{ steps.build_info.outputs.git_commit }}
+            GIT_BRANCH=${{ steps.build_info.outputs.git_branch }}
+            BUILD_TIME=${{ steps.build_info.outputs.build_time }}
+
+      - name: Retry build on failure
+        if: failure()
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             GIT_COMMIT=${{ steps.build_info.outputs.git_commit }}
             GIT_BRANCH=${{ steps.build_info.outputs.git_branch }}
@@ -141,11 +164,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Clean up stale Docker buildx builders
+        run: |
+          docker buildx ls | grep -v default | grep -v NAME | awk '{print $1}' | xargs -r -I {} docker buildx rm {} 2>/dev/null || true
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            network=host
+            env.BUILDKIT_STEP_LOG_MAX_SIZE=10485760
 
       - name: Log in to Container Registry
         if: github.event_name != 'pull_request'
@@ -183,8 +214,20 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # cache-from: type=gha  # Temporarily disabled - GHA cache issues
-          # cache-to: type=gha,mode=max
+          build-args: |
+            GIT_COMMIT=${{ steps.build_info.outputs.git_commit }}
+            GIT_BRANCH=${{ steps.build_info.outputs.git_branch }}
+            BUILD_TIME=${{ steps.build_info.outputs.build_time }}
+
+      - name: Retry build on failure
+        if: failure()
+        uses: docker/build-push-action@v5
+        with:
+          context: ./runpod-exporter
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             GIT_COMMIT=${{ steps.build_info.outputs.git_commit }}
             GIT_BRANCH=${{ steps.build_info.outputs.git_branch }}
@@ -212,11 +255,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Clean up stale Docker buildx builders
+        run: |
+          docker buildx ls | grep -v default | grep -v NAME | awk '{print $1}' | xargs -r -I {} docker buildx rm {} 2>/dev/null || true
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            network=host
+            env.BUILDKIT_STEP_LOG_MAX_SIZE=10485760
 
       - name: Log in to Container Registry
         if: github.event_name != 'pull_request'
@@ -254,8 +305,20 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # cache-from: type=gha  # Temporarily disabled - GHA cache issues
-          # cache-to: type=gha,mode=max
+          build-args: |
+            GIT_COMMIT=${{ steps.build_info.outputs.git_commit }}
+            GIT_BRANCH=${{ steps.build_info.outputs.git_branch }}
+            BUILD_TIME=${{ steps.build_info.outputs.build_time }}
+
+      - name: Retry build on failure
+        if: failure()
+        uses: docker/build-push-action@v5
+        with:
+          context: ./vastai-exporter
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             GIT_COMMIT=${{ steps.build_info.outputs.git_commit }}
             GIT_BRANCH=${{ steps.build_info.outputs.git_branch }}
