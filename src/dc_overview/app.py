@@ -29,6 +29,7 @@ import re
 import ipaddress
 import shlex
 from pathlib import Path
+import requests as http_requests
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from . import __version__
@@ -184,6 +185,56 @@ def get_site_id() -> str:
     
     # Fallback to SITE_NAME env var (shared with ipmi-monitor) or hostname
     return os.environ.get('SITE_NAME', os.environ.get('HOSTNAME', 'default'))
+
+
+# DC Watchdog API integration - fetch agent status via HTTP instead of SSH
+WATCHDOG_URL = os.environ.get('WATCHDOG_URL', 'https://watchdog.cryptolabs.co.za')
+
+# Cache for watchdog API results (avoid hammering the API)
+_watchdog_api_cache = {'ts': 0, 'data': None}
+_WATCHDOG_CACHE_TTL = 30  # seconds
+
+
+def get_watchdog_agents_from_api() -> dict:
+    """Fetch per-agent status from the dc-watchdog server API.
+    
+    Returns a dict keyed by worker_id (lowercase) with agent info,
+    or empty dict if unavailable. Uses cached results for 30s.
+    
+    This is the same method the Fleet Management dashboard uses.
+    """
+    import time
+    now = time.time()
+    
+    if _watchdog_api_cache['data'] is not None and (now - _watchdog_api_cache['ts']) < _WATCHDOG_CACHE_TTL:
+        return _watchdog_api_cache['data']
+    
+    api_key = get_watchdog_api_key()
+    if not api_key:
+        return {}
+    
+    try:
+        resp = http_requests.get(
+            f'{WATCHDOG_URL}/api/agents/status',
+            params={'api_key': api_key},
+            timeout=5
+        )
+        if resp.ok:
+            data = resp.json()
+            # Build lookup dict by worker_id (lowercase for case-insensitive matching)
+            agents_map = {}
+            for agent in data.get('agents', []):
+                wid = (agent.get('worker_id') or '').lower()
+                if wid:
+                    agents_map[wid] = agent
+            
+            _watchdog_api_cache['ts'] = now
+            _watchdog_api_cache['data'] = agents_map
+            return agents_map
+    except Exception as e:
+        app.logger.debug(f"Could not fetch watchdog agent status: {e}")
+    
+    return _watchdog_api_cache.get('data') or {}
 
 
 def validate_hostname(hostname):
@@ -1228,7 +1279,11 @@ def api_watchdog_agents_status():
     """Get status of DC Watchdog agents across all servers.
     
     Returns summary for the Fleet Management dashboard.
+    Also syncs agent status from the dc-watchdog server API.
     """
+    # First, sync status from watchdog API (same method as Fleet Management dashboard)
+    _sync_watchdog_status_from_api()
+    
     servers = Server.query.all()
     
     installed = sum(1 for s in servers if s.watchdog_agent_installed)
@@ -1246,6 +1301,48 @@ def api_watchdog_agents_status():
         'not_installed': len(servers) - installed,
         'site_id': get_site_id(),
     })
+
+
+@app.route('/api/watchdog-agents/sync', methods=['POST', 'GET'])
+@csrf.exempt
+def api_watchdog_agents_sync():
+    """Sync watchdog agent status from dc-watchdog server API.
+    
+    Updates all server records with live heartbeat data from the
+    dc-watchdog server. This is more reliable than SSH checks.
+    """
+    updated = _sync_watchdog_status_from_api()
+    return jsonify({'synced': updated, 'message': f'Updated {updated} server records'})
+
+
+def _sync_watchdog_status_from_api():
+    """Sync watchdog agent status from the dc-watchdog server API into the database.
+    
+    Matches agents by worker_id to server name (case-insensitive).
+    Returns the number of servers updated.
+    """
+    agents_map = get_watchdog_agents_from_api()
+    if not agents_map:
+        return 0
+    
+    servers = Server.query.all()
+    updated = 0
+    
+    for server in servers:
+        agent_info = agents_map.get(server.name.lower())
+        if agent_info:
+            server.watchdog_agent_installed = True
+            server.watchdog_agent_enabled = agent_info.get('online', False)
+            if agent_info.get('version'):
+                server.watchdog_agent_version = agent_info['version']
+            # Update last_seen from heartbeat data
+            server.watchdog_agent_last_seen = datetime.utcnow()
+            updated += 1
+    
+    if updated > 0:
+        db.session.commit()
+    
+    return updated
 
 
 def install_watchdog_agent_remote(server, api_key: str) -> tuple:
@@ -2074,11 +2171,38 @@ def check_exporter(ip, port):
         return {'running': False, 'port': port, 'error': str(e)}
 
 def check_watchdog_agent(server):
-    """Check if dc-watchdog-agent service is running via SSH.
+    """Check if dc-watchdog-agent is running for this server.
     
-    Falls back to database state if SSH fails, so we don't incorrectly
-    report agents as 'not installed' when SSH is simply unreachable.
+    Uses the same method as the Fleet Management dashboard:
+    1. Primary: Query the dc-watchdog server API (HTTP) for heartbeat status
+    2. Fallback: Check via SSH (systemd service status)
+    3. Last resort: Use database cached state
+    
+    The API method is more reliable because it works even when SSH
+    is not configured in the container, and reflects actual heartbeat
+    activity rather than just whether the systemd service is active.
     """
+    # Method 1: Check via dc-watchdog server API (same as Fleet Management dashboard)
+    agents_map = get_watchdog_agents_from_api()
+    if agents_map:
+        # Match by server name (case-insensitive)
+        server_name_lower = server.name.lower()
+        agent_info = agents_map.get(server_name_lower)
+        
+        if agent_info:
+            is_online = agent_info.get('online', False)
+            version = agent_info.get('version') or None
+            last_seen = agent_info.get('last_seen', '')
+            return {
+                'running': is_online,
+                'installed': True,
+                'status': 'running' if is_online else 'stopped',
+                'version': version,
+                'last_seen': last_seen,
+                'source': 'watchdog_api'
+            }
+    
+    # Method 2: Check via SSH (for cases where API is unavailable or agent not registered)
     try:
         cmd = [
             'ssh', '-o', 'ConnectTimeout=5', '-o', 'StrictHostKeyChecking=no',
@@ -2088,11 +2212,8 @@ def check_watchdog_agent(server):
         if server.ssh_key:
             cmd.extend(['-i', server.ssh_key.key_path])
         
-        # Check if service is active and get its status
-        # Check for: systemd service, Go binary, bash fallback script
         check_script = '''
         VERSION=""
-        # Try to get version from Go binary
         if [ -x /usr/local/bin/dc-watchdog-agent ]; then
             VERSION=$(/usr/local/bin/dc-watchdog-agent -version 2>/dev/null | head -1 || echo "")
         fi
@@ -2100,13 +2221,10 @@ def check_watchdog_agent(server):
         if systemctl is-active dc-watchdog-agent >/dev/null 2>&1; then
             echo "RUNNING|$VERSION"
         elif [ -f /etc/systemd/system/dc-watchdog-agent.service ]; then
-            # Service exists but not running
             echo "INSTALLED_NOT_RUNNING|$VERSION"
         elif [ -x /usr/local/bin/dc-watchdog-agent ]; then
-            # Go binary exists (installed via quickstart)
             echo "INSTALLED_NOT_RUNNING|$VERSION"
         elif [ -f /opt/dc-watchdog/dc-watchdog-agent.sh ]; then
-            # Bash fallback script exists
             echo "INSTALLED_NOT_RUNNING|bash"
         else
             echo "NOT_INSTALLED|"
@@ -2118,19 +2236,18 @@ def check_watchdog_agent(server):
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         output = result.stdout.strip()
         
-        # Parse output: STATUS|VERSION
         parts = output.split('|')
         status_str = parts[0] if parts else "NOT_INSTALLED"
         version = parts[1] if len(parts) > 1 and parts[1] else None
         
         if status_str == "RUNNING":
-            return {'running': True, 'installed': True, 'status': 'running', 'version': version}
+            return {'running': True, 'installed': True, 'status': 'running', 'version': version, 'source': 'ssh'}
         elif status_str == "INSTALLED_NOT_RUNNING":
-            return {'running': False, 'installed': True, 'status': 'stopped', 'version': version}
+            return {'running': False, 'installed': True, 'status': 'stopped', 'version': version, 'source': 'ssh'}
         else:
-            return {'running': False, 'installed': False, 'status': 'not_installed', 'version': None}
+            return {'running': False, 'installed': False, 'status': 'not_installed', 'version': None, 'source': 'ssh'}
     except Exception as e:
-        # SSH failed - fall back to database state instead of reporting "not installed"
+        # Method 3: Fall back to database state
         db_installed = getattr(server, 'watchdog_agent_installed', False)
         db_enabled = getattr(server, 'watchdog_agent_enabled', False)
         db_version = getattr(server, 'watchdog_agent_version', None)
@@ -2141,9 +2258,10 @@ def check_watchdog_agent(server):
                 'installed': True,
                 'status': 'running (cached)' if db_enabled else 'stopped (cached)',
                 'version': db_version,
-                'ssh_error': str(e)
+                'ssh_error': str(e),
+                'source': 'database'
             }
-        return {'running': False, 'installed': False, 'status': 'unknown', 'version': None, 'error': str(e)}
+        return {'running': False, 'installed': False, 'status': 'unknown', 'version': None, 'error': str(e), 'source': 'none'}
 
 def install_exporter_remote(server, exporter_name):
     """Install an exporter on a remote server via SSH."""
@@ -2693,12 +2811,25 @@ DASHBOARD_TEMPLATE = """
         if (indicator) indicator.style.display = 'none';
     }
     
+    async function syncWatchdogStatus() {
+        // Sync WD agent status from dc-watchdog server API (same method as Fleet Management)
+        try {
+            await fetch(`${basePath}/api/watchdog-agents/sync`, {method: 'POST'});
+        } catch (e) {
+            console.log('Watchdog sync not available:', e.message);
+        }
+    }
+    
     document.addEventListener('DOMContentLoaded', async () => {
         await checkUserPermissions();
-        // Auto-check all servers on first load (inline updates, no page reload)
+        // Sync WD status from watchdog API first, then refresh all servers
+        await syncWatchdogStatus();
         await refreshDashboard();
         // Set up periodic refresh every 30 seconds
-        setInterval(refreshDashboard, 30000);
+        setInterval(async () => {
+            await syncWatchdogStatus();
+            await refreshDashboard();
+        }, 30000);
     });
     </script>
 </body></html>
@@ -2995,13 +3126,26 @@ SERVERS_TEMPLATE = """
         }
     }
     
+    async function syncWatchdogStatus() {
+        // Sync WD agent status from dc-watchdog server API (same method as Fleet Management)
+        try {
+            await fetch(`${basePath}/api/watchdog-agents/sync`, {method: 'POST'});
+        } catch (e) {
+            console.log('Watchdog sync not available:', e.message);
+        }
+    }
+    
     // Run permission check on load, then auto-check all servers
     document.addEventListener('DOMContentLoaded', async () => {
         await checkUserPermissions();
-        // Auto-check all servers on page load (silent, no alerts)
+        // Sync WD status from watchdog API first, then check all servers
+        await syncWatchdogStatus();
         await checkAllServersQuietly();
         // Set up periodic refresh every 30 seconds
-        setInterval(checkAllServersQuietly, 30000);
+        setInterval(async () => {
+            await syncWatchdogStatus();
+            await checkAllServersQuietly();
+        }, 30000);
     });
     
     async function checkAllServersQuietly() {
