@@ -160,6 +160,32 @@ def get_watchdog_api_key() -> str:
     
     return ''
 
+def get_site_id() -> str:
+    """Get the site_id for this deployment (multi-site support).
+    
+    Derives site_id from fleet config domain or master_ip.
+    Consistent with what's written to agent.yaml during deployment.
+    """
+    # Check fleet config for domain or master_ip
+    config_paths = ['/etc/dc-overview/fleet-config.yaml', '/etc/dc-overview/config.yaml']
+    for config_path in config_paths:
+        if os.path.exists(config_path):
+            try:
+                with open(config_path) as f:
+                    cfg = yaml.safe_load(f) or {}
+                    domain = cfg.get('domain', '')
+                    if domain:
+                        return domain
+                    master_ip = cfg.get('master_ip', '')
+                    if master_ip:
+                        return master_ip
+            except Exception:
+                pass
+    
+    # Fallback to SITE_NAME env var (shared with ipmi-monitor) or hostname
+    return os.environ.get('SITE_NAME', os.environ.get('HOSTNAME', 'default'))
+
+
 def validate_hostname(hostname):
     """Validate hostname/server name format."""
     if not hostname:
@@ -1201,7 +1227,8 @@ def api_watchdog_agents_status():
         'total_servers': len(servers),
         'installed': installed,
         'enabled': enabled,
-        'not_installed': len(servers) - installed
+        'not_installed': len(servers) - installed,
+        'site_id': get_site_id(),
     })
 
 

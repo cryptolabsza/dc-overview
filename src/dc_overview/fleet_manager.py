@@ -2231,6 +2231,8 @@ except Exception as e:
         ping_interval = self.config.watchdog.ping_interval
         use_mtr = 'true' if self.config.watchdog.agent_use_mtr else 'false'
         api_key = self.config.watchdog.api_key
+        # Site ID for multi-site support - use domain or master IP as site identifier
+        site_id = self.config.domain or self.config.master_ip or 'default'
         
         success_count = 0
         fail_count = 0
@@ -2374,6 +2376,7 @@ cat > "$CONFIG_DIR/agent.yaml" << YAMLEOF
 server_url: "{base_watchdog_url}"
 api_key: "{auth_key}"
 worker_name: "{server.name}"
+site_id: "{site_id}"
 heartbeat_interval: 30s
 level: "$MONITOR_LEVEL"
 
@@ -2396,6 +2399,14 @@ network:
     enabled: {use_mtr}
     interval: 10
     hops: 15
+
+# RAID monitoring (auto-detects mdadm arrays)
+raid:
+  enabled: true
+  interval: 1
+  alert_on_degraded: true
+  alert_on_rebuild: true
+  track_progress: true
 
 log_level: info
 YAMLEOF
