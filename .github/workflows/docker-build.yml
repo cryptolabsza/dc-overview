@@ -23,18 +23,18 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      DOCKER_CONFIG: /tmp/docker-config-build-${{ github.run_id }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Log in to Container Registry
+      - name: Docker login
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$DOCKER_CONFIG"
+          echo "${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}" | docker --config "$DOCKER_CONFIG" login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
       - name: Determine version info
         id: version
@@ -113,8 +113,14 @@ jobs:
           IFS=',' read -ra TAG_ARRAY <<< "${{ steps.tags.outputs.tags }}"
           for tag in "${TAG_ARRAY[@]}"; do
             echo "Pushing $tag..."
-            docker push "$tag"
+            docker --config "$DOCKER_CONFIG" push "$tag"
           done
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker --config "$DOCKER_CONFIG" logout ${{ env.REGISTRY }} 2>/dev/null || true
+          rm -rf "$DOCKER_CONFIG"
 
       - name: Summary
         run: |
@@ -136,18 +142,18 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      DOCKER_CONFIG: /tmp/docker-config-runpod-${{ github.run_id }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Log in to Container Registry
+      - name: Docker login
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$DOCKER_CONFIG"
+          echo "${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}" | docker --config "$DOCKER_CONFIG" login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
       - name: Compute tags
         id: tags
@@ -192,8 +198,14 @@ jobs:
           IFS=',' read -ra TAG_ARRAY <<< "${{ steps.tags.outputs.tags }}"
           for tag in "${TAG_ARRAY[@]}"; do
             echo "Pushing $tag..."
-            docker push "$tag"
+            docker --config "$DOCKER_CONFIG" push "$tag"
           done
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker --config "$DOCKER_CONFIG" logout ${{ env.REGISTRY }} 2>/dev/null || true
+          rm -rf "$DOCKER_CONFIG"
 
       - name: Summary
         run: |
@@ -212,18 +224,18 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      DOCKER_CONFIG: /tmp/docker-config-vastai-${{ github.run_id }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Log in to Container Registry
+      - name: Docker login
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$DOCKER_CONFIG"
+          echo "${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}" | docker --config "$DOCKER_CONFIG" login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
       - name: Compute tags
         id: tags
@@ -268,8 +280,14 @@ jobs:
           IFS=',' read -ra TAG_ARRAY <<< "${{ steps.tags.outputs.tags }}"
           for tag in "${TAG_ARRAY[@]}"; do
             echo "Pushing $tag..."
-            docker push "$tag"
+            docker --config "$DOCKER_CONFIG" push "$tag"
           done
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker --config "$DOCKER_CONFIG" logout ${{ env.REGISTRY }} 2>/dev/null || true
+          rm -rf "$DOCKER_CONFIG"
 
       - name: Summary
         run: |
