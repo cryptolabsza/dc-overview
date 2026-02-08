@@ -553,6 +553,14 @@ def api_add_server():
         ssh_port=validated_port,
         ssh_key_id=data.get('ssh_key_id')
     )
+    
+    # Allow setting watchdog agent status (e.g., from quickstart after deploying agents)
+    if data.get('watchdog_agent_installed'):
+        server.watchdog_agent_installed = True
+        server.watchdog_agent_enabled = True
+    if data.get('watchdog_agent_version'):
+        server.watchdog_agent_version = data['watchdog_agent_version']
+    
     db.session.add(server)
     db.session.commit()
     
@@ -599,10 +607,14 @@ def api_check_server(server_id):
     server.node_exporter_installed = results['node_exporter']['running']
     server.dc_exporter_installed = results['dc_exporter']['running']
     server.dcgm_exporter_installed = results['dcgm_exporter']['running']
-    server.watchdog_agent_installed = results['watchdog_agent'].get('installed', False)
-    server.watchdog_agent_enabled = results['watchdog_agent'].get('running', False)
-    if results['watchdog_agent'].get('version'):
-        server.watchdog_agent_version = results['watchdog_agent']['version']
+    
+    # Only update watchdog DB state if we got a definitive answer (not SSH failure)
+    wd_result = results['watchdog_agent']
+    if not wd_result.get('ssh_error') and not wd_result.get('error'):
+        server.watchdog_agent_installed = wd_result.get('installed', False)
+        server.watchdog_agent_enabled = wd_result.get('running', False)
+        if wd_result.get('version'):
+            server.watchdog_agent_version = wd_result['version']
     
     if any([results['node_exporter']['running'], results['dc_exporter']['running']]):
         server.status = 'online'
@@ -812,11 +824,13 @@ def api_get_exporter_versions(server_id):
     
     # Also get watchdog agent status
     watchdog_status = check_watchdog_agent(server)
-    server.watchdog_agent_installed = watchdog_status.get('installed', False)
-    server.watchdog_agent_enabled = watchdog_status.get('running', False)
-    if watchdog_status.get('version'):
-        server.watchdog_agent_version = watchdog_status['version']
-    db.session.commit()
+    # Only update DB if we got a definitive answer (not SSH failure)
+    if not watchdog_status.get('ssh_error') and not watchdog_status.get('error'):
+        server.watchdog_agent_installed = watchdog_status.get('installed', False)
+        server.watchdog_agent_enabled = watchdog_status.get('running', False)
+        if watchdog_status.get('version'):
+            server.watchdog_agent_version = watchdog_status['version']
+        db.session.commit()
     
     return jsonify({
         'server_id': server_id,
@@ -827,7 +841,8 @@ def api_get_exporter_versions(server_id):
             'installed': server.watchdog_agent_installed,
             'enabled': server.watchdog_agent_enabled,
             'version': server.watchdog_agent_version,
-            'status': watchdog_status.get('status', 'unknown')
+            'status': watchdog_status.get('status', 'unknown'),
+            'ssh_error': watchdog_status.get('ssh_error')
         }
     })
 
@@ -977,12 +992,13 @@ def api_watchdog_status(server_id):
     server = Server.query.get_or_404(server_id)
     status = check_watchdog_agent(server)
     
-    # Update server record
-    server.watchdog_agent_installed = status.get('installed', False)
-    server.watchdog_agent_enabled = status.get('running', False)
-    if status.get('version'):
-        server.watchdog_agent_version = status['version']
-    db.session.commit()
+    # Only update server record if we got a definitive answer (not SSH failure)
+    if not status.get('ssh_error') and not status.get('error'):
+        server.watchdog_agent_installed = status.get('installed', False)
+        server.watchdog_agent_enabled = status.get('running', False)
+        if status.get('version'):
+            server.watchdog_agent_version = status['version']
+        db.session.commit()
     
     return jsonify({
         'server_id': server.id,
@@ -2058,7 +2074,11 @@ def check_exporter(ip, port):
         return {'running': False, 'port': port, 'error': str(e)}
 
 def check_watchdog_agent(server):
-    """Check if dc-watchdog-agent service is running via SSH."""
+    """Check if dc-watchdog-agent service is running via SSH.
+    
+    Falls back to database state if SSH fails, so we don't incorrectly
+    report agents as 'not installed' when SSH is simply unreachable.
+    """
     try:
         cmd = [
             'ssh', '-o', 'ConnectTimeout=5', '-o', 'StrictHostKeyChecking=no',
@@ -2110,6 +2130,19 @@ def check_watchdog_agent(server):
         else:
             return {'running': False, 'installed': False, 'status': 'not_installed', 'version': None}
     except Exception as e:
+        # SSH failed - fall back to database state instead of reporting "not installed"
+        db_installed = getattr(server, 'watchdog_agent_installed', False)
+        db_enabled = getattr(server, 'watchdog_agent_enabled', False)
+        db_version = getattr(server, 'watchdog_agent_version', None)
+        
+        if db_installed:
+            return {
+                'running': db_enabled,
+                'installed': True,
+                'status': 'running (cached)' if db_enabled else 'stopped (cached)',
+                'version': db_version,
+                'ssh_error': str(e)
+            }
         return {'running': False, 'installed': False, 'status': 'unknown', 'version': None, 'error': str(e)}
 
 def install_exporter_remote(server, exporter_name):
@@ -2887,6 +2920,7 @@ SERVERS_TEMPLATE = """
                             <span class="status-indicator {% if server.node_exporter_installed and server.node_exporter_enabled %}status-enabled{% elif server.node_exporter_installed %}status-disabled{% else %}status-not-installed{% endif %}"></span>node
                             <span class="status-indicator {% if server.dc_exporter_installed and server.dc_exporter_enabled %}status-enabled{% elif server.dc_exporter_installed %}status-disabled{% else %}status-not-installed{% endif %}" style="margin-left:8px"></span>dc
                             <span class="status-indicator {% if server.dcgm_exporter_installed and server.dcgm_exporter_enabled %}status-enabled{% elif server.dcgm_exporter_installed %}status-disabled{% else %}status-not-installed{% endif %}" style="margin-left:8px"></span>dcgm
+                            <span class="status-indicator {% if server.watchdog_agent_installed and server.watchdog_agent_enabled %}status-enabled{% elif server.watchdog_agent_installed %}status-disabled{% else %}status-not-installed{% endif %}" style="margin-left:8px" title="DC Watchdog Agent"></span>wd
                         </td>
                         <td>
                             <button class="btn btn-secondary" onclick="openServerDetail({{ server.id }}, '{{ server.name }}')">Manage</button>
@@ -2996,23 +3030,10 @@ SERVERS_TEMPLATE = """
     function updateServerRow(row, result) {
         // Update all columns in the table row
         const cells = row.querySelectorAll('td');
-        if (cells.length < 6) return;  // Expect: Name, IP, Status, GPUs, Exporters, Last Seen, Actions
+        if (cells.length < 5) return;  // Expect: Name, IP, SSH, Exporters, Actions
         
-        // Status column (index 2)
-        const statusCell = cells[2];
-        if (statusCell && result.status) {
-            const statusClass = result.status === 'online' ? 'status-online' : 'status-offline';
-            statusCell.innerHTML = `<span class="${statusClass}">${result.status}</span>`;
-        }
-        
-        // GPU count column (index 3)
-        const gpuCell = cells[3];
-        if (gpuCell && result.gpu_count !== undefined) {
-            gpuCell.textContent = result.gpu_count;
-        }
-        
-        // Exporter status column (index 4)
-        const exporterCell = cells[4];
+        // Exporter status column (index 3)
+        const exporterCell = cells[3];
         if (exporterCell) {
             let html = '';
             html += `<span class="status-indicator ${result.node_exporter?.running ? 'status-enabled' : 'status-not-installed'}"></span>node`;
@@ -3021,6 +3042,9 @@ SERVERS_TEMPLATE = """
             if (result.dc_exporter?.version) html += ` ${result.dc_exporter.version}`;
             html += `<span class="status-indicator ${result.dcgm_exporter?.running ? 'status-enabled' : 'status-not-installed'}" style="margin-left:8px"></span>dcgm`;
             if (result.dcgm_exporter?.version) html += ` ${result.dcgm_exporter.version}`;
+            const wdStatus = result.watchdog_agent?.running ? 'status-enabled' : (result.watchdog_agent?.installed ? 'status-disabled' : 'status-not-installed');
+            html += `<span class="status-indicator ${wdStatus}" style="margin-left:8px" title="DC Watchdog Agent"></span>wd`;
+            if (result.watchdog_agent?.version) html += ` ${result.watchdog_agent.version}`;
             exporterCell.innerHTML = html;
         }
         
@@ -3098,6 +3122,20 @@ SERVERS_TEMPLATE = """
                 const isInstalled = watchdogData.installed || false;
                 const isEnabled = watchdogData.enabled !== false;
                 const wdVersion = watchdogData.version || null;
+                const sshError = watchdogData.ssh_error || null;
+                
+                let statusText, statusStyle;
+                if (sshError && isInstalled) {
+                    // SSH failed but DB says installed - show cached state
+                    statusText = isEnabled ? 'Running (cached)' : 'Stopped (cached)';
+                    statusStyle = 'background: var(--accent-yellow); color: #000;';
+                } else if (isInstalled) {
+                    statusText = isEnabled ? 'Running' : 'Stopped';
+                    statusStyle = isEnabled ? 'background: var(--accent-green);' : '';
+                } else {
+                    statusText = 'Not installed';
+                    statusStyle = '';
+                }
                 
                 html += `
                 <div class="exporter-card" data-exporter="${exp.key}" style="border-color: var(--accent-cyan); background: linear-gradient(135deg, var(--bg-card), rgba(0, 212, 255, 0.05));">
@@ -3110,9 +3148,10 @@ SERVERS_TEMPLATE = """
                     </div>
                     <div class="version-info">
                         <span>Status:</span>
-                        <span class="version-badge" style="${isInstalled ? 'background: var(--accent-green);' : ''}">${isInstalled ? (isEnabled ? 'Running' : 'Stopped') : 'Not installed'}</span>
+                        <span class="version-badge" style="${statusStyle}">${statusText}</span>
                         ${wdVersion ? `<span style="color: var(--text-secondary); margin-left: 8px;">v${wdVersion}</span>` : ''}
                     </div>
+                    ${sshError ? `<div style="margin-top: 6px; font-size: 11px; color: var(--accent-yellow);">SSH check failed - showing last known state</div>` : ''}
                     ${canWrite ? `
                     <div style="margin-top: 10px; display: flex; gap: 8px;">
                         ${!isInstalled ? `<button class="btn btn-primary btn-sm" onclick="installWatchdogAgent()">Install Agent</button>` : ''}
@@ -3341,10 +3380,16 @@ SERVERS_TEMPLATE = """
         const response = await fetch(`${basePath}/api/servers/${id}/check`);
         const result = await response.json();
         
+        const wdStatus = result.watchdog_agent ? 
+            (result.watchdog_agent.running ? 'Running' : (result.watchdog_agent.installed ? 'Stopped' : 'Not installed')) : 
+            'Unknown';
+        const wdVersion = result.watchdog_agent?.version ? ` (v${result.watchdog_agent.version})` : '';
+        
         alert(`SSH: ${result.ssh.connected ? 'OK' : 'Failed'}
 Node Exporter: ${result.node_exporter.running ? 'Running' : 'Not running'}
 DC Exporter: ${result.dc_exporter.running ? 'Running' : 'Not running'}
-DCGM Exporter: ${result.dcgm_exporter.running ? 'Running' : 'Not running'}`);
+DCGM Exporter: ${result.dcgm_exporter.running ? 'Running' : 'Not running'}
+DC Watchdog Agent: ${wdStatus}${wdVersion}`);
         
         location.reload();
     }

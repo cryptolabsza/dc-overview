@@ -2775,13 +2775,21 @@ echo "[+] Installation complete"
         
         # Step 2: Add each server via docker exec curl
         added = 0
+        # Check if watchdog agents were deployed (Step 8c ran before this)
+        watchdog_deployed = self.config.components.dc_watchdog and bool(self.config.watchdog.api_key)
+        
         for server in self.config.servers:
-            data = json.dumps({
+            server_data = {
                 "name": server.name,
                 "server_ip": server.server_ip,
                 "ssh_user": self.config.ssh.username,
                 "ssh_port": self.config.ssh.port,
-            })
+            }
+            # Mark watchdog agent as installed if agents were deployed in Step 8c
+            if watchdog_deployed:
+                server_data["watchdog_agent_installed"] = True
+            
+            data = json.dumps(server_data)
             
             result = subprocess.run([
                 "docker", "exec", "dc-overview",
