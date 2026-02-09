@@ -352,12 +352,15 @@ After setup, access your monitoring at:
 
 ## Integration with IPMI Monitor
 
-DC Overview and IPMI Monitor share infrastructure:
+DC Overview and IPMI Monitor share infrastructure and auto-detect each other's configuration:
 
 ```bash
 # If IPMI Monitor is already installed, quickstart detects it:
 ✓ IPMI Monitor Detected!
 ✓ CryptoLabs Proxy Already Running!
+✓ Fleet admin: admin (from existing proxy)
+✓ Site name: My GPU Farm (from existing proxy)
+✓ AI license key detected from existing deployment
 ✓ Imported 12 servers from IPMI Monitor
 ✓ Imported SSH keys from IPMI Monitor
 ```
@@ -368,6 +371,41 @@ Shared components:
 - **Server list** - Imported automatically
 - **SSH keys** - Shared between services
 - **Watchtower** - Auto-updates for all containers
+
+### Cross-Tool Config Auto-Detection
+
+Both quickstart commands can be run in **either order**. The second tool automatically reuses configuration from the first:
+
+```bash
+# Scenario A: dc-overview first, ipmi-monitor second
+sudo dc-overview quickstart -c dc-config.yaml -y
+sudo ipmi-monitor quickstart -c ipmi-config.yaml -y    # Skips credential prompts
+
+# Scenario B: ipmi-monitor first, dc-overview second
+sudo ipmi-monitor quickstart -c ipmi-config.yaml -y
+sudo dc-overview quickstart -c dc-config.yaml -y        # Skips credential prompts
+```
+
+**Auto-detected from an existing proxy:**
+
+| Value | Source |
+|-------|--------|
+| Fleet admin credentials | Proxy env vars (`FLEET_ADMIN_USER` / `FLEET_ADMIN_PASS`) |
+| Site name | Proxy env var (`SITE_NAME`) |
+| AI / Watchdog license key | Proxy env var (`WATCHDOG_API_KEY`) or `/etc/ipmi-monitor/.env` |
+| Domain and SSL mode | Proxy nginx config |
+| SSH keys | `/etc/ipmi-monitor/ssh_keys/` or `/etc/dc-overview/ssh_keys/` |
+| Server list | IPMI Monitor database or `servers.yaml` |
+
+**Priority order** (highest to lowest):
+
+| Priority | Source | When used |
+|----------|--------|-----------|
+| 1 | Config file (`-c`) | Always takes precedence if value is present |
+| 2 | Running proxy env vars | Fills in missing values from config file |
+| 3 | Interactive prompt | Only if neither of the above provides a value |
+
+> **Note:** Config file values always win. If your two config files specify different credentials, each deployment uses its own file's values. The auto-detection only fills in values **missing** from the config file — it never silently overrides what you explicitly set.
 
 ---
 
