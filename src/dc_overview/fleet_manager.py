@@ -42,12 +42,16 @@ try:
         ProxyConfig,
         setup_proxy as proxy_setup,
         is_proxy_running,
+        get_proxy_config,
         update_proxy_credentials,
         ensure_docker_network as proxy_ensure_network,
         DOCKER_NETWORK_NAME as PROXY_NETWORK_NAME,
         DOCKER_NETWORK_SUBNET as PROXY_NETWORK_SUBNET,
         PROXY_STATIC_IP,
     )
+    from cryptolabs_proxy.services import ServiceRegistry as ProxyServiceRegistry
+    from cryptolabs_proxy.config import generate_nginx_config as proxy_generate_nginx_config
+    from cryptolabs_proxy.config import CONFIG_DIR as PROXY_CONFIG_DIR
     HAS_PROXY_MODULE = True
 except ImportError:
     HAS_PROXY_MODULE = False
@@ -2623,10 +2627,26 @@ echo "[+] Installation complete"
         """Set up Docker-based cryptolabs-proxy with SSL."""
         console.print("\n[bold]Step 9: Setting up HTTPS Reverse Proxy[/bold]\n")
         
-        # Check if using existing cryptolabs-proxy
+        # Check if using existing cryptolabs-proxy (set by wizard or config file)
         if getattr(self.config.ssl, 'use_existing_proxy', False):
             self._integrate_with_proxy()
             return
+        
+        # Safety net: even if use_existing_proxy wasn't set, check at runtime
+        # This handles the case where ipmi-monitor set up the proxy and dc-overview
+        # was run without the wizard (e.g., direct deploy_fleet() call)
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", "cryptolabs-proxy", "--format", "{{.State.Status}}"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip() == "running":
+                console.print("[green]✓[/green] Existing CryptoLabs Proxy detected, integrating...")
+                self.config.ssl.use_existing_proxy = True
+                self._integrate_with_proxy()
+                return
+        except Exception:
+            pass
         
         # Deploy cryptolabs-proxy Docker container
         self._deploy_cryptolabs_proxy()
@@ -3197,6 +3217,50 @@ echo "[+] Installation complete"
         
         console.print("[green]✓[/green] Containers connected to cryptolabs network")
         
+        # Regenerate proxy nginx config with all detected services
+        # This is critical when ipmi-monitor set up the proxy first - its nginx.conf
+        # only has /ipmi/ routes, so we need to add /dc/, /grafana/, /prometheus/ etc.
+        if HAS_PROXY_MODULE:
+            try:
+                console.print("[dim]Updating proxy routes for all services...[/dim]")
+                registry = ProxyServiceRegistry(PROXY_CONFIG_DIR)
+                
+                # Auto-detect all running services and register them
+                detected = registry.auto_detect_services()
+                for name, svc in detected.items():
+                    registry.services[name] = svc
+                registry.save()
+                
+                # Determine SSL mode
+                use_le = (self.config.ssl.mode == SSLMode.LETSENCRYPT)
+                
+                # Regenerate nginx config with all services
+                proxy_generate_nginx_config(
+                    PROXY_CONFIG_DIR,
+                    domain=domain,
+                    letsencrypt=use_le,
+                    services=registry.services,
+                )
+                
+                # Reload nginx in the proxy container
+                result = subprocess.run(
+                    ["docker", "exec", "cryptolabs-proxy", "nginx", "-t"],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0:
+                    subprocess.run(
+                        ["docker", "exec", "cryptolabs-proxy", "nginx", "-s", "reload"],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    console.print(f"[green]✓[/green] Proxy routes updated ({len(detected)} services detected)")
+                else:
+                    console.print(f"[yellow]⚠[/yellow] Nginx config test failed, routes may need manual update")
+            except Exception as e:
+                console.print(f"[yellow]⚠[/yellow] Could not update proxy routes: {e}")
+        else:
+            # Legacy: try to add dc-overview routes to existing nginx config
+            self._add_dc_routes_to_proxy_nginx(domain)
+        
         # Populate dc-overview with configured servers and SSH keys
         # This is critical for Server Manager SSH operations to work
         if self.config.servers or self.config.ssh.key_path:
@@ -3295,6 +3359,128 @@ echo "[+] Installation complete"
                 console.print(f"[red]✗[/red] Failed to update proxy: {result.stderr[:200]}")
         else:
             console.print("[green]✓[/green] Proxy already configured correctly")
+    
+    def _add_dc_routes_to_proxy_nginx(self, domain: str):
+        """Add dc-overview, grafana, prometheus routes to existing proxy nginx config.
+        
+        Used when cryptolabs-proxy module is not available (legacy fallback).
+        Handles the case where ipmi-monitor set up the proxy first with only /ipmi/ routes.
+        """
+        import re
+        
+        # Find the nginx config (check ipmi-monitor and cryptolabs-proxy locations)
+        nginx_paths = [
+            Path("/etc/ipmi-monitor/nginx.conf"),
+            Path("/etc/cryptolabs-proxy/nginx.conf"),
+        ]
+        
+        nginx_path = None
+        for path in nginx_paths:
+            if path.exists():
+                nginx_path = path
+                break
+        
+        if not nginx_path:
+            console.print("[yellow]⚠[/yellow] Could not find proxy nginx config for route addition")
+            return
+        
+        content = nginx_path.read_text()
+        routes_added = 0
+        
+        # Define routes to add (dc-overview, grafana, prometheus)
+        route_blocks = {
+            "/dc/": '''
+        # DC Overview (Server Manager)
+        location /dc/ {
+            auth_request /_auth_check;
+            auth_request_set $auth_user $upstream_http_x_fleet_auth_user;
+            auth_request_set $auth_role $upstream_http_x_fleet_auth_role;
+            auth_request_set $auth_token $upstream_http_x_fleet_auth_token;
+            error_page 401 = @login_redirect;
+
+            proxy_pass http://dc-overview:5001/;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Script-Name /dc;
+            proxy_set_header X-Fleet-Auth-User $auth_user;
+            proxy_set_header X-Fleet-Auth-Role $auth_role;
+            proxy_set_header X-Fleet-Auth-Token $auth_token;
+            proxy_set_header X-Fleet-Authenticated "true";
+            proxy_read_timeout 300s;
+            proxy_connect_timeout 10s;
+        }
+''',
+            "/grafana/": '''
+        # Grafana Dashboards
+        location /grafana/ {
+            auth_request /_auth_check;
+            error_page 401 = @login_redirect;
+
+            proxy_pass http://grafana:3000/;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_read_timeout 300s;
+        }
+''',
+            "/prometheus/": '''
+        # Prometheus
+        location /prometheus/ {
+            auth_request /_auth_check;
+            error_page 401 = @login_redirect;
+
+            proxy_pass http://prometheus:9090/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+''',
+        }
+        
+        for route_path, route_block in route_blocks.items():
+            if route_path in content:
+                continue  # Already exists
+            
+            # Insert before the IPMI Monitor block or the root location block
+            insert_pattern = r'(\s+# IPMI Monitor|\s+# Fleet Management Landing Page|\s+location = / \{)'
+            match = re.search(insert_pattern, content)
+            if match:
+                insert_pos = match.start()
+                content = content[:insert_pos] + route_block + content[insert_pos:]
+                routes_added += 1
+        
+        if routes_added > 0:
+            nginx_path.write_text(content)
+            console.print(f"[green]✓[/green] Added {routes_added} route(s) to proxy nginx config")
+            
+            # Reload nginx
+            try:
+                result = subprocess.run(
+                    ["docker", "exec", "cryptolabs-proxy", "nginx", "-t"],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0:
+                    subprocess.run(
+                        ["docker", "exec", "cryptolabs-proxy", "nginx", "-s", "reload"],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    console.print("[green]✓[/green] Proxy nginx config reloaded")
+                else:
+                    console.print(f"[yellow]⚠[/yellow] Nginx config test failed")
+            except Exception as e:
+                console.print(f"[yellow]⚠[/yellow] Could not reload proxy: {e}")
+        else:
+            console.print("[green]✓[/green] All routes already configured in proxy")
     
     def _update_api_services_endpoint(self, nginx_path: Path, content: str = None):
         """Update /api/services endpoint to include all running services."""

@@ -301,6 +301,9 @@ class Server(db.Model):
     ssh_user = db.Column(db.String(50), default='root')
     ssh_port = db.Column(db.Integer, default=22)
     ssh_key_id = db.Column(db.Integer, db.ForeignKey('ssh_key.id'), nullable=True)
+    # Password-based SSH auth (alternative to key-based)
+    # If both key and password are set, key takes priority
+    ssh_password = db.Column(db.String(500), nullable=True)
     
     # Exporter installation status
     node_exporter_installed = db.Column(db.Boolean, default=False)
@@ -597,12 +600,21 @@ def api_add_server():
     if existing:
         return jsonify({'error': 'Server with this name or IP already exists'}), 409
     
+    # Validate SSH key if provided
+    ssh_key_id = data.get('ssh_key_id')
+    if ssh_key_id:
+        ssh_key_id = int(ssh_key_id)
+        key = SSHKey.query.get(ssh_key_id)
+        if not key:
+            return jsonify({'error': 'SSH key not found'}), 404
+    
     server = Server(
         name=validated_name,
         server_ip=validated_ip,
         ssh_user=validated_user,
         ssh_port=validated_port,
-        ssh_key_id=data.get('ssh_key_id')
+        ssh_key_id=ssh_key_id,
+        ssh_password=data.get('ssh_password') or None
     )
     
     # Allow setting watchdog agent status (e.g., from quickstart after deploying agents)
@@ -659,9 +671,9 @@ def api_check_server(server_id):
     server.dc_exporter_installed = results['dc_exporter']['running']
     server.dcgm_exporter_installed = results['dcgm_exporter']['running']
     
-    # Only update watchdog DB state if we got a definitive answer (not SSH failure)
+    # Update watchdog DB state from the check result
     wd_result = results['watchdog_agent']
-    if not wd_result.get('ssh_error') and not wd_result.get('error'):
+    if wd_result.get('source') != 'database':  # Don't re-save cached data as new data
         server.watchdog_agent_installed = wd_result.get('installed', False)
         server.watchdog_agent_enabled = wd_result.get('running', False)
         if wd_result.get('version'):
@@ -685,21 +697,22 @@ def api_check_server(server_id):
     
     # Detect exporter versions
     ssh_key_path = resolve_ssh_key_path(server)
+    ssh_password = server.ssh_password
     
     if server.node_exporter_installed:
-        version = get_exporter_version(server.server_ip, 'node_exporter', server.ssh_user, server.ssh_port, ssh_key_path)
+        version = get_exporter_version(server.server_ip, 'node_exporter', server.ssh_user, server.ssh_port, ssh_key_path, ssh_password)
         if version:
             server.node_exporter_version = version
             results['node_exporter']['version'] = version
     
     if server.dc_exporter_installed:
-        version = get_exporter_version(server.server_ip, 'dc_exporter', server.ssh_user, server.ssh_port, ssh_key_path)
+        version = get_exporter_version(server.server_ip, 'dc_exporter', server.ssh_user, server.ssh_port, ssh_key_path, ssh_password)
         if version:
             server.dc_exporter_version = version
             results['dc_exporter']['version'] = version
     
     if server.dcgm_exporter_installed:
-        version = get_exporter_version(server.server_ip, 'dcgm_exporter', server.ssh_user, server.ssh_port, ssh_key_path)
+        version = get_exporter_version(server.server_ip, 'dcgm_exporter', server.ssh_user, server.ssh_port, ssh_key_path, ssh_password)
         if version:
             server.dcgm_exporter_version = version
             results['dcgm_exporter']['version'] = version
@@ -725,7 +738,8 @@ def check_and_apply_auto_updates(server):
             server.ssh_user,
             server.ssh_port,
             ssh_key_path,
-            server.exporter_update_branch or 'main'
+            ssh_password=server.ssh_password,
+            branch=server.exporter_update_branch or 'main'
         )
         
         # Check each exporter for auto-update
@@ -843,15 +857,17 @@ def api_get_exporter_versions(server_id):
     
     server = Server.query.get_or_404(server_id)
     
-    # Get SSH key path if available
+    # Get SSH credentials
     ssh_key_path = resolve_ssh_key_path(server)
+    ssh_password = server.ssh_password
     
     # Get installed versions
     versions = get_all_exporter_versions(
         server.server_ip,
         server.ssh_user,
         server.ssh_port,
-        ssh_key_path
+        ssh_key_path,
+        ssh_password
     )
     
     # Check for updates
@@ -860,7 +876,8 @@ def api_get_exporter_versions(server_id):
         server.ssh_user,
         server.ssh_port,
         ssh_key_path,
-        server.exporter_update_branch
+        ssh_password=ssh_password,
+        branch=server.exporter_update_branch
     )
     
     # Update version info in database
@@ -875,8 +892,8 @@ def api_get_exporter_versions(server_id):
     
     # Also get watchdog agent status
     watchdog_status = check_watchdog_agent(server)
-    # Only update DB if we got a definitive answer (not SSH failure)
-    if not watchdog_status.get('ssh_error') and not watchdog_status.get('error'):
+    # Update DB unless we only got cached DB data back
+    if watchdog_status.get('source') not in ('database', 'none'):
         server.watchdog_agent_installed = watchdog_status.get('installed', False)
         server.watchdog_agent_enabled = watchdog_status.get('running', False)
         if watchdog_status.get('version'):
@@ -893,7 +910,7 @@ def api_get_exporter_versions(server_id):
             'enabled': server.watchdog_agent_enabled,
             'version': server.watchdog_agent_version,
             'status': watchdog_status.get('status', 'unknown'),
-            'ssh_error': watchdog_status.get('ssh_error')
+            'source': watchdog_status.get('source')
         }
     })
 
@@ -1043,8 +1060,8 @@ def api_watchdog_status(server_id):
     server = Server.query.get_or_404(server_id)
     status = check_watchdog_agent(server)
     
-    # Only update server record if we got a definitive answer (not SSH failure)
-    if not status.get('ssh_error') and not status.get('error'):
+    # Update server record unless we only got cached DB data back
+    if status.get('source') != 'database' and status.get('source') != 'none':
         server.watchdog_agent_installed = status.get('installed', False)
         server.watchdog_agent_enabled = status.get('running', False)
         if status.get('version'):
@@ -1095,23 +1112,15 @@ def api_toggle_watchdog(server_id):
 def toggle_watchdog_service(server, enabled: bool) -> bool:
     """Start or stop dc-watchdog-agent service on a server via SSH."""
     try:
-        cmd = [
-            'ssh', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=no',
-            '-o', 'BatchMode=yes', '-p', str(server.ssh_port)
-        ]
-        
-        ssh_key_path = resolve_ssh_key_path(server)
-        if ssh_key_path:
-            cmd.extend(['-i', ssh_key_path])
-        
-        cmd.append(f'{server.ssh_user}@{server.server_ip}')
+        cmd, env = build_ssh_cmd(server, timeout=10)
         
         if enabled:
             cmd.append('systemctl start dc-watchdog-agent')
         else:
             cmd.append('systemctl stop dc-watchdog-agent')
         
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        run_env = {**os.environ, **env} if env else None
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=run_env)
         return result.returncode == 0
     except Exception as e:
         app.logger.error(f"Error toggling watchdog agent on {server.name}: {e}")
@@ -1200,6 +1209,25 @@ def api_remove_watchdog_agent(server_id):
         return jsonify({'success': True, 'message': 'DC Watchdog agent removed'})
     else:
         return jsonify({'success': False, 'error': 'Failed to remove agent'}), 500
+
+
+@app.route('/api/watchdog-agent/latest')
+@login_required
+def api_watchdog_latest_release():
+    """Get the latest DC Watchdog agent release from GitHub."""
+    release = get_watchdog_latest_release()
+    if release:
+        return jsonify({
+            'success': True,
+            'version': release.get('version', ''),
+            'tag': release.get('tag', ''),
+            'name': release.get('name', '')
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'error': 'Could not fetch latest release from GitHub'
+        }), 502
 
 
 @app.route('/api/watchdog-agents/deploy-all', methods=['POST'])
@@ -1346,8 +1374,49 @@ def _sync_watchdog_status_from_api():
     return updated
 
 
+def get_watchdog_latest_release() -> dict:
+    """Query GitHub API for the latest dc-watchdog agent release.
+    
+    Returns dict with 'version' (e.g. '1.0.2') and 'tag' (e.g. 'v1.0.2'),
+    or empty dict if the API is unreachable.
+    Uses a 10-minute cache to avoid hammering the API.
+    """
+    cache_key = '_watchdog_release_cache'
+    cache = getattr(get_watchdog_latest_release, cache_key, None)
+    if cache and (datetime.utcnow() - cache['fetched_at']).total_seconds() < 600:
+        return cache['data']
+    
+    try:
+        import requests as req
+        resp = req.get(
+            'https://api.github.com/repos/cryptolabsza/dc-watchdog/releases/latest',
+            headers={'Accept': 'application/vnd.github.v3+json'},
+            timeout=10
+        )
+        if resp.ok:
+            data = resp.json()
+            tag = data.get('tag_name', '')
+            version = tag.lstrip('v') if tag else ''
+            result = {'version': version, 'tag': tag, 'name': data.get('name', '')}
+            setattr(get_watchdog_latest_release, cache_key, {
+                'data': result, 'fetched_at': datetime.utcnow()
+            })
+            return result
+    except Exception as e:
+        app.logger.warning(f"Could not fetch latest watchdog release: {e}")
+    
+    return {}
+
+
 def install_watchdog_agent_remote(server, api_key: str) -> tuple:
-    """Install DC Watchdog agent on a remote server via SSH.
+    """Install DC Watchdog Go agent on a remote server via SSH.
+    
+    Downloads the Go binary from the latest GitHub release. No bash fallback -
+    the Go binary is required for:
+    - Health endpoint on port 9878 for Fleet Management probing
+    - Prometheus metrics at /metrics
+    - GPU, RAID, network (MTR), and service monitoring
+    - Proper version reporting
     
     Security: Instead of storing the API key on the worker, we first request
     a worker-specific token from dc-watchdog. This token:
@@ -1356,13 +1425,14 @@ def install_watchdog_agent_remote(server, api_key: str) -> tuple:
     - Can be revoked without changing the API key
     - If compromised, only affects this specific worker
     """
-    WATCHDOG_URL = "https://watchdog.cryptolabs.co.za"
+    WATCHDOG_URL = os.environ.get('DC_WATCHDOG_URL', 'https://watchdog.cryptolabs.co.za')
+    GITHUB_REPO = "cryptolabsza/dc-watchdog"
     
     try:
         # Step 1: Request a worker token from dc-watchdog
-        # This requires the API key but returns a worker-specific token
         import requests as req
         
+        worker_token = None
         try:
             token_resp = req.post(
                 f'{WATCHDOG_URL}/api/worker/register',
@@ -1379,79 +1449,168 @@ def install_watchdog_agent_remote(server, api_key: str) -> tuple:
                 else:
                     return False, token_data.get('error', 'Failed to get worker token')
             else:
-                # Fallback: use API key directly if token endpoint not available
-                # (backward compatibility with older dc-watchdog versions)
                 app.logger.warning(f"Could not get worker token (status {token_resp.status_code}), using API key")
-                worker_token = None
         except req.RequestException as e:
             app.logger.warning(f"Could not reach dc-watchdog for token: {e}, using API key")
-            worker_token = None
         
-        # Step 2: Deploy the agent with either worker token or API key
-        cmd = [
-            'ssh', '-o', 'ConnectTimeout=30', '-o', 'StrictHostKeyChecking=no',
-            '-o', 'BatchMode=yes', '-p', str(server.ssh_port)
-        ]
+        # Check latest release version for logging
+        latest = get_watchdog_latest_release()
+        latest_ver = latest.get('version', 'unknown')
+        app.logger.info(f"Installing watchdog agent on {server.name} (latest release: {latest_ver})")
         
-        ssh_key_path = resolve_ssh_key_path(server)
-        if ssh_key_path:
-            cmd.extend(['-i', ssh_key_path])
+        # Step 2: Build SSH command and deploy the Go agent
+        cmd, ssh_env = build_ssh_cmd(server, timeout=60)
         
-        cmd.append(f'{server.ssh_user}@{server.server_ip}')
-        
-        # Use worker token if available, otherwise fall back to API key
-        if worker_token:
-            # Secure mode: use worker token (recommended)
-            auth_var = f'WORKER_TOKEN="{worker_token}"'
-            auth_param = 'worker_token=$WORKER_TOKEN'
-        else:
-            # Legacy mode: use API key directly
-            auth_var = f'API_KEY="{api_key}"'
-            auth_param = 'api_key=$API_KEY'
+        # Use worker token if available, otherwise API key directly
+        auth_key = worker_token if worker_token else api_key
         
         install_script = f'''
 set -e
-INSTALL_DIR="/opt/dc-watchdog"
-mkdir -p "$INSTALL_DIR"
 
-# Create environment file with worker token (not API key)
-cat > "$INSTALL_DIR/agent.env" << 'ENVEOF'
-WATCHDOG_SERVER="{WATCHDOG_URL}"
-HEARTBEAT_INTERVAL=30
-{auth_var}
-WORKER_ID="{server.name}"
-USE_MTR=true
-ENVEOF
-chmod 600 "$INSTALL_DIR/agent.env"
+INSTALL_DIR="/usr/local/bin"
+CONFIG_DIR="/etc/dc-watchdog"
+GITHUB_REPO="{GITHUB_REPO}"
 
-# Install mtr if available
-apt-get update -qq && apt-get install -y -qq mtr-tiny 2>/dev/null || yum install -y -q mtr 2>/dev/null || true
+echo "[+] Installing DC-Watchdog Agent (Go binary)..."
 
-# Create agent script using worker token for authentication
-cat > "$INSTALL_DIR/dc-watchdog-agent.sh" << 'AGENTEOF'
-#!/bin/bash
-source /opt/dc-watchdog/agent.env
+# Stop existing agent if running
+systemctl stop dc-watchdog-agent 2>/dev/null || true
 
-while true; do
-    # Send heartbeat using worker token (not API key)
-    curl -s -X GET "$WATCHDOG_SERVER/ping/$WORKER_ID?{auth_param}" > /dev/null 2>&1
-    sleep $HEARTBEAT_INTERVAL
-done
-AGENTEOF
-chmod +x "$INSTALL_DIR/dc-watchdog-agent.sh"
+# Create directories
+mkdir -p "$CONFIG_DIR"
 
-# Create systemd service
+# Install dependencies (mtr for network diagnostics)
+echo "[+] Installing dependencies..."
+if command -v apt-get &> /dev/null; then
+    apt-get update -qq 2>/dev/null || true
+    apt-get install -y -qq mtr-tiny curl 2>/dev/null || true
+elif command -v yum &> /dev/null; then
+    yum install -y -q mtr curl 2>/dev/null || true
+elif command -v dnf &> /dev/null; then
+    dnf install -y -q mtr curl 2>/dev/null || true
+fi
+
+# Detect architecture
+ARCH=$(uname -m)
+case $ARCH in
+    x86_64)  ARCH_SUFFIX="linux-amd64" ;;
+    aarch64) ARCH_SUFFIX="linux-arm64" ;;
+    *)
+        echo "INSTALL_FAILED: Unsupported architecture: $ARCH"
+        exit 1
+        ;;
+esac
+
+# Download Go agent binary (required - no bash fallback)
+echo "[+] Downloading Go agent for $ARCH_SUFFIX..."
+DOWNLOAD_OK=false
+
+# Primary: Download from DC Watchdog server
+AGENT_URL="{WATCHDOG_URL}/agent/dc-watchdog-agent-$ARCH_SUFFIX"
+if curl -fsSL "$AGENT_URL" -o "$INSTALL_DIR/dc-watchdog-agent.tmp" 2>/dev/null; then
+    if [ -s "$INSTALL_DIR/dc-watchdog-agent.tmp" ]; then
+        mv "$INSTALL_DIR/dc-watchdog-agent.tmp" "$INSTALL_DIR/dc-watchdog-agent"
+        chmod +x "$INSTALL_DIR/dc-watchdog-agent"
+        if "$INSTALL_DIR/dc-watchdog-agent" -version 2>/dev/null; then
+            DOWNLOAD_OK=true
+            echo "[+] Go agent downloaded from watchdog server"
+        fi
+    fi
+fi
+
+# Fallback: Try GitHub releases (always fetches latest)
+if [ "$DOWNLOAD_OK" = "false" ]; then
+    echo "[+] Trying GitHub releases (latest)..."
+    RELEASE_URL="https://github.com/$GITHUB_REPO/releases/latest/download/dc-watchdog-agent-$ARCH_SUFFIX"
+    if curl -fsSL "$RELEASE_URL" -o "$INSTALL_DIR/dc-watchdog-agent.tmp" 2>/dev/null; then
+        if [ -s "$INSTALL_DIR/dc-watchdog-agent.tmp" ]; then
+            mv "$INSTALL_DIR/dc-watchdog-agent.tmp" "$INSTALL_DIR/dc-watchdog-agent"
+            chmod +x "$INSTALL_DIR/dc-watchdog-agent"
+            if "$INSTALL_DIR/dc-watchdog-agent" -version 2>/dev/null; then
+                DOWNLOAD_OK=true
+                echo "[+] Go agent downloaded from GitHub releases"
+            fi
+        fi
+    fi
+fi
+
+rm -f "$INSTALL_DIR/dc-watchdog-agent.tmp" 2>/dev/null
+
+# Fail if we couldn't get the Go binary - no bash fallback
+if [ "$DOWNLOAD_OK" = "false" ]; then
+    echo "INSTALL_FAILED: Could not download Go agent binary from watchdog server or GitHub releases"
+    exit 1
+fi
+
+# Detect GPU availability
+HAS_GPU=false
+if command -v nvidia-smi &> /dev/null; then
+    if timeout 5 nvidia-smi -L &> /dev/null; then
+        HAS_GPU=true
+    fi
+fi
+
+# Set monitoring level based on GPU availability
+if [ "$HAS_GPU" = "true" ]; then
+    MONITOR_LEVEL="standard"
+else
+    MONITOR_LEVEL="basic"
+fi
+
+# Create YAML configuration for Go agent
+echo "[+] Creating configuration..."
+cat > "$CONFIG_DIR/agent.yaml" << YAMLEOF
+# DC-Watchdog Agent Configuration
+server_url: "{WATCHDOG_URL}"
+api_key: "{auth_key}"
+worker_name: "{server.name}"
+heartbeat_interval: 30s
+level: $MONITOR_LEVEL
+
+# Health endpoint for Fleet Management probing (port 9878)
+health_port: 9878
+
+gpu:
+  enabled: $HAS_GPU
+  check_driver_health: true
+  detect_vm_passthrough: true
+  timeout_seconds: 5
+
+network:
+  mtr:
+    enabled: true
+    interval: 10
+    hops: 15
+
+raid:
+  enabled: true
+  interval: 1
+  alert_on_degraded: true
+
+log_level: info
+YAMLEOF
+chmod 600 "$CONFIG_DIR/agent.yaml"
+
+# Clean up any old bash fallback agent
+rm -f /opt/dc-watchdog/dc-watchdog-agent.sh 2>/dev/null
+
+# Create systemd service (Go binary only)
+echo "[+] Creating systemd service..."
 cat > /etc/systemd/system/dc-watchdog-agent.service << 'SVCEOF'
 [Unit]
-Description=DC Watchdog Agent
-After=network.target
+Description=DC-Watchdog Agent
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-EnvironmentFile=/opt/dc-watchdog/agent.env
-ExecStart=/opt/dc-watchdog/dc-watchdog-agent.sh
+User=root
+ExecStart=/usr/local/bin/dc-watchdog-agent -config /etc/dc-watchdog/agent.yaml
 Restart=always
-RestartSec=10
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+MemoryLimit=128M
 
 [Install]
 WantedBy=multi-user.target
@@ -1460,19 +1619,47 @@ SVCEOF
 systemctl daemon-reload
 systemctl enable dc-watchdog-agent
 systemctl restart dc-watchdog-agent
+
+# Verify agent starts and stays running
+sleep 3
+if ! systemctl is-active --quiet dc-watchdog-agent; then
+    echo "INSTALL_FAILED: Agent crashed on startup"
+    journalctl -u dc-watchdog-agent -n 5 --no-pager 2>/dev/null || true
+    exit 1
+fi
+
+sleep 3
+if ! systemctl is-active --quiet dc-watchdog-agent; then
+    echo "INSTALL_FAILED: Agent crashed after startup"
+    journalctl -u dc-watchdog-agent -n 5 --no-pager 2>/dev/null || true
+    exit 1
+fi
+
+VERSION=$("$INSTALL_DIR/dc-watchdog-agent" -version 2>&1 | head -1 || echo "unknown")
+echo "AGENT_VERSION=$VERSION"
 echo "INSTALL_SUCCESS"
 '''
         cmd.append(install_script)
         
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        run_env = {**os.environ, **ssh_env} if ssh_env else None
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env=run_env)
         
         if result.returncode == 0 and 'INSTALL_SUCCESS' in result.stdout:
+            # Extract version if reported
+            for line in result.stdout.splitlines():
+                if line.startswith('AGENT_VERSION='):
+                    version_str = line.split('=', 1)[1].strip()
+                    # Parse "dc-watchdog-agent version 1.0.2" or just "1.0.2"
+                    import re
+                    ver_match = re.search(r'(\d+\.\d+\.\d+)', version_str)
+                    if ver_match:
+                        server.watchdog_agent_version = ver_match.group(1)
             return True, None
         else:
             error = result.stderr.strip() or result.stdout.strip() or 'Unknown error'
-            return False, error[:200]
+            return False, error[:300]
     except subprocess.TimeoutExpired:
-        return False, 'SSH connection timed out'
+        return False, 'SSH connection timed out (180s)'
     except Exception as e:
         app.logger.exception(f"Error installing watchdog agent on {server.name}")
         return False, str(e)[:200]
@@ -1481,28 +1668,22 @@ echo "INSTALL_SUCCESS"
 def remove_watchdog_agent_remote(server) -> bool:
     """Remove DC Watchdog agent from a remote server via SSH."""
     try:
-        cmd = [
-            'ssh', '-o', 'ConnectTimeout=15', '-o', 'StrictHostKeyChecking=no',
-            '-o', 'BatchMode=yes', '-p', str(server.ssh_port)
-        ]
-        
-        ssh_key_path = resolve_ssh_key_path(server)
-        if ssh_key_path:
-            cmd.extend(['-i', ssh_key_path])
-        
-        cmd.append(f'{server.ssh_user}@{server.server_ip}')
+        cmd, env = build_ssh_cmd(server, timeout=15)
         
         remove_script = '''
 systemctl stop dc-watchdog-agent 2>/dev/null || true
 systemctl disable dc-watchdog-agent 2>/dev/null || true
 rm -f /etc/systemd/system/dc-watchdog-agent.service
+rm -f /usr/local/bin/dc-watchdog-agent
+rm -rf /etc/dc-watchdog
 rm -rf /opt/dc-watchdog
 systemctl daemon-reload
 echo "REMOVE_SUCCESS"
 '''
         cmd.append(remove_script)
         
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        run_env = {**os.environ, **env} if env else None
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=run_env)
         return result.returncode == 0 and 'REMOVE_SUCCESS' in result.stdout
     except Exception as e:
         app.logger.error(f"Error removing watchdog agent on {server.name}: {e}")
@@ -1576,19 +1757,7 @@ def toggle_exporter_service(server, exporter: str, enabled: bool) -> bool:
         return False
     
     try:
-        ssh_cmd = [
-            'ssh',
-            '-o', 'ConnectTimeout=10',
-            '-o', 'StrictHostKeyChecking=no',
-            '-o', 'BatchMode=yes',
-            '-p', str(server.ssh_port)
-        ]
-        
-        ssh_key_path = resolve_ssh_key_path(server)
-        if ssh_key_path:
-            ssh_cmd.extend(['-i', ssh_key_path])
-        
-        ssh_cmd.append(f'{server.ssh_user}@{server.server_ip}')
+        ssh_cmd, env = build_ssh_cmd(server, timeout=10)
         
         if exporter == 'dcgm_exporter':
             # Docker container
@@ -1601,7 +1770,8 @@ def toggle_exporter_service(server, exporter: str, enabled: bool) -> bool:
             action = 'start' if enabled else 'stop'
             ssh_cmd.append(f"systemctl {action} {service}")
         
-        result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=30)
+        run_env = {**os.environ, **env} if env else None
+        result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=30, env=run_env)
         return result.returncode == 0
         
     except Exception:
@@ -1621,22 +1791,8 @@ def update_exporter_remote(server, exporter: str, version: str, branch: str = 'm
         return False, f"Could not get download URL for {exporter} v{version}"
     
     try:
-        # Validate SSH key exists
-        ssh_key_path = resolve_ssh_key_path(server)
-        if not ssh_key_path:
-            return False, "No SSH key configured for server"
-        
-        ssh_cmd = [
-            'ssh',
-            '-o', 'ConnectTimeout=15',
-            '-o', 'StrictHostKeyChecking=no',
-            '-o', 'BatchMode=yes',
-            '-o', 'ServerAliveInterval=10',
-            '-p', str(server.ssh_port or 22),
-            '-i', ssh_key_path
-        ]
-        
-        ssh_cmd.append(f'{server.ssh_user or "root"}@{server.server_ip}')
+        # Build SSH command with proper auth (key or password)
+        ssh_cmd, ssh_env = build_ssh_cmd(server, timeout=15, extra_opts=['-o', 'ServerAliveInterval=10'])
         
         if exporter == 'node_exporter':
             # Download, extract, and replace binary
@@ -1681,7 +1837,8 @@ echo "UPDATE_SUCCESS"
             return False, f"Unknown exporter type: {exporter}"
         
         app.logger.info(f"[Exporter Update] Running: ssh -p {server.ssh_port or 22} {server.ssh_user or 'root'}@{server.server_ip}")
-        result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=180)
+        run_env = {**os.environ, **ssh_env} if ssh_env else None
+        result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=180, env=run_env)
         
         if result.returncode != 0:
             error_msg = result.stderr.strip() or result.stdout.strip() or f"SSH command failed with code {result.returncode}"
@@ -1874,6 +2031,104 @@ def api_set_server_ssh_key(server_id):
         'server_id': server.id,
         'ssh_key_id': server.ssh_key_id
     })
+
+# =============================================================================
+# SSH CONFIGURATION API
+# =============================================================================
+
+@app.route('/api/servers/<int:server_id>/ssh-config', methods=['GET'])
+@login_required
+def api_get_server_ssh_config(server_id):
+    """Get SSH configuration for a server."""
+    server = Server.query.get_or_404(server_id)
+    ssh_keys = SSHKey.query.all()
+    
+    return jsonify({
+        'server_id': server.id,
+        'server_name': server.name,
+        'ssh_user': server.ssh_user or 'root',
+        'ssh_port': server.ssh_port or 22,
+        'ssh_key_id': server.ssh_key_id,
+        'ssh_key_name': server.ssh_key.name if server.ssh_key else None,
+        'has_password': bool(server.ssh_password),
+        'auth_method': 'key' if (server.ssh_key_id or resolve_ssh_key_path(server)) else ('password' if server.ssh_password else 'none'),
+        'available_keys': [{
+            'id': k.id,
+            'name': k.name,
+            'fingerprint': k.fingerprint
+        } for k in ssh_keys]
+    })
+
+
+@app.route('/api/servers/<int:server_id>/ssh-config', methods=['POST'])
+@csrf.exempt
+@admin_required
+def api_update_server_ssh_config(server_id):
+    """Update SSH configuration for a server.
+    
+    Accepts:
+        ssh_user: string
+        ssh_port: int
+        ssh_key_id: int or null (to use a registered key)
+        ssh_password: string or null (for password-based auth)
+    """
+    server = Server.query.get_or_404(server_id)
+    data = request.json or {}
+    
+    if 'ssh_user' in data:
+        server.ssh_user = data['ssh_user'] or 'root'
+    if 'ssh_port' in data:
+        server.ssh_port = int(data['ssh_port']) if data['ssh_port'] else 22
+    if 'ssh_key_id' in data:
+        key_id = data['ssh_key_id']
+        if key_id:
+            key = SSHKey.query.get(key_id)
+            if not key:
+                return jsonify({'error': 'SSH key not found'}), 404
+            server.ssh_key_id = key_id
+        else:
+            server.ssh_key_id = None
+    if 'ssh_password' in data:
+        # Set or clear the password
+        server.ssh_password = data['ssh_password'] if data['ssh_password'] else None
+    
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'server_id': server.id,
+        'ssh_user': server.ssh_user,
+        'ssh_port': server.ssh_port,
+        'ssh_key_id': server.ssh_key_id,
+        'has_password': bool(server.ssh_password)
+    })
+
+
+@app.route('/api/servers/<int:server_id>/ssh-test', methods=['POST'])
+@csrf.exempt
+@login_required
+def api_test_server_ssh(server_id):
+    """Test SSH connection to a server and return detailed results."""
+    server = Server.query.get_or_404(server_id)
+    
+    result = check_ssh_connection(server)
+    
+    # Add auth method info
+    ssh_key_path = resolve_ssh_key_path(server)
+    if ssh_key_path:
+        result['auth_method'] = 'key'
+        result['key_path'] = ssh_key_path
+    elif server.ssh_password:
+        result['auth_method'] = 'password'
+    else:
+        result['auth_method'] = 'none'
+    
+    result['ssh_user'] = server.ssh_user or 'root'
+    result['ssh_port'] = server.ssh_port or 22
+    result['server_ip'] = server.server_ip
+    
+    return jsonify(result)
+
 
 # =============================================================================
 # VAST.AI ACCOUNT MANAGEMENT
@@ -2254,6 +2509,7 @@ def prometheus_metrics():
 # =============================================================================
 
 @app.route('/')
+@app.route('/dashboard')
 def index():
     """Main dashboard."""
     if not check_auth():
@@ -2374,21 +2630,73 @@ def resolve_ssh_key_path(server):
     return None
 
 
-def check_ssh_connection(server):
-    """Test SSH connection to a server."""
-    try:
+def build_ssh_cmd(server, timeout=10, batch_mode=True, extra_opts=None):
+    """Build a complete SSH command for a server, handling both key and password auth.
+    
+    Returns (cmd_prefix, env) where:
+    - cmd_prefix: list of command parts (may include 'sshpass' for password auth)
+    - env: dict of extra environment variables (for SSHPASS)
+    
+    Usage:
+        cmd, env = build_ssh_cmd(server)
+        cmd.append('echo ok')
+        result = subprocess.run(cmd, capture_output=True, text=True, env={**os.environ, **env})
+    """
+    env = {}
+    cmd = []
+    
+    # Determine auth method: key takes priority over password
+    ssh_key_path = resolve_ssh_key_path(server)
+    ssh_password = getattr(server, 'ssh_password', None)
+    
+    if ssh_key_path:
+        # Key-based authentication
         cmd = [
-            'ssh', '-o', 'ConnectTimeout=5', '-o', 'StrictHostKeyChecking=no',
-            '-o', 'BatchMode=yes', '-p', str(server.ssh_port)
+            'ssh',
+            '-o', f'ConnectTimeout={timeout}',
+            '-o', 'StrictHostKeyChecking=no',
         ]
+        if batch_mode:
+            cmd.extend(['-o', 'BatchMode=yes'])
+        cmd.extend(['-p', str(server.ssh_port or 22)])
+        cmd.extend(['-i', ssh_key_path])
+    elif ssh_password:
+        # Password-based authentication via sshpass
+        cmd = [
+            'sshpass', '-e',  # Read password from SSHPASS env var
+            'ssh',
+            '-o', f'ConnectTimeout={timeout}',
+            '-o', 'StrictHostKeyChecking=no',
+            '-p', str(server.ssh_port or 22),
+        ]
+        env['SSHPASS'] = ssh_password
+    else:
+        # No credentials configured - basic SSH (will likely fail)
+        cmd = [
+            'ssh',
+            '-o', f'ConnectTimeout={timeout}',
+            '-o', 'StrictHostKeyChecking=no',
+        ]
+        if batch_mode:
+            cmd.extend(['-o', 'BatchMode=yes'])
+        cmd.extend(['-p', str(server.ssh_port or 22)])
+    
+    if extra_opts:
+        cmd.extend(extra_opts)
+    
+    cmd.append(f'{server.ssh_user or "root"}@{server.server_ip}')
+    
+    return cmd, env
+
+
+def check_ssh_connection(server):
+    """Test SSH connection to a server. Supports both key and password auth."""
+    try:
+        cmd, env = build_ssh_cmd(server, timeout=5)
+        cmd.append('echo ok')
         
-        ssh_key_path = resolve_ssh_key_path(server)
-        if ssh_key_path:
-            cmd.extend(['-i', ssh_key_path])
-        
-        cmd.extend([f'{server.ssh_user}@{server.server_ip}', 'echo ok'])
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        run_env = {**os.environ, **env} if env else None
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=run_env)
         return {'connected': result.returncode == 0}
     except Exception as e:
         return {'connected': False, 'error': str(e)}
@@ -2404,19 +2712,52 @@ def check_exporter(ip, port):
     except Exception as e:
         return {'running': False, 'port': port, 'error': str(e)}
 
+def check_watchdog_health_port(ip, port=9878):
+    """Check the dc-watchdog-agent health endpoint via HTTP.
+    
+    The agent exposes /health on port 9878 (configurable) with JSON status.
+    This is a fast, consistent check — same pattern as checking exporters
+    on 9100, 9835, 9400 — no SSH required.
+    
+    Returns dict with status or None if the health endpoint is unreachable.
+    """
+    import http.client
+    try:
+        conn = http.client.HTTPConnection(ip, port, timeout=3)
+        conn.request("GET", "/health")
+        resp = conn.getresponse()
+        if resp.status == 200:
+            import json
+            data = json.loads(resp.read().decode())
+            return {
+                'running': True,
+                'installed': True,
+                'status': 'running',
+                'version': data.get('version'),
+                'last_heartbeat_ok': data.get('last_heartbeat_ok', False),
+                'heartbeat_count': data.get('heartbeat_count', 0),
+                'uptime_seconds': data.get('uptime_seconds', 0),
+                'source': 'health_port'
+            }
+        conn.close()
+    except Exception:
+        pass
+    return None
+
+
 def check_watchdog_agent(server):
     """Check if dc-watchdog-agent is running for this server.
     
-    Uses the same method as the Fleet Management dashboard:
-    1. Primary: Query the dc-watchdog server API (HTTP) for heartbeat status
-    2. Fallback: Check via SSH (systemd service status)
+    Uses a consistent, fast checking strategy (no SSH):
+    1. Primary: Query the dc-watchdog server API (HTTP, cached, bulk)
+    2. Secondary: Probe the agent's local health port (9878) — same
+       pattern as checking node_exporter (9100), dc_exporter (9835), etc.
     3. Last resort: Use database cached state
     
-    The API method is more reliable because it works even when SSH
-    is not configured in the container, and reflects actual heartbeat
-    activity rather than just whether the systemd service is active.
+    SSH is NOT used here. SSH connectivity is verified separately
+    by check_ssh_connection() and shown as its own status.
     """
-    # Method 1: Check via dc-watchdog server API (same as Fleet Management dashboard)
+    # Method 1: Check via dc-watchdog server API (fast — uses 30s cache)
     agents_map = get_watchdog_agents_from_api()
     if agents_map:
         # Match by server name (case-insensitive)
@@ -2436,67 +2777,39 @@ def check_watchdog_agent(server):
                 'source': 'watchdog_api'
             }
     
-    # Method 2: Check via SSH (for cases where API is unavailable or agent not registered)
-    try:
-        cmd = [
-            'ssh', '-o', 'ConnectTimeout=5', '-o', 'StrictHostKeyChecking=no',
-            '-o', 'BatchMode=yes', '-p', str(server.ssh_port)
-        ]
-        
-        ssh_key_path = resolve_ssh_key_path(server)
-        if ssh_key_path:
-            cmd.extend(['-i', ssh_key_path])
-        
-        check_script = '''
-        VERSION=""
-        if [ -x /usr/local/bin/dc-watchdog-agent ]; then
-            VERSION=$(/usr/local/bin/dc-watchdog-agent -version 2>/dev/null | head -1 || echo "")
-        fi
-        
-        if systemctl is-active dc-watchdog-agent >/dev/null 2>&1; then
-            echo "RUNNING|$VERSION"
-        elif [ -f /etc/systemd/system/dc-watchdog-agent.service ]; then
-            echo "INSTALLED_NOT_RUNNING|$VERSION"
-        elif [ -x /usr/local/bin/dc-watchdog-agent ]; then
-            echo "INSTALLED_NOT_RUNNING|$VERSION"
-        elif [ -f /opt/dc-watchdog/dc-watchdog-agent.sh ]; then
-            echo "INSTALLED_NOT_RUNNING|bash"
-        else
-            echo "NOT_INSTALLED|"
-        fi
-        '''
-        
-        cmd.extend([f'{server.ssh_user}@{server.server_ip}', check_script])
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        output = result.stdout.strip()
-        
-        parts = output.split('|')
-        status_str = parts[0] if parts else "NOT_INSTALLED"
-        version = parts[1] if len(parts) > 1 and parts[1] else None
-        
-        if status_str == "RUNNING":
-            return {'running': True, 'installed': True, 'status': 'running', 'version': version, 'source': 'ssh'}
-        elif status_str == "INSTALLED_NOT_RUNNING":
-            return {'running': False, 'installed': True, 'status': 'stopped', 'version': version, 'source': 'ssh'}
-        else:
-            return {'running': False, 'installed': False, 'status': 'not_installed', 'version': None, 'source': 'ssh'}
-    except Exception as e:
-        # Method 3: Fall back to database state
-        db_installed = getattr(server, 'watchdog_agent_installed', False)
-        db_enabled = getattr(server, 'watchdog_agent_enabled', False)
-        db_version = getattr(server, 'watchdog_agent_version', None)
-        
-        if db_installed:
-            return {
-                'running': db_enabled,
-                'installed': True,
-                'status': 'running (cached)' if db_enabled else 'stopped (cached)',
-                'version': db_version,
-                'ssh_error': str(e),
-                'source': 'database'
-            }
-        return {'running': False, 'installed': False, 'status': 'unknown', 'version': None, 'error': str(e), 'source': 'none'}
+    # Method 2: Probe the agent's local health port (fast HTTP check, ~3s timeout)
+    health_result = check_watchdog_health_port(server.server_ip)
+    if health_result:
+        return health_result
+    
+    # If health port is unreachable, the agent is either not installed,
+    # stopped, or running an older version without the health endpoint.
+    # Check TCP port to distinguish "not listening" from "not reachable".
+    port_check = check_exporter(server.server_ip, 9878)
+    if port_check.get('running'):
+        # Port open but /health failed — old agent version without health endpoint
+        return {
+            'running': True,
+            'installed': True,
+            'status': 'running',
+            'version': None,
+            'source': 'health_port_tcp'
+        }
+    
+    # Method 3: Fall back to database cached state
+    db_installed = getattr(server, 'watchdog_agent_installed', False)
+    db_enabled = getattr(server, 'watchdog_agent_enabled', False)
+    db_version = getattr(server, 'watchdog_agent_version', None)
+    
+    if db_installed:
+        return {
+            'running': db_enabled,
+            'installed': True,
+            'status': 'running (cached)' if db_enabled else 'stopped (cached)',
+            'version': db_version,
+            'source': 'database'
+        }
+    return {'running': False, 'installed': False, 'status': 'not_installed', 'version': None, 'source': 'none'}
 
 def install_exporter_remote(server, exporter_name):
     """Install an exporter on a remote server via SSH."""
@@ -2557,18 +2870,11 @@ EOF
         else:
             return False
         
-        cmd = [
-            'ssh', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=no',
-            '-p', str(server.ssh_port)
-        ]
+        cmd, env = build_ssh_cmd(server, timeout=10, batch_mode=False)
+        cmd.append(f'bash -c "{script}"')
         
-        ssh_key_path = resolve_ssh_key_path(server)
-        if ssh_key_path:
-            cmd.extend(['-i', ssh_key_path])
-        
-        cmd.extend([f'{server.ssh_user}@{server.server_ip}', f'bash -c "{script}"'])
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        run_env = {**os.environ, **env} if env else None
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=run_env)
         return result.returncode == 0
     except Exception:
         return False
@@ -2608,18 +2914,11 @@ def remove_exporter_remote(server, exporter_name):
         else:
             return False
         
-        cmd = [
-            'ssh', '-o', 'ConnectTimeout=10', '-o', 'StrictHostKeyChecking=no',
-            '-p', str(server.ssh_port)
-        ]
+        cmd, env = build_ssh_cmd(server, timeout=10, batch_mode=False)
+        cmd.append(f'bash -c "{script}"')
         
-        ssh_key_path = resolve_ssh_key_path(server)
-        if ssh_key_path:
-            cmd.extend(['-i', ssh_key_path])
-        
-        cmd.extend([f'{server.ssh_user}@{server.server_ip}', f'bash -c "{script}"'])
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        run_env = {**os.environ, **env} if env else None
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=run_env)
         return result.returncode == 0
     except Exception:
         return False
@@ -2650,6 +2949,12 @@ def update_prometheus_targets():
                 targets.append({
                     'targets': [f"{server.server_ip}:9400"],
                     'labels': {'instance': server.name, 'job': 'dcgm-exporter'}
+                })
+            # DC Watchdog agent health/metrics (port 9878)
+            if server.watchdog_agent_installed and server.watchdog_agent_enabled:
+                targets.append({
+                    'targets': [f"{server.server_ip}:9878"],
+                    'labels': {'instance': server.name, 'job': 'dc-watchdog-agent'}
                 })
         
         targets_file.write_text(json.dumps(targets, indent=2))
@@ -2755,12 +3060,18 @@ BASE_STYLE = """
         background: linear-gradient(135deg, var(--accent-cyan), #00ff88);
         -webkit-background-clip: text; -webkit-text-fill-color: transparent;
     }
-    .nav { display: flex; gap: 15px; }
+    .nav { display: flex; gap: 15px; align-items: center; }
     .nav a {
         color: var(--text-secondary); text-decoration: none; padding: 8px 16px;
         border-radius: 8px; transition: all 0.2s;
     }
     .nav a:hover, .nav a.active { color: var(--text-primary); background: var(--bg-card); }
+    .nav a.nav-home {
+        color: var(--accent-cyan); border: 1px solid var(--accent-cyan);
+        padding: 6px 14px; font-size: 0.85rem;
+    }
+    .nav a.nav-home:hover { background: rgba(0, 212, 255, 0.1); color: var(--accent-cyan); }
+    .nav .nav-sep { color: var(--border-color); font-size: 1.2rem; user-select: none; }
     .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
     .stat-card {
         background: var(--bg-card); border: 1px solid var(--border-color);
@@ -2880,10 +3191,12 @@ DASHBOARD_TEMPLATE = """
         <div class="header">
             <h1>Server Manager</h1>
             <div class="nav">
-                <a href="/" class="active">Dashboard</a>
-                <a href="/servers">Servers</a>
-                <a href="/settings">Settings</a>
-                <a href="/logout">Logout</a>
+                <a href="/" class="nav-home">Home</a>
+                <span class="nav-sep">|</span>
+                <a href="/dashboard" class="active" data-nav>Dashboard</a>
+                <a href="/servers" data-nav>Servers</a>
+                <a href="/settings" data-nav>Settings</a>
+                <a href="/logout" data-nav>Logout</a>
             </div>
         </div>
         
@@ -2960,6 +3273,11 @@ DASHBOARD_TEMPLATE = """
     <script>
     // Get base path for API calls - extract /dc from any subpath like /dc/servers
     const basePath = window.location.pathname.match(/^(\/[^\/]+)/)?.[1] || '';
+    
+    // Fix nav links to include base path (e.g. /dc/servers instead of /servers)
+    document.querySelectorAll('.nav a[data-nav]').forEach(a => {
+        a.href = basePath + a.getAttribute('href');
+    });
     
     // Check user permissions and adjust UI
     async function checkUserPermissions() {
@@ -3178,6 +3496,77 @@ SERVERS_TEMPLATE = """
             border-radius: 4px;
             font-size: 12px;
         }
+        .modal-tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 20px;
+        }
+        .modal-tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 500;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .modal-tab:hover {
+            color: var(--text-primary);
+            background: rgba(255,255,255,0.03);
+        }
+        .modal-tab.active {
+            color: var(--accent-cyan);
+            border-bottom-color: var(--accent-cyan);
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .ssh-config-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 15px;
+        }
+        .ssh-config-group .form-group {
+            margin-bottom: 0;
+        }
+        .ssh-config-group select,
+        .ssh-config-group input {
+            width: 100%;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            font-size: 13px;
+        }
+        .ssh-status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .ssh-status-ok {
+            background: rgba(46, 204, 113, 0.15);
+            color: var(--accent-green);
+        }
+        .ssh-status-fail {
+            background: rgba(231, 76, 60, 0.15);
+            color: var(--accent-red);
+        }
+        .ssh-status-testing {
+            background: rgba(0, 212, 255, 0.15);
+            color: var(--accent-cyan);
+        }
         .server-detail-modal {
             display: none;
             position: fixed;
@@ -3229,17 +3618,19 @@ SERVERS_TEMPLATE = """
         <div class="header">
             <h1>Server Manager</h1>
             <div class="nav">
-                <a href="/">Dashboard</a>
-                <a href="/servers" class="active">Servers</a>
-                <a href="/settings">Settings</a>
-                <a href="/logout">Logout</a>
+                <a href="/" class="nav-home">Home</a>
+                <span class="nav-sep">|</span>
+                <a href="/dashboard" data-nav>Dashboard</a>
+                <a href="/servers" class="active" data-nav>Servers</a>
+                <a href="/settings" data-nav>Settings</a>
+                <a href="/logout" data-nav>Logout</a>
             </div>
         </div>
         
         <div class="card">
             <h2>Add Server</h2>
             <form id="addServerForm">
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 15px;">
                     <div class="form-group">
                         <label>Server Name</label>
                         <input type="text" name="name" placeholder="gpu-worker-01" required>
@@ -3251,6 +3642,25 @@ SERVERS_TEMPLATE = """
                     <div class="form-group">
                         <label>SSH User</label>
                         <input type="text" name="ssh_user" value="root">
+                    </div>
+                    <div class="form-group">
+                        <label>SSH Port</label>
+                        <input type="number" name="ssh_port" value="22" min="1" max="65535">
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 10px;">
+                    <div class="form-group">
+                        <label>SSH Key <small style="color:var(--text-secondary)">(or use password below)</small></label>
+                        <select name="ssh_key_id" id="addServerKeySelect" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-primary);">
+                            <option value="">Default (fleet key)</option>
+                            {% for key in ssh_keys %}
+                            <option value="{{ key.id }}">{{ key.name }} {% if key.fingerprint %}({{ key.fingerprint[:20] }}...){% endif %}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>SSH Password <small style="color:var(--text-secondary)">(optional, key preferred)</small></label>
+                        <input type="password" name="ssh_password" placeholder="Leave empty to use SSH key">
                     </div>
                 </div>
                 <button type="submit" class="btn btn-primary">Add Server</button>
@@ -3283,7 +3693,16 @@ SERVERS_TEMPLATE = """
                     <tr data-id="{{ server.id }}">
                         <td><strong>{{ server.name }}</strong></td>
                         <td>{{ server.server_ip }}</td>
-                        <td>{{ server.ssh_user }}@:{{ server.ssh_port }}</td>
+                        <td>
+                            {{ server.ssh_user }}@:{{ server.ssh_port }}
+                            {% if server.ssh_key %}
+                            <br><small style="color: var(--accent-green);" title="{{ server.ssh_key.name }}">key: {{ server.ssh_key.name }}</small>
+                            {% elif server.ssh_password %}
+                            <br><small style="color: var(--accent-cyan);">password</small>
+                            {% else %}
+                            <br><small style="color: var(--text-secondary);">default key</small>
+                            {% endif %}
+                        </td>
                         <td class="exporter-status">
                             <span class="status-indicator {% if server.node_exporter_installed and server.node_exporter_enabled %}status-enabled{% elif server.node_exporter_installed %}status-disabled{% else %}status-not-installed{% endif %}"></span>node
                             <span class="status-indicator {% if server.dc_exporter_installed and server.dc_exporter_enabled %}status-enabled{% elif server.dc_exporter_installed %}status-disabled{% else %}status-not-installed{% endif %}" style="margin-left:8px"></span>dc
@@ -3311,8 +3730,19 @@ SERVERS_TEMPLATE = """
                 <h2 id="modalServerName">Server Details</h2>
                 <button class="modal-close" onclick="closeModal()">&times;</button>
             </div>
-            <div id="modalContent">
-                <!-- Dynamic content -->
+            <div class="modal-tabs">
+                <button class="modal-tab active" onclick="switchTab('exporters')" id="tab-exporters">Exporters</button>
+                <button class="modal-tab" onclick="switchTab('ssh')" id="tab-ssh">SSH Configuration</button>
+            </div>
+            <div id="tab-content-exporters" class="tab-content active">
+                <div id="modalContent">
+                    <!-- Dynamic exporter content -->
+                </div>
+            </div>
+            <div id="tab-content-ssh" class="tab-content">
+                <div id="sshConfigContent">
+                    <!-- Dynamic SSH config content -->
+                </div>
             </div>
         </div>
     </div>
@@ -3320,6 +3750,11 @@ SERVERS_TEMPLATE = """
     <script>
     // Get base path for API calls - extract /dc from any subpath like /dc/servers
     const basePath = window.location.pathname.match(/^(\/[^\/]+)/)?.[1] || '';
+    
+    // Fix nav links to include base path (e.g. /dc/servers instead of /servers)
+    document.querySelectorAll('.nav a[data-nav]').forEach(a => {
+        a.href = basePath + a.getAttribute('href');
+    });
     
     let currentServerId = null;
     let userPermissions = { can_read: false, can_write: false, can_admin: false };
@@ -3444,8 +3879,19 @@ SERVERS_TEMPLATE = """
         const data = {
             name: form.name.value,
             server_ip: form.server_ip.value,
-            ssh_user: form.ssh_user.value
+            ssh_user: form.ssh_user.value,
+            ssh_port: parseInt(form.ssh_port.value) || 22
         };
+        
+        // Include SSH key if selected
+        if (form.ssh_key_id.value) {
+            data.ssh_key_id = parseInt(form.ssh_key_id.value);
+        }
+        
+        // Include password if provided
+        if (form.ssh_password.value) {
+            data.ssh_password = form.ssh_password.value;
+        }
         
         const response = await fetch(`${basePath}/api/servers`, {
             method: 'POST',
@@ -3461,17 +3907,205 @@ SERVERS_TEMPLATE = """
         }
     };
     
+    function switchTab(tabName) {
+        // Update tab buttons
+        document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+        document.getElementById(`tab-${tabName}`).classList.add('active');
+        
+        // Update tab content
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        document.getElementById(`tab-content-${tabName}`).classList.add('active');
+        
+        // Load SSH config on first switch
+        if (tabName === 'ssh' && currentServerId) {
+            loadSSHConfig(currentServerId);
+        }
+    }
+    
     async function openServerDetail(id, name) {
         currentServerId = id;
-        document.getElementById('modalServerName').textContent = name + ' - Exporter Management';
+        document.getElementById('modalServerName').textContent = name + ' - Server Management';
         document.getElementById('serverDetailModal').style.display = 'flex';
         document.getElementById('modalContent').innerHTML = '<p>Loading...</p>';
+        document.getElementById('sshConfigContent').innerHTML = '<p style="color:var(--text-secondary)">Switch to this tab to load SSH configuration.</p>';
+        
+        // Reset to exporters tab
+        switchTab('exporters');
         
         // Fetch exporter versions
         const response = await fetch(`${basePath}/api/servers/${id}/exporters/versions`);
         const data = await response.json();
         
         renderExporterManagement(data);
+    }
+    
+    async function loadSSHConfig(serverId) {
+        const container = document.getElementById('sshConfigContent');
+        container.innerHTML = '<p>Loading SSH configuration...</p>';
+        
+        try {
+            const response = await fetch(`${basePath}/api/servers/${serverId}/ssh-config`);
+            const data = await response.json();
+            renderSSHConfig(data);
+        } catch (e) {
+            container.innerHTML = `<p style="color: var(--accent-red);">Failed to load SSH config: ${e.message}</p>`;
+        }
+    }
+    
+    function renderSSHConfig(data) {
+        const canWrite = userPermissions.can_write;
+        const container = document.getElementById('sshConfigContent');
+        
+        let keyOptions = '<option value="">Default (fleet key)</option>';
+        for (const key of (data.available_keys || [])) {
+            const selected = key.id === data.ssh_key_id ? 'selected' : '';
+            const fp = key.fingerprint ? ` (${key.fingerprint.substring(0, 20)}...)` : '';
+            keyOptions += `<option value="${key.id}" ${selected}>${key.name}${fp}</option>`;
+        }
+        
+        const authBadge = data.auth_method === 'key' 
+            ? '<span class="ssh-status-badge ssh-status-ok">Key-based auth</span>'
+            : data.auth_method === 'password'
+            ? '<span class="ssh-status-badge ssh-status-ok">Password auth</span>'
+            : '<span class="ssh-status-badge ssh-status-fail">No credentials configured</span>';
+        
+        let html = `
+        <div style="margin-bottom: 20px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px;">
+                <div>
+                    <strong>Current Auth:</strong> ${authBadge}
+                </div>
+                <div id="sshTestResult"></div>
+            </div>
+            <button class="btn btn-secondary" onclick="testSSHConnection()" id="testSSHBtn">Test SSH Connection</button>
+        </div>
+        
+        <div style="border-top: 1px solid var(--border-color); padding-top: 15px;">
+            <h3 style="margin-bottom: 12px;">Connection Settings</h3>
+            ${!canWrite ? '<p style="color: var(--accent-yellow); font-size: 12px; margin-bottom: 10px;">Read-only mode: You cannot modify SSH settings.</p>' : ''}
+            
+            <div class="ssh-config-group">
+                <div class="form-group">
+                    <label>SSH User</label>
+                    <input type="text" id="sshConfigUser" value="${data.ssh_user || 'root'}" ${canWrite ? '' : 'disabled'}>
+                </div>
+                <div class="form-group">
+                    <label>SSH Port</label>
+                    <input type="number" id="sshConfigPort" value="${data.ssh_port || 22}" min="1" max="65535" ${canWrite ? '' : 'disabled'}>
+                </div>
+            </div>
+            
+            <h3 style="margin-bottom: 12px; margin-top: 20px;">Authentication</h3>
+            <div class="ssh-config-group">
+                <div class="form-group">
+                    <label>SSH Key</label>
+                    <select id="sshConfigKeyId" ${canWrite ? '' : 'disabled'}>
+                        ${keyOptions}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>SSH Password <small style="color:var(--text-secondary)">(key takes priority)</small></label>
+                    <input type="password" id="sshConfigPassword" placeholder="${data.has_password ? '••••••••' : 'No password set'}" ${canWrite ? '' : 'disabled'}>
+                </div>
+            </div>
+            
+            <p style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                If both a key and password are configured, key-based auth is tried first. Password uses <code>sshpass</code> on the server.
+            </p>
+            
+            ${canWrite ? `
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button class="btn btn-primary" onclick="saveSSHConfig()">Save SSH Config</button>
+                ${data.has_password ? '<button class="btn btn-danger btn-sm" onclick="clearSSHPassword()">Clear Password</button>' : ''}
+            </div>
+            ` : ''}
+        </div>
+        `;
+        
+        container.innerHTML = html;
+    }
+    
+    async function testSSHConnection() {
+        const btn = document.getElementById('testSSHBtn');
+        const resultDiv = document.getElementById('sshTestResult');
+        btn.disabled = true;
+        btn.textContent = 'Testing...';
+        resultDiv.innerHTML = '<span class="ssh-status-badge ssh-status-testing">Testing connection...</span>';
+        
+        try {
+            const response = await fetch(`${basePath}/api/servers/${currentServerId}/ssh-test`, {method: 'POST'});
+            const result = await response.json();
+            
+            if (result.connected) {
+                resultDiv.innerHTML = `<span class="ssh-status-badge ssh-status-ok">Connected (${result.auth_method})</span>`;
+            } else {
+                resultDiv.innerHTML = `<span class="ssh-status-badge ssh-status-fail">Failed: ${result.error || 'Connection refused'}</span>`;
+            }
+        } catch (e) {
+            resultDiv.innerHTML = `<span class="ssh-status-badge ssh-status-fail">Error: ${e.message}</span>`;
+        }
+        
+        btn.disabled = false;
+        btn.textContent = 'Test SSH Connection';
+    }
+    
+    async function saveSSHConfig() {
+        const data = {
+            ssh_user: document.getElementById('sshConfigUser').value,
+            ssh_port: parseInt(document.getElementById('sshConfigPort').value) || 22,
+            ssh_key_id: document.getElementById('sshConfigKeyId').value || null,
+        };
+        
+        // Only include password if the field was actually changed (not the placeholder dots)
+        const passwordField = document.getElementById('sshConfigPassword');
+        if (passwordField.value && passwordField.value !== '') {
+            data.ssh_password = passwordField.value;
+        }
+        
+        try {
+            const response = await fetch(`${basePath}/api/servers/${currentServerId}/ssh-config`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                // Reload config to show updated state
+                loadSSHConfig(currentServerId);
+                // Update the server table SSH column
+                const row = document.querySelector(`#serversTable tr[data-id="${currentServerId}"]`);
+                if (row) {
+                    const cells = row.querySelectorAll('td');
+                    if (cells[2]) cells[2].textContent = `${data.ssh_user}@:${data.ssh_port}`;
+                }
+                alert('SSH configuration saved successfully');
+            } else {
+                alert('Failed to save: ' + (result.error || 'Unknown error'));
+            }
+        } catch (e) {
+            alert('Error saving SSH config: ' + e.message);
+        }
+    }
+    
+    async function clearSSHPassword() {
+        if (!confirm('Clear the SSH password for this server? Key-based auth will be used instead.')) return;
+        
+        try {
+            const response = await fetch(`${basePath}/api/servers/${currentServerId}/ssh-config`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ssh_password: null})
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                loadSSHConfig(currentServerId);
+            }
+        } catch (e) {
+            alert('Error: ' + e.message);
+        }
     }
     
     function renderExporterManagement(data) {
@@ -3521,7 +4155,7 @@ SERVERS_TEMPLATE = """
                 html += `
                 <div class="exporter-card" data-exporter="${exp.key}" style="border-color: var(--accent-cyan); background: linear-gradient(135deg, var(--bg-card), rgba(0, 212, 255, 0.05));">
                     <div class="exporter-header">
-                        <span class="exporter-name">📡 ${exp.name} <small style="color:var(--text-secondary)">(external uptime)</small></span>
+                        <span class="exporter-name">📡 ${exp.name} <small style="color:var(--text-secondary)">(Go binary)</small></span>
                         <label class="toggle-switch">
                             <input type="checkbox" ${isInstalled && isEnabled ? 'checked' : ''} ${canWrite && isInstalled ? '' : 'disabled'} onchange="toggleWatchdogAgent(this.checked)">
                             <span class="toggle-slider" style="${canWrite && isInstalled ? '' : 'opacity: 0.5; cursor: not-allowed;'}"></span>
@@ -3531,17 +4165,34 @@ SERVERS_TEMPLATE = """
                         <span>Status:</span>
                         <span class="version-badge" style="${statusStyle}">${statusText}</span>
                         ${wdVersion ? `<span style="color: var(--text-secondary); margin-left: 8px;">v${wdVersion}</span>` : ''}
+                        <span id="wd-latest-version" style="color: var(--text-secondary); margin-left: 8px; font-size: 11px;"></span>
                     </div>
                     ${sshError ? `<div style="margin-top: 6px; font-size: 11px; color: var(--accent-yellow);">SSH check failed - showing last known state</div>` : ''}
                     ${canWrite ? `
                     <div style="margin-top: 10px; display: flex; gap: 8px;">
                         ${!isInstalled ? `<button class="btn btn-primary btn-sm" onclick="installWatchdogAgent()">Install Agent</button>` : ''}
-                        ${isInstalled ? `<button class="btn btn-secondary btn-sm" onclick="reinstallWatchdogAgent()">Reinstall</button>` : ''}
+                        ${isInstalled ? `<button class="btn btn-secondary btn-sm" onclick="reinstallWatchdogAgent()">Reinstall (Latest)</button>` : ''}
                         ${isInstalled ? `<button class="btn btn-warning btn-sm" onclick="removeWatchdogAgent()">Remove</button>` : ''}
                     </div>
                     ` : ''}
                 </div>
                 `;
+                
+                // Fetch latest version from GitHub and compare
+                fetch(\`\${basePath}/api/watchdog-agent/latest\`)
+                    .then(r => r.json())
+                    .then(latestData => {
+                        const el = document.getElementById('wd-latest-version');
+                        if (el && latestData.success && latestData.version) {
+                            if (wdVersion && wdVersion !== latestData.version) {
+                                el.innerHTML = \`<span style="color: var(--accent-yellow);">⬆ Update available: v\${latestData.version}</span>\`;
+                            } else if (wdVersion) {
+                                el.innerHTML = '<span style="color: var(--accent-green);">✓ Up to date</span>';
+                            } else {
+                                el.innerHTML = \`Latest: v\${latestData.version}\`;
+                            }
+                        }
+                    }).catch(() => {});
             } else {
                 html += `
                 <div class="exporter-card" data-exporter="${exp.key}">
@@ -3765,12 +4416,13 @@ SERVERS_TEMPLATE = """
             (result.watchdog_agent.running ? 'Running' : (result.watchdog_agent.installed ? 'Stopped' : 'Not installed')) : 
             'Unknown';
         const wdVersion = result.watchdog_agent?.version ? ` (v${result.watchdog_agent.version})` : '';
+        const wdSource = result.watchdog_agent?.source ? ` [${result.watchdog_agent.source}]` : '';
         
         alert(`SSH: ${result.ssh.connected ? 'OK' : 'Failed'}
 Node Exporter: ${result.node_exporter.running ? 'Running' : 'Not running'}
 DC Exporter: ${result.dc_exporter.running ? 'Running' : 'Not running'}
 DCGM Exporter: ${result.dcgm_exporter.running ? 'Running' : 'Not running'}
-DC Watchdog Agent: ${wdStatus}${wdVersion}`);
+DC Watchdog Agent: ${wdStatus}${wdVersion}${wdSource}`);
         
         location.reload();
     }
@@ -3834,10 +4486,12 @@ SETTINGS_TEMPLATE = """
         <div class="header">
             <h1>Server Manager</h1>
             <div class="nav">
-                <a href="/">Dashboard</a>
-                <a href="/servers">Servers</a>
-                <a href="/settings" class="active">Settings</a>
-                <a href="/logout">Logout</a>
+                <a href="/" class="nav-home">Home</a>
+                <span class="nav-sep">|</span>
+                <a href="/dashboard" data-nav>Dashboard</a>
+                <a href="/servers" data-nav>Servers</a>
+                <a href="/settings" class="active" data-nav>Settings</a>
+                <a href="/logout" data-nav>Logout</a>
             </div>
         </div>
         
@@ -3986,6 +4640,11 @@ SETTINGS_TEMPLATE = """
     <script>
     // Get base path for API calls - extract /dc from any subpath like /dc/settings
     const basePath = window.location.pathname.match(/^(\/[^\/]+)/)?.[1] || '';
+    
+    // Fix nav links to include base path (e.g. /dc/servers instead of /servers)
+    document.querySelectorAll('.nav a[data-nav]').forEach(a => {
+        a.href = basePath + a.getAttribute('href');
+    });
     
     // ---- SSH Keys ----
     document.getElementById('addSSHKeyForm').onsubmit = async (e) => {
@@ -4307,9 +4966,27 @@ SETTINGS_TEMPLATE = """
 # =============================================================================
 
 def init_db():
-    """Initialize database."""
+    """Initialize database and run safe migrations for new columns."""
     with app.app_context():
         db.create_all()
+        
+        # Safe migrations: add columns that may not exist on older databases
+        _run_safe_migrations()
+
+
+def _run_safe_migrations():
+    """Add missing columns to existing tables (safe for re-runs)."""
+    from sqlalchemy import inspect as sa_inspect
+    inspector = sa_inspect(db.engine)
+    
+    # Migrations for 'server' table
+    server_columns = {col['name'] for col in inspector.get_columns('server')}
+    
+    if 'ssh_password' not in server_columns:
+        app.logger.info("Migration: Adding ssh_password column to server table")
+        db.session.execute(db.text('ALTER TABLE server ADD COLUMN ssh_password VARCHAR(500)'))
+        db.session.commit()
+
 
 # Initialize on import
 init_db()

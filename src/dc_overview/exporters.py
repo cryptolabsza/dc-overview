@@ -616,8 +616,50 @@ def get_version_from_metrics(server_ip: str, exporter: str, timeout: int = 5) ->
     return None
 
 
+def _build_exporter_ssh_cmd(server_ip: str, ssh_user: str = 'root',
+                            ssh_port: int = 22, ssh_key_path: Optional[str] = None,
+                            ssh_password: Optional[str] = None,
+                            timeout: int = 5) -> tuple:
+    """Build SSH command for exporter operations, supporting both key and password auth.
+    
+    Returns (cmd_prefix, env_dict) where env_dict contains SSHPASS if password auth.
+    """
+    env = {}
+    
+    if ssh_key_path:
+        ssh_cmd = [
+            'ssh',
+            '-o', f'ConnectTimeout={timeout}',
+            '-o', 'StrictHostKeyChecking=no',
+            '-o', 'BatchMode=yes',
+            '-p', str(ssh_port)
+        ]
+        ssh_cmd.extend(['-i', ssh_key_path])
+    elif ssh_password:
+        ssh_cmd = [
+            'sshpass', '-e',
+            'ssh',
+            '-o', f'ConnectTimeout={timeout}',
+            '-o', 'StrictHostKeyChecking=no',
+            '-p', str(ssh_port)
+        ]
+        env['SSHPASS'] = ssh_password
+    else:
+        ssh_cmd = [
+            'ssh',
+            '-o', f'ConnectTimeout={timeout}',
+            '-o', 'StrictHostKeyChecking=no',
+            '-o', 'BatchMode=yes',
+            '-p', str(ssh_port)
+        ]
+    
+    ssh_cmd.append(f'{ssh_user}@{server_ip}')
+    return ssh_cmd, env
+
+
 def get_version_from_ssh(server_ip: str, exporter: str, ssh_user: str = 'root',
                          ssh_port: int = 22, ssh_key_path: Optional[str] = None,
+                         ssh_password: Optional[str] = None,
                          timeout: int = 10) -> Optional[str]:
     """
     Get exporter version by running --version on the remote server via SSH.
@@ -628,6 +670,7 @@ def get_version_from_ssh(server_ip: str, exporter: str, ssh_user: str = 'root',
         ssh_user: SSH username
         ssh_port: SSH port
         ssh_key_path: Path to SSH key (optional)
+        ssh_password: SSH password for password-based auth (optional)
         timeout: Command timeout
         
     Returns:
@@ -642,18 +685,7 @@ def get_version_from_ssh(server_ip: str, exporter: str, ssh_user: str = 'root',
     binary = binary_paths.get(exporter)
     
     try:
-        ssh_cmd = [
-            'ssh',
-            '-o', 'ConnectTimeout=5',
-            '-o', 'StrictHostKeyChecking=no',
-            '-o', 'BatchMode=yes',
-            '-p', str(ssh_port)
-        ]
-        
-        if ssh_key_path:
-            ssh_cmd.extend(['-i', ssh_key_path])
-        
-        ssh_cmd.append(f'{ssh_user}@{server_ip}')
+        ssh_cmd, env = _build_exporter_ssh_cmd(server_ip, ssh_user, ssh_port, ssh_key_path, ssh_password, timeout=5)
         
         if exporter == 'dcgm_exporter':
             # For Docker-based dcgm-exporter, get image tag
@@ -661,7 +693,8 @@ def get_version_from_ssh(server_ip: str, exporter: str, ssh_user: str = 'root',
         else:
             ssh_cmd.append(f"{binary} --version 2>/dev/null || echo ''")
         
-        result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=timeout)
+        run_env = {**os.environ, **env} if env else None
+        result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=timeout, env=run_env)
         
         if result.returncode == 0 and result.stdout.strip():
             output = result.stdout.strip()
@@ -691,7 +724,8 @@ def get_version_from_ssh(server_ip: str, exporter: str, ssh_user: str = 'root',
 
 
 def get_exporter_version(server_ip: str, exporter: str, ssh_user: str = 'root',
-                        ssh_port: int = 22, ssh_key_path: Optional[str] = None) -> Optional[str]:
+                        ssh_port: int = 22, ssh_key_path: Optional[str] = None,
+                        ssh_password: Optional[str] = None) -> Optional[str]:
     """
     Get exporter version, trying metrics endpoint first then SSH fallback.
     
@@ -701,6 +735,7 @@ def get_exporter_version(server_ip: str, exporter: str, ssh_user: str = 'root',
         ssh_user: SSH username
         ssh_port: SSH port
         ssh_key_path: Path to SSH key (optional)
+        ssh_password: SSH password for password-based auth (optional)
         
     Returns:
         Version string or None if not available
@@ -711,7 +746,7 @@ def get_exporter_version(server_ip: str, exporter: str, ssh_user: str = 'root',
         return version
     
     # Fall back to SSH
-    version = get_version_from_ssh(server_ip, exporter, ssh_user, ssh_port, ssh_key_path)
+    version = get_version_from_ssh(server_ip, exporter, ssh_user, ssh_port, ssh_key_path, ssh_password)
     if version:
         return version
     
@@ -723,7 +758,8 @@ def get_exporter_version(server_ip: str, exporter: str, ssh_user: str = 'root',
 
 
 def get_all_exporter_versions(server_ip: str, ssh_user: str = 'root',
-                              ssh_port: int = 22, ssh_key_path: Optional[str] = None) -> Dict[str, Optional[str]]:
+                              ssh_port: int = 22, ssh_key_path: Optional[str] = None,
+                              ssh_password: Optional[str] = None) -> Dict[str, Optional[str]]:
     """
     Get versions of all exporters on a server.
     
@@ -731,9 +767,9 @@ def get_all_exporter_versions(server_ip: str, ssh_user: str = 'root',
         Dictionary mapping exporter name to version (or None if not installed)
     """
     return {
-        'node_exporter': get_exporter_version(server_ip, 'node_exporter', ssh_user, ssh_port, ssh_key_path),
-        'dc_exporter': get_exporter_version(server_ip, 'dc_exporter', ssh_user, ssh_port, ssh_key_path),
-        'dcgm_exporter': get_exporter_version(server_ip, 'dcgm_exporter', ssh_user, ssh_port, ssh_key_path),
+        'node_exporter': get_exporter_version(server_ip, 'node_exporter', ssh_user, ssh_port, ssh_key_path, ssh_password),
+        'dc_exporter': get_exporter_version(server_ip, 'dc_exporter', ssh_user, ssh_port, ssh_key_path, ssh_password),
+        'dcgm_exporter': get_exporter_version(server_ip, 'dcgm_exporter', ssh_user, ssh_port, ssh_key_path, ssh_password),
     }
 
 
@@ -832,7 +868,8 @@ def get_all_latest_versions(branch: str = 'main') -> Dict[str, Optional[str]]:
 
 
 def check_for_updates(server_ip: str, ssh_user: str = 'root', ssh_port: int = 22,
-                     ssh_key_path: Optional[str] = None, branch: str = 'main') -> Dict[str, Dict[str, Any]]:
+                     ssh_key_path: Optional[str] = None, ssh_password: Optional[str] = None,
+                     branch: str = 'main') -> Dict[str, Dict[str, Any]]:
     """
     Check if any exporters on a server have updates available.
     
@@ -847,7 +884,7 @@ def check_for_updates(server_ip: str, ssh_user: str = 'root', ssh_port: int = 22
             ...
         }
     """
-    installed = get_all_exporter_versions(server_ip, ssh_user, ssh_port, ssh_key_path)
+    installed = get_all_exporter_versions(server_ip, ssh_user, ssh_port, ssh_key_path, ssh_password)
     latest = get_all_latest_versions(branch)
     
     result = {}

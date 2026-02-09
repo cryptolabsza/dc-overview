@@ -833,6 +833,48 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     ssl_mode = ssl.get('mode', 'self_signed')
     config.ssl.mode = SSLMode.LETSENCRYPT if ssl_mode == 'letsencrypt' else SSLMode.SELF_SIGNED
     
+    # Auto-detect existing cryptolabs-proxy (e.g., set up by ipmi-monitor quickstart)
+    # This prevents dc-overview from deploying a conflicting proxy
+    config.ssl.use_existing_proxy = ssl.get('use_existing_proxy', False)
+    if not config.ssl.use_existing_proxy:
+        try:
+            import subprocess as _sp
+            _result = _sp.run(
+                ["docker", "inspect", "cryptolabs-proxy", "--format", "{{.State.Status}}"],
+                capture_output=True, text=True, timeout=5
+            )
+            if _result.returncode == 0 and _result.stdout.strip() == "running":
+                config.ssl.use_existing_proxy = True
+                console.print("[green]✓[/green] Detected existing CryptoLabs Proxy (e.g., from ipmi-monitor)")
+                # Inherit domain from existing proxy if not set in config
+                if not config.ssl.domain:
+                    import re as _re
+                    for _nginx_path in ["/etc/ipmi-monitor/nginx.conf", "/etc/cryptolabs-proxy/nginx.conf"]:
+                        try:
+                            with open(_nginx_path) as _f:
+                                _content = _f.read()
+                            _match = _re.search(r'server_name\s+([^;]+);', _content)
+                            if _match:
+                                _domain = _match.group(1).strip()
+                                if _domain and _domain not in ('_', 'localhost', ''):
+                                    config.ssl.domain = _domain
+                                    console.print(f"[dim]  Using domain from existing proxy: {_domain}[/dim]")
+                                    break
+                        except Exception:
+                            continue
+                # Inherit SSL mode from existing proxy
+                for _nginx_path in ["/etc/ipmi-monitor/nginx.conf", "/etc/cryptolabs-proxy/nginx.conf"]:
+                    try:
+                        with open(_nginx_path) as _f:
+                            _content = _f.read()
+                        if '/etc/letsencrypt/' in _content:
+                            config.ssl.mode = SSLMode.LETSENCRYPT
+                        break
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+    
     # Components
     components = data.get('components') or {}
     config.components.dc_overview = components.get('dc_overview', True)
