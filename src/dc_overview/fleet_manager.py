@@ -2823,6 +2823,7 @@ echo "[+] Installation complete"
             "-e", "DC_OVERVIEW_PORT=5001",
             "-e", f"TRUSTED_PROXY_IPS=127.0.0.1,{PROXY_STATIC_IP}",
             "-v", "dc-overview-data:/data",
+            "-v", "fleet-auth-data:/data/auth",  # Shared with proxy for SSO API keys
             "-v", f"{self.config.config_dir}:/etc/dc-overview:ro",
             "--health-cmd", "curl -f http://127.0.0.1:5001/api/health || exit 1",
             "--health-interval", "10s",

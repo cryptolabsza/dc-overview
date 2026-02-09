@@ -124,15 +124,27 @@ def get_watchdog_api_key() -> str:
     
     Searches in order:
     1. WATCHDOG_API_KEY environment variable
-    2. /etc/dc-overview/.secrets.yaml (watchdog_api_key or ipmi_ai_license)
-    3. /etc/dc-overview/fleet-config.yaml (watchdog.api_key)
+    2. /data/auth/watchdog_api_key (shared with cryptolabs-proxy via fleet-auth-data volume)
+    3. /etc/dc-overview/.secrets.yaml (watchdog_api_key or ipmi_ai_license)
+    4. /etc/dc-overview/fleet-config.yaml (watchdog.api_key)
     """
     # 1. Check environment variable first
     api_key = os.environ.get('WATCHDOG_API_KEY', '')
     if api_key:
         return api_key
     
-    # 2. Check .secrets.yaml (has the actual keys)
+    # 2. Check shared fleet-auth-data volume (written by cryptolabs-proxy SSO callback)
+    shared_key_path = '/data/auth/watchdog_api_key'
+    if os.path.exists(shared_key_path):
+        try:
+            with open(shared_key_path) as f:
+                api_key = f.read().strip()
+                if api_key:
+                    return api_key
+        except Exception:
+            pass
+    
+    # 3. Check .secrets.yaml (has the actual keys)
     secrets_path = '/etc/dc-overview/.secrets.yaml'
     if os.path.exists(secrets_path):
         try:
@@ -144,7 +156,7 @@ def get_watchdog_api_key() -> str:
         except Exception:
             pass
     
-    # 3. Check fleet-config.yaml (legacy location)
+    # 4. Check fleet-config.yaml (legacy location)
     config_paths = ['/etc/dc-overview/fleet-config.yaml', '/etc/dc-overview/config.yaml']
     for config_path in config_paths:
         if os.path.exists(config_path):
@@ -879,7 +891,13 @@ def api_check_server(server_id):
         if wd_result.get('version'):
             server.watchdog_agent_version = wd_result['version']
     
-    if any([results['node_exporter']['running'], results['dc_exporter']['running']]):
+    # Server is online if any exporter responds OR SSH is reachable
+    is_online = any([
+        results['node_exporter']['running'],
+        results['dc_exporter']['running'],
+        results['ssh'].get('connected', False),
+    ])
+    if is_online:
         server.status = 'online'
         server.last_seen = datetime.utcnow()
     else:
