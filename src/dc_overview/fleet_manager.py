@@ -245,8 +245,8 @@ class FleetManager:
                             error=str(e)
                         )
             
-            # Step 8: Vast.ai exporter (if enabled)
-            if self.config.components.vast_exporter and self.config.vast.get_all_keys():
+            # Step 8: Vast.ai exporter (if enabled - deploys even without keys; add via mgmt API)
+            if self.config.components.vast_exporter:
                 try:
                     self._deploy_vast_exporter()
                 except Exception as e:
@@ -254,8 +254,8 @@ class FleetManager:
                     self.deployment_errors.append(error_msg)
                     console.print(f"[red]✗[/red] Vast.ai exporter failed: {e}")
             
-            # Step 8b: RunPod exporter (if enabled)
-            if self.config.components.runpod_exporter and self.config.runpod.api_keys:
+            # Step 8b: RunPod exporter (if enabled - deploys even without keys; add via mgmt API)
+            if self.config.components.runpod_exporter:
                 try:
                     self._deploy_runpod_exporter()
                 except Exception as e:
@@ -449,6 +449,14 @@ class FleetManager:
         try:
             shutil.copy2(source_key, dest_key)
             os.chmod(dest_key, 0o600)
+            # Set ownership to uid 1000 (dcuser in the dc-overview container)
+            # so the container process can read the SSH key
+            try:
+                os.chown(dest_key, 1000, 1000)
+            except (OSError, PermissionError):
+                # If we can't chown (e.g., not running as root), that's OK
+                # but log a warning since this will likely cause SSH failures
+                console.print("[yellow]⚠[/yellow] Could not set SSH key ownership to dcuser (uid 1000)")
             console.print(f"[dim]  Copied SSH key to {dest_key}[/dim]")
         except Exception as e:
             console.print(f"[yellow]⚠[/yellow] Failed to copy SSH key: {e}")
@@ -1072,8 +1080,8 @@ echo "Exporters installed successfully"
                     }]
                 })
         
-        # Add Vast.ai exporter if enabled
-        if self.config.components.vast_exporter and self.config.vast.get_all_keys():
+        # Add Vast.ai exporter if enabled (scrapes even without keys - accounts added via mgmt API)
+        if self.config.components.vast_exporter:
             scrape_configs.append({
                 "job_name": "vastai",
                 "scrape_interval": "60s",
@@ -1083,8 +1091,8 @@ echo "Exporters installed successfully"
                 }]
             })
         
-        # Add RunPod exporter if enabled
-        if self.config.components.runpod_exporter and self.config.runpod.api_keys:
+        # Add RunPod exporter if enabled (scrapes even without keys - accounts added via mgmt API)
+        if self.config.components.runpod_exporter:
             scrape_configs.append({
                 "job_name": "runpod",
                 "scrape_interval": "60s",
@@ -2095,10 +2103,8 @@ except Exception as e:
     # ============ Step 8: Vast.ai Exporter ============
     
     def _deploy_vast_exporter(self):
-        """Deploy Vast.ai exporter with multi-account support."""
+        """Deploy Vast.ai exporter with multi-account support and management API."""
         api_keys = self.config.vast.get_all_keys()
-        if not api_keys:
-            return
         
         console.print("\n[bold]Step 8: Starting Vast.ai Exporter[/bold]\n")
         
@@ -2119,32 +2125,68 @@ except Exception as e:
         except Exception:
             pass  # lsof might not be available
         
-        # Build command with all API keys passed as env var (survives Watchtower recreations)
-        keys_csv = ",".join(f"{k.name}:{k.key}" for k in api_keys)
+        # Generate a management token for the API (shared with dc-overview)
+        import secrets as _secrets
+        mgmt_token = _secrets.token_urlsafe(32)
+        
+        # Save management token for dc-overview to use
+        # Save to host filesystem AND inject into the dc-overview container's data volume
+        for token_dir in ["/etc/dc-overview", "/var/lib/dc-overview"]:
+            try:
+                os.makedirs(token_dir, exist_ok=True)
+                token_path = os.path.join(token_dir, ".vast-mgmt-token")
+                with open(token_path, 'w') as f:
+                    f.write(mgmt_token)
+                os.chmod(token_path, 0o600)
+            except Exception:
+                pass
+        
+        # Also write token into the running dc-overview container if it exists
+        try:
+            subprocess.run(
+                ["docker", "exec", "dc-overview", "sh", "-c",
+                 f"mkdir -p /data && echo '{mgmt_token}' > /data/.vast-mgmt-token"],
+                capture_output=True, timeout=10
+            )
+        except Exception:
+            pass  # Container may not be running yet
+        
+        # Build command with named volume for persistent config
         cmd = [
             "docker", "run", "-d",
             "--name", "vastai-exporter",
             "--restart", "unless-stopped",
             "--network", "cryptolabs",
             "-p", f"{self.config.vast.port}:{self.config.vast.port}",
-            "-e", f"VASTAI_API_KEYS={keys_csv}",
+            "-v", "vastai-exporter-data:/data",
+            "-e", f"MGMT_TOKEN={mgmt_token}",
+        ]
+        
+        # Pass initial API keys if available (also persisted to /data/accounts.json)
+        if api_keys:
+            keys_csv = ",".join(f"{k.name}:{k.key}" for k in api_keys)
+            cmd.extend(["-e", f"VASTAI_API_KEYS={keys_csv}"])
+        
+        cmd.extend([
             "--label", "com.centurylinklabs.watchtower.enable=true",
             "ghcr.io/cryptolabsza/vastai-exporter:latest"
-        ]
+        ])
         
         result = subprocess.run(cmd, capture_output=True, text=True)
         
         if result.returncode == 0:
-            console.print(f"[green]✓[/green] Vast.ai exporter running on port {self.config.vast.port} ({len(api_keys)} account(s))")
+            key_count = len(api_keys) if api_keys else 0
+            msg = f"({key_count} account(s))" if key_count else "(no accounts - add via management API)"
+            console.print(f"[green]✓[/green] Vast.ai exporter running on port {self.config.vast.port} {msg}")
+            console.print(f"[dim]  Management API: http://vastai-exporter:8622/api/accounts[/dim]")
         else:
             error_msg = result.stderr[:200] if result.stderr else "Unknown error"
             console.print(f"[yellow]⚠[/yellow] Vast.ai exporter failed: {error_msg[:100]}")
             raise RuntimeError(f"Failed to start Vast.ai exporter: {error_msg}")
     
     def _deploy_runpod_exporter(self):
-        """Deploy RunPod exporter with multi-account support."""
-        if not self.config.runpod.enabled or not self.config.runpod.api_keys:
-            return
+        """Deploy RunPod exporter with multi-account support and management API."""
+        api_keys = self.config.runpod.api_keys if self.config.runpod.enabled else []
         
         console.print("\n[bold]Step 8b: Starting RunPod Exporter[/bold]\n")
         
@@ -2152,7 +2194,6 @@ except Exception as e:
         subprocess.run(["docker", "rm", "-f", "runpod-exporter"], capture_output=True)
         
         # Kill any host-based runpod exporter using port 8623 (from older installations)
-        # This prevents "address already in use" errors when switching to Docker-based exporter
         try:
             result = subprocess.run(
                 ["lsof", "-t", "-i", ":8623"],
@@ -2167,21 +2208,59 @@ except Exception as e:
         except Exception:
             pass  # lsof might not be available, continue anyway
         
-        # Build command with all API keys passed as env var (survives Watchtower recreations)
-        keys_csv = ",".join(f"{k.name}:{k.key}" for k in self.config.runpod.api_keys)
+        # Generate a management token for the API (shared with dc-overview)
+        import secrets as _secrets
+        mgmt_token = _secrets.token_urlsafe(32)
+        
+        # Save management token for dc-overview to use
+        for token_dir in ["/etc/dc-overview", "/var/lib/dc-overview"]:
+            try:
+                os.makedirs(token_dir, exist_ok=True)
+                token_path = os.path.join(token_dir, ".runpod-mgmt-token")
+                with open(token_path, 'w') as f:
+                    f.write(mgmt_token)
+                os.chmod(token_path, 0o600)
+            except Exception:
+                pass
+        
+        # Also write token into the running dc-overview container if it exists
+        try:
+            subprocess.run(
+                ["docker", "exec", "dc-overview", "sh", "-c",
+                 f"mkdir -p /data && echo '{mgmt_token}' > /data/.runpod-mgmt-token"],
+                capture_output=True, timeout=10
+            )
+        except Exception:
+            pass
+        
+        # Build command with named volume for persistent config
         cmd = [
             "docker", "run", "-d",
             "--name", "runpod-exporter",
             "--restart", "unless-stopped",
+            "--network", "cryptolabs",
             "-p", "8623:8623",
-            "-e", f"RUNPOD_API_KEYS={keys_csv}",
-            "ghcr.io/cryptolabsza/runpod-exporter:latest"
+            "-v", "runpod-exporter-data:/data",
+            "-e", f"MGMT_TOKEN={mgmt_token}",
         ]
+        
+        # Pass initial API keys if available (also persisted to /data/accounts.json)
+        if api_keys:
+            keys_csv = ",".join(f"{k.name}:{k.key}" for k in api_keys)
+            cmd.extend(["-e", f"RUNPOD_API_KEYS={keys_csv}"])
+        
+        cmd.extend([
+            "--label", "com.centurylinklabs.watchtower.enable=true",
+            "ghcr.io/cryptolabsza/runpod-exporter:latest"
+        ])
         
         result = subprocess.run(cmd, capture_output=True, text=True)
         
         if result.returncode == 0:
-            console.print(f"[green]✓[/green] RunPod exporter running on port 8623 ({len(self.config.runpod.api_keys)} account(s))")
+            key_count = len(api_keys) if api_keys else 0
+            msg = f"({key_count} account(s))" if key_count else "(no accounts - add via management API)"
+            console.print(f"[green]✓[/green] RunPod exporter running on port 8623 {msg}")
+            console.print(f"[dim]  Management API: http://runpod-exporter:8623/api/accounts[/dim]")
         else:
             error_msg = result.stderr[:200] if result.stderr else "Unknown error"
             console.print(f"[yellow]⚠[/yellow] RunPod exporter failed: {error_msg[:100]}")
@@ -3117,6 +3196,12 @@ echo "[+] Installation complete"
                 pass
         
         console.print("[green]✓[/green] Containers connected to cryptolabs network")
+        
+        # Populate dc-overview with configured servers and SSH keys
+        # This is critical for Server Manager SSH operations to work
+        if self.config.servers or self.config.ssh.key_path:
+            console.print("[dim]Populating Server Manager with servers and SSH keys...[/dim]")
+            self._populate_dc_overview_servers()
         
         # Verify service detection is working
         try:

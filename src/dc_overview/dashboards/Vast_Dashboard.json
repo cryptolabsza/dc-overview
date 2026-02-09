@@ -2769,7 +2769,7 @@
                 "result": {
                   "color": "gray",
                   "index": 0,
-                  "text": "U"
+                  "text": "U (Unlisted)"
                 }
               },
               "type": "special"
@@ -2780,7 +2780,7 @@
                 "result": {
                   "color": "gray",
                   "index": 1,
-                  "text": "U"
+                  "text": "U (Unlisted)"
                 },
                 "to": -1
               },
@@ -2804,7 +2804,7 @@
                 "result": {
                   "color": "blue",
                   "index": 3,
-                  "text": "I"
+                  "text": "Rented (Bid)"
                 },
                 "to": 1
               },
@@ -2816,7 +2816,7 @@
                 "result": {
                   "color": "green",
                   "index": 4,
-                  "text": "D"
+                  "text": "Rented (On-Demand)"
                 },
                 "to": 2
               },
@@ -2828,7 +2828,7 @@
                 "result": {
                   "color": "orange",
                   "index": 5,
-                  "text": "R"
+                  "text": "Reserved"
                 },
                 "to": 3
               },
@@ -2867,6 +2867,7 @@
         "x": 0,
         "y": 40
       },
+      "description": "GPU rental status per slot.\n\n**Legend:**\n- **U (Unlisted)** — GPU not listed on Vast.ai or no data available (gray)\n- **Idle** — Listed but not rented (no color)\n- **Rented (Bid)** — Rented via interruptible/bid pricing (blue)\n- **Rented (On-Demand)** — Rented via on-demand/dedicated pricing (green)\n- **Reserved** — Reserved/resident rental (orange)",
       "id": 37,
       "options": {
         "cellHeight": "sm",

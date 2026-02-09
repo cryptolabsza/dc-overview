@@ -684,7 +684,7 @@ def api_check_server(server_id):
     results['gpu_count'] = server.gpu_count or 0
     
     # Detect exporter versions
-    ssh_key_path = server.ssh_key.key_path if server.ssh_key else None
+    ssh_key_path = resolve_ssh_key_path(server)
     
     if server.node_exporter_installed:
         version = get_exporter_version(server.server_ip, 'node_exporter', server.ssh_user, server.ssh_port, ssh_key_path)
@@ -719,7 +719,7 @@ def check_and_apply_auto_updates(server):
     updates_applied = []
     
     try:
-        ssh_key_path = server.ssh_key.key_path if server.ssh_key else None
+        ssh_key_path = resolve_ssh_key_path(server)
         update_info = check_for_updates(
             server.server_ip,
             server.ssh_user,
@@ -844,7 +844,7 @@ def api_get_exporter_versions(server_id):
     server = Server.query.get_or_404(server_id)
     
     # Get SSH key path if available
-    ssh_key_path = server.ssh_key.key_path if server.ssh_key else None
+    ssh_key_path = resolve_ssh_key_path(server)
     
     # Get installed versions
     versions = get_all_exporter_versions(
@@ -1100,8 +1100,9 @@ def toggle_watchdog_service(server, enabled: bool) -> bool:
             '-o', 'BatchMode=yes', '-p', str(server.ssh_port)
         ]
         
-        if server.ssh_key:
-            cmd.extend(['-i', server.ssh_key.key_path])
+        ssh_key_path = resolve_ssh_key_path(server)
+        if ssh_key_path:
+            cmd.extend(['-i', ssh_key_path])
         
         cmd.append(f'{server.ssh_user}@{server.server_ip}')
         
@@ -1392,8 +1393,9 @@ def install_watchdog_agent_remote(server, api_key: str) -> tuple:
             '-o', 'BatchMode=yes', '-p', str(server.ssh_port)
         ]
         
-        if server.ssh_key:
-            cmd.extend(['-i', server.ssh_key.key_path])
+        ssh_key_path = resolve_ssh_key_path(server)
+        if ssh_key_path:
+            cmd.extend(['-i', ssh_key_path])
         
         cmd.append(f'{server.ssh_user}@{server.server_ip}')
         
@@ -1484,8 +1486,9 @@ def remove_watchdog_agent_remote(server) -> bool:
             '-o', 'BatchMode=yes', '-p', str(server.ssh_port)
         ]
         
-        if server.ssh_key:
-            cmd.extend(['-i', server.ssh_key.key_path])
+        ssh_key_path = resolve_ssh_key_path(server)
+        if ssh_key_path:
+            cmd.extend(['-i', ssh_key_path])
         
         cmd.append(f'{server.ssh_user}@{server.server_ip}')
         
@@ -1523,7 +1526,7 @@ def api_check_all_updates():
             'exporters': {}
         }
         
-        ssh_key_path = server.ssh_key.key_path if server.ssh_key else None
+        ssh_key_path = resolve_ssh_key_path(server)
         
         for exporter, latest_ver in latest.items():
             # Get installed attribute name
@@ -1581,8 +1584,9 @@ def toggle_exporter_service(server, exporter: str, enabled: bool) -> bool:
             '-p', str(server.ssh_port)
         ]
         
-        if server.ssh_key:
-            ssh_cmd.extend(['-i', server.ssh_key.key_path])
+        ssh_key_path = resolve_ssh_key_path(server)
+        if ssh_key_path:
+            ssh_cmd.extend(['-i', ssh_key_path])
         
         ssh_cmd.append(f'{server.ssh_user}@{server.server_ip}')
         
@@ -1618,21 +1622,9 @@ def update_exporter_remote(server, exporter: str, version: str, branch: str = 'm
     
     try:
         # Validate SSH key exists
-        ssh_key_path = None
-        if server.ssh_key:
-            ssh_key_path = server.ssh_key.key_path
-            if not os.path.exists(ssh_key_path):
-                return False, f"SSH key not found at {ssh_key_path}"
-        else:
-            # Try default SSH key locations
-            default_keys = ['/etc/dc-overview/ssh_keys/fleet_key', 
-                           os.path.expanduser('~/.ssh/id_rsa')]
-            for key_path in default_keys:
-                if os.path.exists(key_path):
-                    ssh_key_path = key_path
-                    break
-            if not ssh_key_path:
-                return False, "No SSH key configured for server"
+        ssh_key_path = resolve_ssh_key_path(server)
+        if not ssh_key_path:
+            return False, "No SSH key configured for server"
         
         ssh_cmd = [
             'ssh',
@@ -1882,6 +1874,222 @@ def api_set_server_ssh_key(server_id):
         'server_id': server.id,
         'ssh_key_id': server.ssh_key_id
     })
+
+# =============================================================================
+# VAST.AI ACCOUNT MANAGEMENT
+# =============================================================================
+
+VAST_EXPORTER_URL = os.environ.get('VAST_EXPORTER_URL', 'http://vastai-exporter:8622')
+
+def _vast_mgmt_token() -> str:
+    """Read the Vast exporter management token."""
+    token_paths = [
+        '/data/.vast-mgmt-token',  # Inside dc-overview container (injected by fleet_manager)
+        '/etc/dc-overview/.vast-mgmt-token',
+        os.path.join(get_data_dir(), '.vast-mgmt-token'),
+    ]
+    for path in token_paths:
+        try:
+            with open(path, 'r') as f:
+                return f.read().strip()
+        except (FileNotFoundError, PermissionError):
+            continue
+    return os.environ.get('VAST_MGMT_TOKEN', '')
+
+
+def _vast_api_request(method: str, path: str, data: dict = None, timeout: int = 30) -> tuple:
+    """Make a request to the Vast exporter management API.
+    
+    Returns (response_dict, status_code) tuple.
+    """
+    url = f"{VAST_EXPORTER_URL}{path}"
+    headers = {
+        'Content-Type': 'application/json',
+        'X-Mgmt-Token': _vast_mgmt_token()
+    }
+    
+    try:
+        if method == 'GET':
+            resp = http_requests.get(url, headers=headers, timeout=timeout)
+        elif method == 'POST':
+            resp = http_requests.post(url, headers=headers, json=data, timeout=timeout)
+        elif method == 'DELETE':
+            resp = http_requests.delete(url, headers=headers, timeout=timeout)
+        else:
+            return {'error': f'Unsupported method: {method}'}, 400
+        
+        try:
+            result = resp.json()
+        except Exception:
+            result = {'raw': resp.text}
+        
+        return result, resp.status_code
+    
+    except http_requests.ConnectionError:
+        return {'error': 'Vast.ai exporter is not running or not reachable'}, 503
+    except http_requests.Timeout:
+        return {'error': 'Vast.ai exporter request timed out'}, 504
+    except Exception as e:
+        return {'error': f'Failed to contact Vast.ai exporter: {str(e)}'}, 500
+
+
+@app.route('/api/vast/accounts')
+@login_required
+def api_vast_accounts():
+    """List Vast.ai accounts from the exporter."""
+    result, status = _vast_api_request('GET', '/api/accounts')
+    return jsonify(result), status
+
+
+@app.route('/api/vast/accounts', methods=['POST'])
+@csrf.exempt
+@admin_required
+def api_vast_add_account():
+    """Add a Vast.ai API key account."""
+    data = request.json
+    if not data or not data.get('key'):
+        return jsonify({'error': 'API key is required'}), 400
+    
+    payload = {
+        'name': data.get('name', 'default'),
+        'key': data['key']
+    }
+    
+    result, status = _vast_api_request('POST', '/api/accounts', data=payload)
+    return jsonify(result), status
+
+
+@app.route('/api/vast/accounts/<account_name>', methods=['DELETE'])
+@admin_required
+def api_vast_delete_account(account_name):
+    """Remove a Vast.ai API key account."""
+    result, status = _vast_api_request('DELETE', f'/api/accounts/{account_name}')
+    return jsonify(result), status
+
+
+@app.route('/api/vast/accounts/<account_name>/test')
+@login_required
+def api_vast_test_account(account_name):
+    """Test connectivity for a Vast.ai account."""
+    result, status = _vast_api_request('GET', f'/api/accounts/{account_name}/test', timeout=30)
+    return jsonify(result), status
+
+
+@app.route('/api/vast/status')
+@login_required
+def api_vast_status():
+    """Get Vast.ai exporter status."""
+    result, status = _vast_api_request('GET', '/api/status')
+    return jsonify(result), status
+
+
+# =============================================================================
+# RUNPOD ACCOUNT MANAGEMENT
+# =============================================================================
+
+RUNPOD_EXPORTER_URL = os.environ.get('RUNPOD_EXPORTER_URL', 'http://runpod-exporter:8623')
+
+def _runpod_mgmt_token() -> str:
+    """Read the RunPod exporter management token."""
+    token_paths = [
+        '/data/.runpod-mgmt-token',  # Inside dc-overview container
+        '/etc/dc-overview/.runpod-mgmt-token',
+        os.path.join(get_data_dir(), '.runpod-mgmt-token'),
+    ]
+    for path in token_paths:
+        try:
+            with open(path, 'r') as f:
+                return f.read().strip()
+        except (FileNotFoundError, PermissionError):
+            continue
+    return os.environ.get('RUNPOD_MGMT_TOKEN', '')
+
+
+def _runpod_api_request(method: str, path: str, data: dict = None, timeout: int = 30) -> tuple:
+    """Make a request to the RunPod exporter management API.
+    
+    Returns (response_dict, status_code) tuple.
+    """
+    url = f"{RUNPOD_EXPORTER_URL}{path}"
+    headers = {
+        'Content-Type': 'application/json',
+        'X-Mgmt-Token': _runpod_mgmt_token()
+    }
+    
+    try:
+        if method == 'GET':
+            resp = http_requests.get(url, headers=headers, timeout=timeout)
+        elif method == 'POST':
+            resp = http_requests.post(url, headers=headers, json=data, timeout=timeout)
+        elif method == 'DELETE':
+            resp = http_requests.delete(url, headers=headers, timeout=timeout)
+        else:
+            return {'error': f'Unsupported method: {method}'}, 400
+        
+        try:
+            result = resp.json()
+        except Exception:
+            result = {'raw': resp.text}
+        
+        return result, resp.status_code
+    
+    except http_requests.ConnectionError:
+        return {'error': 'RunPod exporter is not running or not reachable'}, 503
+    except http_requests.Timeout:
+        return {'error': 'RunPod exporter request timed out'}, 504
+    except Exception as e:
+        return {'error': f'Failed to contact RunPod exporter: {str(e)}'}, 500
+
+
+@app.route('/api/runpod/accounts')
+@login_required
+def api_runpod_accounts():
+    """List RunPod accounts from the exporter."""
+    result, status = _runpod_api_request('GET', '/api/accounts')
+    return jsonify(result), status
+
+
+@app.route('/api/runpod/accounts', methods=['POST'])
+@csrf.exempt
+@admin_required
+def api_runpod_add_account():
+    """Add a RunPod API key account."""
+    data = request.json
+    if not data or not data.get('key'):
+        return jsonify({'error': 'API key is required'}), 400
+    
+    payload = {
+        'name': data.get('name', 'default'),
+        'key': data['key']
+    }
+    
+    result, status = _runpod_api_request('POST', '/api/accounts', data=payload)
+    return jsonify(result), status
+
+
+@app.route('/api/runpod/accounts/<account_name>', methods=['DELETE'])
+@admin_required
+def api_runpod_delete_account(account_name):
+    """Remove a RunPod API key account."""
+    result, status = _runpod_api_request('DELETE', f'/api/accounts/{account_name}')
+    return jsonify(result), status
+
+
+@app.route('/api/runpod/accounts/<account_name>/test')
+@login_required
+def api_runpod_test_account(account_name):
+    """Test connectivity for a RunPod account."""
+    result, status = _runpod_api_request('GET', f'/api/accounts/{account_name}/test', timeout=30)
+    return jsonify(result), status
+
+
+@app.route('/api/runpod/status')
+@login_required
+def api_runpod_status():
+    """Get RunPod exporter status."""
+    result, status = _runpod_api_request('GET', '/api/status')
+    return jsonify(result), status
+
 
 # =============================================================================
 # GRAFANA ROLE SYNC
@@ -2141,6 +2349,31 @@ def settings_page():
 # HELPER FUNCTIONS
 # =============================================================================
 
+def resolve_ssh_key_path(server):
+    """Resolve the SSH key path for a server, with fallback to default fleet key.
+    
+    Priority:
+    1. Server's explicitly associated SSH key (from database)
+    2. Default fleet key at /etc/dc-overview/ssh_keys/fleet_key
+    3. Default user key at ~/.ssh/id_rsa
+    """
+    if server.ssh_key and server.ssh_key.key_path:
+        key_path = server.ssh_key.key_path
+        if os.path.exists(key_path):
+            return key_path
+        # Key path in DB doesn't exist on disk - fall through to defaults
+        app.logger.warning(f"SSH key for {server.name} not found at {key_path}, trying defaults")
+    
+    # Try default locations
+    default_keys = ['/etc/dc-overview/ssh_keys/fleet_key',
+                    os.path.expanduser('~/.ssh/id_rsa')]
+    for key_path in default_keys:
+        if os.path.exists(key_path):
+            return key_path
+    
+    return None
+
+
 def check_ssh_connection(server):
     """Test SSH connection to a server."""
     try:
@@ -2149,8 +2382,9 @@ def check_ssh_connection(server):
             '-o', 'BatchMode=yes', '-p', str(server.ssh_port)
         ]
         
-        if server.ssh_key:
-            cmd.extend(['-i', server.ssh_key.key_path])
+        ssh_key_path = resolve_ssh_key_path(server)
+        if ssh_key_path:
+            cmd.extend(['-i', ssh_key_path])
         
         cmd.extend([f'{server.ssh_user}@{server.server_ip}', 'echo ok'])
         
@@ -2209,8 +2443,9 @@ def check_watchdog_agent(server):
             '-o', 'BatchMode=yes', '-p', str(server.ssh_port)
         ]
         
-        if server.ssh_key:
-            cmd.extend(['-i', server.ssh_key.key_path])
+        ssh_key_path = resolve_ssh_key_path(server)
+        if ssh_key_path:
+            cmd.extend(['-i', ssh_key_path])
         
         check_script = '''
         VERSION=""
@@ -2327,8 +2562,9 @@ EOF
             '-p', str(server.ssh_port)
         ]
         
-        if server.ssh_key:
-            cmd.extend(['-i', server.ssh_key.key_path])
+        ssh_key_path = resolve_ssh_key_path(server)
+        if ssh_key_path:
+            cmd.extend(['-i', ssh_key_path])
         
         cmd.extend([f'{server.ssh_user}@{server.server_ip}', f'bash -c "{script}"'])
         
@@ -2377,8 +2613,9 @@ def remove_exporter_remote(server, exporter_name):
             '-p', str(server.ssh_port)
         ]
         
-        if server.ssh_key:
-            cmd.extend(['-i', server.ssh_key.key_path])
+        ssh_key_path = resolve_ssh_key_path(server)
+        if ssh_key_path:
+            cmd.extend(['-i', ssh_key_path])
         
         cmd.extend([f'{server.ssh_user}@{server.server_ip}', f'bash -c "{script}"'])
         
@@ -3659,11 +3896,85 @@ SETTINGS_TEMPLATE = """
         </div>
         
         <div class="card">
+            <h2>Vast.ai Accounts</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 15px;">
+                Manage Vast.ai API keys for the metrics exporter. Accounts are validated on add and persisted across restarts.
+            </p>
+            <div id="vastAccountsLoading" style="color: var(--text-secondary);">Loading accounts...</div>
+            <table id="vastAccountsTable" style="display:none;">
+                <thead>
+                    <tr><th>Account</th><th>API Key</th><th>Status</th><th>Balance</th><th>Machines</th><th>Actions</th></tr>
+                </thead>
+                <tbody id="vastAccountsBody"></tbody>
+            </table>
+            <div id="vastAccountsEmpty" style="display:none; color: var(--text-secondary);">
+                No Vast.ai accounts configured. Add one below.
+            </div>
+            <div id="vastAccountsError" style="display:none; color: #e74c3c;"></div>
+            
+            <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
+                <h3>Add Vast.ai Account</h3>
+                <form id="addVastAccountForm">
+                    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 15px;">
+                        <div class="form-group">
+                            <label>Account Name</label>
+                            <input type="text" name="name" placeholder="MyVastAccount" required>
+                        </div>
+                        <div class="form-group">
+                            <label>API Key</label>
+                            <input type="text" name="key" placeholder="Vast.ai API key from Account > API Keys" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary" id="addVastBtn">Add Account</button>
+                    <span id="addVastStatus" style="margin-left: 10px; font-size: 0.9rem;"></span>
+                </form>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>RunPod Accounts</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 15px;">
+                Manage RunPod API keys for the metrics exporter. Accounts are validated on add and persisted across restarts.
+            </p>
+            <div id="runpodAccountsLoading" style="color: var(--text-secondary);">Loading accounts...</div>
+            <table id="runpodAccountsTable" style="display:none;">
+                <thead>
+                    <tr><th>Account</th><th>API Key</th><th>Status</th><th>Balance</th><th>Machines</th><th>Actions</th></tr>
+                </thead>
+                <tbody id="runpodAccountsBody"></tbody>
+            </table>
+            <div id="runpodAccountsEmpty" style="display:none; color: var(--text-secondary);">
+                No RunPod accounts configured. Add one below.
+            </div>
+            <div id="runpodAccountsError" style="display:none; color: #e74c3c;"></div>
+            
+            <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
+                <h3>Add RunPod Account</h3>
+                <form id="addRunpodAccountForm">
+                    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 15px;">
+                        <div class="form-group">
+                            <label>Account Name</label>
+                            <input type="text" name="name" placeholder="MyRunPodAccount" required>
+                        </div>
+                        <div class="form-group">
+                            <label>API Key</label>
+                            <input type="text" name="key" placeholder="rpa_XXXXX (from RunPod Settings > API Keys)" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary" id="addRunpodBtn">Add Account</button>
+                    <span id="addRunpodStatus" style="margin-left: 10px; font-size: 0.9rem;"></span>
+                </form>
+            </div>
+        </div>
+        
+        <div class="card">
             <h2>API Endpoints</h2>
             <table>
                 <tr><td><code>/api/health</code></td><td>Health check</td></tr>
                 <tr><td><code>/api/servers</code></td><td>List/manage servers</td></tr>
                 <tr><td><code>/api/ssh-keys</code></td><td>List/manage SSH keys</td></tr>
+                <tr><td><code>/api/vast/accounts</code></td><td>List/manage Vast.ai accounts</td></tr>
+                <tr><td><code>/api/runpod/accounts</code></td><td>List/manage RunPod accounts</td></tr>
                 <tr><td><code>/api/prometheus/targets.json</code></td><td>Prometheus file_sd targets</td></tr>
                 <tr><td><code>/metrics</code></td><td>Prometheus metrics</td></tr>
             </table>
@@ -3676,6 +3987,7 @@ SETTINGS_TEMPLATE = """
     // Get base path for API calls - extract /dc from any subpath like /dc/settings
     const basePath = window.location.pathname.match(/^(\/[^\/]+)/)?.[1] || '';
     
+    // ---- SSH Keys ----
     document.getElementById('addSSHKeyForm').onsubmit = async (e) => {
         e.preventDefault();
         const form = e.target;
@@ -3710,6 +4022,282 @@ SETTINGS_TEMPLATE = """
             alert(result.error || 'Failed to delete SSH key');
         }
     }
+    
+    // ---- Vast.ai Accounts ----
+    async function loadVastAccounts() {
+        const loading = document.getElementById('vastAccountsLoading');
+        const table = document.getElementById('vastAccountsTable');
+        const tbody = document.getElementById('vastAccountsBody');
+        const empty = document.getElementById('vastAccountsEmpty');
+        const errorDiv = document.getElementById('vastAccountsError');
+        
+        try {
+            const response = await fetch(`${basePath}/api/vast/accounts`);
+            loading.style.display = 'none';
+            
+            if (!response.ok) {
+                const result = await response.json().catch(() => ({}));
+                errorDiv.textContent = result.error || 'Failed to load accounts (exporter may not be running)';
+                errorDiv.style.display = 'block';
+                return;
+            }
+            
+            const data = await response.json();
+            const accounts = data.accounts || [];
+            
+            if (accounts.length === 0) {
+                empty.style.display = 'block';
+                return;
+            }
+            
+            tbody.innerHTML = '';
+            for (const acct of accounts) {
+                const statusColor = acct.status === 'connected' ? '#2ecc71' : '#e74c3c';
+                const statusIcon = acct.status === 'connected' ? '✓' : '✗';
+                const balance = acct.balance !== null ? `$${acct.balance.toFixed(2)}` : '—';
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><strong>${acct.name}</strong></td>
+                    <td style="font-family: monospace; font-size: 0.85rem;">${acct.key_masked}</td>
+                    <td style="color: ${statusColor};">${statusIcon} ${acct.status}</td>
+                    <td>${balance}</td>
+                    <td>${acct.machine_count}</td>
+                    <td>
+                        <button class="btn btn-sm" onclick="testVastAccount('${acct.name}')" style="margin-right:5px;">Test</button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteVastAccount('${acct.name}')">Remove</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            }
+            table.style.display = '';
+            
+        } catch (e) {
+            loading.style.display = 'none';
+            errorDiv.textContent = 'Could not connect to Vast.ai exporter: ' + e.message;
+            errorDiv.style.display = 'block';
+        }
+    }
+    
+    document.getElementById('addVastAccountForm').onsubmit = async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const btn = document.getElementById('addVastBtn');
+        const status = document.getElementById('addVastStatus');
+        
+        btn.disabled = true;
+        status.textContent = 'Validating API key...';
+        status.style.color = 'var(--text-secondary)';
+        
+        try {
+            const response = await fetch(`${basePath}/api/vast/accounts`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    name: form.name.value,
+                    key: form.key.value
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+                status.textContent = `✓ Added (balance: $${result.balance?.toFixed(2) || 'N/A'})`;
+                status.style.color = '#2ecc71';
+                form.reset();
+                setTimeout(() => loadVastAccounts(), 500);
+            } else {
+                status.textContent = '✗ ' + (result.error || 'Failed to add account');
+                status.style.color = '#e74c3c';
+            }
+        } catch (e) {
+            status.textContent = '✗ Connection error: ' + e.message;
+            status.style.color = '#e74c3c';
+        }
+        
+        btn.disabled = false;
+    };
+    
+    async function deleteVastAccount(name) {
+        if (!confirm(`Remove Vast.ai account "${name}"? Metrics for this account will stop.`)) return;
+        
+        const response = await fetch(`${basePath}/api/vast/accounts/${encodeURIComponent(name)}`, {method: 'DELETE'});
+        
+        if (response.ok) {
+            loadVastAccounts();
+        } else {
+            const result = await response.json().catch(() => ({}));
+            alert(result.error || 'Failed to remove account');
+        }
+    }
+    
+    async function testVastAccount(name) {
+        const btn = event.target;
+        btn.disabled = true;
+        btn.textContent = 'Testing...';
+        
+        try {
+            const response = await fetch(`${basePath}/api/vast/accounts/${encodeURIComponent(name)}/test`);
+            const result = await response.json();
+            
+            if (result.status === 'connected') {
+                let msg = `Account: ${name}\\nStatus: Connected\\nBalance: $${result.balance?.toFixed(2)}\\nMachines: ${result.machine_count}`;
+                if (result.machines && result.machines.length > 0) {
+                    msg += '\\n\\nMachines:';
+                    for (const m of result.machines) {
+                        msg += `\\n  ${m.hostname}: ${m.num_gpus} GPUs, occupancy=${m.gpu_occupancy}, listed=${m.listed}`;
+                    }
+                }
+                alert(msg);
+            } else {
+                alert(`Account "${name}" test failed: ${result.error || 'Unknown error'}`);
+            }
+        } catch (e) {
+            alert('Connection error: ' + e.message);
+        }
+        
+        btn.disabled = false;
+        btn.textContent = 'Test';
+    }
+    
+    // ---- RunPod Accounts ----
+    async function loadRunpodAccounts() {
+        const loading = document.getElementById('runpodAccountsLoading');
+        const table = document.getElementById('runpodAccountsTable');
+        const tbody = document.getElementById('runpodAccountsBody');
+        const empty = document.getElementById('runpodAccountsEmpty');
+        const errorDiv = document.getElementById('runpodAccountsError');
+        
+        try {
+            const response = await fetch(`${basePath}/api/runpod/accounts`);
+            loading.style.display = 'none';
+            
+            if (!response.ok) {
+                const result = await response.json().catch(() => ({}));
+                errorDiv.textContent = result.error || 'Failed to load accounts (exporter may not be running)';
+                errorDiv.style.display = 'block';
+                return;
+            }
+            
+            const data = await response.json();
+            const accounts = data.accounts || [];
+            
+            if (accounts.length === 0) {
+                empty.style.display = 'block';
+                return;
+            }
+            
+            tbody.innerHTML = '';
+            for (const acct of accounts) {
+                const statusColor = acct.status === 'connected' ? '#2ecc71' : '#e74c3c';
+                const statusIcon = acct.status === 'connected' ? '✓' : '✗';
+                const balance = acct.balance !== null ? `$${Number(acct.balance).toFixed(2)}` : '—';
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><strong>${acct.name}</strong></td>
+                    <td style="font-family: monospace; font-size: 0.85rem;">${acct.key_masked}</td>
+                    <td style="color: ${statusColor};">${statusIcon} ${acct.status}</td>
+                    <td>${balance}</td>
+                    <td>${acct.machine_count}</td>
+                    <td>
+                        <button class="btn btn-sm" onclick="testRunpodAccount('${acct.name}')" style="margin-right:5px;">Test</button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteRunpodAccount('${acct.name}')">Remove</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            }
+            table.style.display = '';
+            
+        } catch (e) {
+            loading.style.display = 'none';
+            errorDiv.textContent = 'Could not connect to RunPod exporter: ' + e.message;
+            errorDiv.style.display = 'block';
+        }
+    }
+    
+    document.getElementById('addRunpodAccountForm').onsubmit = async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const btn = document.getElementById('addRunpodBtn');
+        const status = document.getElementById('addRunpodStatus');
+        
+        btn.disabled = true;
+        status.textContent = 'Validating API key...';
+        status.style.color = 'var(--text-secondary)';
+        
+        try {
+            const response = await fetch(`${basePath}/api/runpod/accounts`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    name: form.name.value,
+                    key: form.key.value
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+                status.textContent = `✓ Added (balance: $${Number(result.balance || 0).toFixed(2)}, ${result.machine_count || 0} machine(s))`;
+                status.style.color = '#2ecc71';
+                form.reset();
+                setTimeout(() => loadRunpodAccounts(), 500);
+            } else {
+                status.textContent = '✗ ' + (result.error || 'Failed to add account');
+                status.style.color = '#e74c3c';
+            }
+        } catch (e) {
+            status.textContent = '✗ Connection error: ' + e.message;
+            status.style.color = '#e74c3c';
+        }
+        
+        btn.disabled = false;
+    };
+    
+    async function deleteRunpodAccount(name) {
+        if (!confirm(`Remove RunPod account "${name}"? Metrics for this account will stop.`)) return;
+        
+        const response = await fetch(`${basePath}/api/runpod/accounts/${encodeURIComponent(name)}`, {method: 'DELETE'});
+        
+        if (response.ok) {
+            loadRunpodAccounts();
+        } else {
+            const result = await response.json().catch(() => ({}));
+            alert(result.error || 'Failed to remove account');
+        }
+    }
+    
+    async function testRunpodAccount(name) {
+        const btn = event.target;
+        btn.disabled = true;
+        btn.textContent = 'Testing...';
+        
+        try {
+            const response = await fetch(`${basePath}/api/runpod/accounts/${encodeURIComponent(name)}/test`);
+            const result = await response.json();
+            
+            if (result.status === 'connected') {
+                let msg = `Account: ${name}\\nStatus: Connected\\nBalance: $${Number(result.balance || 0).toFixed(2)}\\nMachines: ${result.machine_count}`;
+                if (result.machines && result.machines.length > 0) {
+                    msg += '\\n\\nMachines:';
+                    for (const m of result.machines) {
+                        msg += `\\n  ${m.name}: ${m.gpu_total} GPUs (${m.gpu_rented} rented), listed=${m.listed}`;
+                    }
+                }
+                alert(msg);
+            } else {
+                alert(`Account "${name}" test failed: ${result.error || 'Unknown error'}`);
+            }
+        } catch (e) {
+            alert('Connection error: ' + e.message);
+        }
+        
+        btn.disabled = false;
+        btn.textContent = 'Test';
+    }
+    
+    // Load accounts on page load
+    loadVastAccounts();
+    loadRunpodAccounts();
     </script>
 </body></html>
 """

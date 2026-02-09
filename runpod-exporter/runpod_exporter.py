@@ -436,10 +436,198 @@ class MetricsCollector:
         return f'account="{account}",machine_id="{machine_id}",name="{name}",gpu_type="{gpu_type}",location="{location}"'
 
 
+class AccountManager:
+    """Manages RunPod API key accounts with file persistence."""
+    
+    CONFIG_FILE = "/data/accounts.json"
+    
+    def __init__(self, collector: MetricsCollector):
+        self.collector = collector
+        self.lock = threading.Lock()
+        self._mgmt_token = os.environ.get('MGMT_TOKEN', '')
+    
+    def _save(self):
+        """Save accounts to config file."""
+        try:
+            config_dir = os.path.dirname(self.CONFIG_FILE)
+            os.makedirs(config_dir, exist_ok=True)
+            accounts = []
+            for client in self.collector.clients:
+                accounts.append({
+                    'name': client.account_name,
+                    'key': client.api_key
+                })
+            with open(self.CONFIG_FILE, 'w') as f:
+                json.dump({'accounts': accounts, 'version': 1}, f, indent=2)
+            logger.info(f"Saved {len(accounts)} account(s) to {self.CONFIG_FILE}")
+        except Exception as e:
+            logger.error(f"Failed to save accounts: {e}")
+    
+    def load_from_file(self) -> List[tuple]:
+        """Load accounts from config file. Returns list of (name, key) tuples."""
+        try:
+            if os.path.exists(self.CONFIG_FILE):
+                with open(self.CONFIG_FILE, 'r') as f:
+                    data = json.load(f)
+                accounts = data.get('accounts', [])
+                keys = [(a['name'], a['key']) for a in accounts if a.get('key')]
+                if keys:
+                    logger.info(f"Loaded {len(keys)} account(s) from {self.CONFIG_FILE}")
+                return keys
+        except Exception as e:
+            logger.error(f"Failed to load accounts from {self.CONFIG_FILE}: {e}")
+        return []
+    
+    def check_auth(self, token: str) -> bool:
+        """Check management API auth token."""
+        if not self._mgmt_token:
+            return True  # No token configured = no auth (internal network only)
+        return token == self._mgmt_token
+    
+    def list_accounts(self) -> List[Dict]:
+        """List accounts with masked keys and status."""
+        result = []
+        with self.lock:
+            for client in self.collector.clients:
+                key = client.api_key
+                masked = key[:6] + '...' + key[-4:] if len(key) > 14 else '***'
+                
+                # Quick status check via GraphQL
+                data = client.get_host_metrics()
+                if data and 'myself' in data:
+                    myself = data['myself']
+                    balance = myself.get('hostBalance', 0) or 0
+                    machines = myself.get('machines', []) or []
+                    status = 'connected'
+                else:
+                    balance = None
+                    machines = []
+                    status = 'error'
+                
+                result.append({
+                    'name': client.account_name,
+                    'key_masked': masked,
+                    'status': status,
+                    'balance': balance,
+                    'machine_count': len(machines)
+                })
+        return result
+    
+    def add_account(self, name: str, key: str) -> Dict:
+        """Add a new API key account."""
+        with self.lock:
+            # Check for duplicate name
+            for client in self.collector.clients:
+                if client.account_name == name:
+                    return {'error': f'Account "{name}" already exists', 'status': 409}
+            
+            # Verify the key works
+            test_client = RunPodClient(key, name)
+            data = test_client.get_host_metrics()
+            if not data or 'myself' not in data:
+                return {'error': 'API key validation failed - could not connect to RunPod', 'status': 400}
+            
+            # Add to collector
+            self.collector.clients.append(test_client)
+            
+            # Invalidate metrics cache
+            self.collector.last_update = 0
+            self.collector.metrics_cache = {}
+            
+            # Save to file
+            self._save()
+            
+            balance = data['myself'].get('hostBalance', 0) or 0
+            machine_count = len(data['myself'].get('machines', []) or [])
+            logger.info(f"Added account '{name}' (balance: ${balance}, machines: {machine_count})")
+            return {
+                'name': name,
+                'balance': balance,
+                'machine_count': machine_count,
+                'status': 'connected'
+            }
+    
+    def remove_account(self, name: str) -> Dict:
+        """Remove an API key account."""
+        with self.lock:
+            for i, client in enumerate(self.collector.clients):
+                if client.account_name == name:
+                    self.collector.clients.pop(i)
+                    
+                    # Invalidate metrics cache
+                    self.collector.last_update = 0
+                    self.collector.metrics_cache = {}
+                    
+                    # Save to file
+                    self._save()
+                    
+                    logger.info(f"Removed account '{name}'")
+                    return {'success': True, 'name': name}
+            
+            return {'error': f'Account "{name}" not found', 'status': 404}
+    
+    def test_account(self, name: str) -> Dict:
+        """Test connectivity for a specific account."""
+        with self.lock:
+            for client in self.collector.clients:
+                if client.account_name == name:
+                    data = client.get_host_metrics()
+                    if data and 'myself' in data:
+                        myself = data['myself']
+                        machines = myself.get('machines', []) or []
+                        return {
+                            'name': name,
+                            'status': 'connected',
+                            'balance': myself.get('hostBalance', 0) or 0,
+                            'machine_count': len(machines),
+                            'machines': [
+                                {
+                                    'name': m.get('name', 'unknown'),
+                                    'gpu_total': m.get('gpuTotal', 0),
+                                    'gpu_rented': m.get('gpuReserved', 0),
+                                    'listed': m.get('listed', False),
+                                    'location': m.get('location', '')
+                                }
+                                for m in machines
+                            ]
+                        }
+                    else:
+                        return {'name': name, 'status': 'error', 'error': 'Failed to connect'}
+            
+            return {'error': f'Account "{name}" not found', 'status': 404}
+
+
 class MetricsHandler(BaseHTTPRequestHandler):
-    """HTTP handler for /metrics endpoint"""
+    """HTTP handler for /metrics and management API endpoints"""
     
     collector = None  # Set by main()
+    account_manager = None  # Set by main()
+    
+    def _send_json(self, data: Dict, status: int = 200):
+        """Send JSON response."""
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode('utf-8'))
+    
+    def _read_body(self) -> Optional[Dict]:
+        """Read and parse JSON request body."""
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length > 0:
+                body = self.rfile.read(content_length)
+                return json.loads(body.decode('utf-8'))
+        except Exception:
+            pass
+        return None
+    
+    def _check_mgmt_auth(self) -> bool:
+        """Check management API authorization."""
+        token = self.headers.get('X-Mgmt-Token', '') or self.headers.get('Authorization', '').replace('Bearer ', '')
+        if not self.account_manager.check_auth(token):
+            self._send_json({'error': 'Unauthorized'}, 401)
+            return False
+        return True
     
     def do_GET(self):
         if self.path == '/metrics':
@@ -457,6 +645,57 @@ class MetricsHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'text/plain')
             self.end_headers()
             self.wfile.write(b'OK')
+        elif self.path == '/api/accounts':
+            if not self._check_mgmt_auth():
+                return
+            accounts = self.account_manager.list_accounts()
+            self._send_json({'accounts': accounts})
+        elif self.path.startswith('/api/accounts/') and self.path.endswith('/test'):
+            if not self._check_mgmt_auth():
+                return
+            name = self.path.split('/')[3]
+            result = self.account_manager.test_account(name)
+            status = result.pop('status', 200) if 'error' in result else 200
+            self._send_json(result, status)
+        elif self.path == '/api/status':
+            # Quick status without auth - used for health monitoring
+            self._send_json({
+                'accounts': len(self.collector.clients),
+                'cache_age': int(time.time() - self.collector.last_update) if self.collector.last_update else None,
+                'cache_ttl': self.collector.cache_ttl
+            })
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def do_POST(self):
+        if self.path == '/api/accounts':
+            if not self._check_mgmt_auth():
+                return
+            data = self._read_body()
+            if not data or not data.get('key'):
+                self._send_json({'error': 'key is required (name is optional)'}, 400)
+                return
+            name = data.get('name', 'default')
+            key = data['key']
+            result = self.account_manager.add_account(name, key)
+            status = result.pop('status', 201) if 'error' in result else 201
+            self._send_json(result, status)
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def do_DELETE(self):
+        if self.path.startswith('/api/accounts/'):
+            if not self._check_mgmt_auth():
+                return
+            name = self.path.split('/')[3]
+            if not name:
+                self._send_json({'error': 'Account name required'}, 400)
+                return
+            result = self.account_manager.remove_account(name)
+            status = result.pop('status', 200) if 'error' in result else 200
+            self._send_json(result, status)
         else:
             self.send_response(404)
             self.end_headers()
@@ -538,21 +777,64 @@ Examples:
     elif os.environ.get('RUNPOD_API_KEY'):
         api_keys = [('default', os.environ['RUNPOD_API_KEY'])]
     
-    if not api_keys:
-        print("Error: No API keys provided. Use -api-key or set RUNPOD_API_KEYS env var.")
-        sys.exit(1)
-    
-    logger.info(f"Configured {len(api_keys)} account(s): {[k[0] for k in api_keys]}")
-    
-    # Create collector
+    # Create collector (may start empty - accounts can be added via API)
     collector = MetricsCollector(api_keys)
     collector.cache_ttl = args.interval
+    
+    # Create account manager (handles persistence + API)
+    account_manager = AccountManager(collector)
+    
+    # If no keys from env/args, try loading from config file
+    if not api_keys:
+        file_keys = account_manager.load_from_file()
+        if file_keys:
+            api_keys = file_keys
+            collector.clients = [
+                RunPodClient(api_key, account_name)
+                for account_name, api_key in file_keys
+            ]
+    
+    if not api_keys:
+        logger.warning("No API keys configured. Add accounts via the management API:")
+        logger.warning(f"  POST http://localhost:{args.port}/api/accounts")
+        logger.warning("  Body: {\"name\": \"MyAccount\", \"key\": \"rpa_XXXXX\"}")
+        logger.warning("The exporter will start and serve empty metrics until accounts are added.")
+    else:
+        logger.info(f"RunPod Exporter starting with {len(api_keys)} account(s): {[k[0] for k in api_keys]}")
+        for name, key in api_keys:
+            masked = key[:6] + '...' + key[-4:] if len(key) > 14 else '***'
+            logger.info(f"  Account '{name}': key={masked}")
+        
+        # Save initial keys to config file (so they persist across restarts)
+        account_manager._save()
+        
+        # Initial connectivity check
+        logger.info("Performing initial API connectivity check...")
+        for client in collector.clients:
+            data = client.get_host_metrics()
+            if data and 'myself' in data:
+                myself = data['myself']
+                balance = myself.get('hostBalance', 'N/A')
+                machines = myself.get('machines', []) or []
+                logger.info(f"  ✓ Account '{client.account_name}': connected (balance: ${balance}, {len(machines)} machine(s))")
+                for m in machines:
+                    name_str = m.get('name', 'unknown')
+                    gpu_total = m.get('gpuTotal', 0)
+                    gpu_rented = m.get('gpuReserved', 0) or 0
+                    listed = m.get('listed', False)
+                    logger.info(f"    - {name_str}: {gpu_total} GPUs ({gpu_rented} rented), listed={listed}")
+            else:
+                logger.error(f"  ✗ Account '{client.account_name}': FAILED to connect - check API key")
+    
+    # Wire up handler
     MetricsHandler.collector = collector
+    MetricsHandler.account_manager = account_manager
     
     # Start HTTP server
     server = HTTPServer(('0.0.0.0', args.port), MetricsHandler)
     logger.info(f"RunPod Exporter listening on port {args.port}")
     logger.info(f"Metrics available at http://localhost:{args.port}/metrics")
+    logger.info(f"Management API at http://localhost:{args.port}/api/accounts")
     
     try:
         server.serve_forever()

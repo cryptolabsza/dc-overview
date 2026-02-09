@@ -1,5 +1,9 @@
 # DC Overview Test Configuration
 # Use with: sudo dc-overview quickstart -c test-config.yaml -y
+#
+# Secrets (API keys, passwords) can be stored separately in .secrets.yaml
+# Place .secrets.yaml in the same directory as this config file, or in /etc/dc-overview/
+# See test-secrets.yaml for the format.
 
 site_name: "Test Fleet"
 
@@ -8,8 +12,21 @@ components:
   dc_overview: true
   ipmi_monitor: false
   dc_watchdog: true
-  vast_exporter: false
+  vast_exporter: true  # Set to true; API keys in .secrets.yaml or vast: section below
   runpod_exporter: false
+
+# Vast.ai Integration
+# API keys can be provided here OR in .secrets.yaml (preferred for security)
+# If API keys are found in .secrets.yaml, vast_exporter is auto-enabled even if false above
+#
+# vast:
+#   api_key: your-vast-api-key          # Single key
+#   # OR multiple accounts:
+#   # api_keys:
+#   #   - name: VastMain
+#   #     key: your-api-key-1
+#   #   - name: VastSecondary
+#   #     key: your-api-key-2
 
 # SSL Configuration
 ssl:

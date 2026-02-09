@@ -767,7 +767,14 @@ def run_fleet_quickstart(config_file: str = None, auto_confirm: bool = False):
 
 
 def load_config_from_file(config_file: str) -> FleetConfig:
-    """Load FleetConfig from a YAML file."""
+    """Load FleetConfig from a YAML file.
+    
+    Also loads secrets from .secrets.yaml if found:
+    1. Same directory as config_file (e.g., /root/.secrets.yaml next to /root/test-config.yaml)
+    2. /etc/dc-overview/.secrets.yaml (default secrets location)
+    
+    This allows API keys (Vast, RunPod, etc.) to be kept separate from the config.
+    """
     import yaml
     from .fleet_config import FleetConfig, SSLConfig, SSHCredentials, BMCCredentials, Server
     from .fleet_config import ComponentConfig, GrafanaConfig, VastConfig, IPMIMonitorConfig
@@ -803,7 +810,10 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     config.fleet_admin_pass = data.get('fleet_admin_pass')
     
     # SSH configuration
-    ssh = data.get('ssh', {})
+    # Note: use `or {}` instead of default={} because YAML sections with only
+    # comments parse as None, and data.get('key', {}) returns None (not {})
+    # when the key exists but its value is None.
+    ssh = data.get('ssh') or {}
     config.ssh.username = ssh.get('username', 'root')
     config.ssh.key_path = ssh.get('key_path')
     config.ssh.password = ssh.get('password')
@@ -812,19 +822,19 @@ def load_config_from_file(config_file: str) -> FleetConfig:
         config.ssh.auth_method = AuthMethod.KEY
     
     # BMC configuration
-    bmc = data.get('bmc', {})
+    bmc = data.get('bmc') or {}
     config.bmc.username = bmc.get('username', 'ADMIN')
     config.bmc.password = bmc.get('password')
     
     # SSL configuration
-    ssl = data.get('ssl', {})
+    ssl = data.get('ssl') or {}
     config.ssl.domain = ssl.get('domain')
     config.ssl.email = ssl.get('email')
     ssl_mode = ssl.get('mode', 'self_signed')
     config.ssl.mode = SSLMode.LETSENCRYPT if ssl_mode == 'letsencrypt' else SSLMode.SELF_SIGNED
     
     # Components
-    components = data.get('components', {})
+    components = data.get('components') or {}
     config.components.dc_overview = components.get('dc_overview', True)
     config.components.ipmi_monitor = components.get('ipmi_monitor', False)
     config.components.vast_exporter = components.get('vast_exporter', False)
@@ -832,11 +842,11 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     config.components.dc_watchdog = components.get('dc_watchdog', False)
     
     # Vast.ai
-    vast = data.get('vast', {})
+    vast = data.get('vast') or {}
     config.vast.enabled = config.components.vast_exporter
     config.vast.api_key = vast.get('api_key')
     # Support api_keys list with name/key pairs (multi-account)
-    for api_key_data in vast.get('api_keys', []):
+    for api_key_data in (vast.get('api_keys') or []):
         if isinstance(api_key_data, dict):
             config.vast.add_key(
                 name=api_key_data.get('name', 'default'),
@@ -847,11 +857,11 @@ def load_config_from_file(config_file: str) -> FleetConfig:
         config.vast.enabled = True
     
     # RunPod (supports multiple API keys)
-    runpod = data.get('runpod', {})
+    runpod = data.get('runpod') or {}
     config.runpod.enabled = runpod.get('enabled', False) or config.components.runpod_exporter
     config.runpod.port = runpod.get('port', 8623)
     # Support api_keys list with name/key pairs
-    for api_key_data in runpod.get('api_keys', []):
+    for api_key_data in (runpod.get('api_keys') or []):
         if isinstance(api_key_data, dict):
             config.runpod.add_key(
                 name=api_key_data.get('name', 'default'),
@@ -863,13 +873,13 @@ def load_config_from_file(config_file: str) -> FleetConfig:
         config.components.runpod_exporter = True
     
     # Grafana
-    grafana = data.get('grafana', {})
+    grafana = data.get('grafana') or {}
     config.grafana.admin_password = grafana.get('admin_password', 'admin')
     # home_dashboard: "dc-overview-main", "vast-dashboard", or None to disable
     config.grafana.home_dashboard = grafana.get('home_dashboard', 'dc-overview-main')
     
     # IPMI Monitor
-    ipmi = data.get('ipmi_monitor', {})
+    ipmi = data.get('ipmi_monitor') or {}
     config.ipmi_monitor.enabled = config.components.ipmi_monitor
     config.ipmi_monitor.admin_password = ipmi.get('admin_password')
     config.ipmi_monitor.ai_license_key = ipmi.get('ai_license_key')
@@ -877,7 +887,7 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     config.ipmi_monitor.enable_ssh_logs = ipmi.get('enable_ssh_logs', False)
     
     # DC Watchdog (external uptime monitoring)
-    watchdog = data.get('watchdog', {})
+    watchdog = data.get('watchdog') or {}
     config.watchdog.server_url = watchdog.get('server_url', 'https://watchdog.cryptolabs.co.za')
     config.watchdog.ping_interval = watchdog.get('ping_interval', 30)
     config.watchdog.fail_timeout = watchdog.get('fail_timeout', 120)
@@ -887,7 +897,7 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     config.watchdog.api_key = watchdog.get('api_key') or ipmi.get('ai_license_key')
     
     # Security / Firewall
-    security = data.get('security', {})
+    security = data.get('security') or {}
     config.security.ufw_enabled = security.get('ufw_enabled', True)
     config.security.ufw_ports = security.get('ufw_ports', [22, 80, 443])
     config.security.ufw_additional_ports = security.get('ufw_additional_ports', [])
@@ -904,6 +914,104 @@ def load_config_from_file(config_file: str) -> FleetConfig:
         )
     
     console.print(f"[green]✓[/green] Loaded configuration from {config_file}")
+    
+    # =========================================================================
+    # Load secrets from .secrets.yaml (API keys, passwords kept separate)
+    # Search order:
+    #   1. Same directory as the config file
+    #   2. /etc/dc-overview/.secrets.yaml
+    # =========================================================================
+    secrets = {}
+    config_dir = Path(config_file).resolve().parent
+    secrets_candidates = [
+        config_dir / ".secrets.yaml",
+        Path("/etc/dc-overview/.secrets.yaml"),
+    ]
+    
+    for secrets_path in secrets_candidates:
+        if secrets_path.exists():
+            try:
+                with open(secrets_path, 'r') as f:
+                    secrets = yaml.safe_load(f) or {}
+                console.print(f"[green]✓[/green] Loaded secrets from {secrets_path}")
+            except Exception as e:
+                console.print(f"[yellow]⚠[/yellow] Could not load secrets from {secrets_path}: {e}")
+            break  # Use first found
+    
+    if secrets:
+        # Fleet admin credentials (secrets override config)
+        if secrets.get("fleet_admin_user"):
+            config.fleet_admin_user = secrets["fleet_admin_user"]
+        if secrets.get("fleet_admin_pass"):
+            config.fleet_admin_pass = secrets["fleet_admin_pass"]
+        
+        # SSH password (if not already set from config)
+        if secrets.get("ssh_password") and not config.ssh.password:
+            config.ssh.password = secrets["ssh_password"]
+        
+        # BMC password (if not already set from config)
+        if secrets.get("bmc_password") and not config.bmc.password:
+            config.bmc.password = secrets["bmc_password"]
+        
+        # Use fleet_admin_pass as default for service passwords (optional overrides)
+        default_pass = config.fleet_admin_pass or config.grafana.admin_password
+        if secrets.get("grafana_password"):
+            config.grafana.admin_password = secrets["grafana_password"]
+        elif config.fleet_admin_pass and config.grafana.admin_password == 'admin':
+            config.grafana.admin_password = config.fleet_admin_pass
+        
+        if secrets.get("ipmi_monitor_password"):
+            config.ipmi_monitor.admin_password = secrets["ipmi_monitor_password"]
+        elif config.fleet_admin_pass and not config.ipmi_monitor.admin_password:
+            config.ipmi_monitor.admin_password = config.fleet_admin_pass
+        
+        # Load Vast API keys from secrets (supports multiple or legacy single key)
+        for api_key_data in secrets.get("vast_api_keys", []):
+            if isinstance(api_key_data, dict):
+                config.vast.add_key(
+                    name=api_key_data.get("name", "default"),
+                    key=api_key_data.get("key", "")
+                )
+        # Legacy single key support
+        if secrets.get("vast_api_key") and not config.vast.api_keys:
+            config.vast.api_key = secrets["vast_api_key"]
+        
+        # If Vast API keys found in secrets and component is enabled, ensure vast is enabled
+        if (config.vast.api_keys or config.vast.api_key) and config.components.vast_exporter:
+            config.vast.enabled = True
+        # If Vast API keys found in secrets but component was false, auto-enable
+        if (config.vast.api_keys or config.vast.api_key) and not config.components.vast_exporter:
+            config.components.vast_exporter = True
+            config.vast.enabled = True
+            console.print("[dim]  Vast.ai auto-enabled (API keys found in secrets)[/dim]")
+        
+        # IPMI AI license key
+        if secrets.get("ipmi_ai_license"):
+            config.ipmi_monitor.ai_license_key = secrets["ipmi_ai_license"]
+        
+        # Load RunPod API keys from secrets
+        for api_key_data in secrets.get("runpod_api_keys", []):
+            if isinstance(api_key_data, dict):
+                config.runpod.add_key(
+                    name=api_key_data.get("name", "default"),
+                    key=api_key_data.get("key", "")
+                )
+        # If RunPod API keys found in secrets, auto-enable
+        if config.runpod.api_keys and not config.components.runpod_exporter:
+            config.components.runpod_exporter = True
+            config.runpod.enabled = True
+            console.print("[dim]  RunPod auto-enabled (API keys found in secrets)[/dim]")
+        
+        # Load DC Watchdog API key from secrets
+        # Falls back to ipmi_ai_license since they use the same sk-ipmi-xxx key
+        watchdog_key = (
+            secrets.get("watchdog_api_key") or 
+            secrets.get("ipmi_ai_license") or
+            secrets.get("cryptolabs_api_key")
+        )
+        if watchdog_key and not config.watchdog.api_key:
+            config.watchdog.api_key = watchdog_key
+    
     return config
 
 

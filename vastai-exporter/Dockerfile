@@ -23,6 +23,10 @@ COPY vastai_exporter.py /app/
 # No additional dependencies needed - uses stdlib only
 RUN chmod +x /app/vastai_exporter.py
 
+# Data volume for persistent config (API keys stored in /data/accounts.json)
+RUN mkdir -p /data
+VOLUME /data
+
 # Default port
 EXPOSE 8622
 

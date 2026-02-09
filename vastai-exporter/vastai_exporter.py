@@ -91,6 +91,19 @@ class VastAIClient:
         elif isinstance(data, list):
             return data
         return None
+    
+    def get_instances(self) -> Optional[List[Dict[str, Any]]]:
+        """Get all instances (rentals) running on host machines.
+        
+        Each instance has machine_id, num_gpus, and rental type info
+        which allows us to determine per-GPU occupancy state.
+        """
+        data = self._request("/instances/")
+        if data and 'instances' in data:
+            return data['instances']
+        elif isinstance(data, list):
+            return data
+        return None
 
 
 class MetricsCollector:
@@ -125,6 +138,7 @@ class MetricsCollector:
             all_metrics = {
                 'accounts': [],
                 'machines': [],
+                'instances_by_machine': {},  # machine_id -> list of instances
             }
             
             for client in self.clients:
@@ -142,9 +156,43 @@ class MetricsCollector:
                     # Get machines
                     machines = client.get_machines()
                     if machines:
+                        # Log machine fields on first fetch for diagnostics
+                        if not self.metrics_cache and machines:
+                            sample = machines[0]
+                            logger.info(f"Machine fields for {client.account_name}: {sorted(sample.keys())}")
+                            # Log occupancy-related fields specifically
+                            for field in ['gpu_occupancy', 'current_rentals_running',
+                                          'current_rentals_running_on_demand', 'current_rentals_on_demand',
+                                          'current_rentals_resident', 'current_rentals_bid',
+                                          'gpu_lanes', 'rentals', 'instances', 'num_gpus']:
+                                if field in sample:
+                                    logger.info(f"  {field} = {sample[field]}")
+                        
                         for machine in machines:
                             machine['_account'] = client.account_name
                             all_metrics['machines'].append(machine)
+                    
+                    # Get instances (rentals on host machines) for accurate per-GPU occupancy
+                    instances = client.get_instances()
+                    if instances:
+                        # Log instance fields on first fetch for diagnostics
+                        if not self.metrics_cache and instances:
+                            sample = instances[0]
+                            logger.info(f"Instance fields for {client.account_name}: {sorted(sample.keys())}")
+                            for field in ['machine_id', 'num_gpus', 'gpu_num',
+                                          'type', 'rental_type', 'hosting_type',
+                                          'bid_type', 'is_bid', 'static_ip',
+                                          'actual_status', 'intended_status',
+                                          'start_date', 'gpu_lanes']:
+                                if field in sample:
+                                    logger.info(f"  {field} = {sample[field]}")
+                        
+                        for inst in instances:
+                            mid = str(inst.get('machine_id', ''))
+                            if mid:
+                                if mid not in all_metrics['instances_by_machine']:
+                                    all_metrics['instances_by_machine'][mid] = []
+                                all_metrics['instances_by_machine'][mid].append(inst)
                     
                 except Exception as e:
                     logger.error(f"Error collecting metrics for {client.account_name}: {e}")
@@ -391,30 +439,77 @@ class MetricsCollector:
             error_desc = (m.get('error_description', '') or '').replace('"', '\\"')
             lines.append(f'vastai_machine_ErrorDescription{{account="{account}",error_description="{error_desc}",hostname="{hostname}",machine_id="{machine_id}"}} 1')
         
-        # GPU occupancy (parsed from string like "0/2" -> outputs for each GPU)
+        # GPU occupancy (per-GPU rental state)
+        # Values: 0=Idle, 1=Rented(Bid/Interruptible), 2=Rented(On-Demand), 3=Reserved/Resident
+        #
+        # Strategy: Use per-instance data from /instances/ API when available (accurate),
+        # fall back to machine-level rental counts (approximation for multi-GPU rentals).
         lines.append("")
-        lines.append("# HELP vastai_machine_gpu_occupancy GPU occupancy state per machine and GPU number.")
+        lines.append("# HELP vastai_machine_gpu_occupancy GPU occupancy state per machine and GPU slot. 0=Idle 1=Bid 2=OnDemand 3=Reserved")
         lines.append("# TYPE vastai_machine_gpu_occupancy gauge")
+        
+        instances_by_machine = metrics.get('instances_by_machine', {})
+        
         for m in metrics.get('machines', []):
             account = m.get('_account', 'default')
             hostname = (m.get('hostname', '') or '').replace('"', '\\"')
             machine_id = str(m.get('id', m.get('machine_id', 'unknown')))
-            gpu_occupancy = m.get('gpu_occupancy', '') or ''
             num_gpus = self._safe_int(m.get('num_gpus', 0))
             
-            # Parse occupancy - could be "0/2" format or just a number
-            try:
-                if '/' in str(gpu_occupancy):
-                    rented, total = gpu_occupancy.split('/')
-                    rented = int(rented)
-                else:
-                    rented = int(gpu_occupancy) if gpu_occupancy else 0
+            # Build per-GPU state array
+            gpu_states = [0] * num_gpus  # Default: all idle
+            
+            # Method 1: Use per-instance data (accurate - knows GPU count + type per rental)
+            machine_instances = instances_by_machine.get(machine_id, [])
+            if machine_instances:
+                gpu_slot = 0
+                # Sort: reserved first, then on-demand, then bid (interruptible)
+                for inst in sorted(machine_instances, key=lambda x: self._instance_type_priority(x)):
+                    actual_status = (inst.get('actual_status') or '').lower()
+                    intended_status = (inst.get('intended_status') or '').lower()
+                    # Only count running/active instances
+                    if actual_status not in ('running', 'loading', 'created') and intended_status != 'running':
+                        continue
+                    
+                    inst_gpus = self._safe_int(inst.get('num_gpus', 1))
+                    rental_type = self._classify_instance_type(inst)
+                    
+                    for _ in range(inst_gpus):
+                        if gpu_slot < num_gpus:
+                            gpu_states[gpu_slot] = rental_type
+                            gpu_slot += 1
+            else:
+                # Method 2: Fallback - infer from machine-level fields
+                gpu_occupancy = m.get('gpu_occupancy', '') or ''
+                rentals_resident = self._safe_int(m.get('current_rentals_resident', 0))
+                rentals_on_demand = self._safe_int(m.get('current_rentals_running_on_demand',
+                                                   m.get('current_rentals_on_demand', 0)))
                 
-                for i in range(num_gpus):
-                    occupied = 1 if i < rented else 0
-                    lines.append(f'vastai_machine_gpu_occupancy{{account="{account}",gpu_num="{i}",hostname="{hostname}",machine_id="{machine_id}"}} {occupied}')
-            except (ValueError, TypeError):
-                pass
+                try:
+                    if '/' in str(gpu_occupancy):
+                        rented_str, _ = gpu_occupancy.split('/')
+                        rented = int(rented_str)
+                    else:
+                        rented = int(gpu_occupancy) if gpu_occupancy else 0
+                    
+                    # NOTE: rental counts may not equal GPU counts for multi-GPU rentals.
+                    # This is a best-effort approximation.
+                    rentals_bid = max(0, rented - rentals_on_demand - rentals_resident)
+                    
+                    for i in range(num_gpus):
+                        if i < rentals_resident:
+                            gpu_states[i] = 3  # Reserved/Resident
+                        elif i < rentals_resident + rentals_on_demand:
+                            gpu_states[i] = 2  # On-Demand
+                        elif i < rentals_resident + rentals_on_demand + rentals_bid:
+                            gpu_states[i] = 1  # Bid/Interruptible
+                        # else: stays 0 (Idle)
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Could not parse gpu_occupancy for {hostname}: {e}")
+            
+            # Emit per-GPU metrics
+            for i in range(num_gpus):
+                lines.append(f'vastai_machine_gpu_occupancy{{account="{account}",gpu="{i}",Hostname="{hostname}",hostname="{hostname}",machine_id="{machine_id}"}} {gpu_states[i]}')
         
         # GPU rented metrics
         lines.append("")
@@ -474,12 +569,246 @@ class MetricsCollector:
         hostname = (machine.get('hostname', '') or machine_id).replace('"', '\\"')
         
         return f'account="{account}",hostname="{hostname}",machine_id="{machine_id}"'
+    
+    def _classify_instance_type(self, instance: Dict) -> int:
+        """Classify an instance's rental type.
+        
+        Returns: 0=Idle, 1=Bid/Interruptible, 2=On-Demand, 3=Reserved/Resident
+        
+        The Vast.ai API uses various fields to indicate rental type:
+        - is_bid: True for interruptible/bid instances
+        - bid_type: 'on_demand', 'bid', 'reserved', etc.
+        - type: may contain rental type info
+        - hosting_type: may indicate on-demand vs bid
+        - static_ip: reserved instances often have static IPs
+        - min_bid: non-zero for bid instances
+        """
+        # Check explicit rental type fields (try multiple field names)
+        bid_type = str(instance.get('bid_type', '') or '').lower()
+        rental_type = str(instance.get('rental_type', '') or instance.get('type', '') or '').lower()
+        hosting_type = str(instance.get('hosting_type', '') or '').lower()
+        is_bid = instance.get('is_bid')
+        
+        # Reserved/Resident detection
+        if 'reserved' in bid_type or 'resident' in rental_type or 'reserved' in rental_type:
+            return 3
+        
+        # On-demand detection
+        if bid_type == 'on_demand' or 'on_demand' in rental_type or 'on-demand' in rental_type:
+            return 2
+        if hosting_type in ('on_demand', 'on-demand', 'dedicated'):
+            return 2
+        
+        # Bid/Interruptible detection
+        if is_bid is True or bid_type == 'bid' or 'bid' in rental_type or 'interruptible' in rental_type:
+            return 1
+        if hosting_type in ('bid', 'interruptible', 'spot'):
+            return 1
+        
+        # If is_bid is explicitly False, it's on-demand
+        if is_bid is False:
+            return 2
+        
+        # Default: if we can't determine type, use on-demand (most common for hosts)
+        # The min_bid field can help: if it's > 0 it's a bid rental
+        if instance.get('min_bid') and float(instance.get('min_bid', 0) or 0) > 0:
+            return 1
+        
+        return 2  # Default to on-demand if we can't determine
+    
+    def _instance_type_priority(self, instance: Dict) -> int:
+        """Sort key: reserved first (lowest priority number), then on-demand, then bid.
+        
+        This ensures GPU slot assignment fills reserved first, then on-demand, then bid.
+        """
+        t = self._classify_instance_type(instance)
+        # Map: 3 (reserved) -> 0, 2 (on-demand) -> 1, 1 (bid) -> 2
+        return {3: 0, 2: 1, 1: 2, 0: 3}.get(t, 3)
+
+
+class AccountManager:
+    """Manages Vast.ai API key accounts with file persistence."""
+    
+    CONFIG_FILE = "/data/accounts.json"
+    
+    def __init__(self, collector: MetricsCollector):
+        self.collector = collector
+        self.lock = threading.Lock()
+        self._mgmt_token = os.environ.get('MGMT_TOKEN', '')
+    
+    def _save(self):
+        """Save accounts to config file."""
+        try:
+            config_dir = os.path.dirname(self.CONFIG_FILE)
+            os.makedirs(config_dir, exist_ok=True)
+            accounts = []
+            for client in self.collector.clients:
+                accounts.append({
+                    'name': client.account_name,
+                    'key': client.api_key
+                })
+            with open(self.CONFIG_FILE, 'w') as f:
+                json.dump({'accounts': accounts, 'version': 1}, f, indent=2)
+            logger.info(f"Saved {len(accounts)} account(s) to {self.CONFIG_FILE}")
+        except Exception as e:
+            logger.error(f"Failed to save accounts: {e}")
+    
+    def load_from_file(self) -> List[tuple]:
+        """Load accounts from config file. Returns list of (name, key) tuples."""
+        try:
+            if os.path.exists(self.CONFIG_FILE):
+                with open(self.CONFIG_FILE, 'r') as f:
+                    data = json.load(f)
+                accounts = data.get('accounts', [])
+                keys = [(a['name'], a['key']) for a in accounts if a.get('key')]
+                if keys:
+                    logger.info(f"Loaded {len(keys)} account(s) from {self.CONFIG_FILE}")
+                return keys
+        except Exception as e:
+            logger.error(f"Failed to load accounts from {self.CONFIG_FILE}: {e}")
+        return []
+    
+    def check_auth(self, token: str) -> bool:
+        """Check management API auth token."""
+        if not self._mgmt_token:
+            return True  # No token configured = no auth (internal network only)
+        return token == self._mgmt_token
+    
+    def list_accounts(self) -> List[Dict]:
+        """List accounts with masked keys and status."""
+        result = []
+        with self.lock:
+            for client in self.collector.clients:
+                key = client.api_key
+                masked = key[:4] + '...' + key[-4:] if len(key) > 12 else '***'
+                
+                # Quick status check
+                user_info = client.get_user_info()
+                status = 'connected' if user_info else 'error'
+                balance = float(user_info.get('balance', 0) or 0) if user_info else None
+                machines_data = client.get_machines()
+                machine_count = len(machines_data) if machines_data else 0
+                
+                result.append({
+                    'name': client.account_name,
+                    'key_masked': masked,
+                    'status': status,
+                    'balance': balance,
+                    'machine_count': machine_count
+                })
+        return result
+    
+    def add_account(self, name: str, key: str) -> Dict:
+        """Add a new API key account."""
+        with self.lock:
+            # Check for duplicate name
+            for client in self.collector.clients:
+                if client.account_name == name:
+                    return {'error': f'Account "{name}" already exists', 'status': 409}
+            
+            # Verify the key works
+            test_client = VastAIClient(key, name)
+            user_info = test_client.get_user_info()
+            if not user_info:
+                return {'error': f'API key validation failed - could not connect to Vast.ai', 'status': 400}
+            
+            # Add to collector
+            self.collector.clients.append(test_client)
+            
+            # Invalidate metrics cache to pick up new account
+            self.collector.last_update = 0
+            self.collector.metrics_cache = {}
+            
+            # Save to file
+            self._save()
+            
+            balance = float(user_info.get('balance', 0) or 0)
+            logger.info(f"Added account '{name}' (balance: ${balance})")
+            return {
+                'name': name,
+                'balance': balance,
+                'status': 'connected'
+            }
+    
+    def remove_account(self, name: str) -> Dict:
+        """Remove an API key account."""
+        with self.lock:
+            for i, client in enumerate(self.collector.clients):
+                if client.account_name == name:
+                    self.collector.clients.pop(i)
+                    
+                    # Invalidate metrics cache
+                    self.collector.last_update = 0
+                    self.collector.metrics_cache = {}
+                    
+                    # Save to file
+                    self._save()
+                    
+                    logger.info(f"Removed account '{name}'")
+                    return {'success': True, 'name': name}
+            
+            return {'error': f'Account "{name}" not found', 'status': 404}
+    
+    def test_account(self, name: str) -> Dict:
+        """Test connectivity for a specific account."""
+        with self.lock:
+            for client in self.collector.clients:
+                if client.account_name == name:
+                    user_info = client.get_user_info()
+                    machines = client.get_machines()
+                    if user_info:
+                        return {
+                            'name': name,
+                            'status': 'connected',
+                            'balance': float(user_info.get('balance', 0) or 0),
+                            'machine_count': len(machines) if machines else 0,
+                            'machines': [
+                                {
+                                    'hostname': m.get('hostname', 'unknown'),
+                                    'num_gpus': m.get('num_gpus', 0),
+                                    'gpu_occupancy': m.get('gpu_occupancy', 'N/A'),
+                                    'listed': m.get('listed', False)
+                                }
+                                for m in (machines or [])
+                            ]
+                        }
+                    else:
+                        return {'name': name, 'status': 'error', 'error': 'Failed to connect'}
+            
+            return {'error': f'Account "{name}" not found', 'status': 404}
 
 
 class MetricsHandler(BaseHTTPRequestHandler):
-    """HTTP handler for /metrics endpoint"""
+    """HTTP handler for /metrics and management API endpoints"""
     
     collector = None  # Set by main()
+    account_manager = None  # Set by main()
+    
+    def _send_json(self, data: Dict, status: int = 200):
+        """Send JSON response."""
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode('utf-8'))
+    
+    def _read_body(self) -> Optional[Dict]:
+        """Read and parse JSON request body."""
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length > 0:
+                body = self.rfile.read(content_length)
+                return json.loads(body.decode('utf-8'))
+        except Exception:
+            pass
+        return None
+    
+    def _check_mgmt_auth(self) -> bool:
+        """Check management API authorization."""
+        token = self.headers.get('X-Mgmt-Token', '') or self.headers.get('Authorization', '').replace('Bearer ', '')
+        if not self.account_manager.check_auth(token):
+            self._send_json({'error': 'Unauthorized'}, 401)
+            return False
+        return True
     
     def do_GET(self):
         if self.path == '/metrics':
@@ -497,6 +826,57 @@ class MetricsHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'text/plain')
             self.end_headers()
             self.wfile.write(b'OK')
+        elif self.path == '/api/accounts':
+            if not self._check_mgmt_auth():
+                return
+            accounts = self.account_manager.list_accounts()
+            self._send_json({'accounts': accounts})
+        elif self.path.startswith('/api/accounts/') and self.path.endswith('/test'):
+            if not self._check_mgmt_auth():
+                return
+            name = self.path.split('/')[3]
+            result = self.account_manager.test_account(name)
+            status = result.pop('status', 200) if 'error' in result else 200
+            self._send_json(result, status)
+        elif self.path == '/api/status':
+            # Quick status without auth - used for health monitoring
+            self._send_json({
+                'accounts': len(self.collector.clients),
+                'cache_age': int(time.time() - self.collector.last_update) if self.collector.last_update else None,
+                'cache_ttl': self.collector.cache_ttl
+            })
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def do_POST(self):
+        if self.path == '/api/accounts':
+            if not self._check_mgmt_auth():
+                return
+            data = self._read_body()
+            if not data or not data.get('key'):
+                self._send_json({'error': 'key is required (name is optional)'}, 400)
+                return
+            name = data.get('name', 'default')
+            key = data['key']
+            result = self.account_manager.add_account(name, key)
+            status = result.pop('status', 201) if 'error' in result else 201
+            self._send_json(result, status)
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def do_DELETE(self):
+        if self.path.startswith('/api/accounts/'):
+            if not self._check_mgmt_auth():
+                return
+            name = self.path.split('/')[3]
+            if not name:
+                self._send_json({'error': 'Account name required'}, 400)
+                return
+            result = self.account_manager.remove_account(name)
+            status = result.pop('status', 200) if 'error' in result else 200
+            self._send_json(result, status)
         else:
             self.send_response(404)
             self.end_headers()
@@ -584,21 +964,68 @@ Examples:
     elif os.environ.get('VASTAI_API_KEY'):
         api_keys = [('default', os.environ['VASTAI_API_KEY'])]
     
-    if not api_keys:
-        print("Error: No API keys provided. Use -api-key or set VASTAI_API_KEYS env var.")
-        sys.exit(1)
-    
-    logger.info(f"Starting vast.ai exporter on {args.listen_address}:{args.port}")
-    logger.info(f"Configured {len(api_keys)} account(s): {[k[0] for k in api_keys]}")
-    
-    # Create collector
+    # Create collector (may start empty - accounts can be added via API)
     collector = MetricsCollector(api_keys)
     collector.cache_ttl = args.interval
+    
+    # Create account manager (handles persistence + API)
+    account_manager = AccountManager(collector)
+    
+    # If no keys from env/args, try loading from config file
+    if not api_keys:
+        file_keys = account_manager.load_from_file()
+        if file_keys:
+            api_keys = file_keys
+            collector.clients = [
+                VastAIClient(api_key, account_name)
+                for account_name, api_key in file_keys
+            ]
+    
+    if not api_keys:
+        logger.warning("No API keys configured. Add accounts via the management API:")
+        logger.warning(f"  POST http://localhost:{args.port}/api/accounts")
+        logger.warning("  Body: {\"name\": \"MyAccount\", \"key\": \"your-api-key\"}")
+        logger.warning("The exporter will start and serve empty metrics until accounts are added.")
+    else:
+        logger.info(f"Starting vast.ai exporter on {args.listen_address}:{args.port}")
+        logger.info(f"Configured {len(api_keys)} account(s): {[k[0] for k in api_keys]}")
+        for name, key in api_keys:
+            masked = key[:4] + '...' + key[-4:] if len(key) > 12 else '***'
+            logger.info(f"  Account '{name}': key={masked}")
+        
+        # Save initial keys to config file (so they persist across restarts)
+        account_manager._save()
+        
+        # Initial connectivity check
+        logger.info("Performing initial API connectivity check...")
+        for client in collector.clients:
+            user_info = client.get_user_info()
+            if user_info:
+                balance = user_info.get('balance', 'N/A')
+                logger.info(f"  ✓ Account '{client.account_name}': connected (balance: ${balance})")
+            else:
+                logger.error(f"  ✗ Account '{client.account_name}': FAILED to connect - check API key")
+        
+            machines = client.get_machines()
+            if machines:
+                logger.info(f"  ✓ Account '{client.account_name}': found {len(machines)} machine(s)")
+                for m in machines:
+                    hostname = m.get('hostname', 'unknown')
+                    num_gpus = m.get('num_gpus', 0)
+                    gpu_occ = m.get('gpu_occupancy', 'N/A')
+                    listed = m.get('listed', False)
+                    logger.info(f"    - {hostname}: {num_gpus} GPUs, occupancy={gpu_occ}, listed={listed}")
+            else:
+                logger.warning(f"  ⚠ Account '{client.account_name}': no machines returned")
+    
+    # Wire up handler
     MetricsHandler.collector = collector
+    MetricsHandler.account_manager = account_manager
     
     # Start HTTP server
     server = HTTPServer((args.listen_address, args.port), MetricsHandler)
     logger.info(f"Metrics available at http://{args.listen_address}:{args.port}/metrics")
+    logger.info(f"Management API at http://{args.listen_address}:{args.port}/api/accounts")
     
     try:
         server.serve_forever()

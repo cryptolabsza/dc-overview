@@ -27,7 +27,7 @@ services:
       - dc_data:/data
       - ./prometheus_targets.json:/data/prometheus_targets.json
 {% if ssh_keys_dir %}
-      - ./ssh_keys:/app/ssh_keys:ro
+      - ./ssh_keys:/etc/dc-overview/ssh_keys:ro
 {% endif %}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:{{ dc_port | default(5001) }}/api/health"]

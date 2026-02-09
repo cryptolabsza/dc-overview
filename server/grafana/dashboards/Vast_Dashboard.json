@@ -2745,7 +2745,7 @@
         "type": "prometheus",
         "uid": "ffamzhijdn1fke"
       },
-      "description": "",
+      "description": "GPU rental status per slot.\n\n**Legend:**\n- **U (Unlisted)** — GPU not listed on Vast.ai or no data available (gray)\n- **Idle** — Listed but not rented (no color)\n- **Rented (Bid)** — Rented via interruptible/bid pricing (blue)\n- **Rented (On-Demand)** — Rented via on-demand/dedicated pricing (green)\n- **Reserved** — Reserved/resident rental (orange)",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2765,10 +2765,33 @@
           "mappings": [
             {
               "options": {
+                "match": "null",
+                "result": {
+                  "color": "gray",
+                  "index": 0,
+                  "text": "U (Unlisted)"
+                }
+              },
+              "type": "special"
+            },
+            {
+              "options": {
+                "from": -999,
+                "result": {
+                  "color": "gray",
+                  "index": 1,
+                  "text": "U (Unlisted)"
+                },
+                "to": -1
+              },
+              "type": "range"
+            },
+            {
+              "options": {
                 "from": 0,
                 "result": {
                   "color": "transparent",
-                  "index": 0,
+                  "index": 2,
                   "text": "Idle"
                 },
                 "to": 0
@@ -2780,8 +2803,8 @@
                 "from": 1,
                 "result": {
                   "color": "blue",
-                  "index": 1,
-                  "text": "I"
+                  "index": 3,
+                  "text": "Rented (Bid)"
                 },
                 "to": 1
               },
@@ -2792,8 +2815,8 @@
                 "from": 2,
                 "result": {
                   "color": "green",
-                  "index": 2,
-                  "text": "D"
+                  "index": 4,
+                  "text": "Rented (On-Demand)"
                 },
                 "to": 2
               },
@@ -2804,8 +2827,8 @@
                 "from": 3,
                 "result": {
                   "color": "orange",
-                  "index": 3,
-                  "text": "R"
+                  "index": 5,
+                  "text": "Reserved"
                 },
                 "to": 3
               },

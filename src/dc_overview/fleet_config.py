@@ -450,7 +450,8 @@ class FleetConfig:
             config.master_ip = data.get("master_ip")
             
             # Components
-            comp = data.get("components", {})
+            # Note: use `or {}` because YAML sections with only comments parse as None
+            comp = data.get("components") or {}
             config.components.dc_overview = comp.get("dc_overview", True)
             config.components.ipmi_monitor = comp.get("ipmi_monitor", False)
             config.components.dc_watchdog = comp.get("dc_watchdog", False)
@@ -458,7 +459,7 @@ class FleetConfig:
             config.components.runpod_exporter = comp.get("runpod_exporter", False)
             
             # SSL
-            ssl = data.get("ssl", {})
+            ssl = data.get("ssl") or {}
             config.ssl.mode = SSLMode(ssl.get("mode", "self_signed"))
             config.ssl.domain = ssl.get("domain")
             config.ssl.email = ssl.get("email")
@@ -467,39 +468,39 @@ class FleetConfig:
             config.ssl.external_port = ssl.get("external_port", 443)
             
             # SSH
-            ssh = data.get("ssh", {})
+            ssh = data.get("ssh") or {}
             config.ssh.username = ssh.get("username", "root")
             config.ssh.auth_method = AuthMethod(ssh.get("auth_method", "password"))
             config.ssh.port = ssh.get("port", 22)
             config.ssh.key_path = ssh.get("key_path")
             
             # BMC
-            bmc = data.get("bmc", {})
+            bmc = data.get("bmc") or {}
             config.bmc.username = bmc.get("username", "ADMIN")
             
             # Services
-            grafana = data.get("grafana", {})
+            grafana = data.get("grafana") or {}
             config.grafana.port = grafana.get("port", 3000)
             
-            prometheus = data.get("prometheus", {})
+            prometheus = data.get("prometheus") or {}
             config.prometheus.port = prometheus.get("port", 9090)
             config.prometheus.retention_days = prometheus.get("retention_days", 30)
             
-            ipmi = data.get("ipmi_monitor", {})
+            ipmi = data.get("ipmi_monitor") or {}
             config.ipmi_monitor.enabled = ipmi.get("enabled", False)
             config.ipmi_monitor.port = ipmi.get("port", 5000)
             config.ipmi_monitor.enable_ssh_inventory = ipmi.get("enable_ssh_inventory", True)
             config.ipmi_monitor.enable_ssh_logs = ipmi.get("enable_ssh_logs", False)
             
-            vast = data.get("vast", {})
+            vast = data.get("vast") or {}
             config.vast.enabled = vast.get("enabled", False)
             config.vast.port = vast.get("port", 8622)
             
             # RunPod (supports multiple API keys)
-            runpod = data.get("runpod", {})
+            runpod = data.get("runpod") or {}
             config.runpod.enabled = runpod.get("enabled", False)
             config.runpod.port = runpod.get("port", 8623)
-            for api_key_data in runpod.get("api_keys", []):
+            for api_key_data in (runpod.get("api_keys") or []):
                 if isinstance(api_key_data, dict):
                     config.runpod.add_key(
                         name=api_key_data.get("name", "default"),
@@ -508,7 +509,7 @@ class FleetConfig:
             
             # DC Watchdog (external uptime monitoring)
             # Note: whether watchdog is enabled is controlled by components.dc_watchdog
-            watchdog = data.get("watchdog", {})
+            watchdog = data.get("watchdog") or {}
             config.watchdog.server_url = watchdog.get("server_url", "https://watchdog.cryptolabs.co.za")
             config.watchdog.ping_interval = watchdog.get("ping_interval", 30)
             config.watchdog.fail_timeout = watchdog.get("fail_timeout", 120)
@@ -516,7 +517,7 @@ class FleetConfig:
             config.watchdog.agent_use_mtr = watchdog.get("agent_use_mtr", True)
             
             # Servers
-            for s in data.get("servers", []):
+            for s in (data.get("servers") or []):
                 config.servers.append(Server(
                     name=s.get("name"),
                     server_ip=s.get("server_ip"),
