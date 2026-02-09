@@ -267,6 +267,25 @@ class FleetWizard:
     
     # ============ Step 2: Credentials ============
     
+    def _get_proxy_env(self) -> Optional[Dict]:
+        """Read environment variables from a running cryptolabs-proxy container."""
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", "cryptolabs-proxy", "--format",
+                 "{{range .Config.Env}}{{println .}}{{end}}"],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode != 0:
+                return None
+            config = {}
+            for line in result.stdout.strip().split('\n'):
+                if '=' in line:
+                    key, value = line.split('=', 1)
+                    config[key] = value
+            return config
+        except Exception:
+            return None
+
     def _collect_credentials(self):
         """Collect ALL credentials upfront."""
         console.print(Panel(
@@ -276,34 +295,59 @@ class FleetWizard:
             border_style="blue"
         ))
         
-        # Site name
-        self.config.site_name = questionary.text(
-            "Site/Company name (for dashboard branding):",
-            default="My GPU Farm",
-            style=custom_style
-        ).ask() or "My GPU Farm"
+        # Try to read config from an already-running proxy (deployed by ipmi-monitor or a prior run)
+        proxy_env = None
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", "cryptolabs-proxy", "--format", "{{.State.Status}}"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0 and result.stdout.strip() == "running":
+                proxy_env = self._get_proxy_env()
+        except Exception:
+            pass
         
-        # Fleet Management Credentials (for unified login)
-        console.print("\n[bold]Fleet Management Login[/bold]")
-        console.print("[dim]These credentials will be used to access all services (Fleet Management, Grafana, etc.)[/dim]\n")
+        # Site name -- prefer proxy's SITE_NAME if available
+        proxy_site_name = proxy_env.get("SITE_NAME") if proxy_env else None
+        if proxy_site_name and proxy_site_name not in ("CryptoLabs Fleet", ""):
+            self.config.site_name = proxy_site_name
+            console.print(f"[green]✓[/green] Site name: {proxy_site_name} (from existing proxy)")
+        else:
+            self.config.site_name = questionary.text(
+                "Site/Company name (for dashboard branding):",
+                default="My GPU Farm",
+                style=custom_style
+            ).ask() or "My GPU Farm"
         
-        self.config.fleet_admin_user = questionary.text(
-            "Fleet admin username:",
-            default="admin",
-            style=custom_style
-        ).ask() or "admin"
+        # Fleet Management Credentials -- reuse from proxy if available
+        proxy_admin_user = proxy_env.get("FLEET_ADMIN_USER") if proxy_env else None
+        proxy_admin_pass = proxy_env.get("FLEET_ADMIN_PASS") if proxy_env else None
         
-        self.config.fleet_admin_pass = questionary.password(
-            "Fleet admin password:",
-            validate=lambda x: len(x) >= 4 or "Password must be at least 4 characters",
-            style=custom_style
-        ).ask()
-        
-        if not self.config.fleet_admin_pass:
-            # Generate a random password if none provided
-            import secrets
-            self.config.fleet_admin_pass = secrets.token_urlsafe(12)
-            console.print(f"[dim]Generated password: {self.config.fleet_admin_pass}[/dim]")
+        if proxy_admin_user and proxy_admin_pass:
+            self.config.fleet_admin_user = proxy_admin_user
+            self.config.fleet_admin_pass = proxy_admin_pass
+            console.print(f"\n[green]✓[/green] Fleet admin: {proxy_admin_user} (from existing proxy)")
+        else:
+            console.print("\n[bold]Fleet Management Login[/bold]")
+            console.print("[dim]These credentials will be used to access all services (Fleet Management, Grafana, etc.)[/dim]\n")
+            
+            self.config.fleet_admin_user = questionary.text(
+                "Fleet admin username:",
+                default="admin",
+                style=custom_style
+            ).ask() or "admin"
+            
+            self.config.fleet_admin_pass = questionary.password(
+                "Fleet admin password:",
+                validate=lambda x: len(x) >= 4 or "Password must be at least 4 characters",
+                style=custom_style
+            ).ask()
+            
+            if not self.config.fleet_admin_pass:
+                # Generate a random password if none provided
+                import secrets
+                self.config.fleet_admin_pass = secrets.token_urlsafe(12)
+                console.print(f"[dim]Generated password: {self.config.fleet_admin_pass}[/dim]")
         
         # Grafana password (optional - defaults to fleet admin password)
         console.print("\n[bold]Grafana Dashboard[/bold]")
@@ -341,19 +385,39 @@ class FleetWizard:
             ).ask()
             self.config.ipmi_monitor.admin_password = ipmi_pass if ipmi_pass else self.config.fleet_admin_pass
 
-            # AI License (optional)
-            console.print("\n[dim]AI Insights provides intelligent diagnostics (optional)[/dim]")
-            has_ai = questionary.confirm(
-                "Do you have a CryptoLabs AI license?",
-                default=False,
-                style=custom_style
-            ).ask()
-
-            if has_ai:
-                self.config.ipmi_monitor.ai_license_key = questionary.password(
-                    "CryptoLabs License Key:",
+            # AI License (optional) -- auto-detect from existing deployments
+            detected_ai_key = None
+            # Check proxy env (WATCHDOG_API_KEY is the same CryptoLabs AI key)
+            if proxy_env and proxy_env.get("WATCHDOG_API_KEY"):
+                detected_ai_key = proxy_env["WATCHDOG_API_KEY"]
+            # Check ipmi-monitor .env from a prior deployment
+            if not detected_ai_key:
+                ipmi_env_path = Path("/etc/ipmi-monitor/.env")
+                if ipmi_env_path.exists():
+                    try:
+                        for line in ipmi_env_path.read_text().splitlines():
+                            if line.startswith("AI_LICENSE_KEY=") and len(line.split("=", 1)[1].strip()) > 0:
+                                detected_ai_key = line.split("=", 1)[1].strip()
+                                break
+                    except Exception:
+                        pass
+            
+            if detected_ai_key:
+                self.config.ipmi_monitor.ai_license_key = detected_ai_key
+                console.print(f"\n[green]✓[/green] AI license key detected from existing deployment")
+            else:
+                console.print("\n[dim]AI Insights provides intelligent diagnostics (optional)[/dim]")
+                has_ai = questionary.confirm(
+                    "Do you have a CryptoLabs AI license?",
+                    default=False,
                     style=custom_style
                 ).ask()
+
+                if has_ai:
+                    self.config.ipmi_monitor.ai_license_key = questionary.password(
+                        "CryptoLabs License Key:",
+                        style=custom_style
+                    ).ask()
             
             # SSH features for IPMI Monitor
             console.print("\n[bold]SSH Features[/bold]")

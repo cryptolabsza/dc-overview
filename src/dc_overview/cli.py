@@ -805,9 +805,35 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     # Site info
     config.site_name = data.get('site_name', 'DC Overview')
     
-    # Fleet admin credentials
+    # Fleet admin credentials -- prefer config file, then detect from running proxy
     config.fleet_admin_user = data.get('fleet_admin_user', 'admin')
     config.fleet_admin_pass = data.get('fleet_admin_pass')
+    
+    # If credentials missing from config, try to read from running proxy
+    if not config.fleet_admin_pass:
+        try:
+            import subprocess as _sp2
+            _r = _sp2.run(
+                ["docker", "inspect", "cryptolabs-proxy", "--format",
+                 "{{range .Config.Env}}{{println .}}{{end}}"],
+                capture_output=True, text=True, timeout=10
+            )
+            if _r.returncode == 0:
+                _proxy_env = {}
+                for _line in _r.stdout.strip().split('\n'):
+                    if '=' in _line:
+                        _k, _v = _line.split('=', 1)
+                        _proxy_env[_k] = _v
+                if _proxy_env.get("FLEET_ADMIN_USER") and _proxy_env.get("FLEET_ADMIN_PASS"):
+                    config.fleet_admin_user = _proxy_env["FLEET_ADMIN_USER"]
+                    config.fleet_admin_pass = _proxy_env["FLEET_ADMIN_PASS"]
+                    console.print(f"[green]✓[/green] Fleet credentials: reused from existing proxy")
+                if not config.site_name or config.site_name == 'DC Overview':
+                    _pname = _proxy_env.get("SITE_NAME")
+                    if _pname and _pname not in ("CryptoLabs Fleet", ""):
+                        config.site_name = _pname
+        except Exception:
+            pass
     
     # SSH configuration
     # Note: use `or {}` instead of default={} because YAML sections with only
