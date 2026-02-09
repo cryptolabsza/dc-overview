@@ -2815,6 +2815,15 @@ echo "[+] Installation complete"
         
         # Start dc-overview container with static IP
         flask_secret = secrets_module.token_hex(16)
+        
+        # Get internal API token from proxy for secure service-to-service config API
+        internal_token = ''
+        try:
+            from cryptolabs_proxy import get_internal_api_token
+            internal_token = get_internal_api_token() or ''
+        except Exception:
+            pass
+        
         cmd = [
             "docker", "run", "-d",
             "--name", "dc-overview",
@@ -2822,6 +2831,7 @@ echo "[+] Installation complete"
             "-e", f"FLASK_SECRET_KEY={flask_secret}",
             "-e", "DC_OVERVIEW_PORT=5001",
             "-e", f"TRUSTED_PROXY_IPS=127.0.0.1,{PROXY_STATIC_IP}",
+            "-e", f"INTERNAL_API_TOKEN={internal_token}",
             "-v", "dc-overview-data:/data",
             "-v", "fleet-auth-data:/data/auth",  # Shared with proxy for SSO API keys
             "-v", f"{self.config.config_dir}:/etc/dc-overview:ro",

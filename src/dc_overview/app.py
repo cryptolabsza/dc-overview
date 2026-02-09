@@ -119,14 +119,92 @@ def validate_ssh_username(username):
     return username
 
 
+def _get_internal_api_token() -> str:
+    """Get the shared secret for authenticating with the proxy's internal API.
+    
+    The token is passed via the INTERNAL_API_TOKEN environment variable, which is
+    set during container deployment by the quickstart scripts. This is intentionally
+    NOT read from a file on the shared volume to prevent token leakage.
+    """
+    return os.environ.get('INTERNAL_API_TOKEN', '')
+
+
+def get_proxy_config(key: str = None) -> any:
+    """Fetch shared config from the cryptolabs-proxy internal API.
+    
+    The proxy (source of truth) exposes /internal/api/config on port 8080,
+    accessible only from the internal Docker network (172.30.0.0/16).
+    Sensitive keys require a valid bearer token.
+    
+    Args:
+        key: Specific config key to fetch, or None for all config.
+    
+    Returns:
+        dict (all config) or str (single value) or None on failure.
+    """
+    proxy_url = 'http://172.30.0.10:8080'
+    token = _get_internal_api_token()
+    try:
+        import urllib.request
+        if key:
+            url = f'{proxy_url}/internal/api/config/{key}'
+        else:
+            url = f'{proxy_url}/internal/api/config'
+        req = urllib.request.Request(url, method='GET')
+        req.add_header('Accept', 'application/json')
+        if token:
+            req.add_header('Authorization', f'Bearer {token}')
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode())
+            if key:
+                return data.get('value')
+            return data
+    except Exception:
+        return None
+
+
+def push_proxy_config(updates: dict) -> bool:
+    """Push config values to the cryptolabs-proxy internal API.
+    
+    Requires a valid bearer token. Passwords and secrets are rejected server-side.
+    
+    Args:
+        updates: dict of key-value pairs to set.
+    
+    Returns:
+        True on success, False on failure.
+    """
+    proxy_url = 'http://172.30.0.10:8080'
+    token = _get_internal_api_token()
+    if not token:
+        app.logger.warning("Cannot push config to proxy: INTERNAL_API_TOKEN not set")
+        return False  # Cannot write without token
+    try:
+        import urllib.request
+        payload = json.dumps(updates).encode()
+        req = urllib.request.Request(
+            f'{proxy_url}/internal/api/config',
+            data=payload,
+            method='POST'
+        )
+        req.add_header('Content-Type', 'application/json')
+        req.add_header('Authorization', f'Bearer {token}')
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode())
+            return data.get('success', False)
+    except Exception:
+        return False
+
+
 def get_watchdog_api_key() -> str:
-    """Get DC Watchdog API key from environment or config files.
+    """Get DC Watchdog API key from environment, proxy API, or config files.
     
     Searches in order:
     1. WATCHDOG_API_KEY environment variable
-    2. /data/auth/watchdog_api_key (shared with cryptolabs-proxy via fleet-auth-data volume)
-    3. /etc/dc-overview/.secrets.yaml (watchdog_api_key or ipmi_ai_license)
-    4. /etc/dc-overview/fleet-config.yaml (watchdog.api_key)
+    2. /data/auth/watchdog_api_key (shared volume from cryptolabs-proxy)
+    3. Proxy internal API at http://172.30.0.10:8080/internal/api/config/watchdog_api_key
+    4. /etc/dc-overview/.secrets.yaml
+    5. /etc/dc-overview/fleet-config.yaml
     """
     # 1. Check environment variable first
     api_key = os.environ.get('WATCHDOG_API_KEY', '')
@@ -141,10 +219,17 @@ def get_watchdog_api_key() -> str:
                 api_key = f.read().strip()
                 if api_key:
                     return api_key
+        except PermissionError:
+            app.logger.warning(f"Permission denied reading {shared_key_path} - proxy may need rebuild to fix file permissions")
         except Exception:
             pass
     
-    # 3. Check .secrets.yaml (has the actual keys)
+    # 3. Ask the proxy directly via internal API (works even without shared volume)
+    api_key = get_proxy_config('watchdog_api_key')
+    if api_key:
+        return api_key
+    
+    # 4. Check .secrets.yaml (has the actual keys)
     secrets_path = '/etc/dc-overview/.secrets.yaml'
     if os.path.exists(secrets_path):
         try:
@@ -156,7 +241,7 @@ def get_watchdog_api_key() -> str:
         except Exception:
             pass
     
-    # 4. Check fleet-config.yaml (legacy location)
+    # 5. Check fleet-config.yaml (legacy location)
     config_paths = ['/etc/dc-overview/fleet-config.yaml', '/etc/dc-overview/config.yaml']
     for config_path in config_paths:
         if os.path.exists(config_path):
@@ -1156,7 +1241,7 @@ def api_toggle_exporter(server_id, exporter):
             enabled = not server.dcgm_exporter_enabled
     
     # Control the service via SSH
-    success = toggle_exporter_service(server, exporter, enabled)
+    success, error_msg = toggle_exporter_service(server, exporter, enabled)
     
     if success:
         # Update database
@@ -1181,7 +1266,8 @@ def api_toggle_exporter(server_id, exporter):
     else:
         return jsonify({
             'success': False,
-            'error': f'Failed to {"start" if enabled else "stop"} {exporter}'
+            'error': f'Failed to {"start" if enabled else "stop"} {exporter}',
+            'detail': error_msg or 'Unknown error'
         }), 500
 
 
@@ -1962,8 +2048,11 @@ def api_check_all_updates():
     })
 
 
-def toggle_exporter_service(server, exporter: str, enabled: bool) -> bool:
-    """Start or stop an exporter service on a remote server via SSH."""
+def toggle_exporter_service(server, exporter: str, enabled: bool) -> tuple:
+    """Start or stop an exporter service on a remote server via SSH.
+    
+    Returns (success: bool, error: str or None)
+    """
     service_names = {
         'node_exporter': 'node_exporter',
         'dc_exporter': 'dc-exporter',
@@ -1972,7 +2061,7 @@ def toggle_exporter_service(server, exporter: str, enabled: bool) -> bool:
     
     service = service_names.get(exporter)
     if not service:
-        return False
+        return False, f'Unknown exporter: {exporter}'
     
     try:
         ssh_cmd, env = build_ssh_cmd(server, timeout=10)
@@ -1980,20 +2069,29 @@ def toggle_exporter_service(server, exporter: str, enabled: bool) -> bool:
         if exporter == 'dcgm_exporter':
             # Docker container
             if enabled:
-                ssh_cmd.append(f"docker start {service} 2>/dev/null || echo 'not found'")
+                ssh_cmd.append(f"docker start {service} 2>&1 || echo 'not found'")
             else:
-                ssh_cmd.append(f"docker stop {service} 2>/dev/null || echo 'not found'")
+                ssh_cmd.append(f"docker stop {service} 2>&1 || echo 'not found'")
         else:
-            # Systemd service
+            # Systemd service - use bash -c to handle the command properly
             action = 'start' if enabled else 'stop'
-            ssh_cmd.append(f"systemctl {action} {service}")
+            ssh_cmd.append(f"systemctl {action} {service} 2>&1")
         
         run_env = {**os.environ, **env} if env else None
         result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=30, env=run_env)
-        return result.returncode == 0
         
-    except Exception:
-        return False
+        if result.returncode != 0:
+            error_msg = (result.stderr or result.stdout or '').strip()
+            app.logger.warning(f"Failed to {('start' if enabled else 'stop')} {service} on {server.name}: {error_msg}")
+            return False, error_msg or f'SSH command exited with code {result.returncode}'
+        
+        return True, None
+        
+    except subprocess.TimeoutExpired:
+        return False, 'SSH command timed out'
+    except Exception as e:
+        app.logger.error(f"Exception toggling {service} on {server.name}: {e}")
+        return False, str(e)
 
 
 def update_exporter_remote(server, exporter: str, version: str, branch: str = 'main') -> tuple:
@@ -4475,7 +4573,7 @@ SERVERS_TEMPLATE = """
         
         const result = await response.json();
         if (!result.success) {
-            alert('Failed to toggle exporter: ' + (result.error || 'Unknown error'));
+            alert('Failed to toggle exporter: ' + (result.error || 'Unknown error') + (result.detail ? '\n\nDetails: ' + result.detail : ''));
             // Reload to reset state
             openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
         }
