@@ -3854,7 +3854,9 @@ SERVERS_TEMPLATE = """
                         <select name="ssh_key_id" id="addServerKeySelect" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-primary);">
                             <option value="">Default (fleet key)</option>
                             {% for key in ssh_keys %}
+                            {% if key.key_path != '/etc/dc-overview/ssh_keys/fleet_key' %}
                             <option value="{{ key.id }}">{{ key.name }} {% if key.fingerprint %}({{ key.fingerprint[:20] }}...){% endif %}</option>
+                            {% endif %}
                             {% endfor %}
                         </select>
                     </div>
@@ -4158,6 +4160,8 @@ SERVERS_TEMPLATE = """
         
         let keyOptions = '<option value="">Default (fleet key)</option>';
         for (const key of (data.available_keys || [])) {
+            // Skip keys that point to the default fleet key path (already covered by Default option)
+            if (key.key_path === '/etc/dc-overview/ssh_keys/fleet_key') continue;
             const selected = key.id === data.ssh_key_id ? 'selected' : '';
             const fp = key.fingerprint ? ` (${key.fingerprint.substring(0, 20)}...)` : '';
             keyOptions += `<option value="${key.id}" ${selected}>${key.name}${fp}</option>`;
@@ -4379,17 +4383,17 @@ SERVERS_TEMPLATE = """
                 `;
                 
                 // Fetch latest version from GitHub and compare
-                fetch(\`\${basePath}/api/watchdog-agent/latest\`)
+                fetch(`${basePath}/api/watchdog-agent/latest`)
                     .then(r => r.json())
                     .then(latestData => {
                         const el = document.getElementById('wd-latest-version');
                         if (el && latestData.success && latestData.version) {
                             if (wdVersion && wdVersion !== latestData.version) {
-                                el.innerHTML = \`<span style="color: var(--accent-yellow);">⬆ Update available: v\${latestData.version}</span>\`;
+                                el.innerHTML = `<span style="color: var(--accent-yellow);">⬆ Update available: v${latestData.version}</span>`;
                             } else if (wdVersion) {
                                 el.innerHTML = '<span style="color: var(--accent-green);">✓ Up to date</span>';
                             } else {
-                                el.innerHTML = \`Latest: v\${latestData.version}\`;
+                                el.innerHTML = `Latest: v${latestData.version}`;
                             }
                         }
                     }).catch(() => {});
