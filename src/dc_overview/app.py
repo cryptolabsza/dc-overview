@@ -516,6 +516,206 @@ def api_health():
         'timestamp': datetime.utcnow().isoformat()
     })
 
+# =============================================================================
+# MOBILE API (CL Fleety App)
+# =============================================================================
+
+class MobileApiKey(db.Model):
+    """API key for mobile app (CL Fleety) read-only access."""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, default='Mobile App')
+    key_hash = db.Column(db.String(128), nullable=False, unique=True)
+    key_prefix = db.Column(db.String(20), nullable=False)  # First 12 chars for display
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_used = db.Column(db.DateTime, nullable=True)
+    is_active = db.Column(db.Boolean, default=True)
+
+
+def verify_mobile_api_key():
+    """Verify mobile API key from Authorization header. Returns True if valid."""
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer mob-'):
+        return False
+    
+    token = auth_header.replace('Bearer ', '').strip()
+    from werkzeug.security import check_password_hash
+    
+    # Check all active keys
+    active_keys = MobileApiKey.query.filter_by(is_active=True).all()
+    for key_record in active_keys:
+        if check_password_hash(key_record.key_hash, token):
+            key_record.last_used = datetime.utcnow()
+            db.session.commit()
+            return True
+    return False
+
+
+def mobile_auth_required(f):
+    """Decorator for mobile API endpoints - accepts mobile API key OR session auth."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if verify_mobile_api_key() or check_auth():
+            return f(*args, **kwargs)
+        return jsonify({'error': 'Authentication required. Use a mobile API key.'}), 401
+    return decorated_function
+
+
+@app.route('/api/mobile/generate-key', methods=['POST'])
+@admin_required
+@csrf.exempt
+def api_mobile_generate_key():
+    """Generate a new mobile API key (admin only)."""
+    import secrets as sec
+    from werkzeug.security import generate_password_hash
+    
+    name = request.json.get('name', 'Mobile App') if request.is_json else 'Mobile App'
+    raw_key = 'mob-' + sec.token_hex(24)
+    key_hash = generate_password_hash(raw_key)
+    
+    new_key = MobileApiKey(
+        name=name,
+        key_hash=key_hash,
+        key_prefix=raw_key[:12] + '...',
+    )
+    db.session.add(new_key)
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'key': raw_key,
+        'name': name,
+        'id': new_key.id,
+        'message': 'Save this key now - it cannot be shown again.',
+    })
+
+
+@app.route('/api/mobile/keys', methods=['GET'])
+@admin_required
+def api_mobile_list_keys():
+    """List all mobile API keys (admin only, shows prefix only)."""
+    keys = MobileApiKey.query.all()
+    return jsonify([{
+        'id': k.id,
+        'name': k.name,
+        'key_prefix': k.key_prefix,
+        'created_at': k.created_at.isoformat() if k.created_at else None,
+        'last_used': k.last_used.isoformat() if k.last_used else None,
+        'is_active': k.is_active,
+    } for k in keys])
+
+
+@app.route('/api/mobile/keys/<int:key_id>', methods=['DELETE'])
+@admin_required
+@csrf.exempt
+def api_mobile_delete_key(key_id):
+    """Revoke a mobile API key (admin only)."""
+    key = MobileApiKey.query.get_or_404(key_id)
+    key.is_active = False
+    db.session.commit()
+    return jsonify({'success': True, 'message': f'Key "{key.name}" revoked.'})
+
+
+@app.route('/api/mobile/status')
+@csrf.exempt
+@mobile_auth_required
+def api_mobile_status():
+    """
+    Mobile-optimized server status endpoint.
+    Returns server list with key metrics from Prometheus.
+    """
+    servers = Server.query.all()
+    
+    # Try to get live metrics from Prometheus
+    metrics = _fetch_prometheus_metrics([s.server_ip for s in servers])
+    
+    server_list = []
+    total_online = 0
+    total_offline = 0
+    
+    for s in servers:
+        is_online = s.status == 'online'
+        if is_online:
+            total_online += 1
+        else:
+            total_offline += 1
+        
+        server_data = {
+            'id': s.id,
+            'name': s.name,
+            'ip': s.server_ip,
+            'status': s.status,
+            'gpu_count': s.gpu_count,
+            'last_seen': s.last_seen.isoformat() if s.last_seen else None,
+            'watchdog': s.watchdog_agent_installed and s.watchdog_agent_enabled,
+        }
+        
+        # Add Prometheus metrics if available
+        ip_metrics = metrics.get(s.server_ip, {})
+        if ip_metrics:
+            server_data['metrics'] = ip_metrics
+        
+        server_list.append(server_data)
+    
+    return jsonify({
+        'instance': get_setting('site_name', 'DC Overview'),
+        'version': __version__,
+        'timestamp': datetime.utcnow().isoformat(),
+        'summary': {
+            'total': len(servers),
+            'online': total_online,
+            'offline': total_offline,
+        },
+        'servers': server_list,
+    })
+
+
+def _fetch_prometheus_metrics(server_ips):
+    """Fetch key metrics from Prometheus for the given server IPs."""
+    import requests as req
+    
+    result = {}
+    if not server_ips:
+        return result
+    
+    prom_url = PROMETHEUS_URL
+    
+    # Queries for key metrics (use last 2 minutes to catch recent data)
+    queries = {
+        'cpu_percent': '100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[2m])) * 100)',
+        'ram_percent': '(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100',
+        'gpu_temp_max': 'max by (instance) (dcgm_gpu_temp)',
+        'gpu_power_total': 'sum by (instance) (dcgm_power_usage)',
+        'gpu_util_avg': 'avg by (instance) (dcgm_gpu_utilization)',
+    }
+    
+    for metric_name, query in queries.items():
+        try:
+            resp = req.get(
+                f'{prom_url}/api/v1/query',
+                params={'query': query},
+                timeout=3,
+            )
+            if resp.status_code == 200:
+                data = resp.json().get('data', {}).get('result', [])
+                for item in data:
+                    instance = item.get('metric', {}).get('instance', '')
+                    # Extract IP from instance label (format: "ip:port")
+                    ip = instance.split(':')[0] if ':' in instance else instance
+                    if ip in server_ips:
+                        if ip not in result:
+                            result[ip] = {}
+                        value = item.get('value', [None, None])[1]
+                        if value is not None:
+                            try:
+                                result[ip][metric_name] = round(float(value), 1)
+                            except (ValueError, TypeError):
+                                pass
+        except Exception as e:
+            app.logger.debug(f'Prometheus query failed for {metric_name}: {e}')
+    
+    return result
+
+
 @app.route('/api/auth/status')
 def api_auth_status():
     """Get current authentication status and user info."""
