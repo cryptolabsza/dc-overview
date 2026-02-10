@@ -83,6 +83,7 @@ dc_overview = [
     "templates/*.conf",
     "templates/grafana/**/*.yml",
     "templates/grafana/**/*.yaml",
+    "web_templates/*.html",
     "dashboards/*.json",
     "dc_exporter/*.c",
     "dc_exporter/*.py",

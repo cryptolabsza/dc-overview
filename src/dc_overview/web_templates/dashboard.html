@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html><head>
+    <title>Server Manager - Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    {% include "_base_style.html" %}
+
+    <style>
+        .exporter-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-right: 4px;
+        }
+        .exporter-badge.enabled {
+            background: rgba(74, 222, 128, 0.2);
+            color: var(--accent-green);
+        }
+        .exporter-badge.disabled {
+            background: rgba(100, 100, 100, 0.2);
+            color: #888;
+        }
+        .exporter-badge.not-installed {
+            background: rgba(239, 68, 68, 0.1);
+            color: #666;
+        }
+        .version-tag {
+            font-size: 10px;
+            color: var(--text-secondary);
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Server Manager</h1>
+            <div class="nav">
+                <a href="/" class="nav-home">Home</a>
+                <span class="nav-sep">|</span>
+                <a href="/dashboard" class="active" data-nav>Dashboard</a>
+                <a href="/servers" data-nav>Servers</a>
+                <a href="/settings" data-nav>Settings</a>
+                <a href="/logout" data-nav>Logout</a>
+            </div>
+        </div>
+        
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value">{{ servers|length }}</div>
+                <div class="stat-label">Total Servers</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" style="color: var(--accent-green);">{{ online_count }}</div>
+                <div class="stat-label">Online</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ total_gpus }}</div>
+                <div class="stat-label">Total GPUs</div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h2>GPU Workers</h2>
+                <div id="checkingIndicator" style="display: none; color: var(--accent-cyan); font-size: 14px;">
+                    <span class="checking-spinner">⟳</span> Checking servers...
+                </div>
+            </div>
+            {% if servers %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Server</th>
+                        <th>IP</th>
+                        <th>Status</th>
+                        <th>GPUs</th>
+                        <th>Exporters</th>
+                        <th>Last Seen</th>
+                    </tr>
+                </thead>
+                <tbody id="serversTableBody">
+                    {% for server in servers %}
+                    <tr data-id="{{ server.id }}">
+                        <td><strong>{{ server.name }}</strong></td>
+                        <td>{{ server.server_ip }}</td>
+                        <td class="status-cell">
+                            <span class="status-dot status-{{ server.status }}"></span>
+                            {{ server.status }}
+                        </td>
+                        <td class="gpu-cell">{{ server.gpu_count }}</td>
+                        <td class="exporter-cell">
+                            <span class="exporter-badge {% if server.node_exporter_installed and server.node_exporter_enabled %}enabled{% elif server.node_exporter_installed %}disabled{% else %}not-installed{% endif %}">
+                                node{% if server.node_exporter_version %} <span class="version-tag">{{ server.node_exporter_version }}</span>{% endif %}
+                            </span>
+                            <span class="exporter-badge {% if server.dc_exporter_installed and server.dc_exporter_enabled %}enabled{% elif server.dc_exporter_installed %}disabled{% else %}not-installed{% endif %}">
+                                dc{% if server.dc_exporter_version %} <span class="version-tag">{{ server.dc_exporter_version }}</span>{% endif %}
+                            </span>
+                            <span class="exporter-badge {% if server.dcgm_exporter_installed and server.dcgm_exporter_enabled %}enabled{% elif server.dcgm_exporter_installed %}disabled{% else %}not-installed{% endif %}">
+                                dcgm{% if server.dcgm_exporter_version %} <span class="version-tag">{{ server.dcgm_exporter_version }}</span>{% endif %}
+                            </span>
+                            <span class="exporter-badge {% if server.watchdog_agent_installed and server.watchdog_agent_enabled %}enabled{% elif server.watchdog_agent_installed %}disabled{% else %}not-installed{% endif %}" title="DC Watchdog Agent (external uptime)">
+                                wd{% if server.watchdog_agent_version %} <span class="version-tag">{{ server.watchdog_agent_version }}</span>{% endif %}
+                            </span>
+                        </td>
+                        <td class="lastseen-cell">{{ server.last_seen.strftime('%Y-%m-%d %H:%M') if server.last_seen else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="color: var(--text-secondary);">No servers configured. <a href="/servers" style="color: var(--accent-cyan);">Add servers →</a></p>
+            {% endif %}
+        </div>
+        
+        <p class="version">Server Manager v{{ version }}</p>
+    </div>
+    <script>
+    // Get base path for API calls - extract /dc from any subpath like /dc/servers
+    const basePath = window.location.pathname.match(/^(\/[^\/]+)/)?.[1] || '';
+    
+    // Fix nav links to include base path (e.g. /dc/servers instead of /servers)
+    document.querySelectorAll('.nav a[data-nav]').forEach(a => {
+        a.href = basePath + a.getAttribute('href');
+    });
+    
+    // Check user permissions and adjust UI
+    async function checkUserPermissions() {
+        try {
+            const response = await fetch(`${basePath}/api/auth/status`);
+            const data = await response.json();
+            const permissions = data.permissions || {};
+            
+            // Hide Settings link for non-admin users
+            if (!permissions.can_admin) {
+                document.querySelectorAll('.nav a').forEach(link => {
+                    if (link.textContent.includes('Settings')) link.style.display = 'none';
+                });
+            }
+            
+            // Show role indicator
+            const roleIndicator = document.createElement('span');
+            roleIndicator.style.cssText = 'background: var(--bg-card); padding: 4px 10px; border-radius: 4px; font-size: 12px; margin-left: 10px;';
+            roleIndicator.textContent = data.role || 'unknown';
+            const nav = document.querySelector('.nav');
+            if (nav) nav.appendChild(roleIndicator);
+        } catch (e) {
+            console.error('Failed to check permissions:', e);
+        }
+    }
+    
+    // Update a single server row with check results
+    function updateDashboardRow(row, result) {
+        // Status cell
+        const statusCell = row.querySelector('.status-cell');
+        if (statusCell && result.status) {
+            statusCell.innerHTML = `<span class="status-dot status-${result.status}"></span>${result.status}`;
+        }
+        
+        // GPU count cell
+        const gpuCell = row.querySelector('.gpu-cell');
+        if (gpuCell && result.gpu_count !== undefined) {
+            gpuCell.textContent = result.gpu_count;
+        }
+        
+        // Exporter cell
+        const exporterCell = row.querySelector('.exporter-cell');
+        if (exporterCell) {
+            const nodeClass = result.node_exporter?.running ? 'enabled' : 'not-installed';
+            const dcClass = result.dc_exporter?.running ? 'enabled' : 'not-installed';
+            const dcgmClass = result.dcgm_exporter?.running ? 'enabled' : 'not-installed';
+            const wdClass = result.watchdog_agent?.running ? 'enabled' : (result.watchdog_agent?.installed ? 'disabled' : 'not-installed');
+            
+            exporterCell.innerHTML = `
+                <span class="exporter-badge ${nodeClass}">node${result.node_exporter?.version ? ` <span class="version-tag">${result.node_exporter.version}</span>` : ''}</span>
+                <span class="exporter-badge ${dcClass}">dc${result.dc_exporter?.version ? ` <span class="version-tag">${result.dc_exporter.version}</span>` : ''}</span>
+                <span class="exporter-badge ${dcgmClass}">dcgm${result.dcgm_exporter?.version ? ` <span class="version-tag">${result.dcgm_exporter.version}</span>` : ''}</span>
+                <span class="exporter-badge ${wdClass}" title="DC Watchdog Agent (external uptime)">wd${result.watchdog_agent?.version ? ` <span class="version-tag">${result.watchdog_agent.version}</span>` : ''}</span>
+            `;
+        }
+        
+        // Last seen cell
+        const lastSeenCell = row.querySelector('.lastseen-cell');
+        if (lastSeenCell) {
+            lastSeenCell.textContent = result.last_seen || '\u2014';
+        }
+    }
+    
+    // Refresh all servers without page reload
+    async function refreshDashboard() {
+        const indicator = document.getElementById('checkingIndicator');
+        const rows = document.querySelectorAll('#serversTableBody tr[data-id]');
+        
+        if (!rows.length) return;
+        
+        if (indicator) indicator.style.display = 'block';
+        
+        for (const row of rows) {
+            const id = row.dataset.id;
+            try {
+                const response = await fetch(`${basePath}/api/servers/${id}/check`);
+                if (response.ok) {
+                    const result = await response.json();
+                    updateDashboardRow(row, result);
+                }
+            } catch (e) {
+                console.error(`Failed to check server ${id}:`, e);
+            }
+        }
+        
+        if (indicator) indicator.style.display = 'none';
+    }
+    
+    async function syncWatchdogStatus() {
+        // Sync WD agent status from dc-watchdog server API (same method as Fleet Management)
+        try {
+            await fetch(`${basePath}/api/watchdog-agents/sync`, {method: 'POST'});
+        } catch (e) {
+            console.log('Watchdog sync not available:', e.message);
+        }
+    }
+    
+    document.addEventListener('DOMContentLoaded', async () => {
+        await checkUserPermissions();
+        // Sync WD status from watchdog API first, then refresh all servers
+        await syncWatchdogStatus();
+        await refreshDashboard();
+        // Set up periodic refresh every 30 seconds
+        setInterval(async () => {
+            await syncWatchdogStatus();
+            await refreshDashboard();
+        }, 30000);
+    });
+    </script>
+</body></html>

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html><head>
+    <title>Server Manager - Login</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    {% include "_base_style.html" %}
+
+</head>
+<body>
+    <div class="container" style="max-width: 400px; margin-top: 100px;">
+        <div class="card">
+            <h2 style="text-align: center; margin-bottom: 20px;">
+                🖥️ Server Manager
+            </h2>
+            {% if first_run %}
+            <p style="color: var(--accent-yellow); margin-bottom: 20px; text-align: center;">
+                Welcome! Set your admin password to get started.
+            </p>
+            {% endif %}
+            {% if error %}
+            <p style="color: var(--accent-red); margin-bottom: 15px;">{{ error }}</p>
+            {% endif %}
+            <form method="POST">
+                <div class="form-group">
+                    <label>{% if first_run %}Set Password{% else %}Password{% endif %}</label>
+                    <input type="password" name="password" required autofocus>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width: 100%;">
+                    {% if first_run %}Set Password{% else %}Login{% endif %}
+                </button>
+            </form>
+        </div>
+    </div>
+</body></html>

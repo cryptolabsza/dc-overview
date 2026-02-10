@@ -1,0 +1,1180 @@
+<!DOCTYPE html>
+<html><head>
+    <title>Server Manager - Servers</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    {% include "_base_style.html" %}
+
+    <style>
+        .exporter-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px;
+            margin: 8px 0;
+        }
+        .exporter-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .exporter-name {
+            font-weight: bold;
+            color: var(--text-primary);
+        }
+        .toggle-switch {
+            position: relative;
+            width: 44px;
+            height: 24px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #444;
+            transition: .3s;
+            border-radius: 24px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+        }
+        input:checked + .toggle-slider {
+            background-color: var(--accent-green);
+        }
+        input:checked + .toggle-slider:before {
+            transform: translateX(20px);
+        }
+        .version-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .version-badge {
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: var(--bg-card);
+            font-family: monospace;
+        }
+        .update-badge {
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: var(--accent-yellow);
+            color: #000;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .update-badge:hover {
+            background: #e5ac00;
+        }
+        .auto-update-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .auto-update-row input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+        }
+        .branch-select {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .modal-tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 20px;
+        }
+        .modal-tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 500;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .modal-tab:hover {
+            color: var(--text-primary);
+            background: rgba(255,255,255,0.03);
+        }
+        .modal-tab.active {
+            color: var(--accent-cyan);
+            border-bottom-color: var(--accent-cyan);
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .ssh-config-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 15px;
+        }
+        .ssh-config-group .form-group {
+            margin-bottom: 0;
+        }
+        .ssh-config-group select,
+        .ssh-config-group input {
+            width: 100%;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            font-size: 13px;
+        }
+        .ssh-status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .ssh-status-ok {
+            background: rgba(46, 204, 113, 0.15);
+            color: var(--accent-green);
+        }
+        .ssh-status-fail {
+            background: rgba(231, 76, 60, 0.15);
+            color: var(--accent-red);
+        }
+        .ssh-status-testing {
+            background: rgba(0, 212, 255, 0.15);
+            color: var(--accent-cyan);
+        }
+        .server-detail-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 24px;
+            cursor: pointer;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        .status-enabled { background: var(--accent-green); }
+        .status-disabled { background: #666; }
+        .status-not-installed { background: var(--accent-red); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Server Manager</h1>
+            <div class="nav">
+                <a href="/" class="nav-home">Home</a>
+                <span class="nav-sep">|</span>
+                <a href="/dashboard" data-nav>Dashboard</a>
+                <a href="/servers" class="active" data-nav>Servers</a>
+                <a href="/settings" data-nav>Settings</a>
+                <a href="/logout" data-nav>Logout</a>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>Add Server</h2>
+            <form id="addServerForm">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 15px;">
+                    <div class="form-group">
+                        <label>Server Name</label>
+                        <input type="text" name="name" placeholder="gpu-worker-01" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Server IP</label>
+                        <input type="text" name="server_ip" placeholder="192.168.1.101" required>
+                    </div>
+                    <div class="form-group">
+                        <label>SSH User</label>
+                        <input type="text" name="ssh_user" value="root">
+                    </div>
+                    <div class="form-group">
+                        <label>SSH Port</label>
+                        <input type="number" name="ssh_port" value="22" min="1" max="65535">
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 10px;">
+                    <div class="form-group">
+                        <label>SSH Key <small style="color:var(--text-secondary)">(or use password below)</small></label>
+                        <select name="ssh_key_id" id="addServerKeySelect" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-primary);">
+                            <option value="">Default (fleet key)</option>
+                            {% for key in ssh_keys %}
+                            {% if key.key_path != '/etc/dc-overview/ssh_keys/fleet_key' %}
+                            <option value="{{ key.id }}">{{ key.name }} {% if key.fingerprint %}({{ key.fingerprint[:20] }}...){% endif %}</option>
+                            {% endif %}
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>SSH Password <small style="color:var(--text-secondary)">(optional, key preferred)</small></label>
+                        <input type="password" name="ssh_password" placeholder="Leave empty to use SSH key">
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">Add Server</button>
+            </form>
+        </div>
+        
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h2>Managed Servers</h2>
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <span id="checkingIndicator" style="display: none; color: var(--accent-cyan); font-size: 14px;">
+                        <span style="display: inline-block; animation: spin 1s linear infinite;">⟳</span> Checking...
+                    </span>
+                    <button class="btn btn-secondary" onclick="checkAllUpdates()">Check for Updates</button>
+                </div>
+            </div>
+            <style>@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }</style>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>IP</th>
+                        <th>SSH</th>
+                        <th>Exporters</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="serversTable">
+                    {% for server in servers %}
+                    <tr data-id="{{ server.id }}">
+                        <td><strong>{{ server.name }}</strong></td>
+                        <td>{{ server.server_ip }}</td>
+                        <td>
+                            {{ server.ssh_user }}@:{{ server.ssh_port }}
+                            {% if server.ssh_key %}
+                            <br><small style="color: var(--accent-green);" title="{{ server.ssh_key.name }}">key: {{ server.ssh_key.name }}</small>
+                            {% elif server.ssh_password %}
+                            <br><small style="color: var(--accent-cyan);">password</small>
+                            {% else %}
+                            <br><small style="color: var(--text-secondary);">default key</small>
+                            {% endif %}
+                        </td>
+                        <td class="exporter-status">
+                            <span class="status-indicator {% if server.node_exporter_installed and server.node_exporter_enabled %}status-enabled{% elif server.node_exporter_installed %}status-disabled{% else %}status-not-installed{% endif %}"></span>node
+                            <span class="status-indicator {% if server.dc_exporter_installed and server.dc_exporter_enabled %}status-enabled{% elif server.dc_exporter_installed %}status-disabled{% else %}status-not-installed{% endif %}" style="margin-left:8px"></span>dc
+                            <span class="status-indicator {% if server.dcgm_exporter_installed and server.dcgm_exporter_enabled %}status-enabled{% elif server.dcgm_exporter_installed %}status-disabled{% else %}status-not-installed{% endif %}" style="margin-left:8px"></span>dcgm
+                            <span class="status-indicator {% if server.watchdog_agent_installed and server.watchdog_agent_enabled %}status-enabled{% elif server.watchdog_agent_installed %}status-disabled{% else %}status-not-installed{% endif %}" style="margin-left:8px" title="DC Watchdog Agent"></span>wd
+                        </td>
+                        <td>
+                            <button class="btn btn-secondary" onclick="openServerDetail({{ server.id }}, '{{ server.name }}')">Manage</button>
+                            <button class="btn btn-secondary" onclick="checkServer({{ server.id }})">Check</button>
+                            <button class="btn btn-danger" onclick="deleteServer({{ server.id }})">Delete</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <p class="version">Server Manager v{{ version }}</p>
+    </div>
+    
+    <!-- Server Detail Modal -->
+    <div id="serverDetailModal" class="server-detail-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalServerName">Server Details</h2>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-tabs">
+                <button class="modal-tab active" onclick="switchTab('exporters')" id="tab-exporters">Exporters</button>
+                <button class="modal-tab" onclick="switchTab('ssh')" id="tab-ssh">SSH Configuration</button>
+            </div>
+            <div id="tab-content-exporters" class="tab-content active">
+                <div id="modalContent">
+                    <!-- Dynamic exporter content -->
+                </div>
+            </div>
+            <div id="tab-content-ssh" class="tab-content">
+                <div id="sshConfigContent">
+                    <!-- Dynamic SSH config content -->
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+    // Get base path for API calls - extract /dc from any subpath like /dc/servers
+    const basePath = window.location.pathname.match(/^(\/[^\/]+)/)?.[1] || '';
+    
+    // Fix nav links to include base path (e.g. /dc/servers instead of /servers)
+    document.querySelectorAll('.nav a[data-nav]').forEach(a => {
+        a.href = basePath + a.getAttribute('href');
+    });
+    
+    let currentServerId = null;
+    let userPermissions = { can_read: false, can_write: false, can_admin: false };
+    
+    // Check user permissions and adjust UI
+    async function checkUserPermissions() {
+        try {
+            const response = await fetch(`${basePath}/api/auth/status`);
+            const data = await response.json();
+            userPermissions = data.permissions || { can_read: false, can_write: false, can_admin: false };
+            
+            // Hide "Add Server" form for readonly users
+            const addServerCard = document.querySelector('.card:has(#addServerForm)');
+            if (addServerCard && !userPermissions.can_write) {
+                addServerCard.style.display = 'none';
+            }
+            
+            // Hide delete buttons for readonly users
+            if (!userPermissions.can_write) {
+                document.querySelectorAll('.btn-danger').forEach(btn => {
+                    if (btn.textContent.includes('Delete')) btn.style.display = 'none';
+                });
+            }
+            
+            // Hide Settings link for non-admin users
+            if (!userPermissions.can_admin) {
+                document.querySelectorAll('.nav a').forEach(link => {
+                    if (link.textContent.includes('Settings')) link.style.display = 'none';
+                });
+            }
+            
+            // Show role indicator
+            const roleIndicator = document.createElement('span');
+            roleIndicator.className = 'role-badge';
+            roleIndicator.style.cssText = 'background: var(--bg-card); padding: 4px 10px; border-radius: 4px; font-size: 12px; margin-left: 10px;';
+            roleIndicator.textContent = data.role || 'unknown';
+            const nav = document.querySelector('.nav');
+            if (nav) nav.appendChild(roleIndicator);
+        } catch (e) {
+            console.error('Failed to check permissions:', e);
+        }
+    }
+    
+    async function syncWatchdogStatus() {
+        // Sync WD agent status from dc-watchdog server API (same method as Fleet Management)
+        try {
+            await fetch(`${basePath}/api/watchdog-agents/sync`, {method: 'POST'});
+        } catch (e) {
+            console.log('Watchdog sync not available:', e.message);
+        }
+    }
+    
+    // Run permission check on load, then auto-check all servers
+    document.addEventListener('DOMContentLoaded', async () => {
+        await checkUserPermissions();
+        // Sync WD status from watchdog API first, then check all servers
+        await syncWatchdogStatus();
+        await checkAllServersQuietly();
+        // Set up periodic refresh every 30 seconds
+        setInterval(async () => {
+            await syncWatchdogStatus();
+            await checkAllServersQuietly();
+        }, 30000);
+    });
+    
+    async function checkAllServersQuietly() {
+        // Check all servers and update table without showing alerts
+        const indicator = document.getElementById('checkingIndicator');
+        const rows = document.querySelectorAll('#serversTable tr[data-id]');
+        
+        if (indicator && rows.length > 0) indicator.style.display = 'inline';
+        
+        for (const row of rows) {
+            const id = row.dataset.id;
+            try {
+                const response = await fetch(`${basePath}/api/servers/${id}/check`);
+                if (response.ok) {
+                    const result = await response.json();
+                    updateServerRow(row, result);
+                }
+            } catch (e) {
+                console.error(`Failed to check server ${id}:`, e);
+            }
+        }
+        
+        if (indicator) indicator.style.display = 'none';
+    }
+    
+    function updateServerRow(row, result) {
+        // Update all columns in the table row
+        const cells = row.querySelectorAll('td');
+        if (cells.length < 5) return;  // Expect: Name, IP, SSH, Exporters, Actions
+        
+        // Exporter status column (index 3)
+        const exporterCell = cells[3];
+        if (exporterCell) {
+            let html = '';
+            html += `<span class="status-indicator ${result.node_exporter?.running ? 'status-enabled' : 'status-not-installed'}"></span>node`;
+            if (result.node_exporter?.version) html += ` ${result.node_exporter.version}`;
+            html += `<span class="status-indicator ${result.dc_exporter?.running ? 'status-enabled' : 'status-not-installed'}" style="margin-left:8px"></span>dc`;
+            if (result.dc_exporter?.version) html += ` ${result.dc_exporter.version}`;
+            html += `<span class="status-indicator ${result.dcgm_exporter?.running ? 'status-enabled' : 'status-not-installed'}" style="margin-left:8px"></span>dcgm`;
+            if (result.dcgm_exporter?.version) html += ` ${result.dcgm_exporter.version}`;
+            const wdStatus = result.watchdog_agent?.running ? 'status-enabled' : (result.watchdog_agent?.installed ? 'status-disabled' : 'status-not-installed');
+            html += `<span class="status-indicator ${wdStatus}" style="margin-left:8px" title="DC Watchdog Agent"></span>wd`;
+            if (result.watchdog_agent?.version) html += ` ${result.watchdog_agent.version}`;
+            exporterCell.innerHTML = html;
+        }
+        
+        // Last Seen column (index 5)
+        const lastSeenCell = cells[5];
+        if (lastSeenCell && result.last_seen) {
+            lastSeenCell.textContent = result.last_seen;
+        } else if (lastSeenCell && result.status === 'offline') {
+            lastSeenCell.textContent = '\u2014';  // em dash
+        }
+    }
+    
+    document.getElementById('addServerForm').onsubmit = async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const data = {
+            name: form.name.value,
+            server_ip: form.server_ip.value,
+            ssh_user: form.ssh_user.value,
+            ssh_port: parseInt(form.ssh_port.value) || 22
+        };
+        
+        // Include SSH key if selected
+        if (form.ssh_key_id.value) {
+            data.ssh_key_id = parseInt(form.ssh_key_id.value);
+        }
+        
+        // Include password if provided
+        if (form.ssh_password.value) {
+            data.ssh_password = form.ssh_password.value;
+        }
+        
+        const response = await fetch(`${basePath}/api/servers`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        
+        if (response.ok) {
+            location.reload();
+        } else {
+            const result = await response.json();
+            alert(result.error || 'Failed to add server');
+        }
+    };
+    
+    function switchTab(tabName) {
+        // Update tab buttons
+        document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+        document.getElementById(`tab-${tabName}`).classList.add('active');
+        
+        // Update tab content
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        document.getElementById(`tab-content-${tabName}`).classList.add('active');
+        
+        // Load SSH config on first switch
+        if (tabName === 'ssh' && currentServerId) {
+            loadSSHConfig(currentServerId);
+        }
+    }
+    
+    async function openServerDetail(id, name) {
+        currentServerId = id;
+        document.getElementById('modalServerName').textContent = name + ' - Server Management';
+        document.getElementById('serverDetailModal').style.display = 'flex';
+        document.getElementById('modalContent').innerHTML = '<p>Loading...</p>';
+        document.getElementById('sshConfigContent').innerHTML = '<p style="color:var(--text-secondary)">Switch to this tab to load SSH configuration.</p>';
+        
+        // Reset to exporters tab
+        switchTab('exporters');
+        
+        // Fast load: get DB-cached data instantly (also triggers background live check)
+        const response = await fetch(`${basePath}/api/servers/${id}/exporters/versions`);
+        const data = await response.json();
+        renderExporterManagement(data);
+        
+        // If cached, poll until the background check finishes and source becomes 'live'
+        if (data.source === 'cached') {
+            pollForLiveData(id, 3000);
+        }
+    }
+    
+    function pollForLiveData(serverId, delay) {
+        setTimeout(async () => {
+            if (currentServerId !== serverId) return;  // Modal closed or switched server
+            try {
+                const resp = await fetch(`${basePath}/api/servers/${serverId}/exporters/versions`);
+                const data = await resp.json();
+                if (currentServerId !== serverId) return;
+                
+                if (data.source === 'live') {
+                    // Background check is done — render fresh data
+                    renderExporterManagement(data);
+                } else {
+                    // Still checking — poll again with backoff (max 10s)
+                    pollForLiveData(serverId, Math.min(delay + 2000, 10000));
+                }
+            } catch (e) {
+                // Network error — stop polling, cached data is still showing
+            }
+        }, delay);
+    }
+    
+    async function loadSSHConfig(serverId) {
+        const container = document.getElementById('sshConfigContent');
+        container.innerHTML = '<p>Loading SSH configuration...</p>';
+        
+        try {
+            const response = await fetch(`${basePath}/api/servers/${serverId}/ssh-config`);
+            const data = await response.json();
+            renderSSHConfig(data);
+        } catch (e) {
+            container.innerHTML = `<p style="color: var(--accent-red);">Failed to load SSH config: ${e.message}</p>`;
+        }
+    }
+    
+    function renderSSHConfig(data) {
+        const canWrite = userPermissions.can_write;
+        const container = document.getElementById('sshConfigContent');
+        
+        let keyOptions = '<option value="">Default (fleet key)</option>';
+        for (const key of (data.available_keys || [])) {
+            // Skip keys that point to the default fleet key path (already covered by Default option)
+            if (key.key_path === '/etc/dc-overview/ssh_keys/fleet_key') continue;
+            const selected = key.id === data.ssh_key_id ? 'selected' : '';
+            const fp = key.fingerprint ? ` (${key.fingerprint.substring(0, 20)}...)` : '';
+            keyOptions += `<option value="${key.id}" ${selected}>${key.name}${fp}</option>`;
+        }
+        
+        const authBadge = data.auth_method === 'key' 
+            ? '<span class="ssh-status-badge ssh-status-ok">Key-based auth</span>'
+            : data.auth_method === 'password'
+            ? '<span class="ssh-status-badge ssh-status-ok">Password auth</span>'
+            : '<span class="ssh-status-badge ssh-status-fail">No credentials configured</span>';
+        
+        let html = `
+        <div style="margin-bottom: 20px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px;">
+                <div>
+                    <strong>Current Auth:</strong> ${authBadge}
+                </div>
+                <div id="sshTestResult"></div>
+            </div>
+            <button class="btn btn-secondary" onclick="testSSHConnection()" id="testSSHBtn">Test SSH Connection</button>
+        </div>
+        
+        <div style="border-top: 1px solid var(--border-color); padding-top: 15px;">
+            <h3 style="margin-bottom: 12px;">Connection Settings</h3>
+            ${!canWrite ? '<p style="color: var(--accent-yellow); font-size: 12px; margin-bottom: 10px;">Read-only mode: You cannot modify SSH settings.</p>' : ''}
+            
+            <div class="ssh-config-group">
+                <div class="form-group">
+                    <label>SSH User</label>
+                    <input type="text" id="sshConfigUser" value="${data.ssh_user || 'root'}" ${canWrite ? '' : 'disabled'}>
+                </div>
+                <div class="form-group">
+                    <label>SSH Port</label>
+                    <input type="number" id="sshConfigPort" value="${data.ssh_port || 22}" min="1" max="65535" ${canWrite ? '' : 'disabled'}>
+                </div>
+            </div>
+            
+            <h3 style="margin-bottom: 12px; margin-top: 20px;">Authentication</h3>
+            <div class="ssh-config-group">
+                <div class="form-group">
+                    <label>SSH Key</label>
+                    <select id="sshConfigKeyId" ${canWrite ? '' : 'disabled'}>
+                        ${keyOptions}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>SSH Password <small style="color:var(--text-secondary)">(key takes priority)</small></label>
+                    <input type="password" id="sshConfigPassword" placeholder="${data.has_password ? '••••••••' : 'No password set'}" ${canWrite ? '' : 'disabled'}>
+                </div>
+            </div>
+            
+            <p style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                If both a key and password are configured, key-based auth is tried first. Password uses <code>sshpass</code> on the server.
+            </p>
+            
+            ${canWrite ? `
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button class="btn btn-primary" onclick="saveSSHConfig()">Save SSH Config</button>
+                ${data.has_password ? '<button class="btn btn-danger btn-sm" onclick="clearSSHPassword()">Clear Password</button>' : ''}
+            </div>
+            ` : ''}
+        </div>
+        `;
+        
+        container.innerHTML = html;
+    }
+    
+    async function testSSHConnection() {
+        const btn = document.getElementById('testSSHBtn');
+        const resultDiv = document.getElementById('sshTestResult');
+        btn.disabled = true;
+        btn.textContent = 'Testing...';
+        resultDiv.innerHTML = '<span class="ssh-status-badge ssh-status-testing">Testing connection...</span>';
+        
+        try {
+            const response = await fetch(`${basePath}/api/servers/${currentServerId}/ssh-test`, {method: 'POST'});
+            const result = await response.json();
+            
+            if (result.connected) {
+                resultDiv.innerHTML = `<span class="ssh-status-badge ssh-status-ok">Connected (${result.auth_method})</span>`;
+            } else {
+                resultDiv.innerHTML = `<span class="ssh-status-badge ssh-status-fail">Failed: ${result.error || 'Connection refused'}</span>`;
+            }
+        } catch (e) {
+            resultDiv.innerHTML = `<span class="ssh-status-badge ssh-status-fail">Error: ${e.message}</span>`;
+        }
+        
+        btn.disabled = false;
+        btn.textContent = 'Test SSH Connection';
+    }
+    
+    async function saveSSHConfig() {
+        const data = {
+            ssh_user: document.getElementById('sshConfigUser').value,
+            ssh_port: parseInt(document.getElementById('sshConfigPort').value) || 22,
+            ssh_key_id: document.getElementById('sshConfigKeyId').value || null,
+        };
+        
+        // Only include password if the field was actually changed (not the placeholder dots)
+        const passwordField = document.getElementById('sshConfigPassword');
+        if (passwordField.value && passwordField.value !== '') {
+            data.ssh_password = passwordField.value;
+        }
+        
+        try {
+            const response = await fetch(`${basePath}/api/servers/${currentServerId}/ssh-config`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                // Reload config to show updated state
+                loadSSHConfig(currentServerId);
+                // Update the server table SSH column
+                const row = document.querySelector(`#serversTable tr[data-id="${currentServerId}"]`);
+                if (row) {
+                    const cells = row.querySelectorAll('td');
+                    if (cells[2]) cells[2].textContent = `${data.ssh_user}@:${data.ssh_port}`;
+                }
+                alert('SSH configuration saved successfully');
+            } else {
+                alert('Failed to save: ' + (result.error || 'Unknown error'));
+            }
+        } catch (e) {
+            alert('Error saving SSH config: ' + e.message);
+        }
+    }
+    
+    async function clearSSHPassword() {
+        if (!confirm('Clear the SSH password for this server? Key-based auth will be used instead.')) return;
+        
+        try {
+            const response = await fetch(`${basePath}/api/servers/${currentServerId}/ssh-config`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ssh_password: null})
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                loadSSHConfig(currentServerId);
+            }
+        } catch (e) {
+            alert('Error: ' + e.message);
+        }
+    }
+    
+    function renderExporterManagement(data) {
+        const exporters = [
+            { key: 'node_exporter', name: 'Node Exporter', port: 9100 },
+            { key: 'dc_exporter', name: 'DC Exporter', port: 9835 },
+            { key: 'dcgm_exporter', name: 'DCGM Exporter', port: 9400 },
+            { key: 'watchdog_agent', name: 'DC Watchdog Agent', port: null, isWatchdog: true }
+        ];
+        
+        const canWrite = userPermissions.can_write;
+        const isCached = data.source === 'cached';
+        let html = '';
+        
+        // Show checking indicator when data is from cache
+        if (isCached) {
+            html += `<div id="liveCheckIndicator" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-bottom: 12px; background: var(--bg-secondary); border-radius: 8px; font-size: 12px; color: var(--text-secondary);">
+                <span class="checking-spinner">&#x21bb;</span> Checking live status...
+            </div>`;
+        }
+        
+        // Show read-only notice for readonly users
+        if (!canWrite) {
+            html += `<div style="background: var(--accent-yellow); color: #000; padding: 10px; border-radius: 8px; margin-bottom: 15px;">
+                <strong>Read-only mode:</strong> You don't have permission to modify exporters.
+            </div>`;
+        }
+        
+        for (const exp of exporters) {
+            const version = data.versions[exp.key];
+            const updateInfo = data.updates[exp.key];
+            const hasUpdate = updateInfo && updateInfo.update_available;
+            
+            // Special handling for DC Watchdog agent
+            if (exp.isWatchdog) {
+                const watchdogData = data.watchdog_agent || {};
+                const isInstalled = watchdogData.installed || false;
+                const isEnabled = watchdogData.enabled !== false;
+                const wdVersion = watchdogData.version || null;
+                const sshError = watchdogData.ssh_error || null;
+                
+                let statusText, statusStyle;
+                if (sshError && isInstalled) {
+                    // SSH failed but DB says installed - show cached state
+                    statusText = isEnabled ? 'Running (cached)' : 'Stopped (cached)';
+                    statusStyle = 'background: var(--accent-yellow); color: #000;';
+                } else if (isInstalled) {
+                    statusText = isEnabled ? 'Running' : 'Stopped';
+                    statusStyle = isEnabled ? 'background: var(--accent-green);' : '';
+                } else {
+                    statusText = 'Not installed';
+                    statusStyle = '';
+                }
+                
+                html += `
+                <div class="exporter-card" data-exporter="${exp.key}" style="border-color: var(--accent-cyan); background: linear-gradient(135deg, var(--bg-card), rgba(0, 212, 255, 0.05));">
+                    <div class="exporter-header">
+                        <span class="exporter-name">📡 ${exp.name} <small style="color:var(--text-secondary)">(Go binary)</small></span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" ${isInstalled && isEnabled ? 'checked' : ''} ${canWrite && isInstalled ? '' : 'disabled'} onchange="toggleWatchdogAgent(this.checked)">
+                            <span class="toggle-slider" style="${canWrite && isInstalled ? '' : 'opacity: 0.5; cursor: not-allowed;'}"></span>
+                        </label>
+                    </div>
+                    <div class="version-info">
+                        <span>Status:</span>
+                        <span class="version-badge" style="${statusStyle}">${statusText}</span>
+                        ${wdVersion ? `<span style="color: var(--text-secondary); margin-left: 8px;">v${wdVersion}</span>` : ''}
+                        <span id="wd-latest-version" style="color: var(--text-secondary); margin-left: 8px; font-size: 11px;"></span>
+                    </div>
+                    ${sshError ? `<div style="margin-top: 6px; font-size: 11px; color: var(--accent-yellow);">SSH check failed - showing last known state</div>` : ''}
+                    ${canWrite ? `
+                    <div style="margin-top: 10px; display: flex; gap: 8px;">
+                        ${!isInstalled ? `<button class="btn btn-primary btn-sm" onclick="installWatchdogAgent()">Install Agent</button>` : ''}
+                        ${isInstalled ? `<button class="btn btn-secondary btn-sm" onclick="reinstallWatchdogAgent()">Reinstall (Latest)</button>` : ''}
+                        ${isInstalled ? `<button class="btn btn-warning btn-sm" onclick="removeWatchdogAgent()">Remove</button>` : ''}
+                    </div>
+                    ` : ''}
+                </div>
+                `;
+                
+                // Fetch latest version from GitHub and compare
+                fetch(`${basePath}/api/watchdog-agent/latest`)
+                    .then(r => r.json())
+                    .then(latestData => {
+                        const el = document.getElementById('wd-latest-version');
+                        if (el && latestData.success && latestData.version) {
+                            if (wdVersion && wdVersion !== latestData.version) {
+                                el.innerHTML = `<span style="color: var(--accent-yellow);">⬆ Update available: v${latestData.version}</span>`;
+                            } else if (wdVersion) {
+                                el.innerHTML = '<span style="color: var(--accent-green);">✓ Up to date</span>';
+                            } else {
+                                el.innerHTML = `Latest: v${latestData.version}`;
+                            }
+                        }
+                    }).catch(() => {});
+            } else {
+                // Determine state from API data.
+                // Port check is the source of truth (synced by backend):
+                // - version truthy = running + detected version
+                // - data.enabled[key] = port was responding on last check
+                // - data.installed[key] = was installed at some point (may be stopped)
+                const isRunning = !!version;
+                const isInstalled = data.installed ? !!data.installed[exp.key] : isRunning;
+                const isEnabled = data.enabled ? !!data.enabled[exp.key] : isRunning;
+                
+                // Status display
+                let statusText, statusStyle;
+                if (isRunning) {
+                    statusText = version;
+                    statusStyle = 'background: var(--accent-green);';
+                } else if (isInstalled) {
+                    statusText = 'Stopped';
+                    statusStyle = 'background: var(--accent-yellow); color: #000;';
+                } else {
+                    statusText = 'Not installed';
+                    statusStyle = '';
+                }
+                
+                // Toggle reflects actual running state:
+                // - ON = running (or install+start if not installed)
+                // - OFF = stopped / not installed
+                const isChecked = isRunning;
+                
+                html += `
+                <div class="exporter-card" data-exporter="${exp.key}">
+                    <div class="exporter-header">
+                        <span class="exporter-name">${exp.name} <small style="color:var(--text-secondary)">(port ${exp.port})</small></span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" ${isChecked ? 'checked' : ''} ${canWrite ? '' : 'disabled'} onchange="toggleExporter('${exp.key}', this.checked)">
+                            <span class="toggle-slider" style="${canWrite ? '' : 'opacity: 0.5; cursor: not-allowed;'}"></span>
+                        </label>
+                    </div>
+                    <div class="version-info">
+                        <span>${version ? 'Version:' : 'Status:'}</span>
+                        <span class="version-badge" style="${statusStyle}">${statusText}</span>
+                        ${hasUpdate && canWrite ? `<span class="update-badge" onclick="updateExporter('${exp.key}')">Update to ${updateInfo.latest}</span>` : ''}
+                        ${hasUpdate && !canWrite ? `<span style="color: var(--accent-yellow); font-size: 11px;">Update available: ${updateInfo.latest}</span>` : ''}
+                    </div>
+                    ${isInstalled ? `
+                    <div class="auto-update-row">
+                        <input type="checkbox" id="auto-${exp.key}" ${canWrite ? '' : 'disabled'} onchange="updateAutoSetting('${exp.key}', this.checked)">
+                        <label for="auto-${exp.key}">Auto-update</label>
+                    </div>` : `
+                    <div style="margin-top: 6px; font-size: 11px; color: var(--text-secondary);">
+                        Toggle on to install and start this exporter
+                    </div>`}
+                </div>
+                `;
+            }
+        }
+        
+        html += `
+        <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <label>Update Branch:</label>
+                <select class="branch-select" id="branchSelect" ${canWrite ? '' : 'disabled'} onchange="updateBranch(this.value)">
+                    <option value="main">main (stable)</option>
+                    <option value="dev">dev (latest)</option>
+                </select>
+            </div>
+            ${canWrite ? `
+            <div style="margin-top: 15px; display: flex; gap: 10px;">
+                <button class="btn btn-secondary" onclick="installExporters(currentServerId)">Install All</button>
+                <button class="btn btn-warning" onclick="removeExporters(currentServerId)">Remove All</button>
+            </div>
+            ` : ''}
+        </div>
+        `;
+        
+        document.getElementById('modalContent').innerHTML = html;
+    }
+    
+    function closeModal() {
+        document.getElementById('serverDetailModal').style.display = 'none';
+        currentServerId = null;
+    }
+    
+    async function toggleExporter(exporter, enabled) {
+        // Find the exporter card and show a spinner/status
+        const card = document.querySelector(`[data-exporter="${exporter}"]`);
+        const versionBadge = card ? card.querySelector('.version-badge') : null;
+        const origText = versionBadge ? versionBadge.textContent : '';
+        
+        if (versionBadge && enabled && origText === 'Not installed') {
+            versionBadge.textContent = 'Installing...';
+            versionBadge.style.background = 'var(--accent-cyan)';
+            versionBadge.style.color = '#000';
+        } else if (versionBadge) {
+            versionBadge.textContent = enabled ? 'Starting...' : 'Stopping...';
+        }
+        
+        try {
+            const response = await fetch(`${basePath}/api/servers/${currentServerId}/exporters/${exporter}/toggle`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({enabled})
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                // Refresh the panel to show updated state
+                openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
+            } else {
+                alert('Failed to toggle exporter: ' + (result.error || 'Unknown error') + (result.detail ? '\\n\\nDetails: ' + result.detail : ''));
+                // Reload to reset state
+                openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
+            }
+        } catch (e) {
+            alert('Network error: ' + e.message);
+            openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
+        }
+    }
+    
+    async function updateExporter(exporter) {
+        if (!confirm(`Update ${exporter} to latest version?`)) return;
+        
+        const branch = document.getElementById('branchSelect').value;
+        
+        const response = await fetch(`${basePath}/api/servers/${currentServerId}/exporters/${exporter}/update`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({branch})
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            alert(`${exporter} updated to ${result.version}`);
+            openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
+        } else {
+            alert('Update failed: ' + (result.error || 'Unknown error'));
+        }
+    }
+    
+    async function updateAutoSetting(exporter, enabled) {
+        const data = {};
+        data[`${exporter}_auto_update`] = enabled;
+        
+        await fetch(`${basePath}/api/servers/${currentServerId}/exporters/settings`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+    }
+    
+    async function updateBranch(branch) {
+        await fetch(`${basePath}/api/servers/${currentServerId}/exporters/settings`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({exporter_update_branch: branch})
+        });
+    }
+    
+    // DC Watchdog Agent management functions
+    async function toggleWatchdogAgent(enabled) {
+        const response = await fetch(`${basePath}/api/servers/${currentServerId}/watchdog-agent/toggle`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({enabled})
+        });
+        
+        const result = await response.json();
+        if (!result.success) {
+            alert('Failed to toggle watchdog agent: ' + (result.error || 'Unknown error'));
+            openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
+        }
+    }
+    
+    async function installWatchdogAgent() {
+        if (!confirm('Install DC Watchdog agent on this server?\\n\\nThis will enable external uptime monitoring from watchdog.cryptolabs.co.za')) return;
+        
+        const btn = event.target;
+        btn.disabled = true;
+        btn.textContent = 'Installing...';
+        
+        const response = await fetch(`${basePath}/api/servers/${currentServerId}/watchdog-agent/install`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            alert('DC Watchdog agent installed successfully');
+            openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
+        } else {
+            alert('Installation failed: ' + (result.error || 'Unknown error'));
+            btn.disabled = false;
+            btn.textContent = 'Install Agent';
+        }
+    }
+    
+    async function reinstallWatchdogAgent() {
+        if (!confirm('Reinstall DC Watchdog agent? This will stop and reinstall the agent.')) return;
+        
+        const btn = event.target;
+        btn.disabled = true;
+        btn.textContent = 'Reinstalling...';
+        
+        const response = await fetch(`${basePath}/api/servers/${currentServerId}/watchdog-agent/reinstall`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            alert('DC Watchdog agent reinstalled successfully');
+            openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
+        } else {
+            alert('Reinstall failed: ' + (result.error || 'Unknown error'));
+            btn.disabled = false;
+            btn.textContent = 'Reinstall';
+        }
+    }
+    
+    async function removeWatchdogAgent() {
+        if (!confirm('Remove DC Watchdog agent from this server?\\n\\nThe server will no longer be monitored for uptime.')) return;
+        
+        const btn = event.target;
+        btn.disabled = true;
+        btn.textContent = 'Removing...';
+        
+        const response = await fetch(`${basePath}/api/servers/${currentServerId}/watchdog-agent/remove`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            alert('DC Watchdog agent removed');
+            openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
+        } else {
+            alert('Removal failed: ' + (result.error || 'Unknown error'));
+            btn.disabled = false;
+            btn.textContent = 'Remove';
+        }
+    }
+    
+    async function checkAllUpdates() {
+        const btn = event.target;
+        btn.textContent = 'Checking...';
+        btn.disabled = true;
+        
+        const response = await fetch(`${basePath}/api/exporters/updates`);
+        const result = await response.json();
+        
+        btn.textContent = 'Check for Updates';
+        btn.disabled = false;
+        
+        if (result.updates_available) {
+            let msg = 'Updates available:\\n\\n';
+            for (const server of result.servers) {
+                msg += `${server.server_name}:\\n`;
+                for (const [exp, info] of Object.entries(server.exporters)) {
+                    msg += `  - ${exp}: ${info.installed} -> ${info.latest}\\n`;
+                }
+            }
+            alert(msg);
+        } else {
+            alert('All exporters are up to date!');
+        }
+    }
+    
+    async function checkServer(id) {
+        const btn = event.target;
+        const origText = btn.textContent;
+        btn.textContent = 'Checking...';
+        btn.disabled = true;
+        
+        try {
+            const response = await fetch(`${basePath}/api/servers/${id}/check`);
+            const result = await response.json();
+            
+            const wdStatus = result.watchdog_agent ? 
+                (result.watchdog_agent.running ? 'Running' : (result.watchdog_agent.installed ? 'Stopped' : 'Not installed')) : 
+                'Unknown';
+            const wdVersion = result.watchdog_agent?.version ? ` (v${result.watchdog_agent.version})` : '';
+            
+            alert(`SSH: ${result.ssh.connected ? 'OK' : 'Failed'}\nNode Exporter: ${result.node_exporter.running ? 'Running' : 'Not running'}\nDC Exporter: ${result.dc_exporter.running ? 'Running' : 'Not running'}\nDCGM Exporter: ${result.dcgm_exporter.running ? 'Running' : 'Not running'}\nDC Watchdog Agent: ${wdStatus}${wdVersion}`);
+            
+            // If the Manage modal is open for this server, refresh it with now-fresh data
+            if (currentServerId === id) {
+                const verResp = await fetch(`${basePath}/api/servers/${id}/exporters/versions`);
+                const verData = await verResp.json();
+                renderExporterManagement(verData);
+            }
+        } catch (e) {
+            alert('Check failed: ' + e.message);
+        }
+        
+        btn.textContent = origText;
+        btn.disabled = false;
+    }
+    
+    async function installExporters(id) {
+        if (!confirm('Install node_exporter and dc-exporter on this server?')) return;
+        
+        const response = await fetch(`${basePath}/api/servers/${id}/install-exporters`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({exporters: ['node_exporter', 'dc_exporter']})
+        });
+        
+        const result = await response.json();
+        alert(`node_exporter: ${result.node_exporter}
+dc_exporter: ${result.dc_exporter}`);
+        
+        location.reload();
+    }
+    
+    async function removeExporters(id) {
+        if (!confirm('Remove exporters from this server?')) return;
+        
+        const response = await fetch(`${basePath}/api/servers/${id}/remove-exporters`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({exporters: ['node_exporter', 'dc_exporter']})
+        });
+        
+        const result = await response.json();
+        alert(`node_exporter: ${result.node_exporter}
+dc_exporter: ${result.dc_exporter}`);
+        
+        location.reload();
+    }
+    
+    async function deleteServer(id) {
+        if (!confirm('Remove this server from monitoring?')) return;
+        
+        await fetch(`${basePath}/api/servers/${id}`, {method: 'DELETE'});
+        location.reload();
+    }
+    
+    // Close modal when clicking outside
+    document.getElementById('serverDetailModal').addEventListener('click', function(e) {
+        if (e.target === this) closeModal();
+    });
+    </script>
+</body></html>
