@@ -2808,6 +2808,8 @@ echo "[+] Installation complete"
                       capture_output=True, timeout=120)
         
         auth_secret = secrets_module.token_hex(32)
+        watchdog_key = self.config.watchdog.api_key or ""
+        watchdog_url = self.config.watchdog.server_url or "https://watchdog.cryptolabs.co.za"
         cmd = [
             "docker", "run", "-d",
             "--name", "cryptolabs-proxy",
@@ -2817,6 +2819,8 @@ echo "[+] Installation complete"
             "-e", f"FLEET_ADMIN_PASS={self.config.fleet_admin_pass}",
             "-e", f"AUTH_SECRET_KEY={auth_secret}",
             "-e", f"SITE_NAME={self.config.site_name}",
+            "-e", f"WATCHDOG_API_KEY={watchdog_key}",
+            "-e", f"WATCHDOG_URL={watchdog_url}",
             "-v", "/var/run/docker.sock:/var/run/docker.sock:ro",
             "-v", "fleet-auth-data:/data/auth",
             "-v", f"{ssl_dir}:/etc/nginx/ssl:ro",
@@ -2866,14 +2870,19 @@ echo "[+] Installation complete"
         except Exception:
             pass
         
+        watchdog_key = self.config.watchdog.api_key or ""
         cmd = [
             "docker", "run", "-d",
             "--name", "dc-overview",
             "--restart", "unless-stopped",
             "-e", f"FLASK_SECRET_KEY={flask_secret}",
             "-e", "DC_OVERVIEW_PORT=5001",
+            "-e", "APPLICATION_ROOT=/dc",
             "-e", f"TRUSTED_PROXY_IPS=127.0.0.1,{PROXY_STATIC_IP}",
             "-e", f"INTERNAL_API_TOKEN={internal_token}",
+            "-e", f"WATCHDOG_API_KEY={watchdog_key}",
+            "-e", f"GRAFANA_URL=http://grafana:3000",
+            "-e", f"PROMETHEUS_URL=http://prometheus:9090",
             "-v", "dc-overview-data:/data",
             "-v", "fleet-auth-data:/data/auth",  # Shared with proxy for SSO API keys
             "-v", f"{self.config.config_dir}:/etc/dc-overview:ro",
@@ -3228,6 +3237,19 @@ echo "[+] Installation complete"
                         console.print("[green]✓[/green] CryptoLabs Proxy credentials updated")
                     else:
                         console.print(f"[yellow]⚠[/yellow] {message}")
+                
+                # Persist watchdog API key to shared auth volume so dc-overview can read it
+                watchdog_key = self.config.watchdog.api_key or ""
+                if watchdog_key:
+                    try:
+                        subprocess.run(
+                            ["docker", "exec", "cryptolabs-proxy", "sh", "-c",
+                             f"mkdir -p /data/auth && echo -n '{watchdog_key}' > /data/auth/watchdog_api_key"],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        console.print("[green]✓[/green] Watchdog API key synced to proxy")
+                    except Exception:
+                        pass
             else:
                 # Proxy not running, do full setup
                 console.print("[dim]Proxy not running, performing full setup...[/dim]")
