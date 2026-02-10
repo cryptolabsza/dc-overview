@@ -2841,6 +2841,18 @@ echo "[+] Installation complete"
             console.print("[red]✗[/red] Proxy failed to become healthy")
             raise RuntimeError("CryptoLabs Proxy container failed to become healthy")
         
+        # Persist watchdog API key to shared auth volume so both proxy and dc-overview
+        # can read it (the env var alone doesn't persist across container recreates)
+        if watchdog_key:
+            try:
+                subprocess.run(
+                    ["docker", "exec", "cryptolabs-proxy", "sh", "-c",
+                     f"mkdir -p /data/auth && echo -n '{watchdog_key}' > /data/auth/watchdog_api_key"],
+                    capture_output=True, text=True, timeout=10
+                )
+            except Exception:
+                pass
+        
         console.print("[green]✓[/green] CryptoLabs Proxy started")
         console.print(f"\n  Fleet Management: [cyan]https://{domain}/[/cyan]")
         console.print(f"  Server Manager: [cyan]https://{domain}/dc/[/cyan]")
