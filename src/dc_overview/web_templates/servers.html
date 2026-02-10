@@ -998,15 +998,33 @@
     
     // DC Watchdog Agent management functions
     async function toggleWatchdogAgent(enabled) {
-        const response = await fetch(`${basePath}/api/servers/${currentServerId}/watchdog-agent/toggle`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({enabled})
-        });
+        // Show feedback while processing
+        const card = document.querySelector('[data-exporter="watchdog_agent"]');
+        const badge = card ? card.querySelector('.version-badge') : null;
+        if (badge && enabled) {
+            badge.textContent = badge.textContent === 'Not installed' ? 'Installing...' : 'Starting...';
+            badge.style.background = 'var(--accent-cyan)';
+            badge.style.color = '#000';
+        } else if (badge) {
+            badge.textContent = 'Stopping...';
+        }
         
-        const result = await response.json();
-        if (!result.success) {
-            alert('Failed to toggle watchdog agent: ' + (result.error || 'Unknown error'));
+        try {
+            const response = await fetch(`${basePath}/api/servers/${currentServerId}/watchdog-agent/toggle`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({enabled})
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
+            } else {
+                alert('Failed to toggle watchdog agent: ' + (result.error || 'Unknown error'));
+                openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
+            }
+        } catch (e) {
+            alert('Network error: ' + e.message);
             openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
         }
     }

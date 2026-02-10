@@ -998,16 +998,28 @@ def _build_exporter_response(server, versions=None, updates=None, source='cached
         if server.dcgm_exporter_enabled and server.dcgm_exporter_version:
             versions['dcgm_exporter'] = server.dcgm_exporter_version
     
+    # For cached responses, only claim "installed" if also "enabled" (was running
+    # at last check). This avoids showing stale "Stopped" for exporters that are
+    # actually not installed. The background live check will correct the state.
+    if source == 'cached':
+        installed = {
+            'node_exporter': server.node_exporter_enabled,
+            'dc_exporter': server.dc_exporter_enabled,
+            'dcgm_exporter': server.dcgm_exporter_enabled,
+        }
+    else:
+        installed = {
+            'node_exporter': server.node_exporter_installed,
+            'dc_exporter': server.dc_exporter_installed,
+            'dcgm_exporter': server.dcgm_exporter_installed,
+        }
+    
     return {
         'server_id': server.id,
         'server_name': server.name,
         'versions': versions,
         'updates': updates or {},
-        'installed': {
-            'node_exporter': server.node_exporter_installed,
-            'dc_exporter': server.dc_exporter_installed,
-            'dcgm_exporter': server.dcgm_exporter_installed,
-        },
+        'installed': installed,
         'enabled': {
             'node_exporter': server.node_exporter_enabled,
             'dc_exporter': server.dc_exporter_enabled,
@@ -1376,7 +1388,47 @@ def api_toggle_watchdog(server_id):
     if enabled is None:
         enabled = not server.watchdog_agent_enabled
     
-    # Control the service via SSH
+    # If enabling and agent is not installed (or was removed), auto-install
+    if enabled and not server.watchdog_agent_enabled:
+        # Quick check: is the service actually available?
+        success = toggle_watchdog_service(server, True)
+        if not success:
+            # Service didn't start — likely not installed. Try installing.
+            api_key = get_watchdog_api_key()
+            if not api_key:
+                return jsonify({
+                    'success': False,
+                    'error': 'DC Watchdog API key not configured. Link your account via SSO first.'
+                }), 400
+            
+            app.logger.info(f"Auto-installing watchdog agent on {server.name} (toggle on but service not available)")
+            install_ok, install_err = install_watchdog_agent_remote(server, api_key)
+            if install_ok:
+                server.watchdog_agent_installed = True
+                server.watchdog_agent_enabled = True
+                db.session.commit()
+                return jsonify({
+                    'success': True,
+                    'enabled': True,
+                    'installed': True,
+                    'message': 'DC Watchdog agent installed and started'
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to install watchdog agent: {install_err or "Unknown error"}'
+                }), 500
+        else:
+            # Service started successfully
+            server.watchdog_agent_enabled = True
+            db.session.commit()
+            return jsonify({
+                'success': True,
+                'enabled': True,
+                'message': 'DC Watchdog agent enabled'
+            })
+    
+    # Disabling — just stop the service
     success = toggle_watchdog_service(server, enabled)
     
     if success:
