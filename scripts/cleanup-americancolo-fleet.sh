@@ -14,10 +14,10 @@ SSH_KEY="~/.ssh/ubuntu_key"
 SSH_USER="root"
 
 # Worker server IP pattern: 88.0.X.1
-# Brickbox: 1-12, 25-48
-# RunpodCCC: 96-99
-BRICKBOX_SERVERS="1 2 3 4 5 6 7 8 9 10 11 12 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48"
-RUNPOD_SERVERS="96 97 98 99"
+# Brickbox: 1-11 (12 is offline), 25-48
+# RunpodCCC: 95-99
+BRICKBOX_SERVERS="1 2 3 4 5 6 7 8 9 10 11 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48"
+RUNPOD_SERVERS="95 96 97 98 99"
 ALL_WORKERS="${BRICKBOX_SERVERS} ${RUNPOD_SERVERS}"
 
 # Colors
@@ -260,6 +260,7 @@ clean_worker() {
         done
         systemctl daemon-reload 2>/dev/null || true
         rm -f /usr/local/bin/node_exporter /usr/local/bin/dc-exporter* /opt/dc-exporter/* 2>/dev/null || true
+        rm -f /usr/local/bin/dc-watchdog-agent 2>/dev/null || true
         rm -rf /opt/dc-watchdog /etc/dc-watchdog 2>/dev/null || true
     " 2>/dev/null
     
@@ -346,6 +347,6 @@ echo "  • Next deploy will pull fresh monitoring images"
 echo ""
 echo "To redeploy dc-overview:"
 echo "  ssh ${SSH_USER}@${MASTER_IP} -i ${SSH_KEY}"
-echo "  pip install --force-reinstall --no-cache-dir git+https://github.com/cryptolabsza/dc-overview.git@dev --break-system-packages"
 echo "  pip install --force-reinstall --no-cache-dir git+https://github.com/cryptolabsza/cryptolabs-proxy.git@dev --break-system-packages"
-echo "  dc-overview quickstart -c /root/dc-overview-config.yaml -y"
+echo "  pip install --force-reinstall --no-cache-dir git+https://github.com/cryptolabsza/dc-overview.git@dev --break-system-packages"
+echo "  dc-overview quickstart -c /root/test-config.yaml -y"

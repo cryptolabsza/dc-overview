@@ -3264,6 +3264,19 @@ echo "[+] Installation complete"
                 detected = registry.auto_detect_services()
                 for name, svc in detected.items():
                     registry.services[name] = svc
+                
+                # Always register dc-watchdog in the service registry.
+                # It's an external service (no container), so auto_detect
+                # never finds it. Registering it ensures:
+                #   - Shows in "Available Products" when not linked (paid product)
+                #   - Moves to "Services" once client links account via SSO
+                from cryptolabs_proxy.services import DEFAULT_SERVICES
+                if "dc-watchdog" in DEFAULT_SERVICES:
+                    registry.services["dc-watchdog"] = {
+                        **DEFAULT_SERVICES["dc-watchdog"],
+                        "enabled": bool(self.config.components.dc_watchdog),
+                    }
+                
                 registry.save()
                 
                 # Determine SSL mode
