@@ -131,6 +131,14 @@ http {
             proxy_read_timeout 86400;
             proxy_send_timeout 86400;
             
+            # Inject Fleet Management Home button into Grafana HTML
+            # target="_top" prevents Grafana's SPA router from intercepting the click
+            sub_filter '</head>' '<style>.fleet-home-bar{position:fixed;top:0;left:0;right:0;z-index:99999;background:#1a1a2e;border-bottom:1px solid #333;padding:4px 16px;display:flex;align-items:center;gap:10px;font-family:-apple-system,sans-serif;font-size:13px;height:28px;}.fleet-home-bar a{color:#00b4d8;text-decoration:none;border:1px solid #00b4d8;padding:3px 12px;border-radius:4px;font-size:12px;font-weight:500;transition:background 0.2s;}.fleet-home-bar a:hover{background:rgba(0,180,216,0.15);}.fleet-home-bar span{color:#666;}body{padding-top:36px !important;}</style></head>';
+            sub_filter '</body>' '<div class="fleet-home-bar"><a href="/" target="_top">Home</a><span>|</span><span style="color:#888;">Grafana</span></div></body>';
+            sub_filter_once on;
+            sub_filter_types text/html;
+            proxy_set_header Accept-Encoding "";
+            
             proxy_intercept_errors on;
             error_page 502 503 504 = @service_unavailable;
         }
@@ -145,6 +153,13 @@ http {
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
+            
+            # Inject Fleet Management Home button into Prometheus HTML
+            sub_filter '</head>' '<style>.fleet-home-bar{position:fixed;top:0;left:0;right:0;z-index:99999;background:#1a1a2e;border-bottom:1px solid #333;padding:4px 16px;display:flex;align-items:center;gap:10px;font-family:-apple-system,sans-serif;font-size:13px;height:28px;}.fleet-home-bar a{color:#00b4d8;text-decoration:none;border:1px solid #00b4d8;padding:3px 12px;border-radius:4px;font-size:12px;font-weight:500;transition:background 0.2s;}.fleet-home-bar a:hover{background:rgba(0,180,216,0.15);}.fleet-home-bar span{color:#666;}</style></head>';
+            sub_filter '</body>' '<div class="fleet-home-bar"><a href="/">Home</a><span>|</span><span style="color:#888;">Prometheus</span></div></body>';
+            sub_filter_once on;
+            sub_filter_types text/html;
+            proxy_set_header Accept-Encoding "";
             
             proxy_intercept_errors on;
             error_page 502 503 504 = @service_unavailable;
