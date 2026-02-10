@@ -13,7 +13,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich import print as rprint
 
-from . import __version__, get_version_info
+from . import __version__, get_version_info, get_image_tag
 from .wizard import SetupWizard
 from .service import ServiceManager
 from .exporters import ExporterInstaller
@@ -379,7 +379,7 @@ def upgrade():
     
     try:
         result = subprocess.run(
-            ["docker", "pull", "ghcr.io/cryptolabsza/dc-overview:dev"],
+            ["docker", "pull", f"ghcr.io/cryptolabsza/dc-overview:{get_image_tag()}"],
             capture_output=True, text=True
         )
         

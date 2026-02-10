@@ -81,6 +81,19 @@ def get_version_info() -> str:
 
     return " ".join(parts)
 
+
+def get_image_tag() -> str:
+    """Return the Docker image tag matching the current branch.
+    
+    - 'dev' branch  → 'dev' tag
+    - 'main' branch → 'latest' tag  (default)
+    - anything else → 'latest' tag
+    """
+    branch = (__git_branch__ or '').lower()
+    if branch == 'dev':
+        return 'dev'
+    return 'latest'
+
 # Export main classes for programmatic use
 from .fleet_config import FleetConfig, Server
 from .fleet_wizard import FleetWizard, run_fleet_wizard

@@ -23,6 +23,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 from rich.markup import escape as rich_escape
 import yaml
 
+from . import get_image_tag
 from .fleet_config import FleetConfig, Server, SSLMode, AuthMethod, get_local_ip
 from .prerequisites import PrerequisitesInstaller
 from .ssh_manager import SSHManager
@@ -633,9 +634,10 @@ datasources:
         # When using existing proxy, don't expose ports (proxy handles routing)
         # and use cryptolabs network with static IPs
         if use_existing_proxy:
+            tag = get_image_tag()
             return f"""services:
   dc-overview:
-    image: ghcr.io/cryptolabsza/dc-overview:dev
+    image: ghcr.io/cryptolabsza/dc-overview:{tag}
     container_name: dc-overview
     restart: unless-stopped
     environment:
