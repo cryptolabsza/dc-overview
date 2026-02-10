@@ -635,7 +635,7 @@ datasources:
         if use_existing_proxy:
             return f"""services:
   dc-overview:
-    image: ghcr.io/cryptolabsza/dc-overview:latest
+    image: ghcr.io/cryptolabsza/dc-overview:dev
     container_name: dc-overview
     restart: unless-stopped
     environment:

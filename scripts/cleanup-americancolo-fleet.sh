@@ -54,6 +54,9 @@ EXPORTER_SERVICES="node_exporter dc-exporter dcgm-exporter gddr6-metrics-exporte
 # DC Watchdog agent directories to remove
 DC_WATCHDOG_DIRS="/opt/dc-watchdog /etc/dc-watchdog"
 
+# Config directories to remove (created by quickstart commands)
+CONFIG_DIRS="/etc/ipmi-monitor /etc/dc-overview /etc/cryptolabs-proxy"
+
 # Legacy exporter files to remove
 LEGACY_EXPORTER_FILES="/opt/runpod_exporter.py /opt/vastai_exporter.py /opt/runpod-exporter /opt/vastai-exporter"
 
@@ -143,9 +146,26 @@ for dir in ${DC_WATCHDOG_DIRS}; do
     ssh_master "rm -rf ${dir} 2>/dev/null && echo \"    removed ${dir}\" || true"
 done
 
+# Remove config directories (created by quickstart commands)
+echo "  Removing config directories..."
+for dir in ${CONFIG_DIRS}; do
+    ssh_master "rm -rf ${dir} 2>/dev/null && echo \"    removed ${dir}\" || true"
+done
+
+# Remove IPMI Monitor database files that may exist outside volumes
+echo "  Removing stale database files..."
+ssh_master "rm -rf /var/lib/ipmi-monitor 2>/dev/null || true"
+
+# Uninstall pip packages and clear cache
+echo "  Uninstalling pip packages..."
+ssh_master "pip uninstall dc-overview -y --break-system-packages 2>/dev/null || true"
+ssh_master "pip uninstall ipmi-monitor -y --break-system-packages 2>/dev/null || true"
+ssh_master "pip uninstall cryptolabs-proxy -y --break-system-packages 2>/dev/null || true"
+ssh_master "pip cache purge 2>/dev/null || true"
+
 # Remove dc-overview related volumes explicitly
 echo "  Removing monitoring volumes..."
-REMOVE_VOLUMES="prometheus-data grafana-data ipmi-monitor-data dc-overview-data fleet-auth-data cryptolabs-proxy-data root_grafana-data root_prometheus-data ipmi-monitor_ipmi-data dc-overview_grafana-data dc-overview_prometheus-data"
+REMOVE_VOLUMES="prometheus-data grafana-data ipmi-monitor-data ipmi_data dc-overview-data fleet-auth-data cryptolabs-proxy-data root_grafana-data root_prometheus-data ipmi-monitor_ipmi-data ipmi-monitor_ipmi_data dc-overview_grafana-data dc-overview_prometheus-data"
 for v in ${REMOVE_VOLUMES}; do
   ssh_master "docker volume rm ${v} 2>/dev/null && echo \"    removed volume ${v}\" || true"
 done
@@ -313,6 +333,9 @@ echo -e "${GREEN}=== Cleanup Complete ===${NC}"
 echo ""
 echo "Summary:"
 echo "  • Master: Removed monitoring containers, volumes, and images"
+echo "  • Master: Removed config dirs (${CONFIG_DIRS})"
+echo "  • Master: Removed IPMI Monitor databases"
+echo "  • Master: pip packages (dc-overview, ipmi-monitor, cryptolabs-proxy) uninstalled"
 echo "  • Master: Freed ports 80/443 (stopped nginx/apache, killed processes)"
 echo "  • Master: Removed DC Watchdog agent"
 echo "  • Preserved: registry, netbootxyz, pxe containers and images"
@@ -323,5 +346,6 @@ echo "  • Next deploy will pull fresh monitoring images"
 echo ""
 echo "To redeploy dc-overview:"
 echo "  ssh ${SSH_USER}@${MASTER_IP} -i ${SSH_KEY}"
-echo "  pip install --force-reinstall git+https://github.com/cryptolabsza/dc-overview.git@dev --break-system-packages"
+echo "  pip install --force-reinstall --no-cache-dir git+https://github.com/cryptolabsza/dc-overview.git@dev --break-system-packages"
+echo "  pip install --force-reinstall --no-cache-dir git+https://github.com/cryptolabsza/cryptolabs-proxy.git@dev --break-system-packages"
 echo "  dc-overview quickstart -c /root/dc-overview-config.yaml -y"

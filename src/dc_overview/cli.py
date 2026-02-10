@@ -379,7 +379,7 @@ def upgrade():
     
     try:
         result = subprocess.run(
-            ["docker", "pull", "ghcr.io/cryptolabsza/dc-overview:latest"],
+            ["docker", "pull", "ghcr.io/cryptolabsza/dc-overview:dev"],
             capture_output=True, text=True
         )
         

@@ -40,7 +40,7 @@ DC_CONTAINERS="cryptolabs-proxy dc-overview ipmi-monitor grafana prometheus vast
 CONTAINER_PATTERNS="grafana prometheus ipmi-monitor dc-overview cryptolabs-proxy vastai-exporter runpod-exporter certbot"
 
 # DC Overview volumes to remove (all possible naming conventions)
-DC_VOLUMES="dc-overview-data ipmi-monitor-data grafana-data prometheus-data dc-overview_grafana-data dc-overview_prometheus-data fleet-auth-data cryptolabs-proxy-data root_grafana-data root_prometheus-data ipmi-monitor_ipmi-data"
+DC_VOLUMES="dc-overview-data ipmi-monitor-data ipmi_data grafana-data prometheus-data dc-overview_grafana-data dc-overview_prometheus-data fleet-auth-data cryptolabs-proxy-data root_grafana-data root_prometheus-data ipmi-monitor_ipmi-data ipmi-monitor_ipmi_data"
 
 # Volume patterns for wildcard matching
 VOLUME_PATTERNS="dc-overview prometheus grafana ipmi vastai runpod cryptolabs-proxy fleet-auth"
@@ -53,6 +53,9 @@ EXPORTER_SERVICES="dc-exporter node_exporter dc-watchdog-agent"
 
 # DC Watchdog agent directories to remove
 DC_WATCHDOG_DIRS="/opt/dc-watchdog /etc/dc-watchdog"
+
+# Config directories to remove (created by quickstart commands)
+CONFIG_DIRS="/etc/ipmi-monitor /etc/dc-overview /etc/cryptolabs-proxy"
 
 # Legacy exporter files to remove
 LEGACY_EXPORTER_FILES="/opt/runpod_exporter.py /opt/vastai_exporter.py /opt/runpod-exporter /opt/vastai-exporter"
@@ -173,10 +176,22 @@ echo "  Cleaning certbot lock files..."
 ssh_cmd ${MASTER_PORT} "rm -f /var/lib/letsencrypt/.certbot.lock 2>/dev/null || true"
 ssh_cmd ${MASTER_PORT} "pkill -f certbot 2>/dev/null || true"
 
+# Remove config directories (created by quickstart commands)
+echo "  Removing config directories..."
+for dir in ${CONFIG_DIRS}; do
+    ssh_cmd ${MASTER_PORT} "rm -rf ${dir} 2>/dev/null && echo \"    removed ${dir}\" || true"
+done
+
+# Remove IPMI Monitor database files that may exist outside volumes
+echo "  Removing stale database files..."
+ssh_cmd ${MASTER_PORT} "rm -f /var/lib/ipmi-monitor/*.db 2>/dev/null || true"
+ssh_cmd ${MASTER_PORT} "rm -rf /var/lib/ipmi-monitor 2>/dev/null || true"
+
 # Uninstall pip packages and clear cache
-echo "  Uninstalling dc-overview and ipmi-monitor pip packages..."
+echo "  Uninstalling pip packages..."
 ssh_cmd ${MASTER_PORT} "pip uninstall dc-overview -y --break-system-packages 2>/dev/null || true"
 ssh_cmd ${MASTER_PORT} "pip uninstall ipmi-monitor -y --break-system-packages 2>/dev/null || true"
+ssh_cmd ${MASTER_PORT} "pip uninstall cryptolabs-proxy -y --break-system-packages 2>/dev/null || true"
 ssh_cmd ${MASTER_PORT} "pip cache purge 2>/dev/null || true"
 
 echo -e "${GREEN}  ✓ Master node cleaned${NC}"
@@ -242,7 +257,8 @@ echo -e "${CYAN}Summary:${NC}"
 echo -e "  ${GREEN}•${NC} Master node (port ${MASTER_PORT}):"
 echo -e "      - Containers, volumes, networks removed"
 echo -e "      - Docker images pruned (fresh pull on next deploy)"
-echo -e "      - pip packages (dc-overview, ipmi-monitor) uninstalled"
+echo -e "      - Config dirs removed (${CONFIG_DIRS})"
+echo -e "      - pip packages (dc-overview, ipmi-monitor, cryptolabs-proxy) uninstalled"
 echo -e "      - Ports 80/443 freed (nginx/apache stopped, processes killed)"
 echo ""
 echo -e "  ${GREEN}•${NC} Worker nodes (wk01:${WK01_PORT}, wk03:${WK03_PORT}):"

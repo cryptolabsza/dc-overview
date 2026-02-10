@@ -1262,7 +1262,7 @@ def generate_basic_compose(dc_port: int, grafana_pass: str, enable_proxy: bool) 
     """Generate basic docker-compose.yml without templates."""
     return f"""services:
   dc-overview:
-    image: ghcr.io/cryptolabsza/dc-overview:latest
+    image: ghcr.io/cryptolabsza/dc-overview:dev
     container_name: dc-overview
     restart: unless-stopped
     ports:
