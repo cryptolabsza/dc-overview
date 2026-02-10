@@ -4573,7 +4573,7 @@ SERVERS_TEMPLATE = """
         
         const result = await response.json();
         if (!result.success) {
-            alert('Failed to toggle exporter: ' + (result.error || 'Unknown error') + (result.detail ? '\n\nDetails: ' + result.detail : ''));
+            alert('Failed to toggle exporter: ' + (result.error || 'Unknown error') + (result.detail ? '\\n\\nDetails: ' + result.detail : ''));
             // Reload to reset state
             openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
         }
