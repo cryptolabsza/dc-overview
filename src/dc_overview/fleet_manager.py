@@ -2719,6 +2719,24 @@ echo "[+] Installation complete"
                 console.print(f"  Grafana: [cyan]https://{domain}/grafana/[/cyan]")
                 console.print(f"  Prometheus: [cyan]https://{domain}/prometheus/[/cyan]")
                 console.print(f"\n  Login: [cyan]{self.config.fleet_admin_user}[/cyan] / [dim](password you set)[/dim]")
+                
+                # Register dc-watchdog in service registry for fresh installs.
+                # auto_detect_services() can't find it (no container), so register
+                # explicitly so the landing page shows it in Available Products.
+                try:
+                    from cryptolabs_proxy.services import ServiceRegistry as _SR, DEFAULT_SERVICES as _DS
+                    registry = _SR(PROXY_CONFIG_DIR)
+                    detected = registry.auto_detect_services()
+                    for name, svc in detected.items():
+                        registry.services[name] = svc
+                    if "dc-watchdog" in _DS:
+                        registry.services["dc-watchdog"] = {
+                            **_DS["dc-watchdog"],
+                            "enabled": bool(self.config.components.dc_watchdog),
+                        }
+                    registry.save()
+                except Exception:
+                    pass  # Non-critical, landing page JS has fallback
             else:
                 console.print(f"[red]✗[/red] Failed to start proxy: {message}")
                 raise RuntimeError(f"Failed to start CryptoLabs Proxy: {message}")
