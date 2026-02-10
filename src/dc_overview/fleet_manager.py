@@ -2720,6 +2720,24 @@ echo "[+] Installation complete"
                 console.print(f"  Prometheus: [cyan]https://{domain}/prometheus/[/cyan]")
                 console.print(f"\n  Login: [cyan]{self.config.fleet_admin_user}[/cyan] / [dim](password you set)[/dim]")
                 
+                # Persist watchdog API key and verified flag to shared auth volume.
+                # The proxy requires both: 1) the key file and 2) the watchdog_verified
+                # flag. Without the verified flag, the proxy returns configured=false
+                # even with a valid key, blocking agent deployment from the UI.
+                watchdog_key = self.config.watchdog.api_key or ""
+                if watchdog_key:
+                    try:
+                        subprocess.run(
+                            ["docker", "exec", "cryptolabs-proxy", "sh", "-c",
+                             f"mkdir -p /data/auth && "
+                             f"echo -n '{watchdog_key}' > /data/auth/watchdog_api_key && "
+                             f"echo -n '1' > /data/auth/watchdog_verified"],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        console.print("[green]✓[/green] Watchdog API key synced to proxy")
+                    except Exception:
+                        pass
+                
                 # Register dc-watchdog in service registry for fresh installs.
                 # auto_detect_services() can't find it (no container), so register
                 # explicitly so the landing page shows it in Available Products.
@@ -2841,13 +2859,14 @@ echo "[+] Installation complete"
             console.print("[red]✗[/red] Proxy failed to become healthy")
             raise RuntimeError("CryptoLabs Proxy container failed to become healthy")
         
-        # Persist watchdog API key to shared auth volume so both proxy and dc-overview
-        # can read it (the env var alone doesn't persist across container recreates)
+        # Persist watchdog API key and verified flag to shared auth volume
         if watchdog_key:
             try:
                 subprocess.run(
                     ["docker", "exec", "cryptolabs-proxy", "sh", "-c",
-                     f"mkdir -p /data/auth && echo -n '{watchdog_key}' > /data/auth/watchdog_api_key"],
+                     f"mkdir -p /data/auth && "
+                     f"echo -n '{watchdog_key}' > /data/auth/watchdog_api_key && "
+                     f"echo -n '1' > /data/auth/watchdog_verified"],
                     capture_output=True, text=True, timeout=10
                 )
             except Exception:
@@ -3250,13 +3269,15 @@ echo "[+] Installation complete"
                     else:
                         console.print(f"[yellow]⚠[/yellow] {message}")
                 
-                # Persist watchdog API key to shared auth volume so dc-overview can read it
+                # Persist watchdog API key and verified flag to shared auth volume
                 watchdog_key = self.config.watchdog.api_key or ""
                 if watchdog_key:
                     try:
                         subprocess.run(
                             ["docker", "exec", "cryptolabs-proxy", "sh", "-c",
-                             f"mkdir -p /data/auth && echo -n '{watchdog_key}' > /data/auth/watchdog_api_key"],
+                             f"mkdir -p /data/auth && "
+                             f"echo -n '{watchdog_key}' > /data/auth/watchdog_api_key && "
+                             f"echo -n '1' > /data/auth/watchdog_verified"],
                             capture_output=True, text=True, timeout=10
                         )
                         console.print("[green]✓[/green] Watchdog API key synced to proxy")
