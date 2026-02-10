@@ -514,6 +514,20 @@ datasources:
         compose_cmd = _get_docker_compose_cmd()
         console.print(f"[dim]Using: {' '.join(compose_cmd)}[/dim]")
         
+        # Remove any pre-existing containers that would conflict with compose service names
+        # (e.g. dc-overview started by ipmi-monitor quickstart via docker run)
+        compose_services = ["dc-overview", "prometheus", "grafana"]
+        for svc in compose_services:
+            # Check if a container with this name exists but isn't managed by this compose project
+            result = subprocess.run(
+                ["docker", "inspect", svc, "--format", "{{.Id}}"],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                console.print(f"[dim]  Removing pre-existing {svc} container (will be recreated by compose)...[/dim]")
+                subprocess.run(["docker", "stop", svc], capture_output=True, text=True)
+                subprocess.run(["docker", "rm", "-f", svc], capture_output=True, text=True)
+        
         # Pull images first (docker compose writes progress to stderr which can look like errors)
         with Progress(SpinnerColumn(), TextColumn("Pulling images..."), console=console) as progress:
             progress.add_task("", total=None)
@@ -530,14 +544,18 @@ datasources:
         with Progress(SpinnerColumn(), TextColumn("Starting services..."), console=console) as progress:
             progress.add_task("", total=None)
             
-            subprocess.run(
+            up_result = subprocess.run(
                 compose_cmd + ["up", "-d"],
                 cwd=compose_dir,
                 capture_output=True,
                 text=True
             )
-            # Don't check return code - docker compose returns non-zero during normal operation
-            # We'll verify by checking if containers are actually running
+            
+            # If compose up failed, log the error for debugging
+            if up_result.returncode != 0:
+                error_msg = (up_result.stderr or up_result.stdout or '').strip()
+                if error_msg:
+                    console.print(f"[yellow]⚠[/yellow] [dim]docker compose up: {error_msg[:200]}[/dim]")
         
         # Wait for containers to be running (up to 10 minutes)
         # This ensures we don't proceed until services are actually ready
