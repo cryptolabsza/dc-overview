@@ -672,8 +672,8 @@ datasources:
         ipv4_address: {STATIC_IPS['dc-overview']}
 """ + ('''
     labels:
-      - "com.centurylinklabs.watchtower.enable=true"
-''' if getattr(self.config, 'enable_watchtower_all', False) else '') + """
+      com.centurylinklabs.watchtower.enable: "true"
+''' if getattr(self.config, 'enable_watchtower_all', False) else '') + f"""
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
@@ -697,8 +697,8 @@ datasources:
         ipv4_address: {STATIC_IPS['prometheus']}
 """ + ('''
     labels:
-      - "com.centurylinklabs.watchtower.enable=true"
-''' if getattr(self.config, 'enable_watchtower_all', False) else '') + """
+      com.centurylinklabs.watchtower.enable: "true"
+''' if getattr(self.config, 'enable_watchtower_all', False) else '') + f"""
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
@@ -724,7 +724,7 @@ datasources:
         ipv4_address: {STATIC_IPS['grafana']}
 """ + ('''
     labels:
-      - "com.centurylinklabs.watchtower.enable=true"
+      com.centurylinklabs.watchtower.enable: "true"
 ''' if getattr(self.config, 'enable_watchtower_all', False) else '') + """
 volumes:
   dc-data:
