@@ -1813,36 +1813,47 @@ class FleetWizard:
             border_style="green"
         ))
         
-        # Components table
+        # Components table — distinguish "will deploy" vs "already running" vs "not selected"
+        ipmi_already = self._detect_existing_ipmi()
+        proxy_running = bool(self._existing_proxy and self._existing_proxy.get("running"))
+        
         comp_table = Table(title="Components", show_header=False)
         comp_table.add_column("Component", style="cyan")
         comp_table.add_column("Status")
         
         comp_table.add_row(
             "DC Overview (Prometheus + Grafana)",
-            "[green]✓ Enabled[/green]" if self.config.components.dc_overview else "[dim]Disabled[/dim]"
+            "[green]✓ Will deploy[/green]" if self.config.components.dc_overview else "[dim]Not selected[/dim]"
         )
-        comp_table.add_row(
-            "IPMI Monitor",
-            "[green]✓ Enabled[/green]" if self.config.components.ipmi_monitor else "[dim]Disabled[/dim]"
-        )
-        # DC Watchdog
-        if self.config.components.dc_watchdog and self.config.watchdog.enabled:
-            watchdog_status = f"[green]✓ Enabled (max {self.config.watchdog.max_servers} servers)[/green]"
-        elif self.config.components.dc_watchdog:
-            watchdog_status = "[yellow]⚠ Enabled (no API key)[/yellow]"
+        if ipmi_already:
+            comp_table.add_row("IPMI Monitor", "[green]✓ Already running[/green]")
+        elif self.config.components.ipmi_monitor:
+            comp_table.add_row("IPMI Monitor", "[green]✓ Will deploy[/green]")
         else:
-            watchdog_status = "[dim]Disabled[/dim]"
+            comp_table.add_row("IPMI Monitor", "[dim]Not selected[/dim]")
+        
+        # DC Watchdog — check if already configured via proxy
+        watchdog_already = proxy_running and bool(getattr(self.config.watchdog, 'api_key', None))
+        if watchdog_already:
+            watchdog_status = "[green]✓ Already configured[/green]"
+        elif self.config.components.dc_watchdog and self.config.watchdog.enabled:
+            watchdog_status = f"[green]✓ Will deploy (max {self.config.watchdog.max_servers} servers)[/green]"
+        elif self.config.components.dc_watchdog:
+            watchdog_status = "[yellow]⚠ Selected (no API key)[/yellow]"
+        else:
+            watchdog_status = "[dim]Not selected[/dim]"
         comp_table.add_row("DC Watchdog (External Uptime)", watchdog_status)
         
         comp_table.add_row(
             "Vast.ai Integration",
-            "[green]✓ Enabled[/green]" if self.config.components.vast_exporter else "[dim]Disabled[/dim]"
+            "[green]✓ Will deploy[/green]" if self.config.components.vast_exporter else "[dim]Not selected[/dim]"
         )
         comp_table.add_row(
             "RunPod Integration",
-            f"[green]✓ Enabled ({len(self.config.runpod.api_keys)} account(s))[/green]" if self.config.components.runpod_exporter else "[dim]Disabled[/dim]"
+            f"[green]✓ Will deploy ({len(self.config.runpod.api_keys)} account(s))[/green]" if self.config.components.runpod_exporter else "[dim]Not selected[/dim]"
         )
+        if proxy_running:
+            comp_table.add_row("CryptoLabs Proxy", "[green]✓ Already running[/green]")
         
         console.print(comp_table)
         console.print()
