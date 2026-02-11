@@ -312,7 +312,7 @@ class FleetConfig:
         os.chmod(secrets_path, 0o600)
         
         # Set ownership to uid 1000 (dcuser in dc-overview container)
-        # This ensures the container can read the files even if quickstart runs as root
+        # This ensures the container can read the files even if setup runs as root
         try:
             os.chown(path, 1000, 1000)
             os.chown(secrets_path, 1000, 1000)

@@ -18,7 +18,7 @@ def _get_internal_api_token() -> str:
     """Get the shared secret for authenticating with the proxy's internal API.
     
     The token is passed via the INTERNAL_API_TOKEN environment variable, which is
-    set during container deployment by the quickstart scripts. This is intentionally
+    set during container deployment by the setup scripts. This is intentionally
     NOT read from a file on the shared volume to prevent token leakage.
     """
     return os.environ.get('INTERNAL_API_TOKEN', '')

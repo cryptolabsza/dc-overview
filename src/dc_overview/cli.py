@@ -14,7 +14,6 @@ from rich.table import Table
 from rich import print as rprint
 
 from . import __version__, get_version_info, get_image_tag
-from .wizard import SetupWizard
 from .service import ServiceManager
 from .exporters import ExporterInstaller
 from .deploy import DeployManager, deploy_wizard
@@ -27,7 +26,7 @@ from .fleet_config import FleetConfig
 
 console = Console()
 
-# Docker config directory (where quickstart puts files)
+# Docker config directory (where setup puts files)
 DOCKER_CONFIG_DIR = Path("/etc/dc-overview")
 
 
@@ -40,77 +39,13 @@ def main():
     Monitor your GPU datacenter with Prometheus, Grafana, and AI-powered insights.
     
     \b
-    INSTALLATION MODES:
-    
-    For MASTER/MONITORING server (runs Prometheus + Grafana):
-        dc-overview setup master
-    
-    For GPU WORKER nodes (runs exporters only):
-        dc-overview setup worker
-    
-    \b
     QUICK START:
     
-        dc-overview setup           # Interactive setup wizard
+        sudo dc-overview setup      # Interactive fleet setup (recommended)
         dc-overview install-exporters   # Install exporters on current machine
         dc-overview status          # Check service status
     """
     pass
-
-
-@click.command()
-@click.argument("mode", type=click.Choice(["master", "worker", "auto"]), default="auto")
-@click.option("--install-services", is_flag=True, help="Install as systemd services")
-@click.option("--config-dir", default=None, help="Configuration directory")
-@click.option("--non-interactive", is_flag=True, help="Use defaults, no prompts")
-def setup(mode: str, install_services: bool, config_dir: str, non_interactive: bool):
-    """
-    Run the interactive setup wizard.
-    
-    \b
-    MODES:
-        master  - Install Prometheus, Grafana, and configure scraping
-        worker  - Install exporters (node_exporter, dcgm-exporter, dc-exporter)
-        auto    - Auto-detect based on GPU presence
-    
-    \b
-    EXAMPLES:
-        sudo dc-overview setup master --install-services
-        sudo dc-overview setup worker --install-services
-    """
-    console.print()
-    console.print(Panel.fit(
-        "[bold cyan]DC Overview Setup Wizard[/bold cyan]\n"
-        f"[dim]Version {__version__}[/dim]",
-        border_style="cyan"
-    ))
-    console.print()
-    
-    wizard = SetupWizard(
-        mode=mode,
-        config_dir=config_dir,
-        non_interactive=non_interactive
-    )
-    
-    try:
-        config = wizard.run()
-        
-        if install_services:
-            if os.geteuid() != 0:
-                console.print("[red]Error:[/red] Installing services requires root. Run with sudo.")
-                sys.exit(1)
-            
-            service_mgr = ServiceManager(mode=config.get("mode", "worker"))
-            service_mgr.install_all(config)
-            console.print("\n[green]✓[/green] Services installed!")
-            console.print("  Start with: [cyan]sudo systemctl start dc-overview[/cyan]")
-        else:
-            console.print("\n[green]✓[/green] Setup complete!")
-            console.print("  Install services: [cyan]sudo dc-overview setup --install-services[/cyan]")
-            
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Setup cancelled.[/yellow]")
-        sys.exit(1)
 
 
 @click.command("install-exporters")
@@ -330,12 +265,12 @@ def stop():
     Stops the Docker containers defined in docker-compose.yml.
     """
     if not DOCKER_CONFIG_DIR.exists():
-        console.print("[red]Error:[/red] Config directory not found. Run quickstart first.")
+        console.print("[red]Error:[/red] Config directory not found. Run [cyan]sudo dc-overview setup[/cyan] first.")
         sys.exit(1)
     
     compose_file = DOCKER_CONFIG_DIR / "docker-compose.yml"
     if not compose_file.exists():
-        console.print("[red]Error:[/red] docker-compose.yml not found. Run quickstart first.")
+        console.print("[red]Error:[/red] docker-compose.yml not found. Run [cyan]sudo dc-overview setup[/cyan] first.")
         sys.exit(1)
     
     success, output = run_docker_compose_cmd("down")
@@ -353,12 +288,12 @@ def start():
     Starts the Docker containers defined in docker-compose.yml.
     """
     if not DOCKER_CONFIG_DIR.exists():
-        console.print("[red]Error:[/red] Config directory not found. Run quickstart first.")
+        console.print("[red]Error:[/red] Config directory not found. Run [cyan]sudo dc-overview setup[/cyan] first.")
         sys.exit(1)
     
     compose_file = DOCKER_CONFIG_DIR / "docker-compose.yml"
     if not compose_file.exists():
-        console.print("[red]Error:[/red] docker-compose.yml not found. Run quickstart first.")
+        console.print("[red]Error:[/red] docker-compose.yml not found. Run [cyan]sudo dc-overview setup[/cyan] first.")
         sys.exit(1)
     
     success, output = run_docker_compose_cmd("up -d")
@@ -411,7 +346,7 @@ def restart():
     Restart DC Overview containers.
     """
     if not DOCKER_CONFIG_DIR.exists():
-        console.print("[red]Error:[/red] Config directory not found. Run quickstart first.")
+        console.print("[red]Error:[/red] Config directory not found. Run [cyan]sudo dc-overview setup[/cyan] first.")
         sys.exit(1)
     
     success, output = run_docker_compose_cmd("restart")
@@ -680,10 +615,10 @@ def deploy_vast(api_key: str, status: bool):
 
 
 @click.command()
-@click.option("--legacy", is_flag=True, help="Use legacy quickstart (single machine)")
+@click.option("--legacy", is_flag=True, help="Use legacy single-machine setup (not recommended)")
 @click.option("--config", "-c", "config_file", type=click.Path(exists=True), help="YAML config file for automated setup")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompts (use with --config)")
-def quickstart(legacy: bool, config_file: str, yes: bool):
+def setup(legacy: bool, config_file: str, yes: bool):
     """
     ⚡ One-command setup - does everything!
     
@@ -694,13 +629,13 @@ def quickstart(legacy: bool, config_file: str, yes: bool):
         - Asks for all configuration ONCE at the start
         - Installs Docker, exporters, Prometheus, Grafana
         - Optionally installs IPMI Monitor
-        - Optionally adds Vast.ai integration
+        - Optionally adds Vast.ai / RunPod integration
         - Deploys to all workers via SSH
-        - Sets up HTTPS reverse proxy
+        - Sets up HTTPS reverse proxy with Fleet Management
     
     \b
     INFORMATION COLLECTED:
-        - Components to install (DC Overview, IPMI Monitor, Vast.ai)
+        - Components to install (DC Overview, IPMI Monitor, Vast.ai, RunPod)
         - Grafana/IPMI passwords
         - SSH credentials for worker deployment
         - BMC/IPMI credentials (if IPMI enabled)
@@ -709,9 +644,9 @@ def quickstart(legacy: bool, config_file: str, yes: bool):
     
     \b
     EXAMPLES:
-        sudo dc-overview quickstart                    # Interactive setup
-        sudo dc-overview quickstart -c config.yaml    # Automated from config file
-        sudo dc-overview quickstart -c config.yaml -y # Skip confirmations
+        sudo dc-overview setup                    # Interactive setup
+        sudo dc-overview setup -c config.yaml     # Automated from config file
+        sudo dc-overview setup -c config.yaml -y  # Skip confirmations
     """
     if legacy:
         run_quickstart()
@@ -720,10 +655,10 @@ def quickstart(legacy: bool, config_file: str, yes: bool):
 
 
 def run_fleet_quickstart(config_file: str = None, auto_confirm: bool = False):
-    """Run the new unified fleet quickstart."""
+    """Run the fleet setup (collects config then deploys everything)."""
     if os.geteuid() != 0:
         console.print("[red]Error:[/red] This command requires root privileges.")
-        console.print("Run with: [cyan]sudo dc-overview quickstart[/cyan]")
+        console.print("Run with: [cyan]sudo dc-overview setup[/cyan]")
         sys.exit(1)
     
     try:
@@ -859,7 +794,7 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     ssl_mode = ssl.get('mode', 'self_signed')
     config.ssl.mode = SSLMode.LETSENCRYPT if ssl_mode == 'letsencrypt' else SSLMode.SELF_SIGNED
     
-    # Auto-detect existing cryptolabs-proxy (e.g., set up by ipmi-monitor quickstart)
+    # Auto-detect existing cryptolabs-proxy (e.g., set up by ipmi-monitor setup)
     # This prevents dc-overview from deploying a conflicting proxy
     config.ssl.use_existing_proxy = ssl.get('use_existing_proxy', False)
     if not config.ssl.use_existing_proxy:
@@ -1240,7 +1175,7 @@ def reset(exporters: bool, monitoring: bool, ipmi: bool, proxy: bool,
     """
     Reset/remove DC Overview components for re-testing.
     
-    Useful for cleaning up a dev fleet before re-running quickstart.
+    Useful for cleaning up a dev fleet before re-running setup.
     
     \b
     COMPONENTS:
@@ -1364,7 +1299,7 @@ def reset(exporters: bool, monitoring: bool, ipmi: bool, proxy: bool,
         _remove_containers(["cryptolabs-proxy"])
     
     console.print("\n[green]✓[/green] Reset complete!")
-    console.print("  Re-run: [cyan]sudo dc-overview quickstart[/cyan]")
+    console.print("  Re-run: [cyan]sudo dc-overview setup[/cyan]")
 
 
 def _remove_exporter_from_worker(worker: str, ssh_key: str, default_port: int):
@@ -1512,7 +1447,7 @@ def refresh_dashboards(branch: str):
     # Load config to get Grafana password
     config_path = DOCKER_CONFIG_DIR / "fleet-config.yaml"
     if not config_path.exists():
-        console.print("[red]✗[/red] Fleet config not found. Run quickstart first.")
+        console.print("[red]✗[/red] Fleet config not found. Run [cyan]sudo dc-overview setup[/cyan] first.")
         return
     
     try:
@@ -1573,9 +1508,8 @@ def refresh_dashboards(branch: str):
 
 
 # Register commands
-main.add_command(quickstart)
-main.add_command(add_machine)
 main.add_command(setup)
+main.add_command(add_machine)
 main.add_command(install_exporters)
 main.add_command(status)
 main.add_command(logs)

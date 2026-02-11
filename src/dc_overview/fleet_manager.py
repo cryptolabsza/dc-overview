@@ -515,7 +515,7 @@ datasources:
         console.print(f"[dim]Using: {' '.join(compose_cmd)}[/dim]")
         
         # Remove any pre-existing containers that would conflict with compose service names
-        # (e.g. dc-overview started by ipmi-monitor quickstart via docker run)
+        # (e.g. dc-overview started by ipmi-monitor setup via docker run)
         compose_services = ["dc-overview", "prometheus", "grafana"]
         for svc in compose_services:
             # Check if a container with this name exists but isn't managed by this compose project
@@ -1264,7 +1264,7 @@ echo "Exporters installed successfully"
         
         This API call is safe because:
         1. Grafana is bound to 127.0.0.1:3000 (not externally accessible)
-        2. Only called during local quickstart setup
+        2. Only called during local setup
         3. Uses already-configured admin credentials
         """
         # Check if home dashboard is configured

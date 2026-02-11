@@ -3,7 +3,7 @@ DC Overview QuickStart - One command setup for everything
 
 The client runs:
     pip install dc-overview
-    sudo dc-overview quickstart
+    sudo dc-overview setup
 
 And answers a few questions. That's it.
 """
@@ -45,7 +45,7 @@ def check_root():
     """Check if running as root."""
     if os.geteuid() != 0:
         console.print("[red]Error:[/red] This command requires root privileges.")
-        console.print("Run with: [cyan]sudo dc-overview quickstart[/cyan]")
+        console.print("Run with: [cyan]sudo dc-overview setup[/cyan]")
         sys.exit(1)
 
 
@@ -1213,7 +1213,7 @@ def _set_grafana_home_dashboard(grafana_pass: str, dashboard_uid: str):
     
     This API call is safe because:
     1. Grafana is bound to 127.0.0.1:3000 (not externally accessible)
-    2. Only called during local quickstart setup
+    2. Only called during local setup
     3. Uses already-configured admin credentials
     """
     import urllib.request
@@ -1578,7 +1578,7 @@ def setup_master_native():
     """Set up master natively (no Docker)."""
     console.print("[yellow]Native installation requires manual setup.[/yellow]")
     console.print("Install Docker for automatic setup: [cyan]curl -fsSL https://get.docker.com | sh[/cyan]")
-    console.print("Then run: [cyan]sudo dc-overview quickstart[/cyan] again")
+    console.print("Then run: [cyan]sudo dc-overview setup[/cyan] again")
 
 
 def add_machines_wizard():
@@ -1911,7 +1911,7 @@ def setup_remote_machine(ip: str, name: str):
         console.print(f"[green]✓[/green] Exporters installed on {name}")
     else:
         console.print(f"[yellow]⚠[/yellow] Could not install automatically. Install manually on {name}:")
-        console.print(f"  [cyan]pip install dc-overview && sudo dc-overview quickstart[/cyan]")
+        console.print(f"  [cyan]pip install dc-overview && sudo dc-overview setup[/cyan]")
 
 
 def update_prometheus_targets(machines: List[Dict[str, str]]):

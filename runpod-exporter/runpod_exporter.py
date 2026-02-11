@@ -767,32 +767,46 @@ Examples:
     args = parser.parse_args()
     
     # Get API keys from arguments or environment
-    api_keys = []
+    cli_env_keys = []
     if args.api_keys:
-        api_keys = parse_api_keys(args.api_keys)
+        cli_env_keys = parse_api_keys(args.api_keys)
     elif os.environ.get('RUNPOD_API_KEYS'):
         keys_str = os.environ['RUNPOD_API_KEYS']
         key_list = [k.strip() for k in keys_str.split(',') if k.strip()]
-        api_keys = parse_api_keys(key_list)
+        cli_env_keys = parse_api_keys(key_list)
     elif os.environ.get('RUNPOD_API_KEY'):
-        api_keys = [('default', os.environ['RUNPOD_API_KEY'])]
+        cli_env_keys = [('default', os.environ['RUNPOD_API_KEY'])]
     
     # Create collector (may start empty - accounts can be added via API)
-    collector = MetricsCollector(api_keys)
+    # We start empty and populate below based on the right source
+    collector = MetricsCollector([])
     collector.cache_ttl = args.interval
     
     # Create account manager (handles persistence + API)
     account_manager = AccountManager(collector)
     
-    # If no keys from env/args, try loading from config file
-    if not api_keys:
-        file_keys = account_manager.load_from_file()
-        if file_keys:
-            api_keys = file_keys
-            collector.clients = [
-                RunPodClient(api_key, account_name)
-                for account_name, api_key in file_keys
-            ]
+    # Determine which keys to use:
+    # 1. Always prefer accounts.json if it exists (it contains accounts added
+    #    via the management API and should not be overwritten by CLI/env args)
+    # 2. Fall back to CLI/env args only when no config file exists (first run)
+    api_keys = []
+    file_keys = account_manager.load_from_file()
+    if file_keys:
+        api_keys = file_keys
+        collector.clients = [
+            RunPodClient(api_key, account_name)
+            for account_name, api_key in file_keys
+        ]
+        logger.info(f"Loaded {len(file_keys)} account(s) from persistent config")
+    elif cli_env_keys:
+        api_keys = cli_env_keys
+        collector.clients = [
+            RunPodClient(api_key, account_name)
+            for account_name, api_key in cli_env_keys
+        ]
+        # Save CLI/env keys to config file for future restarts
+        account_manager._save()
+        logger.info(f"Initialized {len(cli_env_keys)} account(s) from CLI/environment args")
     
     if not api_keys:
         logger.warning("No API keys configured. Add accounts via the management API:")
@@ -804,9 +818,6 @@ Examples:
         for name, key in api_keys:
             masked = key[:6] + '...' + key[-4:] if len(key) > 14 else '***'
             logger.info(f"  Account '{name}': key={masked}")
-        
-        # Save initial keys to config file (so they persist across restarts)
-        account_manager._save()
         
         # Initial connectivity check
         logger.info("Performing initial API connectivity check...")

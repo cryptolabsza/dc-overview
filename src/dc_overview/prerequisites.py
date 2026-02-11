@@ -66,7 +66,7 @@ class PrerequisitesInstaller:
         """Check if running as root."""
         if not self.is_root:
             console.print("[red]Error:[/red] This command requires root privileges.")
-            console.print("Run with: [cyan]sudo dc-overview quickstart[/cyan]")
+            console.print("Run with: [cyan]sudo dc-overview setup[/cyan]")
             return False
         return True
     

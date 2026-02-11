@@ -11,7 +11,7 @@ A comprehensive monitoring solution for GPU datacenters with:
 
 Quick Start:
     pip install dc-overview
-    sudo dc-overview quickstart
+    sudo dc-overview setup
 """
 
 __version__ = "1.1.0"

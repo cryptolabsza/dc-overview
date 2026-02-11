@@ -724,7 +724,7 @@ def api_add_server():
         ssh_password=data.get('ssh_password') or None
     )
     
-    # Allow setting watchdog agent status (e.g., from quickstart after deploying agents)
+    # Allow setting watchdog agent status (e.g., from setup after deploying agents)
     if data.get('watchdog_agent_installed'):
         server.watchdog_agent_installed = True
         server.watchdog_agent_enabled = True
