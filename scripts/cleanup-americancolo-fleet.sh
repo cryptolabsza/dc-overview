@@ -177,6 +177,13 @@ ssh_master "pip uninstall ipmi-monitor -y --break-system-packages 2>/dev/null ||
 ssh_master "pip uninstall cryptolabs-proxy -y --break-system-packages 2>/dev/null || true"
 ssh_master "pip cache purge 2>/dev/null || true"
 
+# Remove pipx installations (these shadow pip installs via ~/.local/bin)
+echo "  Removing pipx installations..."
+ssh_master "pipx uninstall dc-overview 2>/dev/null && echo '    pipx: removed dc-overview' || true"
+ssh_master "pipx uninstall ipmi-monitor 2>/dev/null && echo '    pipx: removed ipmi-monitor' || true"
+ssh_master "pipx uninstall cryptolabs-proxy 2>/dev/null && echo '    pipx: removed cryptolabs-proxy' || true"
+ssh_master "rm -f /root/.local/bin/dc-overview /root/.local/bin/ipmi-monitor /root/.local/bin/cryptolabs-proxy 2>/dev/null || true"
+
 # Remove dc-overview related volumes explicitly
 echo "  Removing monitoring volumes..."
 REMOVE_VOLUMES="prometheus-data grafana-data ipmi-monitor-data ipmi_data dc-overview-data fleet-auth-data cryptolabs-proxy-data root_grafana-data root_prometheus-data ipmi-monitor_ipmi-data ipmi-monitor_ipmi_data dc-overview_grafana-data dc-overview_prometheus-data"
