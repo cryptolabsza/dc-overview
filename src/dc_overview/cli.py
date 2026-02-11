@@ -967,14 +967,16 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     # Auto-updates: by default only cryptolabs-proxy; when True, all components get watchtower label
     config.enable_watchtower_all = data.get('enable_watchtower_all', False)
     
-    # Security / Firewall
+    # Security / Firewall — skip if proxy is already running
     security = data.get('security') or {}
     config.security.ufw_enabled = security.get('ufw_enabled', True)
+    if config.ssl.use_existing_proxy:
+        config.security.ufw_enabled = False
     config.security.ufw_ports = security.get('ufw_ports', [22, 80, 443])
     config.security.ufw_additional_ports = security.get('ufw_additional_ports', [])
     config.security.ufw_udp_ports = security.get('ufw_udp_ports', [])
     
-    # Servers
+    # Servers from config file
     for srv in data.get('servers', []):
         config.add_server(
             name=srv.get('name', f"server-{len(config.servers)+1}"),
@@ -983,6 +985,34 @@ def load_config_from_file(config_file: str) -> FleetConfig:
             bmc_user=srv.get('bmc_user'),
             bmc_password=srv.get('bmc_password'),
         )
+    
+    # If no servers in config file, try to import from existing IPMI Monitor
+    if not config.servers:
+        ipmi_config_dir = Path("/etc/ipmi-monitor")
+        if ipmi_config_dir.exists():
+            try:
+                import subprocess as _sp3
+                _r = _sp3.run(
+                    ["docker", "inspect", "ipmi-monitor"],
+                    capture_output=True, timeout=5
+                )
+                if _r.returncode == 0:
+                    from .quickstart import import_ipmi_config
+                    _ipmi_data = import_ipmi_config({
+                        "config_dir": ipmi_config_dir,
+                        "db_path": ipmi_config_dir / "data" / "ipmi_monitor.db",
+                        "ssh_keys_dir": ipmi_config_dir / "ssh_keys"
+                    })
+                    for srv in _ipmi_data.get("servers", []):
+                        config.add_server(
+                            name=srv.get("name", ""),
+                            server_ip=srv.get("server_ip"),
+                            bmc_ip=srv.get("bmc_ip"),
+                        )
+                    if config.servers:
+                        console.print(f"[green]✓[/green] Imported {len(config.servers)} servers from IPMI Monitor")
+            except Exception:
+                pass
     
     console.print(f"[green]✓[/green] Loaded configuration from {config_file}")
     

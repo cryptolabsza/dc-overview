@@ -349,14 +349,34 @@ class FleetWizard:
                 self.config.fleet_admin_pass = secrets.token_urlsafe(12)
                 console.print(f"[dim]Generated password: {self.config.fleet_admin_pass}[/dim]")
         
-        # Grafana password (optional - defaults to fleet admin password)
-        console.print("\n[bold]Grafana Dashboard[/bold]")
-        console.print("[dim]Press Enter to use fleet admin password[/dim]")
-        grafana_pass = questionary.password(
-            "Grafana admin password (optional):",
-            style=custom_style
-        ).ask()
-        self.config.grafana.admin_password = grafana_pass if grafana_pass else self.config.fleet_admin_pass
+        # Grafana password — detect from running container, else prompt
+        grafana_pass = None
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", "grafana", "--format",
+                 "{{range .Config.Env}}{{println .}}{{end}}"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    if line.startswith('GF_SECURITY_ADMIN_PASSWORD='):
+                        grafana_pass = line.split('=', 1)[1]
+                        break
+        except Exception:
+            pass
+        
+        if grafana_pass:
+            console.print(f"\n[bold]Grafana Dashboard[/bold]")
+            console.print(f"[green]✓[/green] Grafana password: reused from existing Grafana")
+            self.config.grafana.admin_password = grafana_pass
+        else:
+            console.print("\n[bold]Grafana Dashboard[/bold]")
+            console.print("[dim]Press Enter to use fleet admin password[/dim]")
+            grafana_pass = questionary.password(
+                "Grafana admin password (optional):",
+                style=custom_style
+            ).ask()
+            self.config.grafana.admin_password = grafana_pass if grafana_pass else self.config.fleet_admin_pass
         
         # Grafana home dashboard
         home_dashboard_choices = [
@@ -1137,9 +1157,10 @@ class FleetWizard:
             border_style="blue"
         ))
 
-        # If IPMI Monitor is selected and already installed, offer to import
+        # If IPMI Monitor is already installed, offer to import servers
+        # regardless of whether it was selected as a component (servers exist either way)
         imported_servers = []
-        if self.config.components.ipmi_monitor and self._detect_existing_ipmi():
+        if self._detect_existing_ipmi():
             console.print("[bold green]✓ Detecting existing IPMI Monitor data...[/bold green]\n")
 
             servers, ssh_keys = self._import_ipmi_data()
@@ -1701,6 +1722,18 @@ class FleetWizard:
     
     def _collect_security_config(self):
         """Collect firewall/UFW configuration."""
+        # Skip UFW config if proxy is already running (firewall already configured)
+        existing_proxy = self._existing_proxy or self._detect_existing_proxy()
+        if existing_proxy and existing_proxy.get("running"):
+            console.print(Panel(
+                "[bold]Step 5: Firewall Configuration[/bold]\n\n"
+                "[green]✓[/green] Skipped — CryptoLabs Proxy is already running with firewall configured.",
+                border_style="blue"
+            ))
+            self.config.security.ufw_enabled = False
+            console.print()
+            return
+        
         console.print(Panel(
             "[bold]Step 5: Firewall Configuration[/bold]\n\n"
             "Configure UFW firewall to secure this server.",
