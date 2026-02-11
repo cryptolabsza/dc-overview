@@ -36,7 +36,9 @@ services:
       retries: 3
       start_period: 15s
     labels:
+{% if enable_watchtower_all %}
       - "com.centurylinklabs.watchtower.enable=true"
+{% endif %}
     networks:
       - cryptolabs
 
@@ -68,7 +70,9 @@ services:
       timeout: 10s
       retries: 3
     labels:
+{% if enable_watchtower_all %}
       - "com.centurylinklabs.watchtower.enable=true"
+{% endif %}
     networks:
       - cryptolabs
 
@@ -112,37 +116,20 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+    start_period: 30s
     labels:
+{% if enable_watchtower_all %}
       - "com.centurylinklabs.watchtower.enable=true"
+{% endif %}
     networks:
       - cryptolabs
 
-{% if enable_watchtower %}
-  # ===========================================================================
-  # Watchtower - Auto-updates
-  # ===========================================================================
-  watchtower:
-    image: containrrr/watchtower
-    container_name: watchtower
-    restart: unless-stopped
-    environment:
-      - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_POLL_INTERVAL=300
-      - WATCHTOWER_LABEL_ENABLE=true
-      - WATCHTOWER_INCLUDE_STOPPED=true
-      - WATCHTOWER_ROLLING_RESTART=true
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    networks:
-      - cryptolabs
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
-{% endif %}
+{# cryptolabs-proxy always has watchtower label; cryptolabs-watchtower deployed when proxy enabled #}
 
 {% if enable_proxy %}
   # ===========================================================================
   # CryptoLabs Proxy - Unified Reverse Proxy with SSL
+  # Always has watchtower label (primary auto-update target)
   # ===========================================================================
   cryptolabs-proxy:
     image: ghcr.io/cryptolabsza/cryptolabs-proxy:{{ proxy_tag | default('latest') }}
@@ -171,6 +158,24 @@ services:
       - "com.centurylinklabs.watchtower.enable=true"
     networks:
       - cryptolabs
+
+  # cryptolabs-watchtower - auto-updates cryptolabs-proxy (default) and other labeled containers when opted in
+  cryptolabs-watchtower:
+    image: containrrr/watchtower
+    container_name: cryptolabs-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=300
+      - WATCHTOWER_LABEL_ENABLE=true
+      - WATCHTOWER_INCLUDE_STOPPED=true
+      - WATCHTOWER_ROLLING_RESTART=true
+    networks:
+      - cryptolabs
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
 {% endif %}
 
 {% if vast_enabled %}
@@ -187,7 +192,9 @@ services:
       - "-api-key"
       - "${VAST_API_KEY}"
     labels:
+{% if enable_watchtower_all %}
       - "com.centurylinklabs.watchtower.enable=true"
+{% endif %}
     networks:
       - cryptolabs
 {% endif %}

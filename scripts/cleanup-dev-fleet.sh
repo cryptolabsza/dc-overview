@@ -33,11 +33,13 @@ echo -e "${YELLOW}=== DC Overview Dev Fleet Cleanup ===${NC}"
 echo ""
 
 # DC Overview containers to remove (including certbot from ipmi-monitor standalone)
-# Note: watchtower is NOT removed as it may be shared with minecraft or other services
-DC_CONTAINERS="cryptolabs-proxy dc-overview ipmi-monitor grafana prometheus vastai-exporter runpod-exporter certbot watchtower"
+# Note: watchtower is NOT removed - it is for minecraft and other non-dc-overview services
+# cryptolabs-watchtower IS removed - deployed by cryptolabs-proxy for auto-updates
+DC_CONTAINERS="cryptolabs-proxy dc-overview ipmi-monitor grafana prometheus vastai-exporter runpod-exporter certbot cryptolabs-watchtower"
 
 # Container name patterns for wildcard matching (catches docker-compose prefixed names)
-CONTAINER_PATTERNS="grafana prometheus ipmi-monitor dc-overview cryptolabs-proxy vastai-exporter runpod-exporter certbot"
+# Excludes "watchtower" - that's for minecraft; we remove "cryptolabs-watchtower" via DC_CONTAINERS
+CONTAINER_PATTERNS="grafana prometheus ipmi-monitor dc-overview cryptolabs-proxy vastai-exporter runpod-exporter certbot cryptolabs-watchtower"
 
 # DC Overview volumes to remove (all possible naming conventions)
 DC_VOLUMES="dc-overview-data ipmi-monitor-data ipmi_data grafana-data prometheus-data dc-overview_grafana-data dc-overview_prometheus-data fleet-auth-data cryptolabs-proxy-data root_grafana-data root_prometheus-data ipmi-monitor_ipmi-data ipmi-monitor_ipmi_data"
@@ -268,7 +270,7 @@ echo -e "  ${GREEN}•${NC} All nodes:"
 echo -e "      - DC Watchdog agent removed (${DC_WATCHDOG_DIRS})"
 echo ""
 echo -e "  ${YELLOW}•${NC} Preserved:"
-echo -e "      - minecraft, watchtower (if not dc-overview related)"
+echo -e "      - minecraft, watchtower (separate from cryptolabs-watchtower)"
 echo ""
 echo -e "${CYAN}To redeploy dc-overview:${NC}"
 echo ""

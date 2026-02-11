@@ -298,7 +298,7 @@ def logs(follow: bool, lines: int, service: str):
         dc-overview logs grafana -n 50   # Last 50 lines of Grafana logs
     """
     # Docker containers
-    docker_services = ["dc-overview", "grafana", "prometheus", "watchtower", "cryptolabs-proxy"]
+    docker_services = ["dc-overview", "grafana", "prometheus", "cryptolabs-proxy"]
     
     if service in docker_services:
         cmd = ["docker", "logs"]
@@ -963,6 +963,9 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     config.watchdog.agent_use_mtr = watchdog.get('agent_use_mtr', True)
     # API key: use watchdog.api_key, or fallback to ipmi_monitor.ai_license_key
     config.watchdog.api_key = watchdog.get('api_key') or ipmi.get('ai_license_key')
+    
+    # Auto-updates: by default only cryptolabs-proxy; when True, all components get watchtower label
+    config.enable_watchtower_all = data.get('enable_watchtower_all', False)
     
     # Security / Firewall
     security = data.get('security') or {}

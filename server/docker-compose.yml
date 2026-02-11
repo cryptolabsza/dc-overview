@@ -61,16 +61,7 @@ services:
       - "127.0.0.1:8622:8622"
     command: ["-api-key", "${VAST_API_KEY}"]
 
-  watchtower:
-    image: containrrr/watchtower
-    container_name: watchtower
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_POLL_INTERVAL=86400
-    command: --label-enable
+  # Auto-updates: cryptolabs-proxy deploys cryptolabs-watchtower when proxy is configured
 
 volumes:
   grafana-data:

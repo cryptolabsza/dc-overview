@@ -1608,6 +1608,16 @@ class FleetWizard:
             self.config.ssl.external_port = 443
             self.config.ssl.use_existing_proxy = True
             console.print("\n[dim]No additional SSL configuration needed.[/dim]")
+            # Auto-updates: ask even when using existing proxy
+            console.print("\n[bold]Auto-Updates[/bold]")
+            console.print("[dim]By default, only cryptolabs-proxy is auto-updated.[/dim]")
+            self.config.enable_watchtower_all = questionary.confirm(
+                "Enable auto-updates for all components (dc-overview, prometheus, grafana, etc.)?",
+                default=False,
+                style=custom_style
+            ).ask()
+            if self.config.enable_watchtower_all is None:
+                self.config.enable_watchtower_all = False
             console.print()
             return
         
@@ -1673,6 +1683,17 @@ class FleetWizard:
             console.print(f"[dim]Grafana will be configured for external port {external_port}[/dim]")
         else:
             self.config.ssl.external_port = 443
+        
+        # Auto-updates: by default only cryptolabs-proxy; opt-in for all components
+        console.print("\n[bold]Auto-Updates[/bold]")
+        console.print("[dim]By default, only cryptolabs-proxy (reverse proxy + fleet manager) is auto-updated.[/dim]")
+        self.config.enable_watchtower_all = questionary.confirm(
+            "Enable auto-updates for all components (dc-overview, prometheus, grafana, etc.)?",
+            default=False,
+            style=custom_style
+        ).ask()
+        if self.config.enable_watchtower_all is None:
+            self.config.enable_watchtower_all = False
         
         console.print()
     

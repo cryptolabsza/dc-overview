@@ -68,17 +68,6 @@ services:
       - "{{ vast_api_key }}"
 {% endif %}
 
-  watchtower:
-    image: containrrr/watchtower
-    container_name: watchtower
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_POLL_INTERVAL=86400
-    command: --label-enable
-
 volumes:
   prometheus-data:
   grafana-data:

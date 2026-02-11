@@ -366,11 +366,12 @@ DC Overview and IPMI Monitor share infrastructure and auto-detect each other's c
 ```
 
 Shared components:
-- **cryptolabs-proxy** - Unified authentication
+- **cryptolabs-proxy** - Unified authentication, reverse proxy, and **cryptolabs-watchtower** for auto-updates
 - **cryptolabs** Docker network - Service communication
 - **Server list** - Imported automatically
 - **SSH keys** - Shared between services
-- **Watchtower** - Auto-updates for all containers
+
+**cryptolabs-watchtower** is deployed by cryptolabs-proxy when the proxy is configured. It primarily auto-updates cryptolabs-proxy (the main entry point); other labeled containers (dc-overview, prometheus, grafana, ipmi-monitor, etc.) can also be updated. Fleet Manager UI has manual update for services.
 
 ### Cross-Tool Config Auto-Detection
 

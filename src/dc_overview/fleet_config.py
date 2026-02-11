@@ -249,6 +249,9 @@ class FleetConfig:
     config_dir: Path = field(default_factory=lambda: Path("/etc/dc-overview"))
     data_dir: Path = field(default_factory=lambda: Path("/var/lib/dc-overview"))
     
+    # Auto-updates: by default only cryptolabs-proxy; when True, all components get watchtower label
+    enable_watchtower_all: bool = False
+    
     # Internal state
     master_ip: Optional[str] = None
     ssh_key_generated: bool = False
@@ -369,6 +372,7 @@ class FleetConfig:
                 "enabled": self.runpod.enabled,
                 "port": self.runpod.port,
             },
+            "enable_watchtower_all": self.enable_watchtower_all,
             "watchdog": {
                 # Note: 'enabled' is controlled by components.dc_watchdog, not here
                 "server_url": self.watchdog.server_url,
@@ -457,6 +461,7 @@ class FleetConfig:
             config.components.dc_watchdog = comp.get("dc_watchdog", False)
             config.components.vast_exporter = comp.get("vast_exporter", False)
             config.components.runpod_exporter = comp.get("runpod_exporter", False)
+            config.enable_watchtower_all = data.get("enable_watchtower_all", False)
             
             # SSL
             ssl = data.get("ssl") or {}

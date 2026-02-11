@@ -877,26 +877,22 @@ def setup_master_docker():
                     style=custom_style
                 ).ask() or "443")
     
-    # Ask about watchtower (skip if already running)
-    watchtower_running = False
-    try:
-        result = subprocess.run(
-            ["docker", "inspect", "watchtower", "--format", "{{.State.Status}}"],
-            capture_output=True, text=True
-        )
-        watchtower_running = result.returncode == 0 and result.stdout.strip() == "running"
-    except Exception:
-        pass
-    
-    if watchtower_running:
-        console.print("[green]✓[/green] Watchtower already running")
-        enable_watchtower = False  # Don't create another
-    else:
-        enable_watchtower = questionary.confirm(
-            "Enable automatic updates (Watchtower)?",
-            default=True,
+    # Auto-updates: by default only cryptolabs-proxy (reverse proxy + fleet manager) is auto-updated
+    enable_watchtower_all = False
+    if setup_proxy or skip_proxy_questions:
+        console.print("\n[bold]Auto-Updates[/bold]\n")
+        console.print("[dim]By default, only cryptolabs-proxy (reverse proxy + fleet manager) is auto-updated.[/dim]")
+        enable_watchtower_all = questionary.confirm(
+            "Enable auto-updates for all components (dc-overview, prometheus, grafana, etc.)?",
+            default=False,
             style=custom_style
         ).ask()
+        if enable_watchtower_all is None:
+            enable_watchtower_all = False
+        if enable_watchtower_all:
+            console.print("[green]✓[/green] Auto-updates enabled for all components")
+        else:
+            console.print("[green]✓[/green] Auto-updates: cryptolabs-proxy only (Fleet Manager has manual update for others)")
     
     # Generate secret key
     secret_key = secrets.token_hex(32)
@@ -926,7 +922,7 @@ GRAFANA_PASSWORD={grafana_pass}
             proxy_tag="latest",
             dc_port=dc_port,
             enable_proxy=start_new_proxy,
-            enable_watchtower=enable_watchtower,
+            enable_watchtower_all=enable_watchtower_all,
             use_letsencrypt=use_letsencrypt,
             external_port=external_port,
             ipmi_enabled=ipmi_enabled,
@@ -1174,7 +1170,6 @@ datasources:
         "domain": domain,
         "external_port": external_port,
         "ipmi_enabled": ipmi_enabled,
-        "watchtower_enabled": enable_watchtower,
         "imported_servers": len(imported_servers) if imported_servers else 0
     }
     (config_dir / "config.json").write_text(json.dumps(config_info, indent=2))

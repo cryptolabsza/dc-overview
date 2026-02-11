@@ -670,9 +670,10 @@ datasources:
     networks:
       cryptolabs:
         ipv4_address: {STATIC_IPS['dc-overview']}
+""" + ('''
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
-
+''' if getattr(self.config, 'enable_watchtower_all', False) else '') + """
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
@@ -694,9 +695,10 @@ datasources:
     networks:
       cryptolabs:
         ipv4_address: {STATIC_IPS['prometheus']}
+""" + ('''
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
-
+''' if getattr(self.config, 'enable_watchtower_all', False) else '') + """
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
@@ -720,9 +722,10 @@ datasources:
     networks:
       cryptolabs:
         ipv4_address: {STATIC_IPS['grafana']}
+""" + ('''
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
-
+''' if getattr(self.config, 'enable_watchtower_all', False) else '') + """
 volumes:
   dc-data:
   prometheus-data:
@@ -1864,9 +1867,9 @@ echo "Exporters installed successfully"
             "--ip", STATIC_IPS["ipmi-monitor"],
             "-v", "ipmi-monitor-data:/app/data",
             "-v", f"{ipmi_config_dir}/servers.yaml:/app/config/servers.yaml:ro",
-        ] + ssh_keys_mount + [
-            "--label", "com.centurylinklabs.watchtower.enable=true",
-        ] + env_vars + [
+        ] + ssh_keys_mount + (
+            ["--label", "com.centurylinklabs.watchtower.enable=true"] if getattr(self.config, 'enable_watchtower_all', False) else []
+        ) + env_vars + [
             "ghcr.io/cryptolabsza/ipmi-monitor:dev"
         ]
         
@@ -2195,10 +2198,9 @@ except Exception as e:
             keys_csv = ",".join(f"{k.name}:{k.key}" for k in api_keys)
             cmd.extend(["-e", f"VASTAI_API_KEYS={keys_csv}"])
         
-        cmd.extend([
-            "--label", "com.centurylinklabs.watchtower.enable=true",
-            "ghcr.io/cryptolabsza/vastai-exporter:latest"
-        ])
+        if getattr(self.config, 'enable_watchtower_all', False):
+            cmd.extend(["--label", "com.centurylinklabs.watchtower.enable=true"])
+        cmd.append("ghcr.io/cryptolabsza/vastai-exporter:latest")
         
         result = subprocess.run(cmd, capture_output=True, text=True)
         
@@ -2277,10 +2279,9 @@ except Exception as e:
             keys_csv = ",".join(f"{k.name}:{k.key}" for k in api_keys)
             cmd.extend(["-e", f"RUNPOD_API_KEYS={keys_csv}"])
         
-        cmd.extend([
-            "--label", "com.centurylinklabs.watchtower.enable=true",
-            "ghcr.io/cryptolabsza/runpod-exporter:latest"
-        ])
+        if getattr(self.config, 'enable_watchtower_all', False):
+            cmd.extend(["--label", "com.centurylinklabs.watchtower.enable=true"])
+        cmd.append("ghcr.io/cryptolabsza/runpod-exporter:latest")
         
         result = subprocess.run(cmd, capture_output=True, text=True)
         
@@ -2924,7 +2925,7 @@ echo "[+] Installation complete"
             "--health-start-period", "10s",
             "--network", DOCKER_NETWORK_NAME,
             "--ip", STATIC_IPS["dc-overview"],
-            "--label", "com.centurylinklabs.watchtower.enable=true",
+        ] + (["--label", "com.centurylinklabs.watchtower.enable=true"] if getattr(self.config, 'enable_watchtower_all', False) else []) + [
             "ghcr.io/cryptolabsza/dc-overview:dev"
         ]
         
