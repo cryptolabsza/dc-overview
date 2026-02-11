@@ -24,7 +24,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 console = Console()
 
 # Latest versions (defaults, used as fallback when GitHub API is rate limited)
-NODE_EXPORTER_VERSION = "1.8.2"
+NODE_EXPORTER_VERSION = "1.10.2"
 DC_EXPORTER_RS_VERSION = "0.2.5"
 DCGM_EXPORTER_VERSION = "3.3.8-3.6.0"
 

@@ -37,9 +37,9 @@ def install_exporter_remote(server, exporter_name):
             script = """
             if ! systemctl is-active node_exporter >/dev/null 2>&1; then
                 cd /tmp
-                curl -sLO https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz
-                tar xzf node_exporter-1.7.0.linux-amd64.tar.gz
-                cp node_exporter-1.7.0.linux-amd64/node_exporter /usr/local/bin/
+                curl -sLO https://github.com/prometheus/node_exporter/releases/download/v1.10.2/node_exporter-1.10.2.linux-amd64.tar.gz
+                tar xzf node_exporter-1.10.2.linux-amd64.tar.gz
+                cp node_exporter-1.10.2.linux-amd64/node_exporter /usr/local/bin/
                 useradd -r -s /bin/false node_exporter 2>/dev/null || true
                 cat > /etc/systemd/system/node_exporter.service << 'EOF'
 [Unit]

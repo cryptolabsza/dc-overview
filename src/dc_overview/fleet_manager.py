@@ -986,9 +986,9 @@ set -e
 # Install node_exporter if not running
 if ! systemctl is-active --quiet node_exporter 2>/dev/null; then
     cd /tmp
-    curl -sLO https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz
-    tar xzf node_exporter-1.7.0.linux-amd64.tar.gz
-    cp node_exporter-1.7.0.linux-amd64/node_exporter /usr/local/bin/
+    curl -sLO https://github.com/prometheus/node_exporter/releases/download/v1.10.2/node_exporter-1.10.2.linux-amd64.tar.gz
+    tar xzf node_exporter-1.10.2.linux-amd64.tar.gz
+    cp node_exporter-1.10.2.linux-amd64/node_exporter /usr/local/bin/
     
     cat > /etc/systemd/system/node_exporter.service << 'EOF'
 [Unit]
