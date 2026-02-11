@@ -35,9 +35,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
-    labels:
 {% if enable_watchtower_all %}
-      - "com.centurylinklabs.watchtower.enable=true"
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
 {% endif %}
     networks:
       - cryptolabs
@@ -69,9 +69,9 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    labels:
 {% if enable_watchtower_all %}
-      - "com.centurylinklabs.watchtower.enable=true"
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
 {% endif %}
     networks:
       - cryptolabs
@@ -117,9 +117,9 @@ services:
       timeout: 10s
       retries: 3
     start_period: 30s
-    labels:
 {% if enable_watchtower_all %}
-      - "com.centurylinklabs.watchtower.enable=true"
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
 {% endif %}
     networks:
       - cryptolabs
@@ -155,7 +155,7 @@ services:
       timeout: 10s
       retries: 3
     labels:
-      - "com.centurylinklabs.watchtower.enable=true"
+      com.centurylinklabs.watchtower.enable: "true"
     networks:
       - cryptolabs
 
@@ -175,7 +175,7 @@ services:
     networks:
       - cryptolabs
     labels:
-      - "com.centurylinklabs.watchtower.enable=true"
+      com.centurylinklabs.watchtower.enable: "true"
 {% endif %}
 
 {% if vast_enabled %}
@@ -191,9 +191,9 @@ services:
     command:
       - "-api-key"
       - "${VAST_API_KEY}"
-    labels:
 {% if enable_watchtower_all %}
-      - "com.centurylinklabs.watchtower.enable=true"
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
 {% endif %}
     networks:
       - cryptolabs
