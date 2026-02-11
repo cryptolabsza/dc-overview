@@ -1661,6 +1661,11 @@ echo "Exporters installed successfully"
                     "local_file": "DC_Exporter_Details.json",
                     "github_url": f"{base_url}/DC_Exporter_Details.json",
                 },
+                {
+                    "name": "NVIDIA DCGM Exporter",
+                    "local_file": "NVIDIA_DCGM_Exporter.json",
+                    "github_url": f"{base_url}/NVIDIA_DCGM_Exporter.json",
+                },
             ])
         
         if self.config.components.vast_exporter:
@@ -1670,7 +1675,9 @@ echo "Exporters installed successfully"
                 "github_url": f"{base_url}/Vast_Dashboard.json",
             })
         
-        if self.config.components.ipmi_monitor:
+        # Include IPMI dashboard if selected OR if IPMI Monitor is already installed
+        ipmi_detected = Path("/etc/ipmi-monitor").exists()
+        if self.config.components.ipmi_monitor or ipmi_detected:
             dashboards.append({
                 "name": "IPMI Monitor",
                 "local_file": "IPMI_Monitor.json",
