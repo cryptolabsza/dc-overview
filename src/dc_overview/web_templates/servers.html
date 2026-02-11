@@ -220,6 +220,118 @@
         .status-enabled { background: var(--accent-green); }
         .status-disabled { background: #666; }
         .status-not-installed { background: var(--accent-red); }
+
+        /* Toast notification system for background operation results */
+        .toast-container {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-width: 400px;
+            pointer-events: none;
+        }
+        .toast {
+            pointer-events: auto;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            line-height: 1.4;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            animation: toastIn 0.3s ease-out;
+            cursor: pointer;
+            transition: opacity 0.3s;
+        }
+        .toast:hover { opacity: 0.85; }
+        .toast-success {
+            background: linear-gradient(135deg, #1a3a2a, #1a2e2a);
+            border: 1px solid var(--accent-green);
+            color: var(--accent-green);
+        }
+        .toast-error {
+            background: linear-gradient(135deg, #3a1a1a, #2e1a1a);
+            border: 1px solid var(--accent-red);
+            color: var(--accent-red);
+        }
+        .toast-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+        .toast-body { flex: 1; }
+        .toast-title { font-weight: 600; margin-bottom: 2px; color: var(--text-primary); }
+        .toast-msg { font-size: 12px; opacity: 0.85; }
+        @keyframes toastIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes toastOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
+        }
+
+        /* Notification banner inside modal for completed background ops */
+        .op-result-banner {
+            padding: 10px 14px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            animation: fadeIn 0.3s ease-out;
+        }
+        .op-result-banner.success {
+            background: rgba(46, 204, 113, 0.12);
+            border: 1px solid rgba(46, 204, 113, 0.3);
+            color: var(--accent-green);
+        }
+        .op-result-banner.error {
+            background: rgba(231, 76, 60, 0.12);
+            border: 1px solid rgba(231, 76, 60, 0.3);
+            color: var(--accent-red);
+        }
+        .op-result-banner .dismiss-banner {
+            margin-left: auto;
+            cursor: pointer;
+            opacity: 0.6;
+            font-size: 16px;
+        }
+        .op-result-banner .dismiss-banner:hover { opacity: 1; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Pending/completed operation indicator on server table rows */
+        .op-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 6px;
+            vertical-align: middle;
+        }
+        .op-indicator.pending {
+            background: rgba(0, 212, 255, 0.15);
+            color: var(--accent-cyan);
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        .op-indicator.done-ok {
+            background: rgba(46, 204, 113, 0.15);
+            color: var(--accent-green);
+        }
+        .op-indicator.done-fail {
+            background: rgba(231, 76, 60, 0.15);
+            color: var(--accent-red);
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
     </style>
 </head>
 <body>
@@ -358,6 +470,9 @@
         </div>
     </div>
     
+    <!-- Toast notifications for background operation results -->
+    <div id="toastContainer" class="toast-container"></div>
+
     <script>
     // Get base path for API calls - extract /dc from any subpath like /dc/servers
     const basePath = window.location.pathname.match(/^(\/[^\/]+)/)?.[1] || '';
@@ -369,6 +484,128 @@
     
     let currentServerId = null;
     let userPermissions = { can_read: false, can_write: false, can_admin: false };
+    
+    // Track in-progress operations per server so reopening modal shows correct state
+    // Key: "serverId:exporter", Value: 'installing' | 'starting' | 'stopping' | 'removing'
+    const pendingOps = {};
+    
+    // Store results of operations that completed while modal was closed/on a different server
+    // Key: "serverId", Value: [{ exporter, action, success, message, time }]
+    const completedOps = {};
+    
+    // Map of serverId → serverName for background op notifications
+    const serverNames = {};
+    
+    // --- Toast notification helpers ---
+    function showToast(type, title, message, duration) {
+        duration = duration || 6000;
+        const container = document.getElementById('toastContainer');
+        const toast = document.createElement('div');
+        toast.className = 'toast toast-' + type;
+        toast.innerHTML = `
+            <span class="toast-icon">${type === 'success' ? '✅' : '❌'}</span>
+            <div class="toast-body">
+                <div class="toast-title">${title}</div>
+                <div class="toast-msg">${message}</div>
+            </div>
+        `;
+        toast.onclick = function() { dismissToast(toast); };
+        container.appendChild(toast);
+        setTimeout(function() { dismissToast(toast); }, duration);
+    }
+    
+    function dismissToast(el) {
+        if (!el || !el.parentNode) return;
+        el.style.animation = 'toastOut 0.3s ease-in forwards';
+        setTimeout(function() { el.remove(); }, 300);
+    }
+    
+    // --- Completed ops helpers ---
+    function recordCompletedOp(serverId, exporter, action, success, message) {
+        if (!completedOps[serverId]) completedOps[serverId] = [];
+        completedOps[serverId].push({
+            exporter: exporter,
+            action: action,
+            success: success,
+            message: message,
+            time: new Date()
+        });
+        updateServerRowIndicators(serverId);
+    }
+    
+    function getAndClearCompletedOps(serverId) {
+        const ops = completedOps[serverId] || [];
+        delete completedOps[serverId];
+        updateServerRowIndicators(serverId);
+        return ops;
+    }
+    
+    // --- Handle background operation completion ---
+    // Called when an async operation finishes. Shows toast + stores result for modal banner.
+    function handleOpComplete(serverId, serverName, exporter, action, success, message) {
+        delete pendingOps[`${serverId}:${exporter}`];
+        updateServerRowIndicators(serverId);
+        
+        const exporterLabel = {
+            node_exporter: 'Node Exporter',
+            dc_exporter: 'DC Exporter',
+            dcgm_exporter: 'DCGM Exporter',
+            watchdog_agent: 'DC Watchdog Agent'
+        }[exporter] || exporter;
+        
+        const actionLabel = { installing: 'Install', starting: 'Start', stopping: 'Stop', removing: 'Remove' }[action] || action;
+        
+        // Is the modal currently open for this server?
+        const modalOpen = (currentServerId === serverId) &&
+            document.getElementById('serverDetailModal').style.display === 'flex';
+        
+        if (modalOpen) {
+            // Modal is visible for this server — refresh it to show result
+            openServerDetail(serverId, serverName);
+        } else {
+            // Modal not visible or different server — store result and show toast
+            recordCompletedOp(serverId, exporter, action, success, message);
+            const toastTitle = `${serverName} — ${exporterLabel}`;
+            const toastMsg = success
+                ? `${actionLabel} completed successfully`
+                : `${actionLabel} failed: ${message}`;
+            showToast(success ? 'success' : 'error', toastTitle, toastMsg, success ? 5000 : 10000);
+        }
+    }
+    
+    // --- Server row indicators (pending / completed) ---
+    function updateServerRowIndicators(serverId) {
+        const row = document.querySelector(`tr[data-id="${serverId}"]`);
+        if (!row) return;
+        
+        // Remove old indicator
+        const old = row.querySelector('.op-indicator');
+        if (old) old.remove();
+        
+        // Count pending ops for this server
+        let pendingCount = 0;
+        for (const key in pendingOps) {
+            if (key.startsWith(serverId + ':')) pendingCount++;
+        }
+        
+        const completed = completedOps[serverId] || [];
+        const failCount = completed.filter(op => !op.success).length;
+        const okCount = completed.filter(op => op.success).length;
+        
+        const nameCell = row.querySelector('td:first-child');
+        if (!nameCell) return;
+        
+        if (pendingCount > 0) {
+            nameCell.insertAdjacentHTML('beforeend',
+                `<span class="op-indicator pending">⟳ ${pendingCount} in progress</span>`);
+        } else if (failCount > 0) {
+            nameCell.insertAdjacentHTML('beforeend',
+                `<span class="op-indicator done-fail">⚠ ${failCount} failed</span>`);
+        } else if (okCount > 0) {
+            nameCell.insertAdjacentHTML('beforeend',
+                `<span class="op-indicator done-ok">✓ ${okCount} done</span>`);
+        }
+    }
     
     // Check user permissions and adjust UI
     async function checkUserPermissions() {
@@ -535,6 +772,7 @@
     
     async function openServerDetail(id, name) {
         currentServerId = id;
+        serverNames[id] = name;
         document.getElementById('modalServerName').textContent = name + ' - Server Management';
         document.getElementById('serverDetailModal').style.display = 'flex';
         document.getElementById('modalContent').innerHTML = '<p>Loading...</p>';
@@ -548,10 +786,44 @@
         const data = await response.json();
         renderExporterManagement(data);
         
+        // Show banners for any operations that completed while this modal was closed
+        showCompletedOpBanners(id);
+        
         // If cached, poll until the background check finishes and source becomes 'live'
         if (data.source === 'cached') {
             pollForLiveData(id, 3000);
         }
+    }
+    
+    function showCompletedOpBanners(serverId) {
+        const ops = getAndClearCompletedOps(serverId);
+        if (ops.length === 0) return;
+        
+        const modalContent = document.getElementById('modalContent');
+        const exporterLabel = {
+            node_exporter: 'Node Exporter',
+            dc_exporter: 'DC Exporter',
+            dcgm_exporter: 'DCGM Exporter',
+            watchdog_agent: 'DC Watchdog Agent'
+        };
+        const actionLabel = { installing: 'Install', starting: 'Start', stopping: 'Stop', removing: 'Remove' };
+        
+        let bannersHtml = '';
+        for (const op of ops) {
+            const expName = exporterLabel[op.exporter] || op.exporter;
+            const actName = actionLabel[op.action] || op.action;
+            const cls = op.success ? 'success' : 'error';
+            const icon = op.success ? '✅' : '❌';
+            const msg = op.success
+                ? `${expName} — ${actName} completed successfully`
+                : `${expName} — ${actName} failed: ${op.message}`;
+            bannersHtml += `<div class="op-result-banner ${cls}">
+                <span>${icon}</span>
+                <span>${msg}</span>
+                <span class="dismiss-banner" onclick="this.parentElement.remove()">×</span>
+            </div>`;
+        }
+        modalContent.insertAdjacentHTML('afterbegin', bannersHtml);
     }
     
     function pollForLiveData(serverId, delay) {
@@ -785,9 +1057,16 @@
                 const wdVersion = watchdogData.version || null;
                 const sshError = watchdogData.ssh_error || null;
                 
+                // Check if there's a pending operation for watchdog
+                const wdOpKey = `${currentServerId}:watchdog_agent`;
+                const wdPending = pendingOps[wdOpKey];
+                
                 let statusText, statusStyle;
-                if (sshError && isInstalled) {
-                    // SSH failed but DB says installed - show cached state
+                if (wdPending) {
+                    const labels = { installing: 'Installing...', starting: 'Starting...', stopping: 'Stopping...', removing: 'Removing...' };
+                    statusText = labels[wdPending] || 'Processing...';
+                    statusStyle = 'background: var(--accent-cyan); color: #000;';
+                } else if (sshError && isInstalled) {
                     statusText = isEnabled ? 'Running (cached)' : 'Stopped (cached)';
                     statusStyle = 'background: var(--accent-yellow); color: #000;';
                 } else if (isInstalled) {
@@ -798,13 +1077,15 @@
                     statusStyle = '';
                 }
                 
+                const wdToggleDisabled = !canWrite || !isInstalled || !!wdPending;
+                const wdChecked = wdPending ? (wdPending !== 'stopping' && wdPending !== 'removing') : (isInstalled && isEnabled);
                 html += `
                 <div class="exporter-card" data-exporter="${exp.key}" style="border-color: var(--accent-cyan); background: linear-gradient(135deg, var(--bg-card), rgba(0, 212, 255, 0.05));">
                     <div class="exporter-header">
                         <span class="exporter-name">📡 ${exp.name} <small style="color:var(--text-secondary)">(Go binary)</small></span>
                         <label class="toggle-switch">
-                            <input type="checkbox" ${isInstalled && isEnabled ? 'checked' : ''} ${canWrite && isInstalled ? '' : 'disabled'} onchange="toggleWatchdogAgent(this.checked)">
-                            <span class="toggle-slider" style="${canWrite && isInstalled ? '' : 'opacity: 0.5; cursor: not-allowed;'}"></span>
+                            <input type="checkbox" ${wdChecked ? 'checked' : ''} ${wdToggleDisabled ? 'disabled' : ''} onchange="toggleWatchdogAgent(this.checked)">
+                            <span class="toggle-slider" style="${wdToggleDisabled ? 'opacity: 0.5; cursor: not-allowed;' : ''}"></span>
                         </label>
                     </div>
                     <div class="version-info">
@@ -814,7 +1095,7 @@
                         <span id="wd-latest-version" style="color: var(--text-secondary); margin-left: 8px; font-size: 11px;"></span>
                     </div>
                     ${sshError ? `<div style="margin-top: 6px; font-size: 11px; color: var(--accent-yellow);">SSH check failed - showing last known state</div>` : ''}
-                    ${canWrite ? `
+                    ${canWrite && !wdPending ? `
                     <div style="margin-top: 10px; display: flex; gap: 8px;">
                         ${!isInstalled ? `<button class="btn btn-primary btn-sm" onclick="installWatchdogAgent()">Install Agent</button>` : ''}
                         ${isInstalled ? `<button class="btn btn-secondary btn-sm" onclick="reinstallWatchdogAgent()">Reinstall (Latest)</button>` : ''}
@@ -849,9 +1130,18 @@
                 const isInstalled = data.installed ? !!data.installed[exp.key] : isRunning;
                 const isEnabled = data.enabled ? !!data.enabled[exp.key] : isRunning;
                 
+                // Check if there's a pending operation for this exporter
+                const opKey = `${currentServerId}:${exp.key}`;
+                const pending = pendingOps[opKey];
+                
                 // Status display
                 let statusText, statusStyle;
-                if (isRunning) {
+                if (pending) {
+                    // Operation in progress — show it regardless of cached state
+                    const labels = { installing: 'Installing...', starting: 'Starting...', stopping: 'Stopping...', removing: 'Removing...' };
+                    statusText = labels[pending] || 'Processing...';
+                    statusStyle = 'background: var(--accent-cyan); color: #000;';
+                } else if (isRunning) {
                     statusText = version;
                     statusStyle = 'background: var(--accent-green);';
                 } else if (isInstalled) {
@@ -865,15 +1155,16 @@
                 // Toggle reflects actual running state:
                 // - ON = running (or install+start if not installed)
                 // - OFF = stopped / not installed
-                const isChecked = isRunning;
+                const isChecked = pending ? (pending !== 'stopping' && pending !== 'removing') : isRunning;
                 
+                const toggleDisabled = !canWrite || !!pending;
                 html += `
                 <div class="exporter-card" data-exporter="${exp.key}">
                     <div class="exporter-header">
                         <span class="exporter-name">${exp.name} <small style="color:var(--text-secondary)">(port ${exp.port})</small></span>
                         <label class="toggle-switch">
-                            <input type="checkbox" ${isChecked ? 'checked' : ''} ${canWrite ? '' : 'disabled'} onchange="toggleExporter('${exp.key}', this.checked)">
-                            <span class="toggle-slider" style="${canWrite ? '' : 'opacity: 0.5; cursor: not-allowed;'}"></span>
+                            <input type="checkbox" ${isChecked ? 'checked' : ''} ${toggleDisabled ? 'disabled' : ''} onchange="toggleExporter('${exp.key}', this.checked)">
+                            <span class="toggle-slider" style="${toggleDisabled ? 'opacity: 0.5; cursor: not-allowed;' : ''}"></span>
                         </label>
                     </div>
                     <div class="version-info">
@@ -922,58 +1213,67 @@
     }
     
     async function toggleExporter(exporter, enabled) {
+        const serverId = currentServerId;
+        const serverName = document.getElementById('modalServerName').textContent.split(' - ')[0];
+        serverNames[serverId] = serverName;
+        const opKey = `${serverId}:${exporter}`;
+        
         // Find the exporter card and show a spinner/status
         const card = document.querySelector(`[data-exporter="${exporter}"]`);
         const versionBadge = card ? card.querySelector('.version-badge') : null;
         const origText = versionBadge ? versionBadge.textContent : '';
         
-        if (versionBadge && enabled && origText === 'Not installed') {
-            versionBadge.textContent = 'Installing...';
-            versionBadge.style.background = 'var(--accent-cyan)';
-            versionBadge.style.color = '#000';
-        } else if (versionBadge) {
-            versionBadge.textContent = enabled ? 'Starting...' : 'Stopping...';
+        const action = (enabled && origText === 'Not installed') ? 'installing' : (enabled ? 'starting' : 'stopping');
+        pendingOps[opKey] = action;
+        updateServerRowIndicators(serverId);
+        
+        if (versionBadge) {
+            versionBadge.textContent = action === 'installing' ? 'Installing...' : (enabled ? 'Starting...' : 'Stopping...');
+            if (action === 'installing') {
+                versionBadge.style.background = 'var(--accent-cyan)';
+                versionBadge.style.color = '#000';
+            }
         }
         
         try {
-            const response = await fetch(`${basePath}/api/servers/${currentServerId}/exporters/${exporter}/toggle`, {
+            const response = await fetch(`${basePath}/api/servers/${serverId}/exporters/${exporter}/toggle`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({enabled})
             });
             
             const result = await response.json();
-            if (result.success) {
-                // Refresh the panel to show updated state
-                openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
-            } else {
-                alert('Failed to toggle exporter: ' + (result.error || 'Unknown error') + (result.detail ? '\\n\\nDetails: ' + result.detail : ''));
-                // Reload to reset state
-                openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
-            }
+            const errMsg = result.success ? '' : ((result.error || 'Unknown error') + (result.detail ? ' — ' + result.detail : ''));
+            handleOpComplete(serverId, serverName, exporter, action, result.success, errMsg);
         } catch (e) {
-            alert('Network error: ' + e.message);
-            openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
+            handleOpComplete(serverId, serverName, exporter, action, false, 'Network error: ' + e.message);
         }
     }
     
     async function updateExporter(exporter) {
         if (!confirm(`Update ${exporter} to latest version?`)) return;
         
+        const serverId = currentServerId;
+        const serverName = document.getElementById('modalServerName').textContent.split(' - ')[0];
+        serverNames[serverId] = serverName;
+        const opKey = `${serverId}:${exporter}`;
+        pendingOps[opKey] = 'installing';
+        updateServerRowIndicators(serverId);
+        
         const branch = document.getElementById('branchSelect').value;
         
-        const response = await fetch(`${basePath}/api/servers/${currentServerId}/exporters/${exporter}/update`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({branch})
-        });
-        
-        const result = await response.json();
-        if (result.success) {
-            alert(`${exporter} updated to ${result.version}`);
-            openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
-        } else {
-            alert('Update failed: ' + (result.error || 'Unknown error'));
+        try {
+            const response = await fetch(`${basePath}/api/servers/${serverId}/exporters/${exporter}/update`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({branch})
+            });
+            
+            const result = await response.json();
+            const msg = result.success ? `Updated to ${result.version}` : (result.error || 'Unknown error');
+            handleOpComplete(serverId, serverName, exporter, 'installing', result.success, msg);
+        } catch (e) {
+            handleOpComplete(serverId, serverName, exporter, 'installing', false, 'Network error: ' + e.message);
         }
     }
     
@@ -998,11 +1298,20 @@
     
     // DC Watchdog Agent management functions
     async function toggleWatchdogAgent(enabled) {
+        const serverId = currentServerId;
+        const serverName = document.getElementById('modalServerName').textContent.split(' - ')[0];
+        serverNames[serverId] = serverName;
+        const opKey = `${serverId}:watchdog_agent`;
+        
         // Show feedback while processing
         const card = document.querySelector('[data-exporter="watchdog_agent"]');
         const badge = card ? card.querySelector('.version-badge') : null;
+        const action = (badge && enabled && badge.textContent === 'Not installed') ? 'installing' : (enabled ? 'starting' : 'stopping');
+        pendingOps[opKey] = action;
+        updateServerRowIndicators(serverId);
+        
         if (badge && enabled) {
-            badge.textContent = badge.textContent === 'Not installed' ? 'Installing...' : 'Starting...';
+            badge.textContent = action === 'installing' ? 'Installing...' : 'Starting...';
             badge.style.background = 'var(--accent-cyan)';
             badge.style.color = '#000';
         } else if (badge) {
@@ -1010,88 +1319,94 @@
         }
         
         try {
-            const response = await fetch(`${basePath}/api/servers/${currentServerId}/watchdog-agent/toggle`, {
+            const response = await fetch(`${basePath}/api/servers/${serverId}/watchdog-agent/toggle`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({enabled})
             });
             
             const result = await response.json();
-            if (result.success) {
-                openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
-            } else {
-                alert('Failed to toggle watchdog agent: ' + (result.error || 'Unknown error'));
-                openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
-            }
+            handleOpComplete(serverId, serverName, 'watchdog_agent', action, result.success, result.error || '');
         } catch (e) {
-            alert('Network error: ' + e.message);
-            openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
+            handleOpComplete(serverId, serverName, 'watchdog_agent', action, false, 'Network error: ' + e.message);
         }
     }
     
     async function installWatchdogAgent() {
         if (!confirm('Install DC Watchdog agent on this server?\\n\\nThis will enable external uptime monitoring from watchdog.cryptolabs.co.za')) return;
         
+        const serverId = currentServerId;
+        const serverName = document.getElementById('modalServerName').textContent.split(' - ')[0];
+        serverNames[serverId] = serverName;
+        const opKey = `${serverId}:watchdog_agent`;
+        pendingOps[opKey] = 'installing';
+        updateServerRowIndicators(serverId);
+        
         const btn = event.target;
         btn.disabled = true;
         btn.textContent = 'Installing...';
         
-        const response = await fetch(`${basePath}/api/servers/${currentServerId}/watchdog-agent/install`, {
-            method: 'POST'
-        });
-        
-        const result = await response.json();
-        if (result.success) {
-            alert('DC Watchdog agent installed successfully');
-            openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
-        } else {
-            alert('Installation failed: ' + (result.error || 'Unknown error'));
-            btn.disabled = false;
-            btn.textContent = 'Install Agent';
+        try {
+            const response = await fetch(`${basePath}/api/servers/${serverId}/watchdog-agent/install`, {
+                method: 'POST'
+            });
+            
+            const result = await response.json();
+            handleOpComplete(serverId, serverName, 'watchdog_agent', 'installing', result.success, result.error || '');
+        } catch (e) {
+            handleOpComplete(serverId, serverName, 'watchdog_agent', 'installing', false, 'Network error: ' + e.message);
         }
     }
     
     async function reinstallWatchdogAgent() {
         if (!confirm('Reinstall DC Watchdog agent? This will stop and reinstall the agent.')) return;
         
+        const serverId = currentServerId;
+        const serverName = document.getElementById('modalServerName').textContent.split(' - ')[0];
+        serverNames[serverId] = serverName;
+        const opKey = `${serverId}:watchdog_agent`;
+        pendingOps[opKey] = 'installing';
+        updateServerRowIndicators(serverId);
+        
         const btn = event.target;
         btn.disabled = true;
         btn.textContent = 'Reinstalling...';
         
-        const response = await fetch(`${basePath}/api/servers/${currentServerId}/watchdog-agent/reinstall`, {
-            method: 'POST'
-        });
-        
-        const result = await response.json();
-        if (result.success) {
-            alert('DC Watchdog agent reinstalled successfully');
-            openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
-        } else {
-            alert('Reinstall failed: ' + (result.error || 'Unknown error'));
-            btn.disabled = false;
-            btn.textContent = 'Reinstall';
+        try {
+            const response = await fetch(`${basePath}/api/servers/${serverId}/watchdog-agent/reinstall`, {
+                method: 'POST'
+            });
+            
+            const result = await response.json();
+            handleOpComplete(serverId, serverName, 'watchdog_agent', 'installing', result.success, result.error || '');
+        } catch (e) {
+            handleOpComplete(serverId, serverName, 'watchdog_agent', 'installing', false, 'Network error: ' + e.message);
         }
     }
     
     async function removeWatchdogAgent() {
         if (!confirm('Remove DC Watchdog agent from this server?\\n\\nThe server will no longer be monitored for uptime.')) return;
         
+        const serverId = currentServerId;
+        const serverName = document.getElementById('modalServerName').textContent.split(' - ')[0];
+        serverNames[serverId] = serverName;
+        const opKey = `${serverId}:watchdog_agent`;
+        pendingOps[opKey] = 'removing';
+        updateServerRowIndicators(serverId);
+        
         const btn = event.target;
         btn.disabled = true;
         btn.textContent = 'Removing...';
         
-        const response = await fetch(`${basePath}/api/servers/${currentServerId}/watchdog-agent/remove`, {
-            method: 'POST'
-        });
-        
-        const result = await response.json();
-        if (result.success) {
-            alert('DC Watchdog agent removed');
-            openServerDetail(currentServerId, document.getElementById('modalServerName').textContent.split(' - ')[0]);
-        } else {
-            alert('Removal failed: ' + (result.error || 'Unknown error'));
-            btn.disabled = false;
-            btn.textContent = 'Remove';
+        try {
+            const response = await fetch(`${basePath}/api/servers/${serverId}/watchdog-agent/remove`, {
+                method: 'POST'
+            });
+            
+            const result = await response.json();
+            handleOpComplete(serverId, serverName, 'watchdog_agent', 'removing', result.success, result.error || '');
+        } catch (e) {
+            handleOpComplete(serverId, serverName, 'watchdog_agent', 'removing', false, 'Network error: ' + e.message);
         }
     }
     
@@ -1154,33 +1469,65 @@
     async function installExporters(id) {
         if (!confirm('Install node_exporter and dc-exporter on this server?')) return;
         
-        const response = await fetch(`${basePath}/api/servers/${id}/install-exporters`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({exporters: ['node_exporter', 'dc_exporter']})
-        });
+        const serverName = serverNames[id] || document.getElementById('modalServerName').textContent.split(' - ')[0];
+        const exporterKeys = ['node_exporter', 'dc_exporter'];
+        exporterKeys.forEach(k => { pendingOps[`${id}:${k}`] = 'installing'; });
+        updateServerRowIndicators(id);
         
-        const result = await response.json();
-        alert(`node_exporter: ${result.node_exporter}
-dc_exporter: ${result.dc_exporter}`);
+        // Re-render to show installing state
+        if (currentServerId === id) {
+            const resp = await fetch(`${basePath}/api/servers/${id}/exporters/versions`);
+            const data = await resp.json();
+            renderExporterManagement(data);
+        }
         
-        location.reload();
+        try {
+            const response = await fetch(`${basePath}/api/servers/${id}/install-exporters`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({exporters: exporterKeys})
+            });
+            
+            const result = await response.json();
+            handleOpComplete(id, serverName, 'node_exporter', 'installing', !result.node_exporter?.includes?.('fail'), result.node_exporter || '');
+            handleOpComplete(id, serverName, 'dc_exporter', 'installing', !result.dc_exporter?.includes?.('fail'), result.dc_exporter || '');
+        } catch (e) {
+            exporterKeys.forEach(k => {
+                handleOpComplete(id, serverName, k, 'installing', false, 'Network error: ' + e.message);
+            });
+        }
     }
     
     async function removeExporters(id) {
         if (!confirm('Remove exporters from this server?')) return;
         
-        const response = await fetch(`${basePath}/api/servers/${id}/remove-exporters`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({exporters: ['node_exporter', 'dc_exporter']})
-        });
+        const serverName = serverNames[id] || document.getElementById('modalServerName').textContent.split(' - ')[0];
+        const exporterKeys = ['node_exporter', 'dc_exporter'];
+        exporterKeys.forEach(k => { pendingOps[`${id}:${k}`] = 'removing'; });
+        updateServerRowIndicators(id);
         
-        const result = await response.json();
-        alert(`node_exporter: ${result.node_exporter}
-dc_exporter: ${result.dc_exporter}`);
+        // Re-render to show removing state
+        if (currentServerId === id) {
+            const resp = await fetch(`${basePath}/api/servers/${id}/exporters/versions`);
+            const data = await resp.json();
+            renderExporterManagement(data);
+        }
         
-        location.reload();
+        try {
+            const response = await fetch(`${basePath}/api/servers/${id}/remove-exporters`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({exporters: exporterKeys})
+            });
+            
+            const result = await response.json();
+            handleOpComplete(id, serverName, 'node_exporter', 'removing', !result.node_exporter?.includes?.('fail'), result.node_exporter || '');
+            handleOpComplete(id, serverName, 'dc_exporter', 'removing', !result.dc_exporter?.includes?.('fail'), result.dc_exporter || '');
+        } catch (e) {
+            exporterKeys.forEach(k => {
+                handleOpComplete(id, serverName, k, 'removing', false, 'Network error: ' + e.message);
+            });
+        }
     }
     
     async function deleteServer(id) {

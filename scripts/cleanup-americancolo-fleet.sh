@@ -10,7 +10,7 @@
 
 # Configuration
 MASTER_IP="88.0.33.141"
-SSH_KEY="~/.ssh/ubuntu_key"
+SSH_KEY="${HOME}/.ssh/ubuntu_key"
 SSH_USER="root"
 
 # Worker server IP pattern: 88.0.X.1
@@ -30,6 +30,20 @@ NC='\033[0m' # No Color
 echo -e "${YELLOW}=== AmericanColo Fleet Cleanup ===${NC}"
 echo -e "${CYAN}Master: ${MASTER_IP}${NC}"
 echo -e "${CYAN}Workers: $(echo ${ALL_WORKERS} | wc -w) servers${NC}"
+echo ""
+
+# Pre-flight checks
+if [ ! -f "${SSH_KEY}" ]; then
+    echo -e "${RED}ERROR: SSH key not found at ${SSH_KEY}${NC}"
+    exit 1
+fi
+
+if ! ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o BatchMode=yes -i "${SSH_KEY}" "${SSH_USER}@${MASTER_IP}" "echo connected" >/dev/null 2>&1; then
+    echo -e "${RED}ERROR: Cannot connect to master ${SSH_USER}@${MASTER_IP} with key ${SSH_KEY}${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✓ Pre-flight checks passed${NC}"
 echo ""
 
 # Containers to REMOVE on master (monitoring-related only)
@@ -65,14 +79,14 @@ EXPORTER_PORTS="8622 8623"
 
 # Function to run SSH command on master
 ssh_master() {
-    ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ${SSH_KEY} ${SSH_USER}@${MASTER_IP} "$@"
+    ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i "${SSH_KEY}" "${SSH_USER}@${MASTER_IP}" "$@"
 }
 
 # Function to run SSH command on worker
 ssh_worker() {
     local subnet=$1
     shift
-    ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes -i ${SSH_KEY} ${SSH_USER}@88.0.${subnet}.1 "$@" 2>/dev/null
+    ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes -i "${SSH_KEY}" "${SSH_USER}@88.0.${subnet}.1" "$@" 2>/dev/null
 }
 
 # ============================================================================
@@ -320,6 +334,26 @@ echo ""
 
 echo "  Master containers (should see registry, netbootxyz only):"
 ssh_master "docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'"
+echo ""
+
+echo "  Verifying config directories removed..."
+for dir in ${CONFIG_DIRS}; do
+    if ssh_master "test ! -e ${dir}"; then
+        echo -e "    ${dir}: ${GREEN}removed${NC}"
+    else
+        echo -e "    ${dir}: ${RED}still exists${NC}"
+    fi
+done
+echo ""
+
+echo "  Verifying monitoring volumes removed..."
+leftover_vols=$(ssh_master "docker volume ls --format '{{.Name}}' | grep -iE 'dc-overview|prometheus|grafana|ipmi|vastai|runpod|cryptolabs-proxy|fleet-auth' || true")
+if [ -z "${leftover_vols}" ]; then
+    echo -e "    ${GREEN}No matching monitoring volumes remain${NC}"
+else
+    echo -e "    ${RED}Leftover volumes detected:${NC}"
+    echo "${leftover_vols}" | sed 's/^/      - /'
+fi
 echo ""
 
 echo "  Sample worker check (88.0.1.1):"
