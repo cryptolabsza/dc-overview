@@ -273,16 +273,36 @@ clean_worker() {
     hostname=$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -o BatchMode=yes -i ${SSH_KEY} ${SSH_USER}@${worker_ip} "hostname" 2>/dev/null || echo "unknown")
     
     # Run all cleanup in a single SSH command for speed
-    ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o BatchMode=yes -i ${SSH_KEY} ${SSH_USER}@${worker_ip} "
+    ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o BatchMode=yes -i "${SSH_KEY}" ${SSH_USER}@${worker_ip} "
+        # Stop and disable all exporter/agent services
         for svc in node_exporter dc-exporter dcgm-exporter gddr6-metrics-exporter dcgm nvidia-dcgm dc-watchdog-agent; do
             systemctl stop \${svc} 2>/dev/null || true
             systemctl disable \${svc} 2>/dev/null || true
             rm -f /etc/systemd/system/\${svc}.service 2>/dev/null || true
         done
         systemctl daemon-reload 2>/dev/null || true
-        rm -f /usr/local/bin/node_exporter /usr/local/bin/dc-exporter* /opt/dc-exporter/* 2>/dev/null || true
+        
+        # Kill any remaining processes on exporter ports
+        for port in 9100 9835 9878; do
+            lsof -t -i :\${port} 2>/dev/null | xargs -r kill -15 2>/dev/null || true
+        done
+        sleep 1
+        for port in 9100 9835 9878; do
+            lsof -t -i :\${port} 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+        done
+        
+        # Remove all exporter and agent binaries
+        rm -f /usr/local/bin/node_exporter 2>/dev/null || true
+        rm -f /usr/local/bin/dc-exporter-rs 2>/dev/null || true
+        rm -f /usr/local/bin/dc-exporter 2>/dev/null || true
         rm -f /usr/local/bin/dc-watchdog-agent 2>/dev/null || true
+        rm -rf /opt/dc-exporter /opt/dc-exporter-rs 2>/dev/null || true
+        
+        # Remove DC Watchdog agent config and data
         rm -rf /opt/dc-watchdog /etc/dc-watchdog 2>/dev/null || true
+        
+        # Remove temp install files
+        rm -rf /tmp/node_exporter* /tmp/dc-exporter* 2>/dev/null || true
     " 2>/dev/null
     
     echo "OK:${hostname}" > "${result_file}"
@@ -365,7 +385,11 @@ echo ""
 
 echo "  Sample worker check (88.0.1.1):"
 echo "    Exporter services:"
-ssh_worker 1 "systemctl list-units --type=service | grep -E 'node_exporter|dcgm|dc-exporter|gddr6' || echo '    (none running)'"
+ssh_worker 1 "systemctl list-units --type=service --all | grep -E 'node_exporter|dcgm|dc-exporter|gddr6|dc-watchdog' || echo '    (none found)'"
+echo "    Binaries:"
+ssh_worker 1 "ls -la /usr/local/bin/node_exporter /usr/local/bin/dc-exporter-rs /usr/local/bin/dc-exporter /usr/local/bin/dc-watchdog-agent 2>&1 | grep -v 'No such file' || echo '    (none found)'"
+echo "    Processes on exporter ports:"
+ssh_worker 1 "lsof -i :9100 -i :9835 -i :9878 2>/dev/null | head -5 || echo '    (none listening)'"
 echo ""
 
 # ============================================================================
