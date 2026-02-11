@@ -242,7 +242,11 @@ def install_node_exporter() -> bool:
             urllib.request.urlretrieve(url, tarball)
             
             with tarfile.open(tarball, "r:gz") as tar:
-                tar.extractall(tmpdir)
+                # Use data filter on Python 3.12+ for path traversal protection
+                if hasattr(tarfile, 'data_filter'):
+                    tar.extractall(tmpdir, filter='data')
+                else:
+                    tar.extractall(tmpdir)
             
             # Find and install binary
             for item in Path(tmpdir).iterdir():
@@ -470,7 +474,7 @@ def install_docker() -> bool:
             )
         with Progress(SpinnerColumn(), TextColumn("Installing Docker (this may take a few minutes)..."), console=console) as progress:
             progress.add_task("", total=None)
-            subprocess.run(["sh", "/tmp/get-docker.sh"], check=True, capture_output=True)
+            subprocess.run(["sh", "/tmp/get-docker.sh"], check=True, capture_output=True, timeout=600)
         subprocess.run(["systemctl", "start", "docker"], capture_output=True)
         subprocess.run(["systemctl", "enable", "docker"], capture_output=True)
         console.print("[green]✓[/green] Docker installed successfully")
@@ -799,7 +803,7 @@ def setup_master_docker():
     dc_port = questionary.text(
         "DC Overview port:",
         default="5001",
-        validate=lambda x: x.isdigit() and 1 <= int(x) <= 65535,
+        validate=lambda x: (x.isdigit() and 1 <= int(x) <= 65535) or "Enter a valid port (1-65535)",
         style=custom_style
     ).ask() or "5001"
     dc_port = int(dc_port)
@@ -838,6 +842,8 @@ def setup_master_docker():
             default=True,
             style=custom_style
         ).ask()
+        if setup_proxy is None:
+            setup_proxy = False
         
         domain = None
         use_letsencrypt = False
@@ -873,7 +879,7 @@ def setup_master_docker():
                 external_port = int(questionary.text(
                     "External HTTPS port:",
                     default="8443",
-                    validate=lambda x: x.isdigit(),
+                    validate=lambda x: x.isdigit() or "Enter a valid port number",
                     style=custom_style
                 ).ask() or "443")
     
@@ -1049,14 +1055,18 @@ datasources:
     
     with Progress(SpinnerColumn(), TextColumn("Pulling Docker images..."), console=console) as progress:
         progress.add_task("", total=None)
-        subprocess.run(["docker", "compose", "pull"], cwd=config_dir, capture_output=True)
+        try:
+            subprocess.run(["docker", "compose", "pull"], cwd=config_dir, capture_output=True, timeout=300)
+        except subprocess.TimeoutExpired:
+            console.print("[yellow]⚠[/yellow] Image pull timed out - continuing with cached images")
     
     with Progress(SpinnerColumn(), TextColumn("Starting containers..."), console=console) as progress:
         progress.add_task("", total=None)
         result = subprocess.run(
             ["docker", "compose", "up", "-d"],
             cwd=config_dir,
-            capture_output=True
+            capture_output=True,
+            timeout=120
         )
     
     if result.returncode == 0:
@@ -1591,6 +1601,8 @@ def add_machines_wizard():
         style=custom_style
     ).ask()
     
+    if method is None:
+        return
     if method == "import":
         machines = import_servers_from_text()
     else:
@@ -1722,7 +1734,7 @@ def add_machines_manual() -> List[Dict]:
         "SSH username:",
         default="root",
         style=custom_style
-    ).ask()
+    ).ask() or "root"
     
     auth_method = questionary.select(
         "Authentication method:",
@@ -1732,6 +1744,9 @@ def add_machines_manual() -> List[Dict]:
         ],
         style=custom_style
     ).ask()
+    
+    if not auth_method:
+        return []
     
     ssh_password = None
     ssh_key = None
@@ -1746,14 +1761,14 @@ def add_machines_manual() -> List[Dict]:
             "SSH key path:",
             default="~/.ssh/id_rsa",
             style=custom_style
-        ).ask()
+        ).ask() or "~/.ssh/id_rsa"
         ssh_key = os.path.expanduser(ssh_key)
     
     ssh_port = questionary.text(
         "SSH port:",
         default="22",
         style=custom_style
-    ).ask()
+    ).ask() or "22"
     
     # Get list of worker IPs
     console.print("\n[bold]Worker IP Addresses[/bold]")
@@ -1837,9 +1852,11 @@ def install_exporters_remote(ip: str, user: str, password: str = None, key_path:
         # Connect
         if password:
             client.connect(ip, port=port, username=user, password=password, timeout=10)
-        else:
+        elif key_path:
             key = paramiko.RSAKey.from_private_key_file(key_path)
             client.connect(ip, port=port, username=user, pkey=key, timeout=10)
+        else:
+            return False  # No credentials available
         
         # Install pip if needed, then dc-overview
         commands = [
@@ -1871,13 +1888,13 @@ def setup_remote_machine(ip: str, name: str):
         "SSH username:",
         default="root",
         style=custom_style
-    ).ask()
-    
+    ).ask() or "root"
+
     ssh_port = questionary.text(
         "SSH port:",
         default="22",
         style=custom_style
-    ).ask()
+    ).ask() or "22"
     
     ssh_pass = questionary.password(
         "SSH password:",
@@ -1908,6 +1925,9 @@ def update_prometheus_targets(machines: List[Dict[str, str]]):
     # Read existing config
     with open(prometheus_file) as f:
         config = yaml.safe_load(f)
+    
+    if not config or "scrape_configs" not in config:
+        return
     
     # Add new targets
     for machine in machines:
@@ -1993,7 +2013,14 @@ def setup_vastai_exporter():
             if result.returncode == 0 and result.stdout.strip():
                 for pid in result.stdout.strip().split('\n'):
                     if pid:
-                        subprocess.run(["kill", "-9", pid], capture_output=True)
+                        subprocess.run(["kill", "-15", pid], capture_output=True)
+                time.sleep(1)
+                # Force kill if still running
+                result2 = subprocess.run(["lsof", "-t", "-i", ":8622"], capture_output=True, text=True)
+                if result2.returncode == 0 and result2.stdout.strip():
+                    for pid in result2.stdout.strip().split('\n'):
+                        if pid:
+                            subprocess.run(["kill", "-9", pid], capture_output=True)
         except Exception:
             pass  # lsof might not be available
         
@@ -2022,19 +2049,20 @@ def setup_vastai_exporter():
             with open(prometheus_file) as f:
                 config = yaml.safe_load(f)
             
-            config["scrape_configs"].append({
-                "job_name": "vastai",
-                "scrape_interval": "60s",
-                "static_configs": [{
-                    "targets": ["localhost:8622"],
-                    "labels": {"instance": "vastai"}
-                }]
-            })
-            
-            with open(prometheus_file, "w") as f:
-                yaml.dump(config, f, default_flow_style=False)
-            
-            subprocess.run(["docker", "exec", "prometheus", "kill", "-HUP", "1"], capture_output=True)
+            if config and "scrape_configs" in config:
+                config["scrape_configs"].append({
+                    "job_name": "vastai",
+                    "scrape_interval": "60s",
+                    "static_configs": [{
+                        "targets": ["localhost:8622"],
+                        "labels": {"instance": "vastai"}
+                    }]
+                })
+                
+                with open(prometheus_file, "w") as f:
+                    yaml.dump(config, f, default_flow_style=False)
+                
+                subprocess.run(["docker", "exec", "prometheus", "kill", "-HUP", "1"], capture_output=True)
     else:
         console.print(f"[red]Error:[/red] {result.stderr.decode()[:100]}")
 
@@ -2101,7 +2129,13 @@ def setup_runpod_exporter():
             if result.returncode == 0 and result.stdout.strip():
                 for pid in result.stdout.strip().split('\n'):
                     if pid:
-                        subprocess.run(["kill", "-9", pid], capture_output=True)
+                        subprocess.run(["kill", "-15", pid], capture_output=True)
+                time.sleep(1)
+                result2 = subprocess.run(["lsof", "-t", "-i", ":8623"], capture_output=True, text=True)
+                if result2.returncode == 0 and result2.stdout.strip():
+                    for pid in result2.stdout.strip().split('\n'):
+                        if pid:
+                            subprocess.run(["kill", "-9", pid], capture_output=True)
         except Exception:
             pass  # lsof might not be available
         
@@ -2130,22 +2164,23 @@ def setup_runpod_exporter():
             with open(prometheus_file) as f:
                 config = yaml.safe_load(f)
             
-            # Check if runpod job already exists
-            existing_jobs = [j.get('job_name') for j in config.get('scrape_configs', [])]
-            if 'runpod' not in existing_jobs:
-                config["scrape_configs"].append({
-                    "job_name": "runpod",
-                    "scrape_interval": "60s",
-                    "static_configs": [{
-                        "targets": ["localhost:8623"],
-                        "labels": {"instance": "runpod"}
-                    }]
-                })
-                
-                with open(prometheus_file, "w") as f:
-                    yaml.dump(config, f, default_flow_style=False)
-                
-                subprocess.run(["docker", "exec", "prometheus", "kill", "-HUP", "1"], capture_output=True)
+            if config and "scrape_configs" in config:
+                # Check if runpod job already exists
+                existing_jobs = [j.get('job_name') for j in config.get('scrape_configs', [])]
+                if 'runpod' not in existing_jobs:
+                    config["scrape_configs"].append({
+                        "job_name": "runpod",
+                        "scrape_interval": "60s",
+                        "static_configs": [{
+                            "targets": ["localhost:8623"],
+                            "labels": {"instance": "runpod"}
+                        }]
+                    })
+                    
+                    with open(prometheus_file, "w") as f:
+                        yaml.dump(config, f, default_flow_style=False)
+                    
+                    subprocess.run(["docker", "exec", "prometheus", "kill", "-HUP", "1"], capture_output=True)
     else:
         console.print(f"[red]Error:[/red] {result.stderr.decode()[:100]}")
 
