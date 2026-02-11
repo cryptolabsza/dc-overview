@@ -1477,6 +1477,15 @@ def api_install_watchdog_agent(server_id):
         server.watchdog_agent_installed = True
         server.watchdog_agent_enabled = True
         db.session.commit()
+        
+        # Sync with watchdog API after a brief delay to pick up the heartbeat
+        import time
+        time.sleep(3)
+        try:
+            _sync_watchdog_status_from_api()
+        except Exception:
+            pass
+        
         return jsonify({'success': True, 'message': 'DC Watchdog agent installed'})
     else:
         return jsonify({'success': False, 'error': error}), 500
@@ -1614,6 +1623,16 @@ def api_deploy_watchdog_agents_all():
             })
     
     db.session.commit()
+    
+    # Wait for agents to send their first heartbeat, then sync status from API
+    if results['installed'] > 0:
+        import time
+        time.sleep(5)  # Give agents time to start and send first heartbeat
+        try:
+            synced = _sync_watchdog_status_from_api()
+            results['synced'] = synced
+        except Exception as e:
+            results['sync_error'] = str(e)
     
     results['success'] = results['failed'] == 0
     results['message'] = f"Installed: {results['installed']}, Skipped: {results['skipped']}, Failed: {results['failed']}"

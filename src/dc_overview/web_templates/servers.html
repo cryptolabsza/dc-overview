@@ -706,7 +706,7 @@
             if (result.dc_exporter?.version) html += ` ${result.dc_exporter.version}`;
             html += `<span class="status-indicator ${result.dcgm_exporter?.running ? 'status-enabled' : 'status-not-installed'}" style="margin-left:8px"></span>dcgm`;
             if (result.dcgm_exporter?.version) html += ` ${result.dcgm_exporter.version}`;
-            const wdStatus = result.watchdog_agent?.running ? 'status-enabled' : (result.watchdog_agent?.installed ? 'status-disabled' : 'status-not-installed');
+            const wdStatus = result.watchdog_agent?.running ? 'status-enabled' : (result.status === 'offline' ? 'status-not-installed' : (result.watchdog_agent?.installed ? 'status-disabled' : 'status-not-installed'));
             html += `<span class="status-indicator ${wdStatus}" style="margin-left:8px" title="DC Watchdog Agent"></span>wd`;
             if (result.watchdog_agent?.version) html += ` ${result.watchdog_agent.version}`;
             exporterCell.innerHTML = html;
