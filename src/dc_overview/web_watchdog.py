@@ -203,14 +203,20 @@ def check_watchdog_agent(server):
             is_online = agent_info.get('online', False)
             version = agent_info.get('version') or None
             last_seen = agent_info.get('last_seen', '')
-            return {
-                'running': is_online,
-                'installed': True,
-                'status': 'running' if is_online else 'stopped',
-                'version': version,
-                'last_seen': last_seen,
-                'source': 'watchdog_api'
-            }
+            
+            if is_online:
+                # Agent is actively reporting - definitely installed and running
+                return {
+                    'running': True,
+                    'installed': True,
+                    'status': 'running',
+                    'version': version,
+                    'last_seen': last_seen,
+                    'source': 'watchdog_api'
+                }
+            # Agent is offline on the watchdog server - don't trust as "installed"
+            # because it may have been removed locally. Fall through to health port
+            # check below to verify it's actually on the machine.
     
     # Method 2: Probe the agent's local health port
     health_result = check_watchdog_health_port(server.server_ip)
