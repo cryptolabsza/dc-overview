@@ -652,7 +652,7 @@ datasources:
         # When using existing proxy, don't expose ports (proxy handles routing)
         # and use cryptolabs network with static IPs
         if use_existing_proxy:
-            tag = get_image_tag()
+            tag = self.config.image_tag
             return f"""services:
   dc-overview:
     image: ghcr.io/cryptolabsza/dc-overview:{tag}

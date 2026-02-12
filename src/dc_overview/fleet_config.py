@@ -252,6 +252,9 @@ class FleetConfig:
     # Auto-updates: by default only cryptolabs-proxy; when True, all components get watchtower label
     enable_watchtower_all: bool = False
     
+    # Docker image tag: 'latest' (stable) or 'dev' (requires --dev flag)
+    image_tag: str = "latest"
+    
     # Internal state
     master_ip: Optional[str] = None
     ssh_key_generated: bool = False

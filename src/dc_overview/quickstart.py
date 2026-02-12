@@ -924,7 +924,7 @@ GRAFANA_PASSWORD={grafana_pass}
         
         compose_template = env.get_template("docker-compose.yml.j2")
         compose_content = compose_template.render(
-            image_tag=get_image_tag(),
+            image_tag='latest',
             proxy_tag="latest",
             dc_port=dc_port,
             enable_proxy=start_new_proxy,
@@ -1267,7 +1267,7 @@ def _set_grafana_home_dashboard(grafana_pass: str, dashboard_uid: str):
 
 def generate_basic_compose(dc_port: int, grafana_pass: str, enable_proxy: bool) -> str:
     """Generate basic docker-compose.yml without templates."""
-    tag = get_image_tag()
+    tag = 'latest'
     return f"""services:
   dc-overview:
     image: ghcr.io/cryptolabsza/dc-overview:{tag}

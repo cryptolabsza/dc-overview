@@ -304,17 +304,19 @@ def start():
 
 
 @click.command()
-def upgrade():
+@click.option("--dev", is_flag=True, help="Pull dev image instead of stable")
+def upgrade(dev: bool):
     """
     Upgrade DC Overview to the latest version.
     
     Pulls the latest Docker image and restarts the containers.
     """
-    console.print("[dim]Pulling latest images...[/dim]")
+    tag = 'dev' if dev else 'latest'
+    console.print(f"[dim]Pulling {tag} images...[/dim]")
     
     try:
         result = subprocess.run(
-            ["docker", "pull", f"ghcr.io/cryptolabsza/dc-overview:{get_image_tag()}"],
+            ["docker", "pull", f"ghcr.io/cryptolabsza/dc-overview:{tag}"],
             capture_output=True, text=True
         )
         
@@ -618,7 +620,8 @@ def deploy_vast(api_key: str, status: bool):
 @click.option("--legacy", is_flag=True, help="Use legacy single-machine setup (not recommended)")
 @click.option("--config", "-c", "config_file", type=click.Path(exists=True), help="YAML config file for automated setup")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompts (use with --config)")
-def setup(legacy: bool, config_file: str, yes: bool):
+@click.option("--dev", is_flag=True, help="Use dev Docker images instead of stable (latest)")
+def setup(legacy: bool, config_file: str, yes: bool, dev: bool):
     """
     ⚡ One-command setup - does everything!
     
@@ -651,10 +654,10 @@ def setup(legacy: bool, config_file: str, yes: bool):
     if legacy:
         run_quickstart()
     else:
-        run_fleet_quickstart(config_file, yes)
+        run_fleet_quickstart(config_file, yes, dev=dev)
 
 
-def run_fleet_quickstart(config_file: str = None, auto_confirm: bool = False):
+def run_fleet_quickstart(config_file: str = None, auto_confirm: bool = False, dev: bool = False):
     """Run the fleet setup (collects config then deploys everything)."""
     if os.geteuid() != 0:
         console.print("[red]Error:[/red] This command requires root privileges.")
@@ -666,6 +669,7 @@ def run_fleet_quickstart(config_file: str = None, auto_confirm: bool = False):
             # Load configuration from file
             config = load_config_from_file(config_file)
             config.auto_confirm = auto_confirm  # Pass -y flag to deployment
+            config.image_tag = 'dev' if dev else 'latest'
             
             if not auto_confirm:
                 # Show config summary and confirm
@@ -689,6 +693,10 @@ def run_fleet_quickstart(config_file: str = None, auto_confirm: bool = False):
         else:
             # Step 1: Collect all configuration upfront via wizard
             config = run_fleet_wizard()
+            config.image_tag = 'dev' if dev else 'latest'
+        
+        if dev:
+            console.print("[yellow]⚠ Using dev Docker images (--dev flag)[/yellow]")
         
         # Step 2: Deploy everything using collected config
         success = deploy_fleet(config)
