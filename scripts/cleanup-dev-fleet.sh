@@ -221,8 +221,9 @@ clean_worker() {
     ssh_cmd ${port} "rm -f /usr/local/bin/dc-exporter-rs /usr/local/bin/dc-exporter /usr/local/bin/node_exporter 2>/dev/null || true"
     ssh_cmd ${port} "rm -rf /etc/dc-exporter 2>/dev/null || true"
 
-    # Remove DC Watchdog agent
+    # Remove DC Watchdog agent binary, config, and data
     echo "    Removing DC Watchdog agent..."
+    ssh_cmd ${port} "rm -f /usr/local/bin/dc-watchdog-agent 2>/dev/null || true"
     for dir in ${DC_WATCHDOG_DIRS}; do
         ssh_cmd ${port} "rm -rf ${dir} 2>/dev/null && echo \"      removed ${dir}\" || true"
     done
