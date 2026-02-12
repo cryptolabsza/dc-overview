@@ -1371,23 +1371,27 @@
         btn.textContent = 'Checking...';
         btn.disabled = true;
         
-        const response = await fetch(`${basePath}/api/exporters/updates`);
-        const result = await response.json();
-        
-        btn.textContent = 'Check for Updates';
-        btn.disabled = false;
-        
-        if (result.updates_available) {
-            let msg = 'Updates available:\\n\\n';
-            for (const server of result.servers) {
-                msg += `${server.server_name}:\\n`;
-                for (const [exp, info] of Object.entries(server.exporters)) {
-                    msg += `  - ${exp}: ${info.installed} -> ${info.latest}\\n`;
+        try {
+            const response = await fetch(`${basePath}/api/exporters/updates`);
+            const result = await response.json();
+            
+            if (result.updates_available) {
+                let msg = 'Updates available:\n\n';
+                for (const server of result.servers) {
+                    msg += `${server.server_name}:\n`;
+                    for (const [exp, info] of Object.entries(server.exporters)) {
+                        msg += `  - ${exp}: ${info.installed} -> ${info.latest}\n`;
+                    }
                 }
+                alert(msg);
+            } else {
+                alert('All exporters are up to date!');
             }
-            alert(msg);
-        } else {
-            alert('All exporters are up to date!');
+        } catch (e) {
+            alert('Check failed: ' + e.message);
+        } finally {
+            btn.textContent = 'Check for Updates';
+            btn.disabled = false;
         }
     }
     
