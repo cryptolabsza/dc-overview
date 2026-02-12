@@ -40,7 +40,7 @@ sudo dc-overview setup -c /path/to/config.yaml -y
 ### Interactive Setup
 
 ```bash
-pip install dc-overview
+pipx install dc-overview
 sudo dc-overview setup
 ```
 

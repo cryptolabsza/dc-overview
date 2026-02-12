@@ -70,7 +70,7 @@ For first-time users or when you don't have a config file:
 
 ```bash
 # Install
-pip install dc-overview
+pipx install dc-overview
 
 # Run interactive wizard
 sudo dc-overview setup
@@ -94,10 +94,10 @@ pip install git+https://github.com/cryptolabsza/dc-overview.git@dev --break-syst
 sudo dc-overview setup -c config.yaml -y
 ```
 
-### Method 2: pip from PyPI (Stable)
+### Method 2: pipx from PyPI (Stable)
 
 ```bash
-pip install dc-overview
+pipx install dc-overview
 sudo dc-overview setup
 ```
 
@@ -446,7 +446,7 @@ docker exec prometheus promtool check config /etc/prometheus/prometheus.yml
 
 ```bash
 dc-overview upgrade              # Pull and restart containers
-pip install --upgrade dc-overview  # Update CLI tool
+pipx upgrade dc-overview             # Update CLI tool
 ```
 
 ---

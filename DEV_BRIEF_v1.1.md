@@ -482,7 +482,7 @@ EOF
     
     # Install dc-exporter if GPU present
     if nvidia-smi >/dev/null 2>&1; then
-        pip3 install dc-overview 2>/dev/null || pip install dc-overview
+        pipx install dc-overview
         dc-overview install-exporters --no-node-exporter
     fi
     """

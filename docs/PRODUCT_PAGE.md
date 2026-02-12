@@ -123,7 +123,7 @@ This automatically:
 ### Interactive Setup
 
 ```bash
-pip install dc-overview
+pipx install dc-overview
 sudo dc-overview setup
 ```
 

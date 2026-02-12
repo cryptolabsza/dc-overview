@@ -434,7 +434,7 @@ If automatic SSH deployment fails:
 
 ```bash
 # On each GPU worker
-pip install dc-overview
+pipx install dc-overview
 sudo dc-overview install-exporters
 ```
 

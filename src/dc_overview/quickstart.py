@@ -2,7 +2,7 @@
 DC Overview QuickStart - One command setup for everything
 
 The client runs:
-    pip install dc-overview
+    pipx install dc-overview
     sudo dc-overview setup
 
 And answers a few questions. That's it.
@@ -1169,7 +1169,7 @@ datasources:
             console.print(f"\n[green]✓[/green] Exporters installed: {success_count}/{len(imported_servers)}")
             if fail_count > 0:
                 console.print(f"[yellow]⚠[/yellow] {fail_count} servers need manual installation:")
-                console.print("  [cyan]pip install dc-overview && sudo dc-overview install-exporters[/cyan]")
+                console.print("  [cyan]pipx install dc-overview && sudo dc-overview install-exporters[/cyan]")
     
     # Save configuration for reference
     config_info = {
@@ -1911,7 +1911,7 @@ def setup_remote_machine(ip: str, name: str):
         console.print(f"[green]✓[/green] Exporters installed on {name}")
     else:
         console.print(f"[yellow]⚠[/yellow] Could not install automatically. Install manually on {name}:")
-        console.print(f"  [cyan]pip install dc-overview && sudo dc-overview setup[/cyan]")
+        console.print(f"  [cyan]pipx install dc-overview && sudo dc-overview setup[/cyan]")
 
 
 def update_prometheus_targets(machines: List[Dict[str, str]]):

@@ -10,7 +10,7 @@ A comprehensive monitoring solution for GPU datacenters with:
 - Automated fleet deployment
 
 Quick Start:
-    pip install dc-overview
+    pipx install dc-overview
     sudo dc-overview setup
 """
 
