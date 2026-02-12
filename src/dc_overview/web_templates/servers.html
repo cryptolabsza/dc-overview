@@ -397,7 +397,7 @@
                     <span id="checkingIndicator" style="display: none; color: var(--accent-cyan); font-size: 14px;">
                         <span style="display: inline-block; animation: spin 1s linear infinite;">⟳</span> Checking...
                     </span>
-                    <button class="btn btn-secondary" onclick="checkAllUpdates()">Check for Updates</button>
+                    <button class="btn btn-secondary" onclick="checkAllUpdates(this)">Check for Updates</button>
                 </div>
             </div>
             <style>@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }</style>
@@ -434,7 +434,7 @@
                         </td>
                         <td>
                             <button class="btn btn-secondary" onclick="openServerDetail({{ server.id }}, '{{ server.name }}')">Manage</button>
-                            <button class="btn btn-secondary" onclick="checkServer({{ server.id }})">Check</button>
+                            <button class="btn btn-secondary" onclick="checkServer(this, {{ server.id }})">Check</button>
                             <button class="btn btn-danger" onclick="deleteServer({{ server.id }})">Delete</button>
                         </td>
                     </tr>
@@ -1097,9 +1097,9 @@
                     ${sshError ? `<div style="margin-top: 6px; font-size: 11px; color: var(--accent-yellow);">SSH check failed - showing last known state</div>` : ''}
                     ${canWrite && !wdPending ? `
                     <div style="margin-top: 10px; display: flex; gap: 8px;">
-                        ${!isInstalled ? `<button class="btn btn-primary btn-sm" onclick="installWatchdogAgent(this)">Install Agent</button>` : ''}
-                        ${isInstalled ? `<button class="btn btn-secondary btn-sm" onclick="reinstallWatchdogAgent(this)">Reinstall (Latest)</button>` : ''}
-                        ${isInstalled ? `<button class="btn btn-warning btn-sm" onclick="removeWatchdogAgent(this)">Remove</button>` : ''}
+                        ${!isInstalled ? `<button class="btn btn-primary btn-sm" onclick="watchdogAgentAction(this,'install')">Install Agent</button>` : ''}
+                        ${isInstalled ? `<button class="btn btn-secondary btn-sm" onclick="watchdogAgentAction(this,'reinstall')">Reinstall (Latest)</button>` : ''}
+                        ${isInstalled ? `<button class="btn btn-warning btn-sm" onclick="watchdogAgentAction(this,'remove')">Remove</button>` : ''}
                     </div>
                     ` : ''}
                 </div>
@@ -1332,83 +1332,42 @@
         }
     }
     
-    async function installWatchdogAgent(btn) {
-        if (!confirm('Install DC Watchdog agent on this server?\n\nThis will enable external uptime monitoring from watchdog.cryptolabs.co.za')) return;
+    /**
+     * Unified watchdog agent action (install, reinstall, or remove).
+     * Called from the Manage modal buttons.
+     */
+    async function watchdogAgentAction(btn, action) {
+        const messages = {
+            install:   { confirm: 'Install DC Watchdog agent on this server?\n\nThis will enable external uptime monitoring from watchdog.cryptolabs.co.za', loading: 'Installing...', op: 'installing' },
+            reinstall: { confirm: 'Reinstall DC Watchdog agent? This will stop and reinstall the agent.', loading: 'Reinstalling...', op: 'installing' },
+            remove:    { confirm: 'Remove DC Watchdog agent from this server?\n\nThe server will no longer be monitored for uptime.', loading: 'Removing...', op: 'removing' },
+        };
+        const msg = messages[action];
+        if (!msg) return;
+        if (!confirm(msg.confirm)) return;
         
         const serverId = currentServerId;
         const serverName = document.getElementById('modalServerName').textContent.split(' - ')[0];
         serverNames[serverId] = serverName;
         const opKey = `${serverId}:watchdog_agent`;
-        pendingOps[opKey] = 'installing';
+        pendingOps[opKey] = msg.op;
         updateServerRowIndicators(serverId);
         
         btn.disabled = true;
-        btn.textContent = 'Installing...';
+        btn.textContent = msg.loading;
         
         try {
-            const response = await fetch(`${basePath}/api/servers/${serverId}/watchdog-agent/install`, {
+            const response = await fetch(`${basePath}/api/servers/${serverId}/watchdog-agent/${action}`, {
                 method: 'POST'
             });
-            
             const result = await response.json();
-            handleOpComplete(serverId, serverName, 'watchdog_agent', 'installing', result.success, result.error || '');
+            handleOpComplete(serverId, serverName, 'watchdog_agent', msg.op, result.success, result.error || '');
         } catch (e) {
-            handleOpComplete(serverId, serverName, 'watchdog_agent', 'installing', false, 'Network error: ' + e.message);
+            handleOpComplete(serverId, serverName, 'watchdog_agent', msg.op, false, 'Network error: ' + e.message);
         }
     }
     
-    async function reinstallWatchdogAgent(btn) {
-        if (!confirm('Reinstall DC Watchdog agent? This will stop and reinstall the agent.')) return;
-        
-        const serverId = currentServerId;
-        const serverName = document.getElementById('modalServerName').textContent.split(' - ')[0];
-        serverNames[serverId] = serverName;
-        const opKey = `${serverId}:watchdog_agent`;
-        pendingOps[opKey] = 'installing';
-        updateServerRowIndicators(serverId);
-        
-        btn.disabled = true;
-        btn.textContent = 'Reinstalling...';
-        
-        try {
-            const response = await fetch(`${basePath}/api/servers/${serverId}/watchdog-agent/reinstall`, {
-                method: 'POST'
-            });
-            
-            const result = await response.json();
-            handleOpComplete(serverId, serverName, 'watchdog_agent', 'installing', result.success, result.error || '');
-        } catch (e) {
-            handleOpComplete(serverId, serverName, 'watchdog_agent', 'installing', false, 'Network error: ' + e.message);
-        }
-    }
-    
-    async function removeWatchdogAgent(btn) {
-        if (!confirm('Remove DC Watchdog agent from this server?\n\nThe server will no longer be monitored for uptime.')) return;
-        
-        const serverId = currentServerId;
-        const serverName = document.getElementById('modalServerName').textContent.split(' - ')[0];
-        serverNames[serverId] = serverName;
-        const opKey = `${serverId}:watchdog_agent`;
-        pendingOps[opKey] = 'removing';
-        updateServerRowIndicators(serverId);
-        
-        btn.disabled = true;
-        btn.textContent = 'Removing...';
-        
-        try {
-            const response = await fetch(`${basePath}/api/servers/${serverId}/watchdog-agent/remove`, {
-                method: 'POST'
-            });
-            
-            const result = await response.json();
-            handleOpComplete(serverId, serverName, 'watchdog_agent', 'removing', result.success, result.error || '');
-        } catch (e) {
-            handleOpComplete(serverId, serverName, 'watchdog_agent', 'removing', false, 'Network error: ' + e.message);
-        }
-    }
-    
-    async function checkAllUpdates() {
-        const btn = event.target;
+    async function checkAllUpdates(btn) {
         btn.textContent = 'Checking...';
         btn.disabled = true;
         
@@ -1432,8 +1391,7 @@
         }
     }
     
-    async function checkServer(id) {
-        const btn = event.target;
+    async function checkServer(btn, id) {
         const origText = btn.textContent;
         btn.textContent = 'Checking...';
         btn.disabled = true;
