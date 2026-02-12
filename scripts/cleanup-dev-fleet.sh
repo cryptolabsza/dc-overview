@@ -56,7 +56,7 @@ EXPORTER_SERVICES="dc-exporter node_exporter dc-watchdog-agent"
 # DC Watchdog agent directories to remove
 DC_WATCHDOG_DIRS="/opt/dc-watchdog /etc/dc-watchdog"
 
-# Config directories to remove (created by quickstart commands)
+# Config directories to remove (created by setup commands)
 CONFIG_DIRS="/etc/ipmi-monitor /etc/dc-overview /etc/cryptolabs-proxy"
 
 # Legacy exporter files to remove
@@ -178,7 +178,7 @@ echo "  Cleaning certbot lock files..."
 ssh_cmd ${MASTER_PORT} "rm -f /var/lib/letsencrypt/.certbot.lock 2>/dev/null || true"
 ssh_cmd ${MASTER_PORT} "pkill -f certbot 2>/dev/null || true"
 
-# Remove config directories (created by quickstart commands)
+# Remove config directories (created by setup commands)
 echo "  Removing config directories..."
 for dir in ${CONFIG_DIRS}; do
     ssh_cmd ${MASTER_PORT} "rm -rf ${dir} 2>/dev/null && echo \"    removed ${dir}\" || true"
@@ -282,5 +282,5 @@ echo "  pip install --force-reinstall --no-cache-dir git+https://github.com/cryp
 echo "  pip install --force-reinstall --no-cache-dir git+https://github.com/cryptolabsza/cryptolabs-proxy.git@dev --break-system-packages"
 echo ""
 echo -e "  ${YELLOW}# Deploy${NC}"
-echo "  dc-overview quickstart -c /root/test-config.yaml -y"
+echo "  dc-overview setup -c /root/test-config.yaml -y"
 echo ""

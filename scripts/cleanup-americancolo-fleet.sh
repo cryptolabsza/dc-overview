@@ -68,7 +68,7 @@ EXPORTER_SERVICES="node_exporter dc-exporter dcgm-exporter gddr6-metrics-exporte
 # DC Watchdog agent directories to remove
 DC_WATCHDOG_DIRS="/opt/dc-watchdog /etc/dc-watchdog"
 
-# Config directories to remove (created by quickstart commands)
+# Config directories to remove (created by setup commands)
 CONFIG_DIRS="/etc/ipmi-monitor /etc/dc-overview /etc/cryptolabs-proxy"
 
 # Legacy exporter files to remove
@@ -160,7 +160,7 @@ for dir in ${DC_WATCHDOG_DIRS}; do
     ssh_master "rm -rf ${dir} 2>/dev/null && echo \"    removed ${dir}\" || true"
 done
 
-# Remove config directories (created by quickstart commands)
+# Remove config directories (created by setup commands)
 echo "  Removing config directories..."
 for dir in ${CONFIG_DIRS}; do
     ssh_master "rm -rf ${dir} 2>/dev/null && echo \"    removed ${dir}\" || true"
@@ -414,4 +414,4 @@ echo "To redeploy dc-overview:"
 echo "  ssh ${SSH_USER}@${MASTER_IP} -i ${SSH_KEY}"
 echo "  pip install --force-reinstall --no-cache-dir git+https://github.com/cryptolabsza/cryptolabs-proxy.git@dev --break-system-packages"
 echo "  pip install --force-reinstall --no-cache-dir git+https://github.com/cryptolabsza/dc-overview.git@dev --break-system-packages"
-echo "  dc-overview quickstart -c /root/test-config.yaml -y"
+echo "  dc-overview setup -c /root/test-config.yaml -y"
