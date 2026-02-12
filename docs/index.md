@@ -40,6 +40,8 @@ sudo dc-overview setup -c /path/to/config.yaml -y
 ### Interactive Setup
 
 ```bash
+apt install pipx -y && pipx ensurepath
+source ~/.bashrc
 pipx install dc-overview
 sudo dc-overview setup
 ```

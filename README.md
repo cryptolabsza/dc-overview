@@ -102,6 +102,8 @@ sudo dc-overview setup -c /path/to/config.yaml -y
 Or install from PyPI (stable):
 
 ```bash
+apt install pipx -y && pipx ensurepath
+source ~/.bashrc
 pipx install dc-overview
 sudo dc-overview setup -c config.yaml -y
 ```

@@ -69,7 +69,11 @@ sudo dc-overview setup -c /path/to/config.yaml -y
 For first-time users or when you don't have a config file:
 
 ```bash
-# Install
+# Install pipx (prerequisite)
+apt install pipx -y && pipx ensurepath
+source ~/.bashrc
+
+# Install dc-overview
 pipx install dc-overview
 
 # Run interactive wizard
