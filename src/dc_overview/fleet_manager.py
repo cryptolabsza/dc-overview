@@ -1661,11 +1661,6 @@ echo "Exporters installed successfully"
                     "local_file": "DC_Exporter_Details.json",
                     "github_url": f"{base_url}/DC_Exporter_Details.json",
                 },
-                {
-                    "name": "NVIDIA DCGM Exporter",
-                    "local_file": "NVIDIA_DCGM_Exporter.json",
-                    "github_url": f"{base_url}/NVIDIA_DCGM_Exporter.json",
-                },
             ])
         
         if self.config.components.vast_exporter:
