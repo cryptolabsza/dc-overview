@@ -34,6 +34,10 @@
     </style>
 </head>
 <body>
+    <script>
+      window.__DEV__ = {{ 'true' if is_dev else 'false' }};
+      if (!window.__DEV__) { console.log = function(){}; console.debug = function(){}; }
+    </script>
     <div class="container">
         <div class="header">
             <h1>Server Manager</h1>

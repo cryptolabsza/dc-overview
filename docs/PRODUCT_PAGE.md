@@ -111,7 +111,7 @@ pip install git+https://github.com/cryptolabsza/dc-overview.git@dev --break-syst
 # See: https://github.com/cryptolabsza/dc-overview/blob/main/test-config.yaml
 
 # Deploy with config file (no prompts)
-sudo dc-overview quickstart -c /path/to/config.yaml -y
+sudo dc-overview setup -c /path/to/config.yaml -y
 ```
 
 This automatically:
@@ -124,7 +124,7 @@ This automatically:
 
 ```bash
 pip install dc-overview
-sudo dc-overview quickstart
+sudo dc-overview setup
 ```
 
 The Fleet Wizard guides you through all configuration options.

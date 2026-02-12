@@ -61,7 +61,7 @@ Deploy everything with a single command using a config file:
 pip install git+https://github.com/cryptolabsza/dc-overview.git@dev --break-system-packages
 
 # Deploy with config file (no prompts)
-sudo dc-overview quickstart -c /path/to/config.yaml -y
+sudo dc-overview setup -c /path/to/config.yaml -y
 ```
 
 ### Interactive Setup
@@ -73,7 +73,7 @@ For first-time users or when you don't have a config file:
 pip install dc-overview
 
 # Run interactive wizard
-sudo dc-overview quickstart
+sudo dc-overview setup
 ```
 
 The Fleet Wizard guides you through:
@@ -91,14 +91,14 @@ The Fleet Wizard guides you through:
 
 ```bash
 pip install git+https://github.com/cryptolabsza/dc-overview.git@dev --break-system-packages
-sudo dc-overview quickstart -c config.yaml -y
+sudo dc-overview setup -c config.yaml -y
 ```
 
 ### Method 2: pip from PyPI (Stable)
 
 ```bash
 pip install dc-overview
-sudo dc-overview quickstart
+sudo dc-overview setup
 ```
 
 ### Method 3: pipx (Isolated Environment)
@@ -106,7 +106,7 @@ sudo dc-overview quickstart
 ```bash
 sudo apt install pipx -y
 pipx install dc-overview
-sudo ~/.local/bin/dc-overview quickstart
+sudo ~/.local/bin/dc-overview setup
 ```
 
 ### Requirements
@@ -239,7 +239,7 @@ After deployment, configuration files are stored in:
 
 ### Key Design Principles
 
-1. **Single Command Setup** - `dc-overview quickstart` deploys everything
+1. **Single Command Setup** - `dc-overview setup` deploys everything
 2. **Configuration Upfront** - Fleet Wizard collects all config before deployment
 3. **Unified Authentication** - Single login for all services via cryptolabs-proxy
 4. **Native Worker Exporters** - systemd services (not Docker) for GPU compatibility
@@ -321,8 +321,8 @@ Fleet roles automatically map to Grafana roles:
 ### Setup & Deployment
 
 ```bash
-dc-overview quickstart              # Interactive setup wizard
-dc-overview quickstart -c FILE -y   # Deploy from config file (no prompts)
+dc-overview setup              # Interactive setup wizard
+dc-overview setup -c FILE -y   # Deploy from config file (no prompts)
 ```
 
 ### Container Management
@@ -372,7 +372,7 @@ Pre-installed dashboards (auto-scaled to fit your fleet size):
 After deployment, access dashboards at:
 - `https://your-domain/grafana/`
 
-Default credentials are set during quickstart configuration.
+Default credentials are set during setup configuration.
 
 ---
 
@@ -487,7 +487,7 @@ dc-overview add-machine IP
 
 Or update the config file and redeploy:
 ```bash
-sudo dc-overview quickstart -c config.yaml -y
+sudo dc-overview setup -c config.yaml -y
 ```
 
 ### Q: Does this work without internet access?

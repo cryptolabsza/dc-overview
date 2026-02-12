@@ -51,6 +51,12 @@ from .web_prometheus import reload_prometheus
 
 app = Flask(__name__, template_folder='web_templates')
 
+@app.context_processor
+def inject_dev_flag():
+    """Inject is_dev flag into all templates for console log suppression."""
+    git_branch = os.environ.get('GIT_BRANCH', 'unknown')
+    return {'is_dev': git_branch in ['develop', 'dev', 'unknown']}
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================

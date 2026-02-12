@@ -167,11 +167,13 @@ def generate_landing_page(
     env = get_jinja_env()
     template = env.get_template("landing.html.j2")
     
+    git_branch = os.environ.get('GIT_BRANCH', 'unknown')
     html = template.render(
         site_name=site_name,
         grafana_enabled=grafana_enabled,
         prometheus_enabled=prometheus_enabled,
         ipmi_enabled=ipmi_enabled,
+        is_dev=git_branch in ['develop', 'dev', 'unknown'],
     )
     
     output_dir = Path(output_dir)

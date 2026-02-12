@@ -132,7 +132,7 @@ scrape_configs:
 
 ## Integration with DC Overview
 
-When using DC Overview quickstart, RunPod exporter is configured automatically:
+When using DC Overview setup, RunPod exporter is configured automatically:
 
 ```yaml
 # In your config.yaml

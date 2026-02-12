@@ -35,7 +35,7 @@ DC Overview is a GPU datacenter monitoring suite that provides:
 
 ### Design Principles
 
-1. **Single Command Setup** - `dc-overview quickstart` deploys everything
+1. **Single Command Setup** - `dc-overview setup` deploys everything
 2. **Configuration Upfront** - Fleet Wizard collects all config before deployment
 3. **Unified Authentication** - Single login for all services via cryptolabs-proxy
 4. **Native Worker Exporters** - systemd services (not Docker) for GPU compatibility
@@ -268,10 +268,10 @@ Fleet roles map to Grafana roles:
 
 ### Quickstart Command
 
-Entry point: `cli.py` → `run_fleet_quickstart()`
+Entry point: `cli.py` → `run_fleet_setup()`
 
 ```
-dc-overview quickstart [-c CONFIG] [-y]
+dc-overview setup [-c CONFIG] [-y]
 ```
 
 ### Deployment Steps
@@ -467,7 +467,7 @@ docker build -t ghcr.io/cryptolabsza/dc-overview:dev .
 ```bash
 # On master node:
 pip install git+https://github.com/cryptolabsza/dc-overview.git@dev --break-system-packages
-dc-overview quickstart -c /root/test-config.yaml -y
+dc-overview setup -c /root/test-config.yaml -y
 ```
 
 ### Test Configuration

@@ -3,16 +3,16 @@
 This directory contains reference configuration templates for manual deployment. For automated deployment, use:
 
 ```bash
-dc-overview quickstart -c config.yaml -y
+dc-overview setup -c config.yaml -y
 ```
 
-> **Note**: The quickstart command generates all necessary configuration files automatically in `/etc/dc-overview/`.
+> **Note**: The setup command generates all necessary configuration files automatically in `/etc/dc-overview/`.
 
 ## Directory Structure
 
 ```
 config-templates/
-├── deployment-config.yaml    # Example YAML config for quickstart
+├── deployment-config.yaml    # Example YAML config for setup
 ├── docker-compose.yml        # Docker Compose for Prometheus & Grafana
 ├── prometheus.yml            # Prometheus scrape configuration
 ├── recording_rules.yml       # Prometheus recording rules for unified metrics
@@ -29,7 +29,7 @@ config-templates/
 
 ## Recommended: Automated Deployment
 
-Create a configuration file and use quickstart:
+Create a configuration file and use setup:
 
 ```yaml
 # my-fleet-config.yaml
@@ -64,7 +64,7 @@ grafana:
 
 Deploy:
 ```bash
-dc-overview quickstart -c my-fleet-config.yaml -y
+dc-overview setup -c my-fleet-config.yaml -y
 ```
 
 ## Manual Deployment (Advanced)

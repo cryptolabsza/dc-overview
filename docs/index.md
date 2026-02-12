@@ -34,14 +34,14 @@ Deploy Prometheus, Grafana, and GPU monitoring with a single command. Features u
 pip install git+https://github.com/cryptolabsza/dc-overview.git@dev --break-system-packages
 
 # Deploy with config file (no prompts)
-sudo dc-overview quickstart -c /path/to/config.yaml -y
+sudo dc-overview setup -c /path/to/config.yaml -y
 ```
 
 ### Interactive Setup
 
 ```bash
 pip install dc-overview
-sudo dc-overview quickstart
+sudo dc-overview setup
 ```
 
 The Fleet Wizard guides you through all configuration options and deploys everything automatically.
@@ -97,8 +97,8 @@ The Fleet Wizard guides you through all configuration options and deploys everyt
 
 ```bash
 # Setup & Deployment
-dc-overview quickstart              # Interactive setup wizard
-dc-overview quickstart -c FILE -y   # Deploy from config file
+dc-overview setup              # Interactive setup wizard
+dc-overview setup -c FILE -y   # Deploy from config file
 
 # Container Management
 dc-overview status                  # Show container status

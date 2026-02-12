@@ -24,7 +24,7 @@
 
 ---
 
-## What's New in v1.2.0
+## What's New in v1.1.1
 
 | Feature | Description |
 |---------|-------------|
@@ -34,7 +34,7 @@
 | **Favicon Support** | Service icons use actual favicons for Grafana, Prometheus, RunPod, Vast.ai |
 | **Improved Update Logic** | Container restart after updates now preserves original configuration |
 
-### v1.1.0
+### v1.1.1
 
 | Feature | Description |
 |---------|-------------|
@@ -96,14 +96,14 @@ pip install git+https://github.com/cryptolabsza/cryptolabs-proxy.git@dev --break
 pip install git+https://github.com/cryptolabsza/dc-overview.git@dev --break-system-packages
 
 # Deploy with config file (no prompts)
-sudo dc-overview quickstart -c /path/to/config.yaml -y
+sudo dc-overview setup -c /path/to/config.yaml -y
 ```
 
 Or install from PyPI (stable):
 
 ```bash
 pipx install dc-overview
-sudo dc-overview quickstart -c config.yaml -y
+sudo dc-overview setup -c config.yaml -y
 ```
 
 ### Interactive Setup
@@ -111,7 +111,7 @@ sudo dc-overview quickstart -c config.yaml -y
 For first-time users or when you don't have a config file:
 
 ```bash
-sudo dc-overview quickstart
+sudo dc-overview setup
 ```
 
 The Fleet Wizard guides you through:
@@ -206,7 +206,7 @@ ipmi_monitor:
 
 Deploy with:
 ```bash
-sudo dc-overview quickstart -c fleet-config.yaml -y
+sudo dc-overview setup -c fleet-config.yaml -y
 ```
 
 > **Security Note:** Never commit config files with real credentials. Use placeholder values in examples and store actual credentials securely.
@@ -250,8 +250,8 @@ curl -X POST https://domain/dc/api/grafana/sync-role \
 
 ```bash
 # Setup & Deployment
-dc-overview quickstart              # Interactive setup wizard
-dc-overview quickstart -c FILE -y   # Deploy from config file
+dc-overview setup              # Interactive setup wizard
+dc-overview setup -c FILE -y   # Deploy from config file
 
 # Container Management
 dc-overview status                  # Show container status
@@ -296,15 +296,15 @@ Push to `dev` branch automatically builds Docker images:
 pip install git+https://github.com/cryptolabsza/cryptolabs-proxy.git@dev --break-system-packages
 pip install git+https://github.com/cryptolabsza/dc-overview.git@dev --break-system-packages
 
-# Run quickstart
-dc-overview quickstart -c /path/to/test-config.yaml -y
+# Run setup
+dc-overview setup -c /path/to/test-config.yaml -y
 ```
 
 ---
 
 ## Deployment Flow
 
-The `quickstart` command executes these steps:
+The `setup` command executes these steps:
 
 1. **Prerequisites** - Install Docker, nginx, ipmitool, certbot
 2. **SSH Keys** - Generate fleet key and deploy to workers
@@ -355,7 +355,7 @@ After setup, access your monitoring at:
 DC Overview and IPMI Monitor share infrastructure and auto-detect each other's configuration:
 
 ```bash
-# If IPMI Monitor is already installed, quickstart detects it:
+# If IPMI Monitor is already installed, setup detects it:
 ✓ IPMI Monitor Detected!
 ✓ CryptoLabs Proxy Already Running!
 ✓ Fleet admin: admin (from existing proxy)
@@ -375,16 +375,16 @@ Shared components:
 
 ### Cross-Tool Config Auto-Detection
 
-Both quickstart commands can be run in **either order**. The second tool automatically reuses configuration from the first:
+Both setup commands can be run in **either order**. The second tool automatically reuses configuration from the first:
 
 ```bash
 # Scenario A: dc-overview first, ipmi-monitor second
-sudo dc-overview quickstart -c dc-config.yaml -y
-sudo ipmi-monitor quickstart -c ipmi-config.yaml -y    # Skips credential prompts
+sudo dc-overview setup -c dc-config.yaml -y
+sudo ipmi-monitor setup -c ipmi-config.yaml -y    # Skips credential prompts
 
 # Scenario B: ipmi-monitor first, dc-overview second
-sudo ipmi-monitor quickstart -c ipmi-config.yaml -y
-sudo dc-overview quickstart -c dc-config.yaml -y        # Skips credential prompts
+sudo ipmi-monitor setup -c ipmi-config.yaml -y
+sudo dc-overview setup -c dc-config.yaml -y        # Skips credential prompts
 ```
 
 **Auto-detected from an existing proxy:**
