@@ -199,42 +199,39 @@ ssh_cmd ${MASTER_PORT} "pip cache purge 2>/dev/null || true"
 echo -e "${GREEN}  ✓ Master node cleaned${NC}"
 
 echo ""
-echo -e "${YELLOW}Step 2: Cleaning wk01 (port ${WK01_PORT})...${NC}"
+echo -e "${YELLOW}Step 2: Cleaning workers...${NC}"
 
-# Remove exporters on wk01
-for svc in ${EXPORTER_SERVICES}; do
-    ssh_cmd ${WK01_PORT} "systemctl stop ${svc} 2>/dev/null || true"
-    ssh_cmd ${WK01_PORT} "systemctl disable ${svc} 2>/dev/null || true"
-    ssh_cmd ${WK01_PORT} "rm -f /etc/systemd/system/${svc}.service 2>/dev/null || true"
-done
-ssh_cmd ${WK01_PORT} "systemctl daemon-reload"
+# Worker cleanup function
+clean_worker() {
+    local port=$1
+    local name=$2
+    echo -e "  ${CYAN}${name} (port ${port})${NC}"
 
-# Remove DC Watchdog agent directories on wk01
-echo "  Removing DC Watchdog agent..."
-for dir in ${DC_WATCHDOG_DIRS}; do
-    ssh_cmd ${WK01_PORT} "rm -rf ${dir} 2>/dev/null && echo \"    removed ${dir}\" || true"
-done
+    # Remove exporter services
+    echo "    Stopping exporter services..."
+    for svc in ${EXPORTER_SERVICES}; do
+        ssh_cmd ${port} "systemctl stop ${svc} 2>/dev/null || true"
+        ssh_cmd ${port} "systemctl disable ${svc} 2>/dev/null || true"
+        ssh_cmd ${port} "rm -f /etc/systemd/system/${svc}.service 2>/dev/null || true"
+    done
+    ssh_cmd ${port} "systemctl daemon-reload"
 
-echo -e "${GREEN}  ✓ wk01 cleaned${NC}"
+    # Remove exporter binaries and config
+    echo "    Removing exporter binaries..."
+    ssh_cmd ${port} "rm -f /usr/local/bin/dc-exporter-rs /usr/local/bin/dc-exporter /usr/local/bin/node_exporter 2>/dev/null || true"
+    ssh_cmd ${port} "rm -rf /etc/dc-exporter 2>/dev/null || true"
 
-echo ""
-echo -e "${YELLOW}Step 3: Cleaning wk03 (port ${WK03_PORT})...${NC}"
+    # Remove DC Watchdog agent
+    echo "    Removing DC Watchdog agent..."
+    for dir in ${DC_WATCHDOG_DIRS}; do
+        ssh_cmd ${port} "rm -rf ${dir} 2>/dev/null && echo \"      removed ${dir}\" || true"
+    done
 
-# Remove exporters on wk03
-for svc in ${EXPORTER_SERVICES}; do
-    ssh_cmd ${WK03_PORT} "systemctl stop ${svc} 2>/dev/null || true"
-    ssh_cmd ${WK03_PORT} "systemctl disable ${svc} 2>/dev/null || true"
-    ssh_cmd ${WK03_PORT} "rm -f /etc/systemd/system/${svc}.service 2>/dev/null || true"
-done
-ssh_cmd ${WK03_PORT} "systemctl daemon-reload"
+    echo -e "    ${GREEN}✓ ${name} cleaned${NC}"
+}
 
-# Remove DC Watchdog agent directories on wk03
-echo "  Removing DC Watchdog agent..."
-for dir in ${DC_WATCHDOG_DIRS}; do
-    ssh_cmd ${WK03_PORT} "rm -rf ${dir} 2>/dev/null && echo \"    removed ${dir}\" || true"
-done
-
-echo -e "${GREEN}  ✓ wk03 cleaned${NC}"
+clean_worker ${WK01_PORT} "wk01"
+clean_worker ${WK03_PORT} "wk03"
 
 echo ""
 echo -e "${YELLOW}Step 4: Verification...${NC}"
