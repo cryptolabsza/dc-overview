@@ -234,20 +234,10 @@ def check_watchdog_agent(server):
             'source': 'health_port_tcp'
         }
     
-    # Method 3: Fall back to database cached state
-    db_installed = getattr(server, 'watchdog_agent_installed', False)
-    db_enabled = getattr(server, 'watchdog_agent_enabled', False)
-    db_version = getattr(server, 'watchdog_agent_version', None)
-    
-    if db_installed:
-        return {
-            'running': db_enabled,
-            'installed': True,
-            'status': 'running (cached)' if db_enabled else 'stopped (cached)',
-            'version': db_version,
-            'source': 'database'
-        }
-    return {'running': False, 'installed': False, 'status': 'not_installed', 'version': None, 'source': 'none'}
+    # Health port not responding and watchdog API says offline (or no data) —
+    # the agent is not running on this machine. Report as not installed so the
+    # database gets updated and the UI reflects the actual state.
+    return {'running': False, 'installed': False, 'status': 'not_installed', 'version': None, 'source': 'check'}
 
 
 def toggle_watchdog_service(server, enabled: bool) -> bool:
