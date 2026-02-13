@@ -406,8 +406,14 @@ def upgrade(dev: bool, stable: bool):
             
             cmd = ["docker", "run", "-d", "--name", container_name, "--restart", "unless-stopped"]
             
-            # Environment variables
-            skip_env = {'PATH', 'HOSTNAME', 'HOME'}
+            # Environment variables - skip system vars and build-time vars
+            # (build vars like GIT_COMMIT must come from the new image, not old container)
+            skip_env = {
+                'PATH', 'HOSTNAME', 'HOME',
+                'GIT_COMMIT', 'GIT_BRANCH', 'BUILD_TIME', 'APP_VERSION',
+                'NGINX_VERSION', 'PKG_RELEASE', 'DYNPKG_RELEASE',
+                'NJS_VERSION', 'NJS_RELEASE', 'ACME_VERSION',
+            }
             for env in env_vars:
                 key = env.split('=')[0]
                 if key not in skip_env:
