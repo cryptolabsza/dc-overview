@@ -1734,15 +1734,22 @@ echo "Exporters installed successfully"
         """Deploy IPMI Monitor as a Docker container on the cryptolabs network."""
         console.print("\n[bold]Step 7: Installing IPMI Monitor[/bold]\n")
         
-        # Check if container is already running (not just an image with the same name)
+        # Check if container is already running with the correct image tag
         try:
             result = subprocess.run(
-                ["docker", "inspect", "--format", "{{.State.Running}}", "ipmi-monitor"],
+                ["docker", "inspect", "--format", "{{.Config.Image}}", "ipmi-monitor"],
                 capture_output=True, text=True
             )
-            if result.returncode == 0 and result.stdout.strip() == "true":
-                console.print("[green]✓[/green] IPMI Monitor container already running")
-                return
+            if result.returncode == 0:
+                current_image = result.stdout.strip()
+                target_image = f"ghcr.io/cryptolabsza/ipmi-monitor:{self.config.image_tag}"
+                if current_image == target_image:
+                    console.print(f"[green]✓[/green] IPMI Monitor container already running (:{self.config.image_tag})")
+                    return
+                else:
+                    console.print(f"[dim]  IPMI Monitor running {current_image}, updating to {target_image}...[/dim]")
+                    subprocess.run(["docker", "stop", "ipmi-monitor"], capture_output=True)
+                    subprocess.run(["docker", "rm", "-f", "ipmi-monitor"], capture_output=True)
         except Exception:
             pass
         

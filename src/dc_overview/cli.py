@@ -304,42 +304,182 @@ def start():
 
 
 @click.command()
-@click.option("--dev", is_flag=True, help="Pull dev image instead of stable")
-def upgrade(dev: bool):
+@click.option("--dev", is_flag=True, help="Switch to dev images (UNSTABLE - may break your system)")
+@click.option("--stable", is_flag=True, help="Switch to stable/latest images (default)")
+def upgrade(dev: bool, stable: bool):
     """
-    Upgrade DC Overview to the latest version.
+    Upgrade all fleet containers to the latest images.
     
-    Pulls the latest Docker image and restarts the containers.
+    Pulls new images and recreates containers for: dc-overview,
+    cryptolabs-proxy, ipmi-monitor, and compose services.
+    
+    \b
+    EXAMPLES:
+        sudo dc-overview upgrade              # Upgrade to latest stable
+        sudo dc-overview upgrade --dev        # Switch to dev (UNSTABLE)
+        sudo dc-overview upgrade --stable     # Switch back to stable
     """
+    if dev and stable:
+        console.print("[red]Error:[/red] Cannot use --dev and --stable together")
+        sys.exit(1)
+    
     tag = 'dev' if dev else 'latest'
-    console.print(f"[dim]Pulling {tag} images...[/dim]")
     
-    try:
+    # Dev warning
+    if dev:
+        console.print()
+        console.print("[bold red]⚠️  WARNING: Dev images are UNSTABLE[/bold red]")
+        console.print("[yellow]Dev builds may contain untested changes that could:[/yellow]")
+        console.print("[yellow]  • Break your monitoring dashboard[/yellow]")
+        console.print("[yellow]  • Cause data loss or service outages[/yellow]")
+        console.print("[yellow]  • Require manual intervention to fix[/yellow]")
+        console.print()
+        
+        import questionary
+        if not questionary.confirm("Are you sure you want to switch to dev images?", default=False).ask():
+            console.print("[green]Cancelled.[/green] Staying on stable images.")
+            return
+        console.print()
+    
+    # Detect running containers and their current tags
+    FLEET_IMAGES = {
+        'dc-overview': 'ghcr.io/cryptolabsza/dc-overview',
+        'cryptolabs-proxy': 'ghcr.io/cryptolabsza/cryptolabs-proxy',
+        'ipmi-monitor': 'ghcr.io/cryptolabsza/ipmi-monitor',
+    }
+    
+    console.print(f"[bold]Upgrading fleet to :{tag}[/bold]\n")
+    
+    updated = 0
+    skipped = 0
+    
+    for container_name, image_base in FLEET_IMAGES.items():
+        # Check if container exists
         result = subprocess.run(
-            ["docker", "pull", f"ghcr.io/cryptolabsza/dc-overview:{tag}"],
+            ["docker", "inspect", "--format", "{{.Config.Image}}", container_name],
             capture_output=True, text=True
         )
-        
         if result.returncode != 0:
-            console.print(f"[red]Error pulling image:[/red] {result.stderr}")
-            sys.exit(1)
+            console.print(f"[dim]  {container_name}: not running (skip)[/dim]")
+            skipped += 1
+            continue
         
-        console.print("[green]✓[/green] DC Overview image updated")
+        current_image = result.stdout.strip()
+        target_image = f"{image_base}:{tag}"
         
-        # Restart containers
-        if DOCKER_CONFIG_DIR.exists() and (DOCKER_CONFIG_DIR / "docker-compose.yml").exists():
-            console.print("[dim]Restarting containers...[/dim]")
+        # Pull new image
+        console.print(f"[dim]  Pulling {container_name}:{tag}...[/dim]")
+        pull_result = subprocess.run(
+            ["docker", "pull", target_image],
+            capture_output=True, text=True, timeout=120
+        )
+        if pull_result.returncode != 0:
+            console.print(f"[red]  ✗ Failed to pull {target_image}[/red]")
+            continue
+        
+        # Check if image actually changed
+        if current_image == target_image:
+            # Check if digest changed (new build of same tag)
+            console.print(f"[dim]  {container_name}: already on :{tag}, checking for updates...[/dim]")
+        
+        # Get current container config for recreation
+        inspect_result = subprocess.run(
+            ["docker", "inspect", container_name],
+            capture_output=True, text=True
+        )
+        if inspect_result.returncode != 0:
+            console.print(f"[yellow]  ⚠ Could not inspect {container_name}[/yellow]")
+            continue
+        
+        import json as json_module
+        try:
+            container_info = json_module.loads(inspect_result.stdout)[0]
+            env_vars = container_info['Config'].get('Env', [])
+            
+            # Stop and remove old container
+            subprocess.run(["docker", "stop", container_name], capture_output=True, timeout=30)
+            subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
+            
+            # Rebuild the run command from inspection
+            config = container_info['Config']
+            host_config = container_info['HostConfig']
+            
+            cmd = ["docker", "run", "-d", "--name", container_name, "--restart", "unless-stopped"]
+            
+            # Environment variables
+            skip_env = {'PATH', 'HOSTNAME', 'HOME'}
+            for env in env_vars:
+                key = env.split('=')[0]
+                if key not in skip_env:
+                    cmd.extend(["-e", env])
+            
+            # Volumes/mounts
+            for mount in container_info.get('Mounts', []):
+                if mount['Type'] == 'volume':
+                    cmd.extend(["-v", f"{mount['Name']}:{mount['Destination']}"])
+                elif mount['Type'] == 'bind':
+                    ro = ':ro' if not mount.get('RW', True) else ''
+                    cmd.extend(["-v", f"{mount['Source']}:{mount['Destination']}{ro}"])
+            
+            # Port bindings
+            port_bindings = host_config.get('PortBindings') or {}
+            for container_port, bindings in port_bindings.items():
+                if bindings:
+                    for binding in bindings:
+                        host_port = binding.get('HostPort', '')
+                        host_ip = binding.get('HostIp', '')
+                        if host_ip:
+                            cmd.extend(["-p", f"{host_ip}:{host_port}:{container_port}"])
+                        else:
+                            cmd.extend(["-p", f"{host_port}:{container_port}"])
+            
+            # Network
+            networks = container_info['NetworkSettings'].get('Networks', {})
+            for net_name, net_config in networks.items():
+                if net_name != 'bridge':
+                    cmd.extend(["--network", net_name])
+                    if net_config.get('IPAddress'):
+                        cmd.extend(["--ip", net_config['IPAddress']])
+            
+            # Labels (watchtower etc.)
+            labels = config.get('Labels', {})
+            for label_key, label_val in labels.items():
+                if label_key.startswith('com.centurylinklabs') or label_key.startswith('org.opencontainers'):
+                    cmd.extend(["--label", f"{label_key}={label_val}"])
+            
+            # Health check
+            healthcheck = config.get('Healthcheck')
+            if healthcheck and healthcheck.get('Test'):
+                test = healthcheck['Test']
+                if isinstance(test, list) and len(test) > 1 and test[0] == 'CMD':
+                    cmd.extend(["--health-cmd", ' '.join(test[1:])])
+            
+            # The image
+            cmd.append(target_image)
+            
+            # Start new container
+            run_result = subprocess.run(cmd, capture_output=True, text=True)
+            if run_result.returncode == 0:
+                console.print(f"[green]  ✓ {container_name}: upgraded to :{tag}[/green]")
+                updated += 1
+            else:
+                console.print(f"[red]  ✗ {container_name}: failed to start - {run_result.stderr[:100]}[/red]")
+                
+        except Exception as e:
+            console.print(f"[red]  ✗ {container_name}: error - {str(e)[:100]}[/red]")
+    
+    # Also update compose-managed services (prometheus, grafana)
+    if DOCKER_CONFIG_DIR.exists() and (DOCKER_CONFIG_DIR / "docker-compose.yml").exists():
+        console.print("[dim]  Updating compose services (prometheus, grafana)...[/dim]")
+        success, output = run_docker_compose_cmd("pull")
+        if success:
             success, output = run_docker_compose_cmd("up -d")
             if success:
-                console.print("[green]✓[/green] DC Overview upgraded and restarted")
-            else:
-                console.print(f"[yellow]Warning:[/yellow] Container restart failed: {output}")
-        else:
-            console.print("[yellow]Note:[/yellow] No docker-compose.yml found. Manual restart required.")
-            
-    except FileNotFoundError:
-        console.print("[red]Error:[/red] Docker is not installed")
-        sys.exit(1)
+                console.print("[green]  ✓ Compose services updated[/green]")
+    
+    console.print(f"\n[bold]Done:[/bold] {updated} upgraded, {skipped} skipped")
+    if dev:
+        console.print("[yellow]⚠ Running dev images. Switch back with: sudo dc-overview upgrade --stable[/yellow]")
 
 
 @click.command()
