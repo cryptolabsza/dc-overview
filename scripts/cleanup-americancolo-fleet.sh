@@ -99,137 +99,54 @@ echo "  Containers to PRESERVE: registry, netbootxyz"
 echo "  Containers to REMOVE: ${REMOVE_CONTAINERS}"
 echo ""
 
-# Stop and remove monitoring containers on master (one by one so missing names don't skip the rest)
-echo "  Stopping monitoring containers..."
-for c in ${REMOVE_CONTAINERS}; do
-  ssh_master "docker stop ${c} 2>/dev/null && echo \"    stopped ${c}\" || true"
-done
+# Stop and remove all monitoring containers (single SSH session)
+echo "  Stopping and removing containers..."
+ssh_master "
+  docker stop -t 3 ${REMOVE_CONTAINERS} 2>/dev/null; \
+  for p in ${CONTAINER_PATTERNS}; do docker ps -a --format '{{.Names}}' | grep -i \"\$p\" | xargs -r docker stop -t 3 2>/dev/null; done; \
+  docker rm -f ${REMOVE_CONTAINERS} 2>/dev/null; \
+  for p in ${CONTAINER_PATTERNS}; do docker ps -a --format '{{.Names}}' | grep -i \"\$p\" | xargs -r docker rm -f 2>/dev/null; done; \
+  echo '  containers done'
+"
 
-# Also stop containers matching patterns (catches docker-compose prefixed names like root_grafana_1)
-echo "  Stopping containers by pattern..."
-for pattern in ${CONTAINER_PATTERNS}; do
-  ssh_master "docker ps -a --format '{{.Names}}' | grep -i '${pattern}' | xargs -r docker stop 2>/dev/null || true"
-done
+# Remove services, ports, legacy files, watchdog, configs (single SSH session)
+echo "  Removing services, configs, and freeing ports..."
+ssh_master "
+  for svc in ${EXPORTER_SERVICES}; do systemctl stop \$svc 2>/dev/null; systemctl disable \$svc 2>/dev/null; rm -f /etc/systemd/system/\$svc.service; done; \
+  systemctl daemon-reload; \
+  for port in ${EXPORTER_PORTS} 80 443; do lsof -t -i :\$port 2>/dev/null | xargs -r kill -9; fuser -k \$port/tcp 2>/dev/null; done; \
+  systemctl stop nginx 2>/dev/null; systemctl disable nginx 2>/dev/null; \
+  systemctl stop apache2 2>/dev/null; systemctl disable apache2 2>/dev/null; \
+  rm -f ${LEGACY_EXPORTER_FILES}; \
+  rm -rf ${DC_WATCHDOG_DIRS} ${CONFIG_DIRS} /var/lib/ipmi-monitor; \
+  pip uninstall dc-overview ipmi-monitor cryptolabs-proxy -y --break-system-packages 2>/dev/null; \
+  pipx uninstall dc-overview 2>/dev/null; pipx uninstall ipmi-monitor 2>/dev/null; pipx uninstall cryptolabs-proxy 2>/dev/null; \
+  rm -f /usr/local/bin/dc-overview /usr/local/bin/ipmi-monitor /usr/local/bin/cryptolabs-proxy; \
+  rm -f /root/.local/bin/dc-overview /root/.local/bin/ipmi-monitor /root/.local/bin/cryptolabs-proxy; \
+  pip cache purge 2>/dev/null; \
+  echo '  services done'
+"
 
-echo "  Removing monitoring containers..."
-for c in ${REMOVE_CONTAINERS}; do
-  ssh_master "docker rm -f ${c} 2>/dev/null && echo \"    removed ${c}\" || true"
-done
-
-# Also remove containers matching patterns
-echo "  Removing containers by pattern..."
-for pattern in ${CONTAINER_PATTERNS}; do
-  ssh_master "docker ps -a --format '{{.Names}}' | grep -i '${pattern}' | xargs -r docker rm -f 2>/dev/null || true"
-done
-
-# Remove exporter services on master (if any)
-echo "  Removing exporter services on master..."
-for svc in ${EXPORTER_SERVICES}; do
-    ssh_master "systemctl stop ${svc} 2>/dev/null || true"
-    ssh_master "systemctl disable ${svc} 2>/dev/null || true"
-    ssh_master "rm -f /etc/systemd/system/${svc}.service 2>/dev/null || true"
-done
-ssh_master "systemctl daemon-reload 2>/dev/null || true"
-
-# Kill any host-based exporters running on ports 8622/8623 (legacy installations)
-echo "  Killing legacy host-based exporters..."
-for port in ${EXPORTER_PORTS}; do
-    ssh_master "lsof -t -i :${port} 2>/dev/null | xargs -r kill -9 && echo \"    killed process on port ${port}\" || true"
-done
-
-# Free ports 80/443 for proxy (stop nginx/apache, kill any processes)
-echo "  Freeing ports 80 and 443..."
-ssh_master "systemctl stop nginx 2>/dev/null && echo '    stopped nginx' || true"
-ssh_master "systemctl disable nginx 2>/dev/null || true"
-ssh_master "systemctl stop apache2 2>/dev/null && echo '    stopped apache2' || true"
-ssh_master "systemctl disable apache2 2>/dev/null || true"
-for port in 80 443; do
-    ssh_master "lsof -t -i :${port} 2>/dev/null | xargs -r kill -9 && echo \"    killed process on port ${port}\" || true"
-    ssh_master "fuser -k ${port}/tcp 2>/dev/null && echo \"    killed process on port ${port} (fuser)\" || true"
-done
-
-# Remove legacy exporter files
-echo "  Removing legacy exporter files..."
-for file in ${LEGACY_EXPORTER_FILES}; do
-    ssh_master "rm -f ${file} 2>/dev/null && echo \"    removed ${file}\" || true"
-done
-
-# Remove DC Watchdog agent directories on master
-echo "  Removing DC Watchdog agent..."
-for dir in ${DC_WATCHDOG_DIRS}; do
-    ssh_master "rm -rf ${dir} 2>/dev/null && echo \"    removed ${dir}\" || true"
-done
-
-# Remove config directories (created by setup commands)
-echo "  Removing config directories..."
-for dir in ${CONFIG_DIRS}; do
-    ssh_master "rm -rf ${dir} 2>/dev/null && echo \"    removed ${dir}\" || true"
-done
-
-# Remove IPMI Monitor database files that may exist outside volumes
-echo "  Removing stale database files..."
-ssh_master "rm -rf /var/lib/ipmi-monitor 2>/dev/null || true"
-
-# Uninstall pip packages and clear cache
-echo "  Uninstalling pip packages..."
-ssh_master "pip uninstall dc-overview -y --break-system-packages 2>/dev/null || true"
-ssh_master "pip uninstall ipmi-monitor -y --break-system-packages 2>/dev/null || true"
-ssh_master "pip uninstall cryptolabs-proxy -y --break-system-packages 2>/dev/null || true"
-ssh_master "pip cache purge 2>/dev/null || true"
-
-# Remove pipx installations (these shadow pip installs via ~/.local/bin)
-echo "  Removing pipx installations..."
-ssh_master "pipx uninstall dc-overview 2>/dev/null && echo '    pipx: removed dc-overview' || true"
-ssh_master "pipx uninstall ipmi-monitor 2>/dev/null && echo '    pipx: removed ipmi-monitor' || true"
-ssh_master "pipx uninstall cryptolabs-proxy 2>/dev/null && echo '    pipx: removed cryptolabs-proxy' || true"
-ssh_master "rm -f /root/.local/bin/dc-overview /root/.local/bin/ipmi-monitor /root/.local/bin/cryptolabs-proxy 2>/dev/null || true"
-
-# Remove dc-overview related volumes explicitly
-echo "  Removing monitoring volumes..."
+# Remove volumes, networks, images (single SSH session)
+echo "  Removing volumes, networks, and images..."
 REMOVE_VOLUMES="prometheus-data grafana-data ipmi-monitor-data ipmi_data dc-overview-data fleet-auth-data cryptolabs-proxy-data root_grafana-data root_prometheus-data ipmi-monitor_ipmi-data ipmi-monitor_ipmi_data dc-overview_grafana-data dc-overview_prometheus-data"
-for v in ${REMOVE_VOLUMES}; do
-  ssh_master "docker volume rm ${v} 2>/dev/null && echo \"    removed volume ${v}\" || true"
-done
-
-# Also remove compose-created volumes by pattern (catches all naming conventions)
-echo "  Removing volumes by pattern..."
 VOLUME_PATTERNS="dc-overview prometheus grafana ipmi vastai runpod cryptolabs-proxy fleet-auth"
-for pattern in ${VOLUME_PATTERNS}; do
-  ssh_master "docker volume ls --format '{{.Name}}' | grep -i '${pattern}' | xargs -r docker volume rm 2>/dev/null || true"
-done
-
-# Prune any remaining unused volumes
-echo "  Pruning unused volumes..."
-ssh_master "docker volume prune -f 2>/dev/null || true"
-
-# Remove dc-overview related networks
-echo "  Removing monitoring networks..."
 REMOVE_NETWORKS="cryptolabs dc-overview_monitoring dc-overview_default"
-for net in ${REMOVE_NETWORKS}; do
-  # Disconnect all containers from the network first
-  ssh_master "docker network inspect ${net} -f '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null | xargs -r -n1 docker network disconnect -f ${net} 2>/dev/null || true"
-  ssh_master "docker network rm ${net} 2>/dev/null && echo \"    removed network ${net}\" || true"
-done
-
-# Also remove networks by pattern
-echo "  Removing networks by pattern..."
-ssh_master "docker network ls --format '{{.Name}}' | grep -iE 'dc-overview|cryptolabs|monitoring' | xargs -r docker network rm 2>/dev/null || true"
-
-# Prune unused networks
-echo "  Pruning unused networks..."
-ssh_master "docker network prune -f 2>/dev/null || true"
-
-# Remove dc-overview related images ONLY (ensures fresh pull on next deploy)
-# PRESERVES: registry, netbootxyz, pxe images
-echo "  Removing monitoring images..."
 REMOVE_IMAGES="ghcr.io/cryptolabsza/ipmi-monitor ghcr.io/cryptolabsza/dc-overview ghcr.io/cryptolabsza/cryptolabs-proxy ghcr.io/cryptolabsza/vastai-exporter ghcr.io/cryptolabsza/runpod-exporter prom/prometheus grafana/grafana"
-for img in ${REMOVE_IMAGES}; do
-  ssh_master "docker images --format '{{.Repository}}:{{.Tag}}' | grep '^${img}' | xargs -r docker rmi -f 2>/dev/null && echo \"    removed ${img}\" || true"
-done
-
-# Prune dangling images only (not all unused - preserves registry/netbootxyz/pxe images)
-echo "  Pruning dangling images..."
-ssh_master "docker image prune -f 2>/dev/null || true"
+ssh_master "
+  docker volume rm ${REMOVE_VOLUMES} 2>/dev/null; \
+  for p in ${VOLUME_PATTERNS}; do docker volume ls --format '{{.Name}}' | grep -i \"\$p\" | xargs -r docker volume rm 2>/dev/null; done; \
+  docker volume prune -f 2>/dev/null; \
+  for net in ${REMOVE_NETWORKS}; do \
+    docker network inspect \$net -f '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null | xargs -r -n1 docker network disconnect -f \$net 2>/dev/null; \
+    docker network rm \$net 2>/dev/null; \
+  done; \
+  docker network ls --format '{{.Name}}' | grep -iE 'dc-overview|cryptolabs|monitoring' | xargs -r docker network rm 2>/dev/null; \
+  docker network prune -f 2>/dev/null; \
+  for img in ${REMOVE_IMAGES}; do docker images --format '{{.Repository}}:{{.Tag}}' | grep \"^\$img\" | xargs -r docker rmi -f 2>/dev/null; done; \
+  docker image prune -f 2>/dev/null; \
+  echo '  cleanup done'
+"
 
 echo -e "${GREEN}  ✓ Master node cleaned${NC}"
 echo ""
@@ -412,6 +329,11 @@ echo "  • Next deploy will pull fresh monitoring images"
 echo ""
 echo "To redeploy dc-overview:"
 echo "  ssh ${SSH_USER}@${MASTER_IP} -i ${SSH_KEY}"
-echo "  pip install --force-reinstall --no-cache-dir git+https://github.com/cryptolabsza/cryptolabs-proxy.git@dev --break-system-packages"
-echo "  pip install --force-reinstall --no-cache-dir git+https://github.com/cryptolabsza/dc-overview.git@dev --break-system-packages"
+echo ""
+echo "  # Install latest stable"
+echo "  apt install pipx -y && pipx ensurepath && source ~/.bashrc"
+echo "  pipx install dc-overview"
 echo "  dc-overview setup -c /root/test-config.yaml -y"
+echo ""
+echo "  # Or for dev (UNSTABLE):"
+echo "  dc-overview setup --dev -c /root/test-config.yaml -y"
