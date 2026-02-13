@@ -350,7 +350,7 @@ class FleetManager:
         if not ghcr_pat:
             # Check if docker is already authenticated
             result = subprocess.run(
-                ["docker", "pull", "ghcr.io/cryptolabsza/cryptolabs-proxy:dev"],
+                ["docker", "pull", f"ghcr.io/cryptolabsza/cryptolabs-proxy:{self.config.image_tag}"],
                 capture_output=True, text=True, timeout=60
             )
             if result.returncode == 0:
@@ -1789,7 +1789,7 @@ echo "Exporters installed successfully"
         # Pull latest image
         console.print("[dim]Pulling ipmi-monitor image...[/dim]")
         subprocess.run(
-            ["docker", "pull", "ghcr.io/cryptolabsza/ipmi-monitor:dev"],
+            ["docker", "pull", f"ghcr.io/cryptolabsza/ipmi-monitor:{self.config.image_tag}"],
             capture_output=True
         )
         
@@ -1872,7 +1872,7 @@ echo "Exporters installed successfully"
         ] + ssh_keys_mount + (
             ["--label", "com.centurylinklabs.watchtower.enable=true"] if getattr(self.config, 'enable_watchtower_all', False) else []
         ) + env_vars + [
-            "ghcr.io/cryptolabsza/ipmi-monitor:dev"
+            f"ghcr.io/cryptolabsza/ipmi-monitor:{self.config.image_tag}"
         ]
         
         result = subprocess.run(docker_cmd, capture_output=True, text=True)
@@ -2825,7 +2825,7 @@ echo "[+] Installation complete"
         
         # Pull and start proxy
         console.print("[dim]Pulling cryptolabs-proxy image...[/dim]")
-        subprocess.run(["docker", "pull", "ghcr.io/cryptolabsza/cryptolabs-proxy:dev"], 
+        subprocess.run(["docker", "pull", f"ghcr.io/cryptolabsza/cryptolabs-proxy:{self.config.image_tag}"], 
                       capture_output=True, timeout=120)
         
         auth_secret = secrets_module.token_hex(32)
@@ -2848,7 +2848,7 @@ echo "[+] Installation complete"
             "--network", DOCKER_NETWORK_NAME,
             "--ip", PROXY_STATIC_IP,
             "--label", "com.centurylinklabs.watchtower.enable=true",
-            "ghcr.io/cryptolabsza/cryptolabs-proxy:dev"
+            f"ghcr.io/cryptolabsza/cryptolabs-proxy:{self.config.image_tag}"
         ]
         
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -2890,7 +2890,7 @@ echo "[+] Installation complete"
         subprocess.run(["docker", "rm", "-f", "dc-overview"], capture_output=True)
         
         # Pull latest image
-        subprocess.run(["docker", "pull", "ghcr.io/cryptolabsza/dc-overview:dev"], 
+        subprocess.run(["docker", "pull", f"ghcr.io/cryptolabsza/dc-overview:{self.config.image_tag}"], 
                       capture_output=True, timeout=120)
         
         # Start dc-overview container with static IP
@@ -2928,7 +2928,7 @@ echo "[+] Installation complete"
             "--network", DOCKER_NETWORK_NAME,
             "--ip", STATIC_IPS["dc-overview"],
         ] + (["--label", "com.centurylinklabs.watchtower.enable=true"] if getattr(self.config, 'enable_watchtower_all', False) else []) + [
-            "ghcr.io/cryptolabsza/dc-overview:dev"
+            f"ghcr.io/cryptolabsza/dc-overview:{self.config.image_tag}"
         ]
         
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -3472,7 +3472,7 @@ echo "[+] Installation complete"
                 "--network", DOCKER_NETWORK_NAME,
                 "--ip", PROXY_STATIC_IP,
                 "--label", "com.centurylinklabs.watchtower.enable=true",
-                "ghcr.io/cryptolabsza/cryptolabs-proxy:dev"
+                f"ghcr.io/cryptolabsza/cryptolabs-proxy:{self.config.image_tag}"
             ]
             
             result = subprocess.run(cmd, capture_output=True, text=True)
