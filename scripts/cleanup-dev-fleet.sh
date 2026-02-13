@@ -74,159 +74,74 @@ ssh_cmd() {
 
 echo -e "${YELLOW}Step 1: Cleaning master node (port ${MASTER_PORT})...${NC}"
 
-# Stop and remove containers on master
-echo "  Stopping containers..."
-ssh_cmd ${MASTER_PORT} "docker stop ${DC_CONTAINERS} 2>/dev/null || true"
+# Stop and remove containers on master (single SSH session for speed)
+echo "  Stopping and removing containers..."
+ssh_cmd ${MASTER_PORT} "
+  docker stop -t 3 ${DC_CONTAINERS} 2>/dev/null; \
+  for p in ${CONTAINER_PATTERNS}; do docker ps -a --format '{{.Names}}' | grep -i \"\$p\" | xargs -r docker stop -t 3 2>/dev/null; done; \
+  docker rm -f ${DC_CONTAINERS} 2>/dev/null; \
+  for p in ${CONTAINER_PATTERNS}; do docker ps -a --format '{{.Names}}' | grep -i \"\$p\" | xargs -r docker rm -f 2>/dev/null; done; \
+  echo done
+"
 
-# Also stop containers matching patterns (catches docker-compose prefixed names)
-echo "  Stopping containers by pattern..."
-for pattern in ${CONTAINER_PATTERNS}; do
-  ssh_cmd ${MASTER_PORT} "docker ps -a --format '{{.Names}}' | grep -i '${pattern}' | xargs -r docker stop 2>/dev/null || true"
-done
+# Remove volumes, networks on master (single SSH session)
+echo "  Removing volumes and networks..."
+ssh_cmd ${MASTER_PORT} "
+  docker volume rm ${DC_VOLUMES} 2>/dev/null; \
+  for p in ${VOLUME_PATTERNS}; do docker volume ls --format '{{.Name}}' | grep -i \"\$p\" | xargs -r docker volume rm 2>/dev/null; done; \
+  docker volume prune -f 2>/dev/null; \
+  for net in ${DC_NETWORKS}; do \
+    docker network inspect \$net -f '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null | xargs -r -n1 docker network disconnect -f \$net 2>/dev/null; \
+    docker network rm \$net 2>/dev/null; \
+  done; \
+  docker network ls --format '{{.Name}}' | grep -iE 'dc-overview|cryptolabs|monitoring' | xargs -r docker network rm 2>/dev/null; \
+  docker network prune -f 2>/dev/null; \
+  echo done
+"
 
-echo "  Removing containers..."
-ssh_cmd ${MASTER_PORT} "docker rm -f ${DC_CONTAINERS} 2>/dev/null || true"
-
-# Also remove containers matching patterns
-echo "  Removing containers by pattern..."
-for pattern in ${CONTAINER_PATTERNS}; do
-  ssh_cmd ${MASTER_PORT} "docker ps -a --format '{{.Names}}' | grep -i '${pattern}' | xargs -r docker rm -f 2>/dev/null || true"
-done
-
-# Remove volumes on master
-echo "  Removing volumes..."
-ssh_cmd ${MASTER_PORT} "docker volume rm ${DC_VOLUMES} 2>/dev/null || true"
-
-# Also remove volumes by pattern
-echo "  Removing volumes by pattern..."
-for pattern in ${VOLUME_PATTERNS}; do
-  ssh_cmd ${MASTER_PORT} "docker volume ls --format '{{.Name}}' | grep -i '${pattern}' | xargs -r docker volume rm 2>/dev/null || true"
-done
-
-# Prune unused volumes
-echo "  Pruning unused volumes..."
-ssh_cmd ${MASTER_PORT} "docker volume prune -f 2>/dev/null || true"
-
-# Remove networks on master (force disconnect any remaining containers first)
-echo "  Removing networks..."
-for net in ${DC_NETWORKS}; do
-    # Disconnect all containers from the network first
-    ssh_cmd ${MASTER_PORT} "docker network inspect ${net} -f '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null | xargs -r -n1 docker network disconnect -f ${net} 2>/dev/null || true"
-    ssh_cmd ${MASTER_PORT} "docker network rm ${net} 2>/dev/null || true"
-done
-
-# Also remove networks by pattern
-echo "  Removing networks by pattern..."
-ssh_cmd ${MASTER_PORT} "docker network ls --format '{{.Name}}' | grep -iE 'dc-overview|cryptolabs|monitoring' | xargs -r docker network rm 2>/dev/null || true"
-
-# Prune unused networks
-echo "  Pruning unused networks..."
-ssh_cmd ${MASTER_PORT} "docker network prune -f 2>/dev/null || true"
-
-# Remove exporters on master
-echo "  Removing exporter services..."
-for svc in ${EXPORTER_SERVICES}; do
-    ssh_cmd ${MASTER_PORT} "systemctl stop ${svc} 2>/dev/null || true"
-    ssh_cmd ${MASTER_PORT} "systemctl disable ${svc} 2>/dev/null || true"
-    ssh_cmd ${MASTER_PORT} "rm -f /etc/systemd/system/${svc}.service 2>/dev/null || true"
-done
-ssh_cmd ${MASTER_PORT} "systemctl daemon-reload"
-
-# Kill any host-based exporters running on ports 8622/8623 (legacy installations)
-echo "  Killing legacy host-based exporters..."
-for port in ${EXPORTER_PORTS}; do
-    ssh_cmd ${MASTER_PORT} "lsof -t -i :${port} 2>/dev/null | xargs -r kill -9 && echo \"    killed process on port ${port}\" || true"
-done
-
-# Free ports 80/443 for proxy (stop nginx/apache, kill any processes)
-echo "  Freeing ports 80 and 443..."
-ssh_cmd ${MASTER_PORT} "systemctl stop nginx 2>/dev/null && echo '    stopped nginx' || true"
-ssh_cmd ${MASTER_PORT} "systemctl disable nginx 2>/dev/null || true"
-ssh_cmd ${MASTER_PORT} "systemctl stop apache2 2>/dev/null && echo '    stopped apache2' || true"
-ssh_cmd ${MASTER_PORT} "systemctl disable apache2 2>/dev/null || true"
-for port in 80 443; do
-    ssh_cmd ${MASTER_PORT} "lsof -t -i :${port} 2>/dev/null | xargs -r kill -9 && echo \"    killed process on port ${port}\" || true"
-    ssh_cmd ${MASTER_PORT} "fuser -k ${port}/tcp 2>/dev/null && echo \"    killed process on port ${port} (fuser)\" || true"
-done
-
-# Remove legacy exporter files
-echo "  Removing legacy exporter files..."
-for file in ${LEGACY_EXPORTER_FILES}; do
-    ssh_cmd ${MASTER_PORT} "rm -f ${file} 2>/dev/null && echo \"    removed ${file}\" || true"
-done
-
-# Remove DC Watchdog agent directories
-echo "  Removing DC Watchdog agent..."
-for dir in ${DC_WATCHDOG_DIRS}; do
-    ssh_cmd ${MASTER_PORT} "rm -rf ${dir} 2>/dev/null && echo \"    removed ${dir}\" || true"
-done
-
-# Remove dc-overview related images ONLY (ensures fresh pull on next deploy)
-# PRESERVES: minecraft, watchtower images
-echo "  Removing monitoring images..."
-DC_IMAGES="ghcr.io/cryptolabsza/ipmi-monitor ghcr.io/cryptolabsza/dc-overview ghcr.io/cryptolabsza/cryptolabs-proxy ghcr.io/cryptolabsza/vastai-exporter ghcr.io/cryptolabsza/runpod-exporter prom/prometheus grafana/grafana"
-for img in ${DC_IMAGES}; do
-  ssh_cmd ${MASTER_PORT} "docker images --format '{{.Repository}}:{{.Tag}}' | grep '^${img}' | xargs -r docker rmi -f 2>/dev/null && echo \"    removed ${img}\" || true"
-done
-
-# Prune dangling images only (not all unused - preserves minecraft/watchtower images)
-echo "  Pruning dangling images..."
-ssh_cmd ${MASTER_PORT} "docker image prune -f 2>/dev/null || true"
-
-# Clean up certbot lock files
-echo "  Cleaning certbot lock files..."
-ssh_cmd ${MASTER_PORT} "rm -f /var/lib/letsencrypt/.certbot.lock 2>/dev/null || true"
-ssh_cmd ${MASTER_PORT} "pkill -f certbot 2>/dev/null || true"
-
-# Remove config directories (created by setup commands)
-echo "  Removing config directories..."
-for dir in ${CONFIG_DIRS}; do
-    ssh_cmd ${MASTER_PORT} "rm -rf ${dir} 2>/dev/null && echo \"    removed ${dir}\" || true"
-done
-
-# Remove IPMI Monitor database files that may exist outside volumes
-echo "  Removing stale database files..."
-ssh_cmd ${MASTER_PORT} "rm -f /var/lib/ipmi-monitor/*.db 2>/dev/null || true"
-ssh_cmd ${MASTER_PORT} "rm -rf /var/lib/ipmi-monitor 2>/dev/null || true"
-
-# Uninstall pip packages and clear cache
-echo "  Uninstalling pip packages..."
-ssh_cmd ${MASTER_PORT} "pip uninstall dc-overview -y --break-system-packages 2>/dev/null || true"
-ssh_cmd ${MASTER_PORT} "pip uninstall ipmi-monitor -y --break-system-packages 2>/dev/null || true"
-ssh_cmd ${MASTER_PORT} "pip uninstall cryptolabs-proxy -y --break-system-packages 2>/dev/null || true"
-ssh_cmd ${MASTER_PORT} "pip cache purge 2>/dev/null || true"
+# Remove services, images, configs on master (single SSH session)
+echo "  Removing services, images, and configs..."
+ssh_cmd ${MASTER_PORT} "
+  for svc in ${EXPORTER_SERVICES}; do systemctl stop \$svc 2>/dev/null; systemctl disable \$svc 2>/dev/null; rm -f /etc/systemd/system/\$svc.service; done; \
+  systemctl daemon-reload; \
+  for port in ${EXPORTER_PORTS}; do lsof -t -i :\$port 2>/dev/null | xargs -r kill -9; done; \
+  systemctl stop nginx 2>/dev/null; systemctl disable nginx 2>/dev/null; \
+  systemctl stop apache2 2>/dev/null; systemctl disable apache2 2>/dev/null; \
+  for port in 80 443; do lsof -t -i :\$port 2>/dev/null | xargs -r kill -9; fuser -k \$port/tcp 2>/dev/null; done; \
+  rm -f ${LEGACY_EXPORTER_FILES}; \
+  rm -rf ${DC_WATCHDOG_DIRS}; \
+  for img in ghcr.io/cryptolabsza/ipmi-monitor ghcr.io/cryptolabsza/dc-overview ghcr.io/cryptolabsza/cryptolabs-proxy ghcr.io/cryptolabsza/vastai-exporter ghcr.io/cryptolabsza/runpod-exporter prom/prometheus grafana/grafana; do \
+    docker images --format '{{.Repository}}:{{.Tag}}' | grep \"^\$img\" | xargs -r docker rmi -f 2>/dev/null; \
+  done; \
+  docker image prune -f 2>/dev/null; \
+  rm -f /var/lib/letsencrypt/.certbot.lock; pkill -f certbot 2>/dev/null; \
+  rm -rf ${CONFIG_DIRS}; \
+  rm -rf /var/lib/ipmi-monitor; \
+  pip uninstall dc-overview ipmi-monitor cryptolabs-proxy -y --break-system-packages 2>/dev/null; \
+  pipx uninstall dc-overview 2>/dev/null; pipx uninstall ipmi-monitor 2>/dev/null; pipx uninstall cryptolabs-proxy 2>/dev/null; \
+  rm -f /usr/local/bin/dc-overview /usr/local/bin/ipmi-monitor /usr/local/bin/cryptolabs-proxy; \
+  pip cache purge 2>/dev/null; \
+  echo done
+"
 
 echo -e "${GREEN}  ✓ Master node cleaned${NC}"
 
 echo ""
 echo -e "${YELLOW}Step 2: Cleaning workers...${NC}"
 
-# Worker cleanup function
+# Worker cleanup function (single SSH session per worker)
 clean_worker() {
     local port=$1
     local name=$2
     echo -e "  ${CYAN}${name} (port ${port})${NC}"
 
-    # Remove exporter services
-    echo "    Stopping exporter services..."
-    for svc in ${EXPORTER_SERVICES}; do
-        ssh_cmd ${port} "systemctl stop ${svc} 2>/dev/null || true"
-        ssh_cmd ${port} "systemctl disable ${svc} 2>/dev/null || true"
-        ssh_cmd ${port} "rm -f /etc/systemd/system/${svc}.service 2>/dev/null || true"
-    done
-    ssh_cmd ${port} "systemctl daemon-reload"
-
-    # Remove exporter binaries and config
-    echo "    Removing exporter binaries..."
-    ssh_cmd ${port} "rm -f /usr/local/bin/dc-exporter-rs /usr/local/bin/dc-exporter /usr/local/bin/node_exporter 2>/dev/null || true"
-    ssh_cmd ${port} "rm -rf /etc/dc-exporter 2>/dev/null || true"
-
-    # Remove DC Watchdog agent binary, config, and data
-    echo "    Removing DC Watchdog agent..."
-    ssh_cmd ${port} "rm -f /usr/local/bin/dc-watchdog-agent 2>/dev/null || true"
-    for dir in ${DC_WATCHDOG_DIRS}; do
-        ssh_cmd ${port} "rm -rf ${dir} 2>/dev/null && echo \"      removed ${dir}\" || true"
-    done
+    ssh_cmd ${port} "
+      for svc in ${EXPORTER_SERVICES}; do systemctl stop \$svc 2>/dev/null; systemctl disable \$svc 2>/dev/null; rm -f /etc/systemd/system/\$svc.service; done; \
+      systemctl daemon-reload; \
+      rm -f /usr/local/bin/dc-exporter-rs /usr/local/bin/dc-exporter /usr/local/bin/dc-exporter.bin /usr/local/bin/node_exporter /usr/local/bin/dc-watchdog-agent; \
+      rm -rf /etc/dc-exporter ${DC_WATCHDOG_DIRS}; \
+      echo done
+    "
 
     echo -e "    ${GREEN}✓ ${name} cleaned${NC}"
 }
@@ -275,10 +190,13 @@ echo ""
 echo -e "  ${YELLOW}# SSH to master${NC}"
 echo "  ssh ${MASTER_HOST} -p ${MASTER_PORT} -i ${SSH_KEY}"
 echo ""
-echo -e "  ${YELLOW}# Install latest dev versions${NC}"
-echo "  pip install --force-reinstall --no-cache-dir git+https://github.com/cryptolabsza/dc-overview.git@dev --break-system-packages"
-echo "  pip install --force-reinstall --no-cache-dir git+https://github.com/cryptolabsza/cryptolabs-proxy.git@dev --break-system-packages"
+echo -e "  ${YELLOW}# Install latest stable${NC}"
+echo "  apt install pipx -y && pipx ensurepath && source ~/.bashrc"
+echo "  pipx install dc-overview"
 echo ""
 echo -e "  ${YELLOW}# Deploy${NC}"
 echo "  dc-overview setup -c /root/test-config.yaml -y"
+echo ""
+echo -e "  ${YELLOW}# Or for dev (UNSTABLE):${NC}"
+echo "  dc-overview setup --dev -c /root/test-config.yaml -y"
 echo ""
