@@ -440,6 +440,51 @@ class FleetConfig:
         
         return secrets
     
+    def scrub_auth_secrets(self):
+        """Remove plaintext auth passwords from .secrets.yaml after deployment.
+        
+        Auth passwords (fleet admin, grafana, ipmi-monitor) are already applied:
+        - Fleet admin password is hashed in /data/auth/users.json
+        - Grafana password is set via API during setup
+        - IPMI Monitor password is passed as env var to container
+        
+        Keeping them in plaintext on disk is a security risk.
+        API keys and BMC/SSH credentials are preserved for runtime operations
+        (e.g., add-machine, restart).
+        """
+        config_dir = self.config_dir or Path("/etc/dc-overview")
+        secrets_path = config_dir / ".secrets.yaml"
+        
+        if not secrets_path.exists():
+            return
+        
+        try:
+            with open(secrets_path) as f:
+                secrets = yaml.safe_load(f) or {}
+            
+            # Remove auth passwords that are already applied/hashed
+            auth_keys = ["fleet_admin_user", "fleet_admin_pass", 
+                         "grafana_password", "ipmi_monitor_password"]
+            scrubbed = False
+            for key in auth_keys:
+                if key in secrets:
+                    del secrets[key]
+                    scrubbed = True
+            
+            if scrubbed:
+                # Rewrite secrets file without auth passwords
+                with open(secrets_path, "w") as f:
+                    yaml.dump(secrets, f, default_flow_style=False)
+                os.chmod(secrets_path, 0o600)
+                
+                # Set ownership to uid 1000 (dcuser) if possible
+                try:
+                    os.chown(secrets_path, 1000, 1000)
+                except (OSError, PermissionError):
+                    pass
+        except Exception:
+            pass  # Don't fail deployment over cleanup
+    
     @classmethod
     def load(cls, config_dir: Path = None) -> "FleetConfig":
         """Load configuration from files."""

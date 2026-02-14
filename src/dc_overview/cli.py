@@ -1129,10 +1129,10 @@ def load_config_from_file(config_file: str) -> FleetConfig:
             break  # Use first found
     
     if secrets:
-        # Fleet admin credentials (secrets override config)
-        if secrets.get("fleet_admin_user"):
+        # Fleet admin credentials (config takes precedence over stale secrets)
+        if secrets.get("fleet_admin_user") and not config.fleet_admin_user:
             config.fleet_admin_user = secrets["fleet_admin_user"]
-        if secrets.get("fleet_admin_pass"):
+        if secrets.get("fleet_admin_pass") and not config.fleet_admin_pass:
             config.fleet_admin_pass = secrets["fleet_admin_pass"]
         
         # SSH password (if not already set from config)

@@ -3914,6 +3914,11 @@ echo "[+] Installation complete"
         
         # Save final config
         self.config.save()
+        
+        # Security: remove plaintext auth passwords from secrets file
+        # Auth passwords are already hashed/applied to containers - no need to keep on disk
+        self.config.scrub_auth_secrets()
+        console.print("[dim]  Scrubbed auth passwords from secrets file[/dim]")
 
 
 def deploy_fleet(config: FleetConfig) -> bool:
