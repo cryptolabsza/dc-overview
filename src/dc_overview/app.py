@@ -47,7 +47,7 @@ from .web_watchdog import (
     _watchdog_api_cache, _WATCHDOG_CACHE_TTL,
 )
 from .web_prometheus import update_prometheus_targets as _update_prometheus_targets
-from .web_prometheus import reload_prometheus
+from .web_prometheus import reload_prometheus, sync_ipmi_monitor_targets
 
 app = Flask(__name__, template_folder='web_templates')
 
