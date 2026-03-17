@@ -1156,10 +1156,10 @@
                     statusStyle = '';
                 }
                 
-                // Toggle reflects actual running state:
-                // - ON = running (or install+start if not installed)
-                // - OFF = stopped / not installed
-                const isChecked = pending ? (pending !== 'stopping' && pending !== 'removing') : isRunning;
+                // Toggle reflects enabled state from DB. For cached data this
+                // avoids the toggle flipping off right after an install because
+                // the version hasn't been detected yet.
+                const isChecked = pending ? (pending !== 'stopping' && pending !== 'removing') : isEnabled;
                 
                 const toggleDisabled = !canWrite || !!pending;
                 html += `

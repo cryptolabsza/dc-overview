@@ -1218,16 +1218,32 @@ def api_toggle_exporter(server_id, exporter):
                 'detail': 'Installation via SSH failed. Check server connectivity and permissions.'
             }), 500
         
-        # Mark as installed and enabled
+        # Mark as installed and enabled, set provisional version so the
+        # frontend toggle stays ON (background live check will refine it).
+        provisional_versions = {
+            'node_exporter': '1.10.2',
+            'dc_exporter': 'latest',
+            'dcgm_exporter': 'latest',
+        }
         if exporter == 'node_exporter':
             server.node_exporter_installed = True
             server.node_exporter_enabled = True
+            server.node_exporter_version = provisional_versions['node_exporter']
         elif exporter == 'dc_exporter':
             server.dc_exporter_installed = True
             server.dc_exporter_enabled = True
+            server.dc_exporter_version = provisional_versions['dc_exporter']
         elif exporter == 'dcgm_exporter':
             server.dcgm_exporter_installed = True
             server.dcgm_exporter_enabled = True
+            server.dcgm_exporter_version = provisional_versions['dcgm_exporter']
+        
+        # Invalidate the live-check cache so the next /exporters/versions
+        # request triggers a fresh check that will pick up the real version.
+        ts_key = f'_exporter_check_ts_{server_id}'
+        ts_setting = AppSettings.query.filter_by(key=ts_key).first()
+        if ts_setting:
+            ts_setting.value = ''
         
         db.session.commit()
         update_prometheus_targets()
