@@ -748,6 +748,7 @@ def api_add_server():
     return jsonify({'id': server.id, 'message': 'Server added'}), 201
 
 @app.route('/api/servers/<int:server_id>', methods=['DELETE'])
+@csrf.exempt
 @write_required
 def api_delete_server(server_id):
     """Remove a server from monitoring."""
@@ -1906,6 +1907,7 @@ def api_add_ssh_key():
 
 
 @app.route('/api/ssh-keys/<int:key_id>', methods=['DELETE'])
+@csrf.exempt
 @admin_required
 def api_delete_ssh_key(key_id):
     """Delete an SSH key."""
@@ -2131,6 +2133,7 @@ def api_vast_add_account():
 
 
 @app.route('/api/vast/accounts/<account_name>', methods=['DELETE'])
+@csrf.exempt
 @admin_required
 def api_vast_delete_account(account_name):
     """Remove a Vast.ai API key account."""
@@ -2239,6 +2242,7 @@ def api_runpod_add_account():
 
 
 @app.route('/api/runpod/accounts/<account_name>', methods=['DELETE'])
+@csrf.exempt
 @admin_required
 def api_runpod_delete_account(account_name):
     """Remove a RunPod API key account."""

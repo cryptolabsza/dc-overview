@@ -1496,8 +1496,17 @@
     async function deleteServer(id) {
         if (!confirm('Remove this server from monitoring?')) return;
         
-        await fetch(`${basePath}/api/servers/${id}`, {method: 'DELETE'});
-        location.reload();
+        try {
+            const response = await fetch(`${basePath}/api/servers/${id}`, {method: 'DELETE'});
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                alert('Failed to delete server: ' + (data.error || `HTTP ${response.status}`));
+                return;
+            }
+            location.reload();
+        } catch (e) {
+            alert('Failed to delete server: ' + e.message);
+        }
     }
     
     // Close modal when clicking outside
