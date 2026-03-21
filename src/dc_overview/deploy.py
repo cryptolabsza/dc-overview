@@ -208,12 +208,18 @@ class DeployManager:
         console.print(f"[cyan]Deploying SSH key to {worker.name} ({worker.ip})...[/cyan]")
         
         try:
-            # Use sshpass to deploy key
-            cmd = f'''sshpass -p '{password}' ssh-copy-id -i {self.ssh_key_path}.pub \
-                -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-                -p {worker.ssh_port} {worker.ssh_user}@{worker.ip}'''
+            import shlex
+            # Use sshpass to deploy key — avoid shell=True to prevent injection
+            cmd = [
+                'sshpass', '-p', password,
+                'ssh-copy-id', '-i', f'{self.ssh_key_path}.pub',
+                '-o', 'StrictHostKeyChecking=no',
+                '-o', 'UserKnownHostsFile=/dev/null',
+                '-p', str(worker.ssh_port),
+                f'{shlex.quote(worker.ssh_user)}@{shlex.quote(worker.ip)}'
+            ]
             
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             
             if result.returncode == 0:
                 console.print(f"[green]✓[/green] SSH key deployed to {worker.name}")

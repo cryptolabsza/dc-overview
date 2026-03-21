@@ -5,6 +5,7 @@ Generate once, deploy everywhere.
 """
 
 import os
+import shlex
 import subprocess
 import shutil
 from pathlib import Path
@@ -204,10 +205,14 @@ class SSHManager:
         pub_key = self.get_public_key()
         
         # Build the command to add key to authorized_keys
+        # Use heredoc to safely pass pub_key without shell injection risk
+        safe_pub_key = pub_key.strip()
         remote_cmd = f'''
             mkdir -p ~/.ssh && 
             chmod 700 ~/.ssh && 
-            echo "{pub_key}" >> ~/.ssh/authorized_keys && 
+            cat >> ~/.ssh/authorized_keys << 'FLEET_KEY_EOF'
+{safe_pub_key}
+FLEET_KEY_EOF
             chmod 600 ~/.ssh/authorized_keys &&
             sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys
         '''
@@ -219,7 +224,7 @@ class SSHManager:
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "ConnectTimeout=10",
             "-p", str(port),
-            f"{username}@{host}",
+            f"{shlex.quote(username)}@{shlex.quote(host)}",
             remote_cmd
         ]
         
@@ -260,10 +265,14 @@ class SSHManager:
         
         pub_key = self.get_public_key()
         
+        # Use heredoc to safely pass pub_key without shell injection risk
+        safe_pub_key = pub_key.strip()
         remote_cmd = f'''
             mkdir -p ~/.ssh && 
             chmod 700 ~/.ssh && 
-            echo "{pub_key}" >> ~/.ssh/authorized_keys && 
+            cat >> ~/.ssh/authorized_keys << 'FLEET_KEY_EOF'
+{safe_pub_key}
+FLEET_KEY_EOF
             chmod 600 ~/.ssh/authorized_keys &&
             sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys
         '''
@@ -275,7 +284,7 @@ class SSHManager:
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "ConnectTimeout=10",
             "-p", str(port),
-            f"{username}@{host}",
+            f"{shlex.quote(username)}@{shlex.quote(host)}",
             remote_cmd
         ]
         

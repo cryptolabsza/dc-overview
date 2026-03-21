@@ -7,6 +7,7 @@ and resolving SSH key paths.
 
 import logging
 import os
+import shlex
 import subprocess
 
 logger = logging.getLogger(__name__)
@@ -85,7 +86,10 @@ def build_ssh_cmd(server, timeout=10, batch_mode=True, extra_opts=None):
     if extra_opts:
         cmd.extend(extra_opts)
     
-    cmd.append(f'{server.ssh_user or "root"}@{server.server_ip}')
+    # Sanitize user and IP to prevent injection
+    safe_user = shlex.quote(server.ssh_user or "root")
+    safe_ip = shlex.quote(server.server_ip)
+    cmd.append(f'{safe_user}@{safe_ip}')
     
     return cmd, env
 

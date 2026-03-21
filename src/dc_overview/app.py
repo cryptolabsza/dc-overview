@@ -36,8 +36,8 @@ from . import __version__
 from .proxy import get_proxy_config, push_proxy_config, _get_internal_api_token
 from .ssh_helpers import resolve_ssh_key_path, build_ssh_cmd, check_ssh_connection
 from .web_exporters import (
-    check_exporter, install_exporter_remote, remove_exporter_remote,
-    toggle_exporter_service, update_exporter_remote,
+    check_exporter, check_services_installed, install_exporter_remote,
+    remove_exporter_remote, toggle_exporter_service, update_exporter_remote,
 )
 from .web_watchdog import (
     get_watchdog_api_key, get_site_id, get_watchdog_agents_from_api,
@@ -943,10 +943,29 @@ def api_install_exporters(server_id):
     
     exporters = data.get('exporters', ['node_exporter', 'dc_exporter'])
     
+    provisional_versions = {
+        'node_exporter': '1.10.2',
+        'dc_exporter': 'latest',
+        'dcgm_exporter': 'latest',
+    }
+    
     results = {}
     for exporter in exporters:
         success = install_exporter_remote(server, exporter)
         results[exporter] = 'installed' if success else 'failed'
+        if success:
+            setattr(server, f'{exporter}_installed', True)
+            setattr(server, f'{exporter}_enabled', True)
+            setattr(server, f'{exporter}_version', provisional_versions.get(exporter))
+    
+    if any(v == 'installed' for v in results.values()):
+        db.session.commit()
+        update_prometheus_targets()
+        ts_key = f'_exporter_check_ts_{server_id}'
+        ts_setting = AppSettings.query.filter_by(key=ts_key).first()
+        if ts_setting:
+            ts_setting.value = ''
+        db.session.commit()
     
     return jsonify(results)
 
@@ -965,14 +984,10 @@ def api_remove_exporters(server_id):
         success = remove_exporter_remote(server, exporter)
         results[exporter] = 'removed' if success else 'failed'
         
-        # Update server record
         if success:
-            if exporter == 'node_exporter':
-                server.node_exporter_installed = False
-            elif exporter == 'dc_exporter':
-                server.dc_exporter_installed = False
-            elif exporter == 'dcgm_exporter':
-                server.dcgm_exporter_installed = False
+            setattr(server, f'{exporter}_installed', False)
+            setattr(server, f'{exporter}_enabled', False)
+            setattr(server, f'{exporter}_version', None)
     
     db.session.commit()
     update_prometheus_targets()
@@ -1032,6 +1047,12 @@ def _build_exporter_response(server, versions=None, updates=None, source='cached
             'dc_exporter': server.dc_exporter_enabled,
             'dcgm_exporter': server.dcgm_exporter_enabled,
         },
+        'auto_update': {
+            'node_exporter': server.node_exporter_auto_update,
+            'dc_exporter': server.dc_exporter_auto_update,
+            'dcgm_exporter': server.dcgm_exporter_auto_update,
+        },
+        'update_branch': server.exporter_update_branch or 'main',
         'watchdog_agent': {
             'installed': server.watchdog_agent_installed,
             'enabled': server.watchdog_agent_enabled,
@@ -1044,9 +1065,13 @@ def _build_exporter_response(server, versions=None, updates=None, source='cached
 
 
 def _do_live_exporter_check(server_id):
-    """Run actual port checks + SSH version detection and update the DB.
+    """Run actual service + port checks and update the DB.
     
     Designed to run in a background thread. Creates its own app context.
+    
+    Uses systemctl / docker inspect to determine whether each service
+    is actually installed on the remote host (not just whether a binary
+    or port exists).  Port checks confirm running state.
     """
     from .exporters import get_all_exporter_versions, check_for_updates
     
@@ -1058,33 +1083,37 @@ def _do_live_exporter_check(server_id):
         ssh_key_path = resolve_ssh_key_path(server)
         ssh_password = server.ssh_password
         
-        # Get installed versions via SSH
-        versions = get_all_exporter_versions(
-            server.server_ip,
-            server.ssh_user,
-            server.ssh_port,
-            ssh_key_path,
-            ssh_password
-        )
+        # 1. Check which services are actually registered on the device
+        svc_status = check_services_installed(server)
         
-        # Port checks are the source of truth for running state
+        # 2. Port checks confirm whether the service is actively listening
         port_checks = {
             'node_exporter': check_exporter(server.server_ip, 9100),
             'dc_exporter': check_exporter(server.server_ip, 9835),
             'dcgm_exporter': check_exporter(server.server_ip, 9400),
         }
         
-        for exp_key, port_result in port_checks.items():
-            is_running = port_result.get('running', False)
-            has_version = bool(versions.get(exp_key))
+        # 3. Get versions via SSH only for services that exist
+        installed_keys = [k for k, v in svc_status.items() if v['installed']]
+        versions = {}
+        if installed_keys:
+            versions = get_all_exporter_versions(
+                server.server_ip,
+                server.ssh_user,
+                server.ssh_port,
+                ssh_key_path,
+                ssh_password
+            )
+        
+        for exp_key in ('node_exporter', 'dc_exporter', 'dcgm_exporter'):
+            svc = svc_status[exp_key]
+            port_running = port_checks[exp_key].get('running', False)
+            is_active = svc['active'] or port_running
             
-            if has_version or is_running:
-                setattr(server, f'{exp_key}_installed', True)
-                setattr(server, f'{exp_key}_enabled', True)
-                if has_version:
-                    setattr(server, f'{exp_key}_version', versions[exp_key])
-            else:
-                setattr(server, f'{exp_key}_enabled', False)
+            setattr(server, f'{exp_key}_installed', svc['installed'])
+            setattr(server, f'{exp_key}_enabled', is_active)
+            if versions.get(exp_key):
+                setattr(server, f'{exp_key}_version', versions[exp_key])
         
         # Also check watchdog agent
         watchdog_status = check_watchdog_agent(server)

@@ -497,6 +497,18 @@
     // Key: "serverId", Value: [{ exporter, action, success, message, time }]
     const completedOps = {};
     
+    // Operation queue: serializes heavy SSH operations (install/remove/reinstall)
+    // per server so they don't stomp on each other.
+    const opQueues = {};  // Key: serverId, Value: Promise chain
+    
+    function enqueueServerOp(serverId, fn) {
+        if (!opQueues[serverId]) {
+            opQueues[serverId] = Promise.resolve();
+        }
+        opQueues[serverId] = opQueues[serverId].then(fn).catch(() => {});
+        return opQueues[serverId];
+    }
+    
     // Map of serverId → serverName for background op notifications
     const serverNames = {};
     
@@ -1161,7 +1173,7 @@
                 // the version hasn't been detected yet.
                 const isChecked = pending ? (pending !== 'stopping' && pending !== 'removing') : isEnabled;
                 
-                const toggleDisabled = !canWrite || !!pending;
+                const toggleDisabled = !canWrite || !isInstalled || !!pending;
                 html += `
                 <div class="exporter-card" data-exporter="${exp.key}">
                     <div class="exporter-header">
@@ -1179,12 +1191,16 @@
                     </div>
                     ${isInstalled ? `
                     <div class="auto-update-row">
-                        <input type="checkbox" id="auto-${exp.key}" ${canWrite ? '' : 'disabled'} onchange="updateAutoSetting('${exp.key}', this.checked)">
+                        <input type="checkbox" id="auto-${exp.key}" ${data.auto_update && data.auto_update[exp.key] ? 'checked' : ''} ${canWrite ? '' : 'disabled'} onchange="updateAutoSetting('${exp.key}', this.checked)">
                         <label for="auto-${exp.key}">Auto-update</label>
-                    </div>` : `
-                    <div style="margin-top: 6px; font-size: 11px; color: var(--text-secondary);">
-                        Toggle on to install and start this exporter
-                    </div>`}
+                    </div>` : ''}
+                    ${canWrite && !pending ? `
+                    <div style="margin-top: 10px; display: flex; gap: 8px;">
+                        ${!isInstalled ? `<button class="btn btn-primary btn-sm" onclick="installSingleExporter('${exp.key}')">Install</button>` : ''}
+                        ${isInstalled ? `<button class="btn btn-secondary btn-sm" onclick="reinstallSingleExporter('${exp.key}')">Reinstall (Latest)</button>` : ''}
+                        ${isInstalled ? `<button class="btn btn-warning btn-sm" onclick="removeSingleExporter('${exp.key}')">Remove</button>` : ''}
+                    </div>
+                    ` : ''}
                 </div>
                 `;
             }
@@ -1195,8 +1211,8 @@
             <div style="display: flex; align-items: center; gap: 12px;">
                 <label>Update Branch:</label>
                 <select class="branch-select" id="branchSelect" ${canWrite ? '' : 'disabled'} onchange="updateBranch(this.value)">
-                    <option value="main">main (stable)</option>
-                    <option value="dev">dev (latest)</option>
+                    <option value="main" ${(data.update_branch || 'main') === 'main' ? 'selected' : ''}>main (stable)</option>
+                    <option value="dev" ${data.update_branch === 'dev' ? 'selected' : ''}>dev (latest)</option>
                 </select>
             </div>
             ${canWrite ? `
@@ -1222,21 +1238,15 @@
         serverNames[serverId] = serverName;
         const opKey = `${serverId}:${exporter}`;
         
-        // Find the exporter card and show a spinner/status
         const card = document.querySelector(`[data-exporter="${exporter}"]`);
         const versionBadge = card ? card.querySelector('.version-badge') : null;
-        const origText = versionBadge ? versionBadge.textContent : '';
         
-        const action = (enabled && origText === 'Not installed') ? 'installing' : (enabled ? 'starting' : 'stopping');
+        const action = enabled ? 'starting' : 'stopping';
         pendingOps[opKey] = action;
         updateServerRowIndicators(serverId);
         
         if (versionBadge) {
-            versionBadge.textContent = action === 'installing' ? 'Installing...' : (enabled ? 'Starting...' : 'Stopping...');
-            if (action === 'installing') {
-                versionBadge.style.background = 'var(--accent-cyan)';
-                versionBadge.style.color = '#000';
-            }
+            versionBadge.textContent = enabled ? 'Starting...' : 'Stopping...';
         }
         
         try {
@@ -1459,6 +1469,93 @@
                 handleOpComplete(id, serverName, k, 'installing', false, 'Network error: ' + e.message);
             });
         }
+    }
+    
+    async function markPendingAndRender(serverId, exporter, action) {
+        const opKey = `${serverId}:${exporter}`;
+        pendingOps[opKey] = action;
+        updateServerRowIndicators(serverId);
+        if (currentServerId === serverId) {
+            try {
+                const resp = await fetch(`${basePath}/api/servers/${serverId}/exporters/versions`);
+                const data = await resp.json();
+                renderExporterManagement(data);
+            } catch (e) {}
+        }
+    }
+    
+    async function installSingleExporter(exporter) {
+        const serverId = currentServerId;
+        const serverName = document.getElementById('modalServerName').textContent.split(' - ')[0];
+        serverNames[serverId] = serverName;
+        
+        await markPendingAndRender(serverId, exporter, 'installing');
+        
+        enqueueServerOp(serverId, async () => {
+            try {
+                const response = await fetch(`${basePath}/api/servers/${serverId}/install-exporters`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({exporters: [exporter]})
+                });
+                
+                const result = await response.json();
+                handleOpComplete(serverId, serverName, exporter, 'installing', !result[exporter]?.includes?.('fail'), result[exporter] || '');
+            } catch (e) {
+                handleOpComplete(serverId, serverName, exporter, 'installing', false, 'Network error: ' + e.message);
+            }
+        });
+    }
+    
+    async function removeSingleExporter(exporter) {
+        if (!confirm(`Remove ${exporter.replace('_', ' ')} from this server?`)) return;
+        const serverId = currentServerId;
+        const serverName = document.getElementById('modalServerName').textContent.split(' - ')[0];
+        serverNames[serverId] = serverName;
+        
+        await markPendingAndRender(serverId, exporter, 'removing');
+        
+        enqueueServerOp(serverId, async () => {
+            try {
+                const response = await fetch(`${basePath}/api/servers/${serverId}/remove-exporters`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({exporters: [exporter]})
+                });
+                
+                const result = await response.json();
+                handleOpComplete(serverId, serverName, exporter, 'removing', !result[exporter]?.includes?.('fail'), result[exporter] || '');
+            } catch (e) {
+                handleOpComplete(serverId, serverName, exporter, 'removing', false, 'Network error: ' + e.message);
+            }
+        });
+    }
+    
+    async function reinstallSingleExporter(exporter) {
+        if (!confirm(`Reinstall ${exporter.replace('_', ' ')} to the latest version?`)) return;
+        const serverId = currentServerId;
+        const serverName = document.getElementById('modalServerName').textContent.split(' - ')[0];
+        serverNames[serverId] = serverName;
+        
+        const branch = document.getElementById('branchSelect')?.value || 'main';
+        
+        await markPendingAndRender(serverId, exporter, 'installing');
+        
+        enqueueServerOp(serverId, async () => {
+            try {
+                const response = await fetch(`${basePath}/api/servers/${serverId}/exporters/${exporter}/update`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({branch})
+                });
+                
+                const result = await response.json();
+                const msg = result.success ? `Updated to ${result.version}` : (result.error || 'Unknown error');
+                handleOpComplete(serverId, serverName, exporter, 'installing', result.success, msg);
+            } catch (e) {
+                handleOpComplete(serverId, serverName, exporter, 'installing', false, 'Network error: ' + e.message);
+            }
+        });
     }
     
     async function removeExporters(id) {

@@ -30,18 +30,101 @@ def check_exporter(ip, port):
         return {'running': False, 'port': port, 'error': str(e)}
 
 
+SERVICE_NAMES = {
+    'node_exporter': 'node_exporter',
+    'dc_exporter': 'dc-exporter',
+    'dcgm_exporter': 'dcgm-exporter',
+}
+
+
+def check_services_installed(server):
+    """Check which exporter services actually exist on a remote host via SSH.
+
+    Runs a single SSH command that queries systemctl for each service unit file
+    and checks for docker containers for dcgm-exporter.
+
+    Returns dict mapping exporter key to
+    {'installed': bool, 'active': bool}.
+    """
+    result = {
+        'node_exporter': {'installed': False, 'active': False},
+        'dc_exporter': {'installed': False, 'active': False},
+        'dcgm_exporter': {'installed': False, 'active': False},
+    }
+
+    script = (
+        "for svc in node_exporter dc-exporter; do "
+        "  state=$(systemctl is-active $svc 2>/dev/null || echo missing); "
+        "  enabled=$(systemctl is-enabled $svc 2>/dev/null || echo missing); "
+        "  echo \"$svc:$state:$enabled\"; "
+        "done; "
+        "docker_state=$(docker inspect -f '{{.State.Status}}' dcgm-exporter 2>/dev/null || echo missing); "
+        "echo \"dcgm-exporter:$docker_state:docker\""
+    )
+
+    try:
+        cmd, env = build_ssh_cmd(server, timeout=10)
+        cmd.append(script)
+
+        run_env = {**os.environ, **env} if env else None
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=20, env=run_env)
+
+        if proc.returncode != 0:
+            logger.warning("check_services_installed SSH failed for %s: %s",
+                           server.name, (proc.stderr or '').strip()[:200])
+            return result
+
+        svc_to_key = {
+            'node_exporter': 'node_exporter',
+            'dc-exporter': 'dc_exporter',
+            'dcgm-exporter': 'dcgm_exporter',
+        }
+
+        for line in proc.stdout.strip().splitlines():
+            parts = line.strip().split(':')
+            if len(parts) < 3:
+                continue
+            svc_name, state, enabled = parts[0], parts[1], parts[2]
+            exp_key = svc_to_key.get(svc_name)
+            if not exp_key:
+                continue
+
+            if exp_key == 'dcgm_exporter':
+                result[exp_key]['installed'] = state != 'missing'
+                result[exp_key]['active'] = state == 'running'
+            else:
+                is_known = state != 'missing' or enabled != 'missing'
+                result[exp_key]['installed'] = is_known
+                result[exp_key]['active'] = state == 'active'
+
+    except subprocess.TimeoutExpired:
+        logger.warning("check_services_installed timed out for %s", server.name)
+    except Exception as e:
+        logger.warning("check_services_installed error for %s: %s", server.name, e)
+
+    return result
+
+
 def install_exporter_remote(server, exporter_name):
-    """Install an exporter on a remote server via SSH."""
+    """Install an exporter on a remote server via SSH.
+
+    Always performs a fresh download regardless of existing files.
+    Cleans up temporary files after installation.
+    """
     try:
         if exporter_name == 'node_exporter':
             script = """
-            if ! systemctl is-active node_exporter >/dev/null 2>&1; then
-                cd /tmp
-                curl -sLO https://github.com/prometheus/node_exporter/releases/download/v1.10.2/node_exporter-1.10.2.linux-amd64.tar.gz
-                tar xzf node_exporter-1.10.2.linux-amd64.tar.gz
-                cp node_exporter-1.10.2.linux-amd64/node_exporter /usr/local/bin/
-                useradd -r -s /bin/false node_exporter 2>/dev/null || true
-                cat > /etc/systemd/system/node_exporter.service << 'EOF'
+set -e
+systemctl stop node_exporter 2>/dev/null || true
+cd /tmp
+rm -rf node_exporter-1.10.2.linux-amd64*
+curl -sLO https://github.com/prometheus/node_exporter/releases/download/v1.10.2/node_exporter-1.10.2.linux-amd64.tar.gz
+tar xzf node_exporter-1.10.2.linux-amd64.tar.gz
+cp node_exporter-1.10.2.linux-amd64/node_exporter /usr/local/bin/
+chmod +x /usr/local/bin/node_exporter
+rm -rf node_exporter-1.10.2.linux-amd64*
+useradd -r -s /bin/false node_exporter 2>/dev/null || true
+cat > /etc/systemd/system/node_exporter.service << 'EOF'
 [Unit]
 Description=Node Exporter
 After=network.target
@@ -55,19 +138,17 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF
-                systemctl daemon-reload
-                systemctl enable node_exporter
-                systemctl start node_exporter
-            fi
+systemctl daemon-reload
+systemctl enable node_exporter
+systemctl start node_exporter
             """
         elif exporter_name == 'dc_exporter':
             script = """
-            # Download dc-exporter-rs (Rust version)
-            curl -L https://github.com/cryptolabsza/dc-exporter-releases/releases/latest/download/dc-exporter-rs -o /usr/local/bin/dc-exporter-rs
-            chmod +x /usr/local/bin/dc-exporter-rs
-            
-            # Create systemd service
-            cat > /etc/systemd/system/dc-exporter.service << 'EOF'
+set -e
+systemctl stop dc-exporter 2>/dev/null || true
+curl -sL https://github.com/cryptolabsza/dc-exporter-releases/releases/latest/download/dc-exporter-rs -o /usr/local/bin/dc-exporter-rs
+chmod +x /usr/local/bin/dc-exporter-rs
+cat > /etc/systemd/system/dc-exporter.service << 'EOF'
 [Unit]
 Description=DC Exporter - GPU Metrics for Prometheus (Rust)
 Documentation=https://github.com/cryptolabsza/dc-exporter-rs
@@ -82,15 +163,15 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-            systemctl daemon-reload
-            systemctl enable dc-exporter
-            systemctl start dc-exporter
+systemctl daemon-reload
+systemctl enable dc-exporter
+systemctl start dc-exporter
             """
         else:
             return False
         
         cmd, env = build_ssh_cmd(server, timeout=10, batch_mode=False)
-        cmd.append(f'bash -c "{script}"')
+        cmd.append(script)
         
         run_env = {**os.environ, **env} if env else None
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=run_env)
