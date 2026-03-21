@@ -9,6 +9,7 @@ import json
 import logging
 import subprocess
 
+import requests
 import yaml
 from pathlib import Path
 
@@ -191,13 +192,37 @@ def sync_ipmi_monitor_targets(servers, config_path: str = None):
 
 
 def reload_prometheus():
-    """Reload Prometheus configuration."""
+    """Reload Prometheus configuration via HTTP lifecycle API with fallbacks.
+
+    Tries in order:
+      1. HTTP POST to prometheus:9090/prometheus/-/reload  (sub-path deploy)
+      2. HTTP POST to prometheus:9090/-/reload             (root deploy)
+      3. docker exec prometheus kill -HUP 1                (host with docker)
+      4. systemctl reload prometheus                       (bare-metal)
+    """
+    for url in (
+        "http://prometheus:9090/prometheus/-/reload",
+        "http://prometheus:9090/-/reload",
+    ):
+        try:
+            resp = requests.post(url, timeout=5)
+            resp.raise_for_status()
+            logger.debug("Prometheus reloaded via %s", url)
+            return
+        except (requests.ConnectionError, requests.Timeout, requests.HTTPError):
+            continue
+
     try:
         subprocess.run(['docker', 'exec', 'prometheus', 'kill', '-HUP', '1'],
                       capture_output=True, timeout=10)
+        logger.debug("Prometheus reloaded via docker exec")
+        return
     except Exception:
-        try:
-            subprocess.run(['systemctl', 'reload', 'prometheus'],
-                          capture_output=True, timeout=10)
-        except Exception:
-            pass
+        pass
+
+    try:
+        subprocess.run(['systemctl', 'reload', 'prometheus'],
+                      capture_output=True, timeout=10)
+        logger.debug("Prometheus reloaded via systemctl")
+    except Exception:
+        logger.warning("Failed to reload Prometheus via all methods")

@@ -60,6 +60,7 @@ services:
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time={{ retention_time | default('30d') }}"
+      - "--web.enable-lifecycle"
 {% if enable_proxy %}
       - "--web.external-url=/prometheus/"
       - "--web.route-prefix=/prometheus/"
