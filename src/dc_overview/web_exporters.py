@@ -117,12 +117,12 @@ def install_exporter_remote(server, exporter_name):
 set -e
 systemctl stop node_exporter 2>/dev/null || true
 cd /tmp
-rm -rf node_exporter-1.10.2.linux-amd64*
+rm -rf node_exporter-*
 curl -sLO https://github.com/prometheus/node_exporter/releases/download/v1.10.2/node_exporter-1.10.2.linux-amd64.tar.gz
 tar xzf node_exporter-1.10.2.linux-amd64.tar.gz
 cp node_exporter-1.10.2.linux-amd64/node_exporter /usr/local/bin/
 chmod +x /usr/local/bin/node_exporter
-rm -rf node_exporter-1.10.2.linux-amd64*
+rm -rf node_exporter-*
 useradd -r -s /bin/false node_exporter 2>/dev/null || true
 cat > /etc/systemd/system/node_exporter.service << 'EOF'
 [Unit]
