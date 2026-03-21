@@ -37,15 +37,18 @@
             {% if ssh_keys %}
             <table>
                 <thead>
-                    <tr><th>Name</th><th>Path</th><th>Fingerprint</th><th>Actions</th></tr>
+                    <tr><th>Name</th><th>Fingerprint</th><th>Servers</th><th>Actions</th></tr>
                 </thead>
                 <tbody id="sshKeysTable">
                     {% for key in ssh_keys %}
                     <tr data-id="{{ key.id }}">
                         <td>{{ key.name }}</td>
-                        <td style="font-family: monospace; font-size: 0.85rem;">{{ key.key_path }}</td>
                         <td style="font-family: monospace; font-size: 0.85rem;">{{ key.fingerprint or '—' }}</td>
-                        <td>
+                        <td>{{ key.server_count|default(0) }}</td>
+                        <td style="display: flex; gap: 6px; flex-wrap: wrap;">
+                            <button class="btn btn-sm" onclick="viewPubKey({{ key.id }})" title="View public key">Pub Key</button>
+                            <button class="btn btn-sm" style="background: var(--accent-green); color: #000;" onclick="deployKey({{ key.id }}, '{{ key.name }}')" title="Deploy to workers">Deploy</button>
+                            <button class="btn btn-sm" style="background: var(--accent-yellow); color: #000;" onclick="syncIPMI({{ key.id }}, '{{ key.name }}')" title="Sync to IPMI Monitor">Sync IPMI</button>
                             <button class="btn btn-danger btn-sm" onclick="deleteSSHKey({{ key.id }})">Delete</button>
                         </td>
                     </tr>
@@ -57,20 +60,60 @@
             {% endif %}
             
             <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
-                <h3>Add SSH Key</h3>
-                <form id="addSSHKeyForm">
-                    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 15px;">
-                        <div class="form-group">
-                            <label>Key Name</label>
-                            <input type="text" name="name" placeholder="my-ssh-key" required>
-                        </div>
-                        <div class="form-group">
-                            <label>Key Path (inside container)</label>
-                            <input type="text" name="key_path" placeholder="/etc/dc-overview/ssh_keys/id_rsa" required>
-                        </div>
+                <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                    <div style="flex: 1; min-width: 300px;">
+                        <h3>Generate New Key</h3>
+                        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 10px;">Create an ed25519 key pair for rotation or new workers.</p>
+                        <form id="generateKeyForm">
+                            <div class="form-group">
+                                <label>Key Name</label>
+                                <input type="text" name="name" placeholder="fleet-key-2026" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Generate Key</button>
+                        </form>
                     </div>
-                    <button type="submit" class="btn btn-primary">Add SSH Key</button>
-                </form>
+                    <div style="flex: 1; min-width: 300px;">
+                        <h3>Register Existing Key</h3>
+                        <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 10px;">Register an existing key file already on disk.</p>
+                        <form id="addSSHKeyForm">
+                            <div class="form-group">
+                                <label>Key Name</label>
+                                <input type="text" name="name" placeholder="my-ssh-key" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Key Path (inside container)</label>
+                                <input type="text" name="key_path" placeholder="/etc/dc-overview/ssh_keys/id_rsa" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Add SSH Key</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Public Key Modal -->
+        <div id="pubkeyModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:1000; align-items:center; justify-content:center;">
+            <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 25px; max-width: 700px; width: 90%; position: relative;">
+                <h3 id="pubkeyModalTitle" style="margin-bottom: 10px;">Public Key</h3>
+                <p id="pubkeyFingerprint" style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 15px; font-family: monospace;"></p>
+                <textarea id="pubkeyContent" readonly style="width:100%; height:100px; background:var(--bg-primary); color:var(--accent-cyan); border:1px solid var(--border-color); border-radius:8px; padding:12px; font-family:monospace; font-size:0.85rem; resize:vertical;"></textarea>
+                <div style="display:flex; gap:10px; margin-top:15px;">
+                    <button class="btn btn-primary" onclick="copyPubKey()">Copy to Clipboard</button>
+                    <button class="btn" onclick="closePubKeyModal()">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Deploy Modal -->
+        <div id="deployModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:1000; align-items:center; justify-content:center;">
+            <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 25px; max-width: 500px; width: 90%; position: relative;">
+                <h3 id="deployModalTitle" style="margin-bottom: 15px;">Deploy Key to Workers</h3>
+                <div id="deployServerList" style="max-height: 250px; overflow-y: auto; margin-bottom: 15px;"></div>
+                <div id="deployStatus" style="display:none; margin-bottom:15px; padding:10px; border-radius:8px; font-size:0.9rem;"></div>
+                <div style="display:flex; gap:10px;">
+                    <button id="deployBtn" class="btn btn-primary" onclick="executeDeployKey()">Deploy to Selected</button>
+                    <button class="btn" onclick="closeDeployModal()">Close</button>
+                </div>
             </div>
         </div>
         
@@ -102,50 +145,160 @@
     </div>
     
     <script>
-    // Get base path for API calls - extract /dc from any subpath like /dc/settings
     const basePath = window.location.pathname.match(/^(\/[^\/]+)/)?.[1] || '';
-    
-    // Fix nav links to include base path (e.g. /dc/servers instead of /servers)
+    let _deployKeyId = null;
+
     document.querySelectorAll('.nav a[data-nav]').forEach(a => {
         a.href = basePath + a.getAttribute('href');
     });
-    
-    // ---- SSH Keys ----
+
+    // ---- Register existing key ----
     document.getElementById('addSSHKeyForm').onsubmit = async (e) => {
         e.preventDefault();
         const form = e.target;
-        const data = {
-            name: form.name.value,
-            key_path: form.key_path.value
-        };
-        
         const response = await fetch(`${basePath}/api/ssh-keys`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(data)
+            body: JSON.stringify({ name: form.name.value, key_path: form.key_path.value })
         });
-        
+        if (response.ok) { location.reload(); }
+        else { const r = await response.json(); alert(r.error || 'Failed to add SSH key'); }
+    };
+
+    // ---- Generate new key ----
+    document.getElementById('generateKeyForm').onsubmit = async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const btn = form.querySelector('button');
+        btn.disabled = true; btn.textContent = 'Generating...';
+
+        const response = await fetch(`${basePath}/api/ssh-keys/generate`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ name: form.name.value })
+        });
+        const data = await response.json();
+
         if (response.ok) {
-            location.reload();
+            document.getElementById('pubkeyModalTitle').textContent = `Generated: ${data.name}`;
+            document.getElementById('pubkeyFingerprint').textContent = data.fingerprint || '';
+            document.getElementById('pubkeyContent').value = data.public_key;
+            document.getElementById('pubkeyModal').style.display = 'flex';
         } else {
-            const result = await response.json();
-            alert(result.error || 'Failed to add SSH key');
+            alert(data.error || 'Failed to generate key');
+            btn.disabled = false; btn.textContent = 'Generate Key';
         }
     };
-    
+
+    // ---- View public key ----
+    async function viewPubKey(id) {
+        const resp = await fetch(`${basePath}/api/ssh-keys/${id}/pubkey`);
+        const data = await resp.json();
+        if (!resp.ok) { alert(data.error || 'Cannot read public key'); return; }
+        document.getElementById('pubkeyModalTitle').textContent = data.name;
+        document.getElementById('pubkeyFingerprint').textContent = data.fingerprint || '';
+        document.getElementById('pubkeyContent').value = data.public_key;
+        document.getElementById('pubkeyModal').style.display = 'flex';
+    }
+
+    function copyPubKey() {
+        const el = document.getElementById('pubkeyContent');
+        el.select();
+        navigator.clipboard.writeText(el.value).then(() => {
+            const btn = event.target;
+            btn.textContent = 'Copied!';
+            setTimeout(() => { btn.textContent = 'Copy to Clipboard'; }, 2000);
+        });
+    }
+
+    function closePubKeyModal() {
+        document.getElementById('pubkeyModal').style.display = 'none';
+        location.reload();
+    }
+
+    // ---- Deploy key to workers ----
+    async function deployKey(keyId, keyName) {
+        _deployKeyId = keyId;
+        document.getElementById('deployModalTitle').textContent = `Deploy "${keyName}" to Workers`;
+        document.getElementById('deployStatus').style.display = 'none';
+        document.getElementById('deployBtn').disabled = false;
+        document.getElementById('deployBtn').textContent = 'Deploy to Selected';
+
+        const resp = await fetch(`${basePath}/api/servers`);
+        const servers = await resp.json();
+        const list = document.getElementById('deployServerList');
+
+        if (!servers.length) {
+            list.innerHTML = '<p style="color:var(--text-secondary)">No servers registered.</p>';
+        } else {
+            list.innerHTML = `
+                <label style="display:block; margin-bottom:8px; cursor:pointer;">
+                    <input type="checkbox" id="deploySelectAll" checked onchange="toggleAllDeploy(this.checked)">
+                    <strong>Select All (${servers.length})</strong>
+                </label>
+                <hr style="border-color:var(--border-color); margin-bottom:8px;">
+            ` + servers.map(s => `
+                <label style="display:block; margin-bottom:6px; cursor:pointer;">
+                    <input type="checkbox" class="deploy-cb" value="${s.id}" checked>
+                    ${s.name} <span style="color:var(--text-secondary)">(${s.server_ip})</span>
+                </label>
+            `).join('');
+        }
+        document.getElementById('deployModal').style.display = 'flex';
+    }
+
+    function toggleAllDeploy(checked) {
+        document.querySelectorAll('.deploy-cb').forEach(cb => { cb.checked = checked; });
+    }
+
+    async function executeDeployKey() {
+        const btn = document.getElementById('deployBtn');
+        btn.disabled = true; btn.textContent = 'Deploying...';
+
+        const ids = [...document.querySelectorAll('.deploy-cb:checked')].map(cb => parseInt(cb.value));
+        if (!ids.length) { alert('Select at least one server'); btn.disabled = false; btn.textContent = 'Deploy to Selected'; return; }
+
+        const resp = await fetch(`${basePath}/api/ssh-keys/${_deployKeyId}/deploy`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ server_ids: ids })
+        });
+        const data = await resp.json();
+
+        const status = document.getElementById('deployStatus');
+        status.style.display = 'block';
+        if (data.failed === 0) {
+            status.style.background = 'rgba(74, 222, 128, 0.15)';
+            status.style.color = 'var(--accent-green)';
+            status.textContent = `Deployed to ${data.deployed}/${data.total} servers.`;
+        } else {
+            status.style.background = 'rgba(239, 68, 68, 0.15)';
+            status.style.color = 'var(--accent-red)';
+            const failed = data.results.filter(r => !r.success).map(r => r.name).join(', ');
+            status.innerHTML = `Deployed: ${data.deployed}/${data.total}. Failed: ${failed}`;
+        }
+        btn.textContent = 'Done';
+    }
+
+    function closeDeployModal() { document.getElementById('deployModal').style.display = 'none'; }
+
+    // ---- Sync to IPMI Monitor ----
+    async function syncIPMI(keyId, keyName) {
+        if (!confirm(`Push "${keyName}" to IPMI Monitor?`)) return;
+        const resp = await fetch(`${basePath}/api/ssh-keys/${keyId}/sync-ipmi`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'}
+        });
+        const data = await resp.json();
+        if (resp.ok) { alert(`Key "${keyName}" synced to IPMI Monitor.`); }
+        else { alert(data.error || 'Failed to sync to IPMI Monitor'); }
+    }
+
+    // ---- Delete key ----
     async function deleteSSHKey(id) {
         if (!confirm('Delete this SSH key?')) return;
-        
         const response = await fetch(`${basePath}/api/ssh-keys/${id}`, {method: 'DELETE'});
-        
-        if (response.ok) {
-            location.reload();
-        } else {
-            const result = await response.json();
-            alert(result.error || 'Failed to delete SSH key');
-        }
+        if (response.ok) { location.reload(); }
+        else { const r = await response.json(); alert(r.error || 'Failed to delete SSH key'); }
     }
-    
-    // Exporter accounts are now managed via Fleet Management (/vastai/ and /runpod/)
     </script>
 </body></html>

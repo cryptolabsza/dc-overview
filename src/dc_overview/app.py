@@ -1940,6 +1940,152 @@ def api_delete_ssh_key(key_id):
     return jsonify({'success': True})
 
 
+@app.route('/api/ssh-keys/<int:key_id>/pubkey')
+@login_required
+def api_ssh_key_pubkey(key_id):
+    """Return the public key content for display / copy."""
+    key = SSHKey.query.get_or_404(key_id)
+    pub_path = Path(key.key_path + '.pub')
+    if not pub_path.exists():
+        return jsonify({'error': f'Public key file not found at {pub_path}'}), 404
+    return jsonify({
+        'id': key.id,
+        'name': key.name,
+        'fingerprint': key.fingerprint,
+        'public_key': pub_path.read_text().strip(),
+    })
+
+
+@app.route('/api/ssh-keys/generate', methods=['POST'])
+@csrf.exempt
+@admin_required
+def api_generate_ssh_key():
+    """Generate a new ed25519 key pair, save to disk, register in DB."""
+    data = request.json or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+
+    if SSHKey.query.filter_by(name=name).first():
+        return jsonify({'error': 'SSH key with this name already exists'}), 409
+
+    keys_dir = Path(data.get('keys_dir', '/etc/dc-overview/ssh_keys'))
+    keys_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', name)
+    key_path = keys_dir / safe_name
+    pub_path = Path(str(key_path) + '.pub')
+
+    result = subprocess.run([
+        'ssh-keygen', '-t', 'ed25519',
+        '-f', str(key_path), '-N', '', '-C', f'dc-overview-{safe_name}',
+    ], capture_output=True, text=True, timeout=30)
+
+    if result.returncode != 0:
+        return jsonify({'error': f'ssh-keygen failed: {result.stderr}'}), 500
+
+    os.chmod(key_path, 0o600)
+    os.chmod(pub_path, 0o644)
+
+    fp_result = subprocess.run(
+        ['ssh-keygen', '-lf', str(key_path)],
+        capture_output=True, text=True, timeout=10,
+    )
+    fingerprint = fp_result.stdout.split()[1] if fp_result.returncode == 0 else None
+
+    key = SSHKey(name=name, key_path=str(key_path), fingerprint=fingerprint)
+    db.session.add(key)
+    db.session.commit()
+
+    return jsonify({
+        'id': key.id,
+        'name': key.name,
+        'key_path': key.key_path,
+        'fingerprint': key.fingerprint,
+        'public_key': pub_path.read_text().strip(),
+    }), 201
+
+
+@app.route('/api/ssh-keys/<int:key_id>/deploy', methods=['POST'])
+@csrf.exempt
+@admin_required
+def api_deploy_ssh_key(key_id):
+    """Deploy a public key to workers' authorized_keys via SSH.
+
+    Body (optional):
+        server_ids: list[int]  — deploy only to these servers (default: all)
+    """
+    key = SSHKey.query.get_or_404(key_id)
+    pub_path = Path(key.key_path + '.pub')
+    if not pub_path.exists():
+        return jsonify({'error': 'Public key file not found'}), 404
+
+    pub_key = pub_path.read_text().strip()
+    data = request.json or {}
+    server_ids = data.get('server_ids')
+
+    if server_ids:
+        servers = Server.query.filter(Server.id.in_(server_ids)).all()
+    else:
+        servers = Server.query.all()
+
+    results = []
+    for server in servers:
+        remote_cmd = (
+            "mkdir -p ~/.ssh && chmod 700 ~/.ssh && "
+            f"grep -qF '{pub_key}' ~/.ssh/authorized_keys 2>/dev/null || "
+            f"echo '{pub_key}' >> ~/.ssh/authorized_keys && "
+            "chmod 600 ~/.ssh/authorized_keys"
+        )
+        try:
+            cmd, env = build_ssh_cmd(server, timeout=10, batch_mode=False)
+            cmd.append(remote_cmd)
+            run_env = {**os.environ, **env} if env else None
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=run_env)
+            results.append({
+                'server_id': server.id, 'name': server.name,
+                'success': proc.returncode == 0,
+                'error': proc.stderr.strip() if proc.returncode != 0 else None,
+            })
+        except Exception as e:
+            results.append({
+                'server_id': server.id, 'name': server.name,
+                'success': False, 'error': str(e),
+            })
+
+    deployed = sum(1 for r in results if r['success'])
+    return jsonify({
+        'total': len(results), 'deployed': deployed,
+        'failed': len(results) - deployed, 'results': results,
+    })
+
+
+@app.route('/api/ssh-keys/<int:key_id>/sync-ipmi', methods=['POST'])
+@csrf.exempt
+@admin_required
+def api_sync_ssh_key_to_ipmi(key_id):
+    """Push an SSH key to IPMI Monitor so both tools share the same key."""
+    key = SSHKey.query.get_or_404(key_id)
+    key_file = Path(key.key_path)
+    if not key_file.exists():
+        return jsonify({'error': 'Private key file not found'}), 404
+
+    key_content = key_file.read_text()
+
+    try:
+        resp = http_requests.post(
+            'http://ipmi-monitor:5000/api/ssh-keys',
+            data=json.dumps({'name': key.name, 'key_content': key_content}),
+            headers={'Content-Type': 'application/json'},
+            timeout=10,
+        )
+        if resp.status_code in (200, 201):
+            return jsonify({'success': True, 'ipmi_key_id': resp.json().get('id')})
+        return jsonify({'error': f'IPMI Monitor returned {resp.status_code}', 'detail': resp.text}), 502
+    except Exception as e:
+        return jsonify({'error': f'Failed to reach IPMI Monitor: {e}'}), 502
+
+
 @app.route('/api/servers/<int:server_id>/ssh-key', methods=['POST'])
 @admin_required
 def api_set_server_ssh_key(server_id):
@@ -2529,6 +2675,8 @@ def servers_page():
 def settings_page():
     """Settings page."""
     ssh_keys = SSHKey.query.all()
+    for k in ssh_keys:
+        k.server_count = Server.query.filter_by(ssh_key_id=k.id).count()
     
     return render_template('settings.html',
         ssh_keys=ssh_keys,
