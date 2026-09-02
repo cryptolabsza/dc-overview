@@ -8,6 +8,7 @@ import logging
 import os
 import shutil
 import tempfile
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -36,6 +37,9 @@ _HARDWARE_TOTAL_EXPRESSION = "__DC_OVERVIEW_HARDWARE_TOTAL_EXPRESSION__"
 _INVENTORY_USABLE_EXPRESSION = "__DC_OVERVIEW_INVENTORY_USABLE_EXPRESSION__"
 _INVENTORY_TOTAL_EXPRESSION = "__DC_OVERVIEW_INVENTORY_TOTAL_EXPRESSION__"
 ROLLBACK_RELOAD_ATTEMPTS = 2
+RECEIVER_ROLLBACK_PUT_ATTEMPTS = 2
+RECEIVER_READY_ATTEMPTS = 30
+RECEIVER_READY_POLL_INTERVAL = 1.0
 _RECEIVER_UNSET = object()
 
 
@@ -66,6 +70,7 @@ class GrafanaReceiverConfigurationResult:
     configured: bool
     receiver: str
     updated_uids: Tuple[str, ...]
+    previous_messages: Tuple[Tuple[str, Optional[str]], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -338,6 +343,23 @@ def install_grafana_alerts(
     return target
 
 
+def install_grafana_notification_template(config_dir: Path) -> Path:
+    """Atomically install only the notification template for staged activation."""
+    template_target = (
+        Path(config_dir)
+        / "grafana"
+        / "provisioning"
+        / "alerting"
+        / NOTIFICATION_TEMPLATE_FILENAME
+    )
+    _atomic_write(
+        template_target,
+        _notification_template_content(),
+        owner=_existing_owner(template_target),
+    )
+    return template_target
+
+
 def reload_grafana_alerts(
     grafana_url: str,
     admin_password: str,
@@ -438,6 +460,98 @@ def _put_contact_point(
     response.raise_for_status()
 
 
+def _live_telegram_messages(
+    document: Any,
+    receiver: str,
+) -> Optional[Dict[str, Optional[str]]]:
+    if not isinstance(document, dict):
+        return None
+    config = document.get("config")
+    if not isinstance(config, dict):
+        return None
+    receivers = config.get("receivers")
+    if not isinstance(receivers, list):
+        return None
+
+    messages: Dict[str, Optional[str]] = {}
+    for configured_receiver in receivers:
+        if not isinstance(configured_receiver, dict):
+            continue
+        if configured_receiver.get("name") != receiver:
+            continue
+        integrations = configured_receiver.get("grafana_managed_receiver_configs")
+        if not isinstance(integrations, list):
+            continue
+        for integration in integrations:
+            if not isinstance(integration, dict):
+                continue
+            if str(integration.get("type", "")).lower() != "telegram":
+                continue
+            uid = integration.get("uid")
+            settings = integration.get("settings")
+            if isinstance(uid, str) and isinstance(settings, dict):
+                message = settings.get("message")
+                if message is None or isinstance(message, str):
+                    messages[uid] = message
+    return messages
+
+
+def wait_for_grafana_telegram_receiver(
+    grafana_url: str,
+    admin_password: str,
+    *,
+    receiver: str,
+    expected_messages: Tuple[Tuple[str, Optional[str]], ...],
+    admin_user: str = "admin",
+    timeout: int = 10,
+    attempts: int = RECEIVER_READY_ATTEMPTS,
+    poll_interval: float = RECEIVER_READY_POLL_INTERVAL,
+) -> bool:
+    """Wait until Alertmanager's live config exposes exact Telegram messages."""
+    if attempts < 1:
+        raise ValueError("attempts must be at least 1")
+    if poll_interval < 0:
+        raise ValueError("poll_interval must not be negative")
+    if not expected_messages:
+        return True
+
+    endpoint = f"{grafana_url.rstrip('/')}/api/alertmanager/grafana/api/v2/status"
+    expected = dict(expected_messages)
+    for attempt in range(attempts):
+        try:
+            response = requests.get(
+                endpoint,
+                auth=(admin_user, admin_password),
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            messages = _live_telegram_messages(response.json(), receiver)
+            if messages is None:
+                raise GrafanaReceiverError(
+                    "Grafana live receiver status had an unexpected structure"
+                )
+            if all(
+                uid in messages and messages[uid] == message
+                for uid, message in expected.items()
+            ):
+                return True
+        except requests.HTTPError as error:
+            status_code = getattr(error.response, "status_code", None)
+            if (
+                isinstance(status_code, int)
+                and 400 <= status_code < 500
+                and status_code not in (408, 429)
+            ):
+                raise GrafanaReceiverError(
+                    f"Grafana live receiver check returned HTTP {status_code}"
+                ) from error
+        except (requests.RequestException, ValueError, TypeError):
+            pass
+        if attempt + 1 < attempts:
+            time.sleep(poll_interval)
+    return False
+
+
 def configure_grafana_telegram_receiver(
     grafana_url: str,
     admin_password: str,
@@ -459,13 +573,19 @@ def configure_grafana_telegram_receiver(
         admin_user=admin_user,
         timeout=timeout,
     )
+    desired_message = f'{{{{ template "{NOTIFICATION_TEMPLATE_NAME}" . }}}}'
+    previous_messages: Tuple[Tuple[str, Optional[str]], ...] = tuple(
+        (str(point["uid"]), point["settings"].get("message"))
+        for point in originals
+    )
+    desired_messages = tuple(
+        (str(point["uid"]), desired_message) for point in originals
+    )
     attempted: list[Dict[str, Any]] = []
     try:
         for original in originals:
             updated = copy.deepcopy(original)
-            updated["settings"]["message"] = (
-                f'{{{{ template "{NOTIFICATION_TEMPLATE_NAME}" . }}}}'
-            )
+            updated["settings"]["message"] = desired_message
             attempted.append(original)
             _put_contact_point(
                 grafana_url,
@@ -474,8 +594,18 @@ def configure_grafana_telegram_receiver(
                 admin_user=admin_user,
                 timeout=timeout,
             )
+        if not wait_for_grafana_telegram_receiver(
+            grafana_url,
+            admin_password,
+            receiver=receiver,
+            expected_messages=desired_messages,
+            admin_user=admin_user,
+            timeout=timeout,
+        ):
+            raise RuntimeError("the concise Telegram message did not become active")
     except Exception as error:
         rollback_complete = True
+        rollback_failure_reason = ""
         for original in reversed(attempted):
             try:
                 _put_contact_point(
@@ -487,8 +617,33 @@ def configure_grafana_telegram_receiver(
                 )
             except Exception:
                 rollback_complete = False
+        if rollback_complete and attempted:
+            try:
+                rollback_complete = wait_for_grafana_telegram_receiver(
+                    grafana_url,
+                    admin_password,
+                    receiver=receiver,
+                    expected_messages=previous_messages,
+                    admin_user=admin_user,
+                    timeout=timeout,
+                )
+                if not rollback_complete:
+                    rollback_failure_reason = (
+                        "the previous Telegram message did not become active"
+                    )
+            except GrafanaReceiverError as rollback_error:
+                rollback_complete = False
+                rollback_failure_reason = str(rollback_error)
+            except Exception as rollback_error:
+                rollback_complete = False
+                rollback_failure_reason = type(rollback_error).__name__
+        elif attempted:
+            rollback_failure_reason = "one or more receiver restore updates failed"
+        message = f"Could not configure Telegram receiver {receiver!r}: {error}"
+        if rollback_failure_reason:
+            message += f"; rollback verification failed: {rollback_failure_reason}"
         raise GrafanaReceiverError(
-            f"Could not configure Telegram receiver {receiver!r}: {error}",
+            message,
             rollback_complete=rollback_complete,
         ) from error
 
@@ -496,7 +651,69 @@ def configure_grafana_telegram_receiver(
         configured=True,
         receiver=receiver,
         updated_uids=tuple(str(point["uid"]) for point in originals),
+        previous_messages=previous_messages,
     )
+
+
+def _restore_grafana_telegram_receiver_messages(
+    grafana_url: str,
+    admin_password: str,
+    *,
+    receiver: str,
+    previous_messages: Tuple[Tuple[str, Optional[str]], ...],
+    admin_user: str,
+    timeout: int,
+) -> bool:
+    """Restore only prior non-secret message fields and confirm live activation."""
+    if not previous_messages:
+        return True
+    try:
+        current = _get_telegram_contact_points(
+            grafana_url,
+            admin_password,
+            receiver=receiver,
+            admin_user=admin_user,
+            timeout=timeout,
+        )
+        by_uid = {str(point["uid"]): point for point in current}
+        if any(uid not in by_uid for uid, _message in previous_messages):
+            return False
+        all_restored = True
+        for uid, message in previous_messages:
+            restored = copy.deepcopy(by_uid[uid])
+            if message is None:
+                restored["settings"].pop("message", None)
+            else:
+                restored["settings"]["message"] = message
+            uid_restored = False
+            for _attempt in range(RECEIVER_ROLLBACK_PUT_ATTEMPTS):
+                try:
+                    _put_contact_point(
+                        grafana_url,
+                        admin_password,
+                        restored,
+                        admin_user=admin_user,
+                        timeout=timeout,
+                    )
+                    uid_restored = True
+                    break
+                except Exception:
+                    continue
+            all_restored = all_restored and uid_restored
+        if not all_restored:
+            return False
+        return wait_for_grafana_telegram_receiver(
+            grafana_url,
+            admin_password,
+            receiver=receiver,
+            expected_messages=previous_messages,
+            admin_user=admin_user,
+            timeout=timeout,
+        )
+    except GrafanaReceiverError:
+        raise
+    except Exception:
+        return False
 
 
 def _remove_managed_uids(path: Path) -> None:
@@ -682,6 +899,7 @@ def sync_grafana_alerts(
     touched_paths = [*duplicates, canonical_path, notification_template_path]
     snapshots = {path: _snapshot(path) for path in touched_paths}
     migrated_files = tuple(duplicates)
+    receiver_result: Optional[GrafanaReceiverConfigurationResult] = None
 
     try:
         for path, snapshot in snapshots.items():
@@ -690,6 +908,25 @@ def sync_grafana_alerts(
                 backup_path = backup_dir / relative_path
                 backup_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(path, backup_path)
+
+        if effective_receiver:
+            install_grafana_notification_template(config_dir)
+            if not reload_grafana_alerts(
+                grafana_url,
+                admin_password,
+                admin_user=admin_user,
+                timeout=timeout,
+            ):
+                raise RuntimeError(
+                    "Grafana rejected the notification-template provisioning reload"
+                )
+            receiver_result = configure_grafana_telegram_receiver(
+                grafana_url,
+                admin_password,
+                receiver=effective_receiver,
+                admin_user=admin_user,
+                timeout=timeout,
+            )
 
         for path in duplicates:
             _remove_managed_uids(path)
@@ -715,17 +952,6 @@ def sync_grafana_alerts(
         ):
             raise RuntimeError("Grafana rejected the alert provisioning reload")
 
-        notification_configured = False
-        if effective_receiver:
-            receiver_result = configure_grafana_telegram_receiver(
-                grafana_url,
-                admin_password,
-                receiver=effective_receiver,
-                admin_user=admin_user,
-                timeout=timeout,
-            )
-            notification_configured = receiver_result.configured
-
         return GrafanaAlertSyncResult(
             success=True,
             canonical_path=canonical_path,
@@ -733,23 +959,57 @@ def sync_grafana_alerts(
             backup_dir=backup_dir,
             migrated_files=migrated_files,
             receiver=effective_receiver,
-            notification_template_configured=notification_configured,
+            notification_template_configured=(
+                receiver_result.configured if receiver_result else False
+            ),
         )
     except Exception as error:
         files_restored, restore_errors = _restore_snapshots(snapshots)
+        receiver_rollback_complete = getattr(error, "rollback_complete", True)
+        receiver_restore_error = ""
         reload_restored, reload_errors = _reload_after_rollback(
             grafana_url,
             admin_password,
             admin_user=admin_user,
             timeout=timeout,
         )
-        receiver_rollback_complete = getattr(error, "rollback_complete", True)
+        if (
+            receiver_result
+            and receiver_result.configured
+            and files_restored
+            and reload_restored
+        ):
+            try:
+                receiver_restored = _restore_grafana_telegram_receiver_messages(
+                    grafana_url,
+                    admin_password,
+                    receiver=effective_receiver,
+                    previous_messages=receiver_result.previous_messages,
+                    admin_user=admin_user,
+                    timeout=timeout,
+                )
+            except GrafanaReceiverError as restore_error:
+                receiver_restored = False
+                receiver_restore_error = str(restore_error)
+            except Exception as restore_error:
+                receiver_restored = False
+                receiver_restore_error = type(restore_error).__name__
+            receiver_rollback_complete = (
+                receiver_restored and receiver_rollback_complete
+            )
+        elif receiver_result and receiver_result.configured:
+            receiver_rollback_complete = False
         rollback_complete = (
             files_restored and reload_restored and receiver_rollback_complete
         )
         details = [str(error), *restore_errors, *reload_errors]
         if not receiver_rollback_complete:
             details.append("Telegram receiver rollback was incomplete")
+        if receiver_restore_error:
+            details.append(
+                f"Telegram receiver rollback verification failed: "
+                f"{receiver_restore_error}"
+            )
         return GrafanaAlertSyncResult(
             success=False,
             canonical_path=canonical_path,
