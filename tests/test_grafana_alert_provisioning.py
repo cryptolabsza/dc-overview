@@ -10,23 +10,23 @@ import requests
 import yaml
 from click.testing import CliRunner
 
+from dc_overview.cli import _sync_alerts_for_upgrade, main
+from dc_overview.fleet_config import FleetConfig
+from dc_overview.fleet_manager import FleetManager
 from dc_overview.grafana_alerts import (
     ALERT_RULES_FILENAME,
+    MANAGED_ALERT_UIDS,
     NOTIFICATION_TEMPLATE_FILENAME,
     NOTIFICATION_TEMPLATE_NAME,
     DuplicateManagedAlertError,
     GrafanaReceiverError,
-    MANAGED_ALERT_UIDS,
     configure_grafana_telegram_receiver,
     install_grafana_alerts,
     reload_grafana_alerts,
     render_grafana_alerts,
     sync_grafana_alerts,
 )
-from dc_overview.fleet_config import FleetConfig
-from dc_overview.fleet_manager import FleetManager
 from dc_overview.templates import generate_docker_compose, setup_grafana_provisioning
-from dc_overview.cli import _sync_alerts_for_upgrade, main
 
 
 def _rule(rendered: str, uid: str) -> dict:
@@ -63,6 +63,17 @@ def _write_alert_rules(path, *uids: str) -> None:
             sort_keys=False,
         )
     )
+
+
+def _set_rule_receiver(path, receiver: str) -> None:
+    document = yaml.safe_load(path.read_text())
+    for group in document.get("groups", []):
+        for rule in group.get("rules", []):
+            rule["notification_settings"] = {
+                "receiver": receiver,
+                "group_wait": "0s",
+            }
+    path.write_text(yaml.safe_dump(document, sort_keys=False))
 
 
 def _uids(path) -> set[str]:
@@ -484,6 +495,143 @@ class TestGrafanaAlertSync:
         assert _uids(legacy) == {"fleet-gpu-thermal-slowdown", "unrelated-alert"}
 
     @patch("dc_overview.grafana_alerts.configure_grafana_telegram_receiver")
+    @patch("dc_overview.grafana_alerts.reload_grafana_alerts")
+    def test_sync_activates_receiver_before_immediate_rules(
+        self, mock_reload, mock_configure_receiver, tmp_path
+    ):
+        legacy = (
+            tmp_path / "grafana" / "provisioning" / "alerting" / "fleet-alerts.yml"
+        )
+        canonical = legacy.with_name(ALERT_RULES_FILENAME)
+        template = legacy.with_name(NOTIFICATION_TEMPLATE_FILENAME)
+        _write_alert_rules(legacy, "fleet-gpu-thermal-slowdown", "unrelated-alert")
+        _set_rule_receiver(legacy, "Charlotte Telegram")
+        events = []
+
+        def observe_reload(*args, **kwargs):
+            if canonical.exists():
+                events.append("rules-active")
+            elif template.exists():
+                events.append("template-loaded")
+            return True
+
+        def observe_receiver(*args, **kwargs):
+            events.append("receiver-active")
+            return MagicMock(configured=True, previous_messages=())
+
+        mock_reload.side_effect = observe_reload
+        mock_configure_receiver.side_effect = observe_receiver
+
+        result = sync_grafana_alerts(
+            tmp_path,
+            grafana_url="http://grafana:3000",
+            admin_password="secret",
+            migrate_duplicates=True,
+        )
+
+        assert result.success is True
+        assert events == ["template-loaded", "receiver-active", "rules-active"]
+
+    @patch("dc_overview.grafana_alerts.configure_grafana_telegram_receiver")
+    @patch("dc_overview.grafana_alerts.reload_grafana_alerts")
+    def test_upgrade_keeps_existing_canonical_rules_unchanged_until_receiver_ready(
+        self, mock_reload, mock_configure_receiver, tmp_path
+    ):
+        canonical = install_grafana_alerts(
+            tmp_path,
+            receiver="Charlotte Telegram",
+        )
+        original = canonical.read_bytes()
+        events = []
+
+        def observe_reload(*args, **kwargs):
+            if mock_reload.call_count == 1:
+                assert canonical.read_bytes() == original
+            else:
+                assert canonical.read_bytes() != original
+            events.append("reload")
+            return True
+
+        def observe_receiver(*args, **kwargs):
+            assert canonical.read_bytes() == original
+            events.append("receiver-ready")
+            return MagicMock(configured=True, previous_messages=())
+
+        mock_reload.side_effect = observe_reload
+        mock_configure_receiver.side_effect = observe_receiver
+
+        result = sync_grafana_alerts(
+            tmp_path,
+            grafana_url="http://grafana:3000",
+            admin_password="secret",
+            instance_matcher=r"runpodccc.+",
+        )
+
+        assert result.success is True
+        assert events == ["reload", "receiver-ready", "reload"]
+
+    @patch(
+        "dc_overview.grafana_alerts._restore_grafana_telegram_receiver_messages",
+        create=True,
+    )
+    @patch("dc_overview.grafana_alerts.configure_grafana_telegram_receiver")
+    @patch("dc_overview.grafana_alerts.reload_grafana_alerts")
+    def test_final_rule_activation_failure_restores_files_and_receiver_message(
+        self,
+        mock_reload,
+        mock_configure_receiver,
+        mock_restore_receiver,
+        tmp_path,
+    ):
+        legacy = (
+            tmp_path / "grafana" / "provisioning" / "alerting" / "fleet-alerts.yml"
+        )
+        _write_alert_rules(legacy, "fleet-gpu-thermal-slowdown", "unrelated-alert")
+        _set_rule_receiver(legacy, "Charlotte Telegram")
+        original = legacy.read_bytes()
+        mock_configure_receiver.return_value = MagicMock(
+            configured=True,
+            previous_messages=(("telegram-1", "old message"),),
+        )
+        rollback_events = []
+        reload_results = iter((True, False, True))
+
+        def observe_reload(*args, **kwargs):
+            result = next(reload_results)
+            if result is True and mock_reload.call_count == 3:
+                rollback_events.append("old-rules-active")
+            return result
+
+        def observe_receiver_restore(*args, **kwargs):
+            rollback_events.append("receiver-restored")
+            return True
+
+        mock_reload.side_effect = observe_reload
+        mock_restore_receiver.side_effect = observe_receiver_restore
+
+        result = sync_grafana_alerts(
+            tmp_path,
+            grafana_url="http://grafana:3000",
+            admin_password="secret",
+            migrate_duplicates=True,
+        )
+
+        assert result.success is False
+        assert result.rollback_complete is True
+        assert legacy.read_bytes() == original
+        assert not legacy.with_name(ALERT_RULES_FILENAME).exists()
+        mock_restore_receiver.assert_called_once_with(
+            "http://grafana:3000",
+            "secret",
+            receiver="Charlotte Telegram",
+            previous_messages=(("telegram-1", "old message"),),
+            admin_user="admin",
+            timeout=10,
+        )
+        assert mock_reload.call_count == 3
+        assert rollback_events == ["old-rules-active", "receiver-restored"]
+
+    @patch("dc_overview.grafana_alerts.configure_grafana_telegram_receiver")
     @patch("dc_overview.grafana_alerts.reload_grafana_alerts", return_value=True)
     def test_sync_migrates_only_managed_uids_and_backs_up_touched_files(
         self, mock_reload, mock_configure_receiver, tmp_path
@@ -515,12 +663,10 @@ class TestGrafanaAlertSync:
         hardware = _rule(result.canonical_path.read_text(), "fleet-gpu-hardware-failure")
         assert hardware["notification_settings"]["receiver"] == "Charlotte Telegram"
         assert stat.S_IMODE(result.canonical_path.stat().st_mode) == 0o644
-        mock_reload.assert_called_once_with(
-            "http://grafana:3000",
-            "secret",
-            admin_user="admin",
-            timeout=10,
-        )
+        assert mock_reload.call_count == 2
+        for call in mock_reload.call_args_list:
+            assert call.args == ("http://grafana:3000", "secret")
+            assert call.kwargs == {"admin_user": "admin", "timeout": 10}
 
     @patch("dc_overview.grafana_alerts.reload_grafana_alerts")
     def test_sync_restores_prior_files_when_grafana_reload_fails(
@@ -771,7 +917,7 @@ class TestGrafanaAlertSync:
 
         assert second.canonical_path.read_bytes() == first_content
         assert (second.backup_dir / ALERT_RULES_FILENAME).read_bytes() == first_content
-        assert mock_reload.call_count == 2
+        assert mock_reload.call_count == 4
 
     @patch("dc_overview.cli.subprocess.run")
     @patch("dc_overview.grafana_alerts.requests.post")
@@ -1003,10 +1149,179 @@ class TestGrafanaAlertSync:
 
 
 class TestGrafanaReceiverWiring:
+    @patch("dc_overview.grafana_alerts.time.sleep", create=True)
+    @patch("dc_overview.grafana_alerts.requests.get")
+    def test_waits_for_concise_message_in_live_alertmanager_config(
+        self, mock_get, mock_sleep
+    ):
+        stale = MagicMock(
+            status_code=200,
+            json=MagicMock(
+                return_value={
+                    "config": {
+                        "receivers": [
+                            {
+                                "name": "Site Telegram",
+                                "grafana_managed_receiver_configs": [
+                                    {
+                                        "uid": "telegram-1",
+                                        "type": "telegram",
+                                        "settings": {"message": "old message"},
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            ),
+        )
+        active = MagicMock(
+            status_code=200,
+            json=MagicMock(
+                return_value={
+                    "config": {
+                        "receivers": [
+                            {
+                                "name": "Site Telegram",
+                                "grafana_managed_receiver_configs": [
+                                    {
+                                        "uid": "telegram-1",
+                                        "type": "telegram",
+                                        "settings": {
+                                            "message": (
+                                                '{{ template "cryptolabs.telegram.message" . }}'
+                                            )
+                                        },
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            ),
+        )
+        mock_get.side_effect = [stale, active]
+
+        from dc_overview import grafana_alerts
+
+        ready = grafana_alerts.wait_for_grafana_telegram_receiver(
+            "http://grafana:3000",
+            "secret",
+            receiver="Site Telegram",
+            expected_messages=(
+                ("telegram-1", '{{ template "cryptolabs.telegram.message" . }}'),
+            ),
+            attempts=2,
+            poll_interval=0.25,
+        )
+
+        assert ready is True
+        assert mock_get.call_count == 2
+        mock_get.assert_called_with(
+            "http://grafana:3000/api/alertmanager/grafana/api/v2/status",
+            auth=("admin", "secret"),
+            timeout=10,
+        )
+        mock_sleep.assert_called_once_with(0.25)
+
+    @patch("dc_overview.grafana_alerts.time.sleep", create=True)
+    @patch("dc_overview.grafana_alerts.requests.get")
+    def test_live_receiver_readiness_is_bounded_and_fails_closed(
+        self, mock_get, mock_sleep
+    ):
+        mock_get.side_effect = requests.ConnectionError("not ready")
+
+        from dc_overview import grafana_alerts
+
+        ready = grafana_alerts.wait_for_grafana_telegram_receiver(
+            "http://grafana:3000",
+            "secret",
+            receiver="Site Telegram",
+            expected_messages=(("telegram-1", "expected message"),),
+            attempts=3,
+            poll_interval=0.25,
+        )
+
+        assert ready is False
+        assert mock_get.call_count == 3
+        assert mock_sleep.call_count == 2
+
+    @patch("dc_overview.grafana_alerts.requests.get")
+    def test_missing_receiver_uid_is_not_ready_when_expected_message_is_unset(
+        self, mock_get
+    ):
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(return_value={"config": {"receivers": []}}),
+        )
+
+        from dc_overview import grafana_alerts
+
+        ready = grafana_alerts.wait_for_grafana_telegram_receiver(
+            "http://grafana:3000",
+            "secret",
+            receiver="Site Telegram",
+            expected_messages=(("telegram-1", None),),
+            attempts=1,
+        )
+
+        assert ready is False
+
+    @patch("dc_overview.grafana_alerts.time.sleep", create=True)
+    @patch("dc_overview.grafana_alerts.requests.get")
+    def test_live_receiver_readiness_surfaces_permanent_http_error(
+        self, mock_get, mock_sleep
+    ):
+        response = MagicMock(status_code=401)
+        response.raise_for_status.side_effect = requests.HTTPError(
+            "unauthorized",
+            response=response,
+        )
+        mock_get.return_value = response
+
+        from dc_overview import grafana_alerts
+
+        with pytest.raises(GrafanaReceiverError, match="HTTP 401"):
+            grafana_alerts.wait_for_grafana_telegram_receiver(
+                "http://grafana:3000",
+                "secret",
+                receiver="Site Telegram",
+                expected_messages=(("telegram-1", "expected message"),),
+                attempts=30,
+            )
+
+        mock_get.assert_called_once()
+        mock_sleep.assert_not_called()
+
+    @patch("dc_overview.grafana_alerts.requests.get")
+    def test_live_receiver_readiness_rejects_malformed_status(self, mock_get):
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(return_value=["not-alertmanager-status"]),
+        )
+
+        from dc_overview import grafana_alerts
+
+        with pytest.raises(GrafanaReceiverError, match="unexpected structure"):
+            grafana_alerts.wait_for_grafana_telegram_receiver(
+                "http://grafana:3000",
+                "secret",
+                receiver="Site Telegram",
+                expected_messages=(("telegram-1", "expected message"),),
+                attempts=30,
+            )
+
+        mock_get.assert_called_once()
+
+    @patch(
+        "dc_overview.grafana_alerts.wait_for_grafana_telegram_receiver",
+        create=True,
+        return_value=True,
+    )
     @patch("dc_overview.grafana_alerts.requests.put")
     @patch("dc_overview.grafana_alerts.requests.get")
     def test_wires_concise_template_without_replacing_redacted_secrets(
-        self, mock_get, mock_put, caplog
+        self, mock_get, mock_put, mock_wait, caplog
     ):
         contact_point = {
             "uid": "telegram-1",
@@ -1032,6 +1347,7 @@ class TestGrafanaReceiverWiring:
         )
 
         assert result.configured is True
+        assert result.previous_messages == (("telegram-1", "old message"),)
         mock_get.assert_called_once_with(
             "http://grafana:3000/api/v1/provisioning/contact-points",
             params={"name": "Site Telegram"},
@@ -1044,12 +1360,107 @@ class TestGrafanaReceiverWiring:
         assert payload["settings"]["message"] == (
             f'{{{{ template "{NOTIFICATION_TEMPLATE_NAME}" . }}}}'
         )
+        mock_wait.assert_called_once_with(
+            "http://grafana:3000",
+            "secret",
+            receiver="Site Telegram",
+            expected_messages=(
+                ("telegram-1", '{{ template "cryptolabs.telegram.message" . }}'),
+            ),
+            admin_user="admin",
+            timeout=10,
+        )
         assert "[REDACTED]" not in caplog.text
 
+    @patch(
+        "dc_overview.grafana_alerts.wait_for_grafana_telegram_receiver",
+        create=True,
+        side_effect=[False, True],
+    )
+    @patch("dc_overview.grafana_alerts.requests.put")
+    @patch("dc_overview.grafana_alerts.requests.get")
+    def test_readiness_timeout_restores_original_message(
+        self, mock_get, mock_put, mock_wait
+    ):
+        contact_point = {
+            "uid": "telegram-1",
+            "name": "Site Telegram",
+            "type": "telegram",
+            "settings": {
+                "bottoken": "[REDACTED]",
+                "message": "old message",
+            },
+        }
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(return_value=[contact_point]),
+        )
+        mock_put.return_value = MagicMock(status_code=202)
+
+        with pytest.raises(GrafanaReceiverError, match="did not become active") as raised:
+            configure_grafana_telegram_receiver(
+                "http://grafana:3000",
+                "secret",
+                receiver="Site Telegram",
+            )
+
+        assert raised.value.rollback_complete is True
+        assert mock_put.call_count == 2
+        assert mock_put.call_args_list[-1].kwargs["json"]["settings"]["message"] == (
+            "old message"
+        )
+        assert mock_wait.call_count == 2
+
+    @patch(
+        "dc_overview.grafana_alerts.wait_for_grafana_telegram_receiver",
+        create=True,
+        side_effect=(
+            GrafanaReceiverError("Grafana live receiver check returned HTTP 401"),
+            GrafanaReceiverError("Grafana live receiver check returned HTTP 401"),
+        ),
+    )
+    @patch("dc_overview.grafana_alerts.requests.put")
+    @patch("dc_overview.grafana_alerts.requests.get")
+    def test_rollback_verification_error_marks_receiver_rollback_incomplete(
+        self, mock_get, mock_put, mock_wait
+    ):
+        contact_point = {
+            "uid": "telegram-1",
+            "name": "Site Telegram",
+            "type": "telegram",
+            "settings": {
+                "bottoken": "[REDACTED]",
+                "message": "old message",
+            },
+        }
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(return_value=[contact_point]),
+        )
+        mock_put.return_value = MagicMock(status_code=202)
+
+        with pytest.raises(GrafanaReceiverError) as raised:
+            configure_grafana_telegram_receiver(
+                "http://grafana:3000",
+                "secret",
+                receiver="Site Telegram",
+            )
+
+        assert raised.value.rollback_complete is False
+        assert "rollback verification failed" in str(raised.value)
+        assert "HTTP 401" in str(raised.value)
+        assert mock_put.call_count == 2
+        assert mock_wait.call_count == 2
+
+    @patch(
+        "dc_overview.grafana_alerts.wait_for_grafana_telegram_receiver",
+        create=True,
+        return_value=True,
+    )
     @patch("dc_overview.grafana_alerts.requests.put")
     @patch("dc_overview.grafana_alerts.requests.get")
     def test_unexpected_contact_update_error_restores_every_attempted_receiver(
-        self, mock_get, mock_put
+        self, mock_get, mock_put, mock_wait
     ):
         contact_points = [
             {
@@ -1085,6 +1496,112 @@ class TestGrafanaReceiverWiring:
             for call in mock_put.call_args_list[-2:]
         ]
         assert restored_messages == ["old two", "old one"]
+        mock_wait.assert_called_once()
+
+    @patch(
+        "dc_overview.grafana_alerts.wait_for_grafana_telegram_receiver",
+        create=True,
+        return_value=True,
+    )
+    @patch("dc_overview.grafana_alerts.requests.put")
+    @patch("dc_overview.grafana_alerts.requests.get")
+    def test_restore_receiver_message_preserves_redacted_settings(
+        self, mock_get, mock_put, mock_wait
+    ):
+        contact_point = {
+            "uid": "telegram-1",
+            "name": "Site Telegram",
+            "type": "telegram",
+            "settings": {
+                "bottoken": "[REDACTED]",
+                "chatid": "-100123",
+                "message": '{{ template "cryptolabs.telegram.message" . }}',
+            },
+        }
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(return_value=[contact_point]),
+        )
+        mock_put.return_value = MagicMock(status_code=202)
+
+        from dc_overview import grafana_alerts
+
+        restored = grafana_alerts._restore_grafana_telegram_receiver_messages(
+            "http://grafana:3000",
+            "secret",
+            receiver="Site Telegram",
+            previous_messages=(("telegram-1", None),),
+            admin_user="admin",
+            timeout=10,
+        )
+
+        assert restored is True
+        payload = mock_put.call_args.kwargs["json"]
+        assert payload["settings"]["bottoken"] == "[REDACTED]"
+        assert payload["settings"]["chatid"] == "-100123"
+        assert "message" not in payload["settings"]
+        mock_wait.assert_called_once_with(
+            "http://grafana:3000",
+            "secret",
+            receiver="Site Telegram",
+            expected_messages=(("telegram-1", None),),
+            admin_user="admin",
+            timeout=10,
+        )
+
+    @patch(
+        "dc_overview.grafana_alerts.wait_for_grafana_telegram_receiver",
+        create=True,
+        return_value=True,
+    )
+    @patch("dc_overview.grafana_alerts.requests.put")
+    @patch("dc_overview.grafana_alerts.requests.get")
+    def test_restore_attempts_every_receiver_after_one_put_fails(
+        self, mock_get, mock_put, mock_wait
+    ):
+        contact_points = [
+            {
+                "uid": uid,
+                "name": "Site Telegram",
+                "type": "telegram",
+                "settings": {
+                    "bottoken": "[REDACTED]",
+                    "message": "concise",
+                },
+            }
+            for uid in ("telegram-1", "telegram-2")
+        ]
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(return_value=contact_points),
+        )
+        mock_put.side_effect = [
+            requests.ConnectionError("first restore failed"),
+            requests.ConnectionError("first restore retry failed"),
+            MagicMock(status_code=202),
+        ]
+
+        from dc_overview import grafana_alerts
+
+        restored = grafana_alerts._restore_grafana_telegram_receiver_messages(
+            "http://grafana:3000",
+            "secret",
+            receiver="Site Telegram",
+            previous_messages=(
+                ("telegram-1", "old one"),
+                ("telegram-2", "old two"),
+            ),
+            admin_user="admin",
+            timeout=10,
+        )
+
+        assert restored is False
+        assert mock_put.call_count == 3
+        assert [
+            call.kwargs["json"]["settings"]["message"]
+            for call in mock_put.call_args_list
+        ] == ["old one", "old one", "old two"]
+        mock_wait.assert_not_called()
 
     @patch("dc_overview.grafana_alerts.requests.put")
     @patch("dc_overview.grafana_alerts.requests.get")
