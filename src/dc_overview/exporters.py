@@ -10,6 +10,8 @@ Includes:
 import os
 import re
 import json
+import base64
+import shlex
 import subprocess
 import urllib.request
 import urllib.error
@@ -25,8 +27,18 @@ console = Console()
 
 # Latest versions (defaults, used as fallback when GitHub API is rate limited)
 NODE_EXPORTER_VERSION = "1.10.2"
-DC_EXPORTER_RS_VERSION = "0.2.5"
+DC_EXPORTER_RS_VERSION = "0.2.8"
 DCGM_EXPORTER_VERSION = "3.3.8-3.6.0"
+
+# The remote timeout sends TERM to Bash so its rollback trap can run, then
+# allows a bounded grace period before KILL.  The caller timeout includes SSH
+# connection setup and is deliberately greater than both values combined.
+DC_EXPORTER_SCRIPT_TIMEOUT_SECONDS = 240
+# Rollback may need seven bounded systemctl calls. At five seconds per call
+# plus each command's two-second kill grace, sixty seconds leaves time for the
+# small local file restores as well.
+DC_EXPORTER_ROLLBACK_GRACE_SECONDS = 60
+DC_EXPORTER_CALLER_TIMEOUT_SECONDS = 330
 
 # Fallback versions when GitHub API fails
 FALLBACK_VERSIONS = {
@@ -84,12 +96,63 @@ EXPORTER_PORTS = {
 # Download URLs
 NODE_EXPORTER_URL = f"https://github.com/prometheus/node_exporter/releases/download/v{NODE_EXPORTER_VERSION}/node_exporter-{NODE_EXPORTER_VERSION}.linux-amd64.tar.gz"
 
-# DC Exporter RS (Rust version) - preferred
-# Using dc-exporter-releases repo for public binary distribution
-# Note: Both main and dev branches use the same 'latest' release URL since
-# dc-exporter-releases doesn't have separate dev releases
-DC_EXPORTER_RS_URL = "https://github.com/cryptolabsza/dc-exporter-releases/releases/latest/download/dc-exporter-rs"
-DC_EXPORTER_RS_DEB_URL = f"https://github.com/cryptolabsza/dc-exporter-releases/releases/latest/download/dc-exporter-rs_{DC_EXPORTER_RS_VERSION}_amd64.deb"
+# DC Exporter RS (Rust version) - preferred. Production downloads are pinned
+# to an immutable release tag; development builds use the explicit dev-latest
+# prerelease through their own workflow rather than this installer.
+DC_EXPORTER_RELEASES_BASE_URL = (
+    "https://github.com/cryptolabsza/dc-exporter-releases/releases/download"
+)
+
+
+def _normalise_dc_exporter_version(version: Optional[str] = None) -> str:
+    return (version or DC_EXPORTER_RS_VERSION).removeprefix("v")
+
+
+def get_dc_exporter_download_url(version: Optional[str] = None) -> str:
+    release_version = _normalise_dc_exporter_version(version)
+    return f"{DC_EXPORTER_RELEASES_BASE_URL}/v{release_version}/dc-exporter-rs"
+
+
+def get_dc_exporter_checksum_url(version: Optional[str] = None) -> str:
+    release_version = _normalise_dc_exporter_version(version)
+    return f"{DC_EXPORTER_RELEASES_BASE_URL}/v{release_version}/SHA256SUMS"
+
+
+def dc_exporter_bash_command() -> list[str]:
+    """Return the bounded explicit-Bash command used for delivery scripts."""
+    return [
+        "timeout",
+        "--signal=TERM",
+        f"--kill-after={DC_EXPORTER_ROLLBACK_GRACE_SECONDS}s",
+        f"{DC_EXPORTER_SCRIPT_TIMEOUT_SECONDS}s",
+        "bash",
+        "-s",
+    ]
+
+
+def dc_exporter_remote_bash_command() -> str:
+    """Return the shell-safe command appended to an SSH invocation."""
+    return shlex.join(dc_exporter_bash_command())
+
+
+def build_dc_exporter_remote_command(script: str, *, sudo: bool = False) -> str:
+    """Encode a script for SSH clients that cannot provide remote stdin.
+
+    The login shell only parses a static POSIX pipeline.  The safety script is
+    base64-encoded and always executed by an explicit, bounded Bash process.
+    """
+    payload = base64.b64encode(script.encode("utf-8")).decode("ascii")
+    runner = dc_exporter_remote_bash_command()
+    if sudo:
+        runner = f"sudo -- {runner}"
+    return f"printf '%s' {shlex.quote(payload)} | base64 --decode | {runner}"
+
+
+DC_EXPORTER_RS_URL = get_dc_exporter_download_url()
+DC_EXPORTER_RS_DEB_URL = (
+    f"{DC_EXPORTER_RELEASES_BASE_URL}/v{DC_EXPORTER_RS_VERSION}/"
+    f"dc-exporter-rs_{DC_EXPORTER_RS_VERSION}_amd64.deb"
+)
 
 
 # Systemd service templates
@@ -140,6 +203,345 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 """
+
+
+def build_dc_exporter_install_script(
+    version: Optional[str] = None,
+    *,
+    mode: str = "install",
+    binary_path: str = "/usr/local/bin/dc-exporter-rs",
+    service_path: str = "/etc/systemd/system/dc-exporter.service",
+    backup_dir: str = "/var/backups/dc-exporter",
+    temp_parent: str = "/tmp",
+    lock_path: str = "/run/lock/dc-exporter-install.lock",
+    proc_root: str = "/proc",
+    metrics_url: str = "http://127.0.0.1:9835/metrics",
+    verification_attempts: int = 3,
+) -> str:
+    """Build the single safe installer used by local and remote deployments.
+
+    Production delivery is deliberately pinned to the version shipped with DC
+    Overview.  The script downloads both release assets to a temporary
+    directory, verifies the exact ``dc-exporter-rs`` manifest entry and the
+    binary's own version, and only then mutates the live installation.  Any
+    failure after mutation restores both the previous binary and service state.
+    """
+    release_version = _normalise_dc_exporter_version(version)
+    if release_version != DC_EXPORTER_RS_VERSION:
+        raise ValueError(
+            "dc-exporter production delivery is pinned to "
+            f"{DC_EXPORTER_RS_VERSION}, not {release_version}"
+        )
+    if mode not in {"install", "update"}:
+        raise ValueError("dc-exporter delivery mode must be 'install' or 'update'")
+    if not 1 <= verification_attempts <= 60:
+        raise ValueError("verification_attempts must be between 1 and 60")
+
+    replacements = {
+        "__MODE__": shlex.quote(mode),
+        "__VERSION__": shlex.quote(release_version),
+        "__BINARY_URL__": shlex.quote(get_dc_exporter_download_url(release_version)),
+        "__CHECKSUM_URL__": shlex.quote(get_dc_exporter_checksum_url(release_version)),
+        "__TARGET__": shlex.quote(binary_path),
+        "__UNIT_PATH__": shlex.quote(service_path),
+        "__BACKUP_DIR__": shlex.quote(backup_dir),
+        "__TEMP_PARENT__": shlex.quote(temp_parent),
+        "__LOCK_PATH__": shlex.quote(lock_path),
+        "__PROC_ROOT__": shlex.quote(proc_root),
+        "__METRICS_URL__": shlex.quote(metrics_url),
+        "__VERIFY_ATTEMPTS__": str(verification_attempts),
+        "__SERVICE_UNIT__": DC_EXPORTER_SERVICE.rstrip(),
+    }
+
+    script = r'''set -Eeuo pipefail
+MODE=__MODE__
+VERSION=__VERSION__
+BINARY_URL=__BINARY_URL__
+CHECKSUM_URL=__CHECKSUM_URL__
+TARGET=__TARGET__
+UNIT_PATH=__UNIT_PATH__
+BACKUP_DIR=__BACKUP_DIR__
+TEMP_PARENT=__TEMP_PARENT__
+LOCK_PATH=__LOCK_PATH__
+PROC_ROOT=__PROC_ROOT__
+METRICS_URL=__METRICS_URL__
+VERIFY_ATTEMPTS=__VERIFY_ATTEMPTS__
+SERVICE=dc-exporter
+SYSTEMCTL_TIMEOUT=5
+VERIFY_COMMAND_TIMEOUT=5
+
+work_dir="$(mktemp -d "${TEMP_PARENT}/dc-exporter-install.XXXXXX")"
+candidate="${work_dir}/dc-exporter-rs"
+manifest="${work_dir}/SHA256SUMS"
+target_tmp="${TARGET}.new.$$"
+unit_tmp="${UNIT_PATH}.new.$$"
+mutated=0
+completed=0
+had_binary=0
+had_unit=0
+was_active=0
+was_enabled=0
+was_present=0
+desired_active=1
+desired_enabled=1
+binary_backup=''
+unit_backup=''
+probed_active=''
+probed_enabled=''
+probed_present=''
+
+systemctl_bounded() {
+    timeout --signal=TERM --kill-after=2s "${SYSTEMCTL_TIMEOUT}s" systemctl "$@"
+}
+
+probe_service_state() {
+    local active_state active_rc enabled_state enabled_rc load_state load_rc
+
+    if active_state="$(systemctl_bounded is-active "$SERVICE" 2>/dev/null)"; then
+        active_rc=0
+    else
+        active_rc=$?
+    fi
+    if enabled_state="$(systemctl_bounded is-enabled "$SERVICE" 2>/dev/null)"; then
+        enabled_rc=0
+    else
+        enabled_rc=$?
+    fi
+
+    case "$active_state:$active_rc" in
+        active:0) probed_active=1 ;;
+        inactive:3) probed_active=0 ;;
+        *) return 1 ;;
+    esac
+    case "$enabled_state:$enabled_rc" in
+        enabled:0)
+            probed_enabled=1
+            probed_present=1
+            ;;
+        disabled:1)
+            probed_enabled=0
+            probed_present=1
+            ;;
+        not-found:1|:1)
+            # A non-zero is-enabled result is not by itself proof that a unit
+            # is absent: timeouts and D-Bus failures also return non-zero.
+            # Require an inactive service, no live unit at the intended path,
+            # and systemd's own load-path lookup to agree that it is absent.
+            [ "$probed_active" -eq 0 ] || return 1
+            if [ -e "$UNIT_PATH" ] || [ -L "$UNIT_PATH" ]; then
+                return 1
+            fi
+            if load_state="$(systemctl_bounded show --property LoadState --value "$SERVICE" 2>/dev/null)"; then
+                load_rc=0
+            else
+                load_rc=$?
+            fi
+            [ "$load_state:$load_rc" = not-found:0 ] || return 1
+            probed_enabled=0
+            probed_present=0
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+cleanup() {
+    rm -rf "$work_dir"
+    rm -f "$target_tmp" "$unit_tmp"
+}
+
+rollback() {
+    set +e
+    rollback_failed=0
+
+    # Stop/disable the candidate while its unit still exists when those were
+    # the prior states. Final state checks below determine whether this worked.
+    if [ "$was_active" -eq 0 ]; then
+        systemctl_bounded stop "$SERVICE" >/dev/null 2>&1 || true
+    fi
+    if [ "$was_enabled" -eq 0 ]; then
+        systemctl_bounded disable "$SERVICE" >/dev/null 2>&1 || true
+    fi
+
+    if [ "$had_binary" -eq 1 ]; then
+        if ! cp -a "$binary_backup" "$target_tmp" || ! mv -f "$target_tmp" "$TARGET"; then
+            rollback_failed=1
+        fi
+    else
+        rm -f "$TARGET" || rollback_failed=1
+    fi
+    if [ "$had_unit" -eq 1 ]; then
+        if ! cp -a "$unit_backup" "$unit_tmp" || ! mv -f "$unit_tmp" "$UNIT_PATH"; then
+            rollback_failed=1
+        fi
+    else
+        rm -f "$UNIT_PATH" || rollback_failed=1
+    fi
+    systemctl_bounded daemon-reload >/dev/null 2>&1 || rollback_failed=1
+    if [ "$was_enabled" -eq 1 ]; then
+        systemctl_bounded enable "$SERVICE" >/dev/null 2>&1 || rollback_failed=1
+    fi
+    if [ "$was_active" -eq 1 ]; then
+        systemctl_bounded restart "$SERVICE" >/dev/null 2>&1 || rollback_failed=1
+    fi
+
+    if probe_service_state; then
+        if [ "$probed_present" -ne "$was_present" ] || [ "$probed_enabled" -ne "$was_enabled" ] || [ "$probed_active" -ne "$was_active" ]; then
+            rollback_failed=1
+        fi
+    else
+        rollback_failed=1
+    fi
+
+    if [ "$rollback_failed" -eq 0 ]; then
+        echo "dc-exporter installation failed; previous binary and service state restored" >&2
+    else
+        echo "dc-exporter installation failed; rollback incomplete, manual recovery required" >&2
+    fi
+    set -e
+    return "$rollback_failed"
+}
+
+on_error() {
+    rc=$?
+    trap - ERR
+    if [ "$mutated" -eq 1 ] && [ "$completed" -eq 0 ]; then
+        rollback || true
+    fi
+    exit "$rc"
+}
+
+on_signal() {
+    trap - ERR HUP INT TERM
+    if [ "$mutated" -eq 1 ] && [ "$completed" -eq 0 ]; then
+        rollback || true
+    fi
+    exit 130
+}
+
+trap cleanup EXIT
+trap on_error ERR
+trap on_signal HUP INT TERM
+
+exec 9>"$LOCK_PATH"
+flock --exclusive --wait 5 9
+
+# Complete every candidate validation before touching the live installation.
+curl --fail --show-error --silent --location --connect-timeout 10 --max-time 60 --output "$candidate" "$BINARY_URL"
+curl --fail --show-error --silent --location --connect-timeout 10 --max-time 15 --output "$manifest" "$CHECKSUM_URL"
+
+# shellcheck disable=SC2016 # $2 belongs to awk, not Bash.
+manifest_matches="$(timeout "${VERIFY_COMMAND_TIMEOUT}s" awk '$2 == "dc-exporter-rs" || $2 == "*dc-exporter-rs" { count++ } END { print count + 0 }' "$manifest")"
+[ "$manifest_matches" -eq 1 ]
+# shellcheck disable=SC2016 # $2 and $1 belong to awk, not Bash.
+expected_checksum="$(timeout "${VERIFY_COMMAND_TIMEOUT}s" awk '$2 == "dc-exporter-rs" || $2 == "*dc-exporter-rs" { print $1 }' "$manifest")"
+printf '%s\n' "$expected_checksum" | timeout "${VERIFY_COMMAND_TIMEOUT}s" grep -Eq '^[[:xdigit:]]{64}$'
+actual_checksum="$(timeout "${VERIFY_COMMAND_TIMEOUT}s" sha256sum "$candidate" | awk '{ print $1 }')"
+[ "$actual_checksum" = "$expected_checksum" ]
+
+chmod 0755 "$candidate"
+candidate_output="$(timeout "${VERIFY_COMMAND_TIMEOUT}s" "$candidate" --version 2>&1)"
+candidate_version="$(printf '%s\n' "$candidate_output" | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) { print $i; exit } }')"
+[ "$candidate_version" = "$VERSION" ]
+
+if [ -e "$TARGET" ]; then
+    had_binary=1
+fi
+if [ -e "$UNIT_PATH" ] || [ -L "$UNIT_PATH" ]; then
+    had_unit=1
+fi
+if ! probe_service_state; then
+    echo "could not determine original dc-exporter service state; refusing to mutate" >&2
+    false
+fi
+was_active="$probed_active"
+was_enabled="$probed_enabled"
+was_present="$probed_present"
+if [ "$MODE" = update ]; then
+    desired_active="$was_active"
+    desired_enabled="$was_enabled"
+fi
+
+mkdir -p "$BACKUP_DIR"
+run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+if [ "$had_binary" -eq 1 ]; then
+    binary_backup="${BACKUP_DIR}/dc-exporter-rs.${run_id}"
+    cp -a "$TARGET" "$binary_backup"
+fi
+if [ "$had_unit" -eq 1 ]; then
+    unit_backup="${BACKUP_DIR}/dc-exporter.service.${run_id}"
+    cp -a "$UNIT_PATH" "$unit_backup"
+fi
+
+mutated=1
+install -m 0755 "$candidate" "$target_tmp"
+mv -f "$target_tmp" "$TARGET"
+
+if [ "$MODE" = install ] || [ "$had_unit" -eq 0 ]; then
+    cat > "$unit_tmp" <<'DC_EXPORTER_SERVICE_EOF'
+__SERVICE_UNIT__
+DC_EXPORTER_SERVICE_EOF
+    chmod 0644 "$unit_tmp"
+    mv -f "$unit_tmp" "$UNIT_PATH"
+fi
+
+systemctl_bounded daemon-reload
+if [ "$MODE" = install ]; then
+    systemctl_bounded enable "$SERVICE"
+    systemctl_bounded restart "$SERVICE"
+elif [ "$was_active" -eq 1 ]; then
+    systemctl_bounded restart "$SERVICE"
+else
+    # Temporarily start an inactive installation so the candidate can be
+    # proven through its live metrics endpoint, then restore inactivity.
+    systemctl_bounded start "$SERVICE"
+fi
+
+verified=0
+attempt=1
+while [ "$attempt" -le "$VERIFY_ATTEMPTS" ]; do
+    if systemctl_bounded is-active --quiet "$SERVICE"; then
+        metrics_output="$(curl --fail --show-error --silent --connect-timeout 2 --max-time 4 "$METRICS_URL")" || metrics_output=''
+        if timeout "${VERIFY_COMMAND_TIMEOUT}s" grep -Fq "dc_exporter_build_info{version=\"${VERSION}\"" <<< "$metrics_output"; then
+            main_pid="$(systemctl_bounded show --property MainPID --value "$SERVICE")" || main_pid=''
+            process_checksum=''
+            if [[ "$main_pid" =~ ^[1-9][0-9]*$ ]] && [ -r "${PROC_ROOT}/${main_pid}/exe" ]; then
+                process_checksum="$(timeout "${VERIFY_COMMAND_TIMEOUT}s" sha256sum "${PROC_ROOT}/${main_pid}/exe" | awk '{ print $1 }')" || process_checksum=''
+            fi
+            if [ "$process_checksum" = "$expected_checksum" ]; then
+                verified=1
+                break
+            fi
+        fi
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+done
+[ "$verified" -eq 1 ]
+
+if [ "$desired_active" -eq 0 ]; then
+    systemctl_bounded stop "$SERVICE"
+fi
+if [ "$desired_enabled" -eq 1 ]; then
+    systemctl_bounded enable "$SERVICE"
+else
+    systemctl_bounded disable "$SERVICE"
+fi
+
+if ! probe_service_state; then
+    echo "could not determine final dc-exporter service state" >&2
+    false
+fi
+if [ "$probed_present" -ne 1 ] || [ "$probed_active" -ne "$desired_active" ] || [ "$probed_enabled" -ne "$desired_enabled" ]; then
+    echo "dc-exporter final service state did not match requested ${MODE} mode" >&2
+    false
+fi
+
+completed=1
+echo "DC_EXPORTER_INSTALL_SUCCESS version=${VERSION}"
+'''
+    for marker, value in replacements.items():
+        script = script.replace(marker, value)
+    return script
 
 # Legacy run script (deprecated, kept for backwards compatibility)
 DC_EXPORTER_RUN_SCRIPT = '''#!/bin/bash
@@ -324,114 +726,38 @@ class ExporterInstaller:
             return False
     
     def install_dc_exporter(self) -> bool:
-        """Install dc-exporter-rs (Rust version) for GPU metrics.
-        
-        Provides DCGM-compatible metrics (DCGM_FI_*) plus unique metrics:
-        - DCGM_FI_DEV_VRAM_TEMP - VRAM temperature
-        - DCGM_FI_DEV_HOT_SPOT_TEMP - Hotspot/Junction temperature  
-        - DCGM_FI_DEV_CLOCKS_THROTTLE_REASON - Throttle reasons
-        - GPU_AER_TOTAL_ERRORS - PCIe AER errors
-        - GPU_ERROR_STATE - GPU state (OK/Warning/Error/VM_Passthrough)
-        
-        Downloads from: https://github.com/cryptolabsza/dc-exporter-rs
-        """
+        """Install the pinned dc-exporter-rs release with rollback safety."""
         console.print("\n[bold]Installing dc-exporter-rs...[/bold]")
-        
+
         try:
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
                 console=console
             ) as progress:
-                task = progress.add_task("Setting up dc-exporter-rs...", total=None)
-                
-                # Create config directory
-                os.makedirs("/etc/dc-exporter", exist_ok=True)
-                
-                # Stop any existing old dc-exporter service
-                subprocess.run(["systemctl", "stop", "dc-exporter"], capture_output=True)
-                subprocess.run(["systemctl", "stop", "gddr6-metrics-exporter"], capture_output=True)
-                
-                # Download dc-exporter-rs binary
-                progress.update(task, description="Downloading dc-exporter-rs...")
-                binary_path = "/usr/local/bin/dc-exporter-rs"
-                
-                try:
-                    urllib.request.urlretrieve(DC_EXPORTER_RS_URL, binary_path)
-                    subprocess.run(["chmod", "+x", binary_path], check=True)
-                    console.print(f"[dim]Downloaded from {DC_EXPORTER_RS_URL}[/dim]")
-                except Exception as e:
-                    console.print(f"[yellow]⚠[/yellow] Failed to download: {e}")
-                    console.print("[dim]Trying alternative method...[/dim]")
-                    
-                    # Try curl as fallback
-                    result = subprocess.run(
-                        ["curl", "-L", "-o", binary_path, DC_EXPORTER_RS_URL],
-                        capture_output=True
-                    )
-                    if result.returncode != 0:
-                        console.print("[red]✗[/red] Failed to download dc-exporter-rs")
-                        console.print(f"[dim]Download manually from: {DC_EXPORTER_RS_URL}[/dim]")
-                        return False
-                    subprocess.run(["chmod", "+x", binary_path], check=True)
-                
-                # Verify binary works
-                progress.update(task, description="Verifying binary...")
-                try:
-                    result = subprocess.run(
-                        [binary_path, "--version"],
-                        capture_output=True, text=True, timeout=10
-                    )
-                    if result.returncode == 0:
-                        version = result.stdout.strip().split('\n')[0] if result.stdout else "unknown"
-                        console.print(f"[dim]Version: {version}[/dim]")
-                    else:
-                        # Try --help as fallback
-                        result = subprocess.run(
-                            [binary_path, "--help"],
-                            capture_output=True, text=True, timeout=10
-                        )
-                except Exception as e:
-                    console.print(f"[yellow]⚠[/yellow] Could not verify binary: {e}")
-                
-                # Remove old services and binaries
-                progress.update(task, description="Cleaning up old installations...")
-                # Remove old gddr6-metrics-exporter
-                subprocess.run(["systemctl", "disable", "gddr6-metrics-exporter"], capture_output=True)
-                subprocess.run(["rm", "-f", "/etc/systemd/system/gddr6-metrics-exporter.service"], capture_output=True)
-                # Remove old dc-exporter files
-                subprocess.run(["rm", "-rf", "/opt/dc-exporter"], capture_output=True)
-                subprocess.run(["rm", "-f", "/usr/local/bin/dc-exporter-c"], capture_output=True)
-                subprocess.run(["rm", "-f", "/usr/local/bin/dc-exporter-collector"], capture_output=True)
-                subprocess.run(["rm", "-f", "/usr/local/bin/dc-exporter-server"], capture_output=True)
-                
-                # Install systemd service
-                progress.update(task, description="Installing systemd service...")
-                with open("/etc/systemd/system/dc-exporter.service", "w") as f:
-                    f.write(DC_EXPORTER_SERVICE)
-                
-                subprocess.run(["systemctl", "daemon-reload"], check=True)
-                subprocess.run(["systemctl", "enable", "dc-exporter"], check=True)
-                subprocess.run(["systemctl", "restart", "dc-exporter"], check=True)
-                
-                # Wait and verify service is running
-                progress.update(task, description="Verifying service...")
-                import time
-                time.sleep(2)
-                
-                result = subprocess.run(
-                    ["systemctl", "is-active", "dc-exporter"],
-                    capture_output=True, text=True
+                task = progress.add_task(
+                    f"Installing verified dc-exporter-rs {DC_EXPORTER_RS_VERSION}...",
+                    total=None,
                 )
-                if result.stdout.strip() != "active":
-                    console.print("[yellow]⚠[/yellow] Service may not be running correctly")
-                    console.print("[dim]Check: journalctl -u dc-exporter -n 20[/dim]")
-            
+                result = subprocess.run(
+                    dc_exporter_bash_command(),
+                    input=build_dc_exporter_install_script(mode="install"),
+                    capture_output=True,
+                    text=True,
+                    timeout=DC_EXPORTER_CALLER_TIMEOUT_SECONDS,
+                )
+                if result.returncode != 0:
+                    detail = (result.stderr or result.stdout or "unknown error").strip()
+                    console.print(f"[red]✗[/red] Failed to install dc-exporter-rs: {detail}")
+                    return False
+                if "DC_EXPORTER_INSTALL_SUCCESS" not in result.stdout:
+                    console.print("[red]✗[/red] Installer did not report successful verification")
+                    return False
+                progress.update(task, description="Verified and running")
+
             console.print("[green]✓[/green] dc-exporter-rs installed (port 9835)")
-            console.print("[dim]  Metrics: DCGM_FI_* + VRAM/Hotspot temps + Throttle reasons[/dim]")
-            console.print("[dim]  Verify: curl http://localhost:9835/metrics | head[/dim]")
             return True
-            
+
         except Exception as e:
             console.print(f"[red]✗[/red] Failed to install dc-exporter-rs: {e}")
             return False
@@ -933,10 +1259,7 @@ def get_exporter_download_url(exporter: str, version: str = None, branch: str = 
     if exporter == 'node_exporter':
         return f"https://github.com/prometheus/node_exporter/releases/download/v{version}/node_exporter-{version}.linux-amd64.tar.gz"
     elif exporter == 'dc_exporter':
-        # dc-exporter-rs: always use 'latest' download URL since dc-exporter-releases
-        # repo uses tagged releases (v0.2.1, etc.) not branch-specific releases
-        # The 'latest' endpoint automatically serves the newest stable release
-        return "https://github.com/cryptolabsza/dc-exporter-releases/releases/latest/download/dc-exporter-rs"
+        return get_dc_exporter_download_url(version)
     elif exporter == 'dcgm_exporter':
         # Docker image, return image tag
         return f"nvidia/dcgm-exporter:{version}-ubuntu22.04"

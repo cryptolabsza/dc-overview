@@ -13,6 +13,11 @@ import os
 import socket
 import subprocess
 
+from .exporters import (
+    DC_EXPORTER_CALLER_TIMEOUT_SECONDS,
+    build_dc_exporter_install_script,
+    dc_exporter_remote_bash_command,
+)
 from .ssh_helpers import build_ssh_cmd
 
 logger = logging.getLogger(__name__)
@@ -35,6 +40,26 @@ SERVICE_NAMES = {
     'dc_exporter': 'dc-exporter',
     'dcgm_exporter': 'dcgm-exporter',
 }
+
+
+def _run_dc_exporter_remote(server, script):
+    """Run a delivery script through bounded Bash, independent of login shell."""
+    cmd, env = build_ssh_cmd(
+        server,
+        timeout=15,
+        batch_mode=False,
+        extra_opts=['-o', 'ServerAliveInterval=10'],
+    )
+    cmd.append(dc_exporter_remote_bash_command())
+    run_env = {**os.environ, **env} if env else None
+    return subprocess.run(
+        cmd,
+        input=script,
+        capture_output=True,
+        text=True,
+        timeout=DC_EXPORTER_CALLER_TIMEOUT_SECONDS,
+        env=run_env,
+    )
 
 
 def check_services_installed(server):
@@ -112,6 +137,14 @@ def install_exporter_remote(server, exporter_name):
     Cleans up temporary files after installation.
     """
     try:
+        if exporter_name == 'dc_exporter':
+            script = build_dc_exporter_install_script(mode='install')
+            result = _run_dc_exporter_remote(server, script)
+            return (
+                result.returncode == 0
+                and 'DC_EXPORTER_INSTALL_SUCCESS' in result.stdout
+            )
+
         if exporter_name == 'node_exporter':
             script = """
 set -e
@@ -142,31 +175,6 @@ systemctl daemon-reload
 systemctl enable node_exporter
 systemctl start node_exporter
             """
-        elif exporter_name == 'dc_exporter':
-            script = """
-set -e
-systemctl stop dc-exporter 2>/dev/null || true
-curl -sL https://github.com/cryptolabsza/dc-exporter-releases/releases/latest/download/dc-exporter-rs -o /usr/local/bin/dc-exporter-rs
-chmod +x /usr/local/bin/dc-exporter-rs
-cat > /etc/systemd/system/dc-exporter.service << 'EOF'
-[Unit]
-Description=DC Exporter - GPU Metrics for Prometheus (Rust)
-Documentation=https://github.com/cryptolabsza/dc-exporter-rs
-After=network.target nvidia-persistenced.service
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/dc-exporter-rs --port 9835
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl daemon-reload
-systemctl enable dc-exporter
-systemctl start dc-exporter
-            """
         else:
             return False
         
@@ -174,7 +182,7 @@ systemctl start dc-exporter
         cmd.append(script)
         
         run_env = {**os.environ, **env} if env else None
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=run_env)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=240, env=run_env)
         return result.returncode == 0
     except Exception:
         return False
@@ -276,14 +284,27 @@ def update_exporter_remote(server, exporter: str, version: str, branch: str = 'm
         tuple: (success: bool, error_message: str or None)
     """
     from .exporters import get_exporter_download_url
-    
-    download_url = get_exporter_download_url(exporter, version, branch)
-    if not download_url:
-        return False, f"Could not get download URL for {exporter} v{version}"
+
+    if exporter == 'dc_exporter':
+        try:
+            update_script = build_dc_exporter_install_script(version, mode='update')
+        except ValueError as exc:
+            return False, str(exc)
+    else:
+        download_url = get_exporter_download_url(exporter, version, branch)
+        if not download_url:
+            return False, f"Could not get download URL for {exporter} v{version}"
     
     try:
-        ssh_cmd, ssh_env = build_ssh_cmd(server, timeout=15, extra_opts=['-o', 'ServerAliveInterval=10'])
-        
+        if exporter == 'dc_exporter':
+            result = _run_dc_exporter_remote(server, update_script)
+        else:
+            ssh_cmd, ssh_env = build_ssh_cmd(
+                server,
+                timeout=15,
+                extra_opts=['-o', 'ServerAliveInterval=10'],
+            )
+
         if exporter == 'node_exporter':
             update_script = f'''
 set -e
@@ -298,18 +319,7 @@ rm -rf node_exporter*
 echo "UPDATE_SUCCESS"
 '''
             ssh_cmd.append(update_script)
-            
-        elif exporter == 'dc_exporter':
-            update_script = f'''
-set -e
-systemctl stop dc-exporter 2>/dev/null || true
-curl -sL "{download_url}" -o /usr/local/bin/dc-exporter-rs
-chmod +x /usr/local/bin/dc-exporter-rs
-systemctl start dc-exporter
-echo "UPDATE_SUCCESS"
-'''
-            ssh_cmd.append(update_script)
-            
+
         elif exporter == 'dcgm_exporter':
             update_script = f'''
 set -e
@@ -321,25 +331,38 @@ echo "UPDATE_SUCCESS"
 '''
             ssh_cmd.append(update_script)
         else:
-            return False, f"Unknown exporter type: {exporter}"
-        
+            if exporter != 'dc_exporter':
+                return False, f"Unknown exporter type: {exporter}"
+
         logger.info(f"[Exporter Update] Running: ssh -p {server.ssh_port or 22} {server.ssh_user or 'root'}@{server.server_ip}")
-        run_env = {**os.environ, **ssh_env} if ssh_env else None
-        result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=180, env=run_env)
+        if exporter != 'dc_exporter':
+            run_env = {**os.environ, **ssh_env} if ssh_env else None
+            result = subprocess.run(
+                ssh_cmd,
+                capture_output=True,
+                text=True,
+                timeout=240,
+                env=run_env,
+            )
         
         if result.returncode != 0:
             error_msg = result.stderr.strip() or result.stdout.strip() or f"SSH command failed with code {result.returncode}"
             logger.error(f"[Exporter Update] Failed for {server.server_ip}: {error_msg[:200]}")
             return False, error_msg[:200]
         
-        if 'UPDATE_SUCCESS' in result.stdout:
+        success_marker = (
+            'DC_EXPORTER_INSTALL_SUCCESS'
+            if exporter == 'dc_exporter'
+            else 'UPDATE_SUCCESS'
+        )
+        if success_marker in result.stdout:
             logger.info(f"[Exporter Update] Successfully updated {exporter} on {server.server_ip}")
             return True, None
         else:
             return False, f"Update script did not complete successfully: {result.stdout[:200]}"
         
     except subprocess.TimeoutExpired:
-        return False, "SSH connection timed out (180s)"
+        return False, f"SSH connection timed out ({DC_EXPORTER_CALLER_TIMEOUT_SECONDS}s)"
     except Exception as e:
         logger.exception(f"[Exporter Update] Exception updating {exporter} on {server.server_ip}")
         return False, str(e)[:200]

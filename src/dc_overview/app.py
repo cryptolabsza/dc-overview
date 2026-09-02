@@ -31,6 +31,7 @@ import requests as http_requests
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from . import __version__
+from .exporters import DC_EXPORTER_RS_VERSION
 
 # Import extracted utility modules
 from .proxy import get_proxy_config, push_proxy_config, _get_internal_api_token
@@ -863,7 +864,8 @@ def check_and_apply_auto_updates(server):
     """Check and apply auto-updates for exporters that have auto-update enabled."""
     from .exporters import check_for_updates
     
-    updates_applied = []
+    update_results = []
+    database_changed = False
     
     try:
         ssh_key_path = resolve_ssh_key_path(server)
@@ -889,7 +891,15 @@ def check_and_apply_auto_updates(server):
                 if exp_info.get('update_available'):
                     # Apply update
                     latest_version = exp_info.get('latest')
-                    success = update_exporter_remote(server, exporter, latest_version, server.exporter_update_branch or 'main')
+                    try:
+                        success, error = update_exporter_remote(
+                            server,
+                            exporter,
+                            latest_version,
+                            server.exporter_update_branch or 'main',
+                        )
+                    except Exception as exc:
+                        success, error = False, str(exc)[:200]
                     if success:
                         # Update version in database
                         if exporter == 'node_exporter':
@@ -898,20 +908,46 @@ def check_and_apply_auto_updates(server):
                             server.dc_exporter_version = latest_version
                         elif exporter == 'dcgm_exporter':
                             server.dcgm_exporter_version = latest_version
-                        
-                        updates_applied.append({
+
+                        database_changed = True
+                        update_results.append({
                             'exporter': exporter,
+                            'status': 'updated',
                             'from_version': exp_info.get('installed'),
                             'to_version': latest_version
                         })
+                    else:
+                        failure = {
+                            'exporter': exporter,
+                            'status': 'failed',
+                            'from_version': exp_info.get('installed'),
+                            'to_version': latest_version,
+                            'error': error or 'Unknown update failure',
+                        }
+                        update_results.append(failure)
+                        app.logger.error(
+                            "Exporter auto-update failed for %s on %s: %s",
+                            exporter,
+                            server.server_ip,
+                            failure['error'],
+                        )
         
-        if updates_applied:
+        if database_changed:
             db.session.commit()
             
-    except Exception:
-        pass  # Non-critical operation
+    except Exception as exc:
+        if database_changed:
+            db.session.rollback()
+        app.logger.exception(
+            "Exporter auto-update check failed for %s", server.server_ip
+        )
+        update_results.append({
+            'exporter': 'auto_update_check',
+            'status': 'failed',
+            'error': str(exc)[:200],
+        })
     
-    return updates_applied
+    return update_results
 
 
 def get_gpu_count_from_exporter(server_ip):
@@ -945,7 +981,7 @@ def api_install_exporters(server_id):
     
     provisional_versions = {
         'node_exporter': '1.10.2',
-        'dc_exporter': 'latest',
+        'dc_exporter': DC_EXPORTER_RS_VERSION,
         'dcgm_exporter': 'latest',
     }
     
@@ -1251,7 +1287,7 @@ def api_toggle_exporter(server_id, exporter):
         # frontend toggle stays ON (background live check will refine it).
         provisional_versions = {
             'node_exporter': '1.10.2',
-            'dc_exporter': 'latest',
+            'dc_exporter': DC_EXPORTER_RS_VERSION,
             'dcgm_exporter': 'latest',
         }
         if exporter == 'node_exporter':
