@@ -24,7 +24,13 @@ from rich.markup import escape as rich_escape
 import yaml
 
 from . import get_image_tag
+from .exporters import (
+    DC_EXPORTER_CALLER_TIMEOUT_SECONDS,
+    build_dc_exporter_install_script,
+    build_dc_exporter_remote_command,
+)
 from .fleet_config import FleetConfig, Server, SSLMode, AuthMethod, get_local_ip
+from .grafana_alerts import install_grafana_alerts
 from .prerequisites import PrerequisitesInstaller
 from .ssh_manager import SSHManager
 
@@ -503,6 +509,11 @@ datasources:
     uid: prometheus
 """
         (grafana_dir / "provisioning" / "datasources" / "prometheus.yml").write_text(datasource_config)
+
+        install_grafana_alerts(
+            compose_dir,
+            receiver=self.config.grafana.alert_receiver,
+        )
         
         # Note: Dashboards are NOT provisioned via files - they are imported via API
         # in _import_dashboards() which stores them in Grafana's database for full editability
@@ -978,18 +989,17 @@ scrape_configs:
                 )
             return False
         
-        # Install node_exporter and dc-exporter directly (no pip required)
-        # dc-exporter is downloaded from public releases repo
-        install_script = '''#!/bin/bash
+        # Install node_exporter first. dc-exporter uses the shared verified,
+        # rollback-capable installer below rather than this legacy script.
+        node_install_script = '''#!/bin/bash
 set -e
 
-# Install node_exporter if not running
 if ! systemctl is-active --quiet node_exporter 2>/dev/null; then
     cd /tmp
     curl -sLO https://github.com/prometheus/node_exporter/releases/download/v1.10.2/node_exporter-1.10.2.linux-amd64.tar.gz
     tar xzf node_exporter-1.10.2.linux-amd64.tar.gz
     cp node_exporter-1.10.2.linux-amd64/node_exporter /usr/local/bin/
-    
+
     cat > /etc/systemd/system/node_exporter.service << 'EOF'
 [Unit]
 Description=Node Exporter
@@ -1004,55 +1014,43 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 EOF
-    
+
     systemctl daemon-reload
     systemctl enable node_exporter
     systemctl start node_exporter
     rm -rf /tmp/node_exporter-*
 fi
-
-# Install dc-exporter if not running
-if ! systemctl is-active --quiet dc-exporter 2>/dev/null; then
-    curl -L https://github.com/cryptolabsza/dc-exporter-releases/releases/latest/download/dc-exporter-rs -o /usr/local/bin/dc-exporter-rs
-    chmod +x /usr/local/bin/dc-exporter-rs
-    
-    cat > /etc/systemd/system/dc-exporter.service << 'EOF'
-[Unit]
-Description=DC Exporter - GPU Metrics
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/dc-exporter-rs --port 9835
-Restart=always
-RestartSec=10
-User=root
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    
-    systemctl daemon-reload
-    systemctl enable dc-exporter
-    systemctl start dc-exporter
-fi
-
-echo "Exporters installed successfully"
+echo "node_exporter installed successfully"
 '''
-        
+
         result = self.ssh.run_command(
             host=server.server_ip,
-            command=install_script,
+            command=node_install_script,
             username=creds.username,
             port=creds.port,
-            timeout=180,  # Allow more time for downloads
+            timeout=180,
             sudo=True,
             key_path=ssh_key,
         )
-        
         if not result.success:
             return False
-        
+
+        dc_install_script = build_dc_exporter_install_script(mode="install")
+        dc_remote_command = build_dc_exporter_remote_command(
+            dc_install_script,
+            sudo=creds.username != "root",
+        )
+        result = self.ssh.run_command(
+            host=server.server_ip,
+            command=dc_remote_command,
+            username=creds.username,
+            port=creds.port,
+            timeout=DC_EXPORTER_CALLER_TIMEOUT_SECONDS,
+            sudo=False,
+            key_path=ssh_key,
+        )
+        if not result.success or "DC_EXPORTER_INSTALL_SUCCESS" not in result.output:
+            return False
         # Detect GPUs
         result = self.ssh.run_command(
             host=server.server_ip,

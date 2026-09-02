@@ -14,6 +14,7 @@ import sys
 import json
 import secrets
 import shutil
+import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
@@ -28,6 +29,15 @@ from rich.prompt import Prompt
 import yaml
 
 from . import get_image_tag
+from .exporters import (
+    DC_EXPORTER_CALLER_TIMEOUT_SECONDS,
+    DC_EXPORTER_RS_VERSION,
+    NODE_EXPORTER_VERSION,
+    ExporterInstaller,
+    build_dc_exporter_install_script,
+    build_dc_exporter_remote_command,
+)
+from .grafana_alerts import install_grafana_alerts
 
 console = Console()
 
@@ -316,112 +326,12 @@ def install_dcgm_exporter() -> bool:
     except Exception:
         return False
 
-
 def install_dc_exporter() -> bool:
-    """Install dc-exporter for VRAM/hotspot temps and GPU metrics."""
+    """Install the pinned Rust exporter through the shared safe installer."""
     try:
-        # Check if already running on correct port
-        result = subprocess.run(["systemctl", "is-active", "dc-exporter"], capture_output=True)
-        if result.returncode == 0:
-            # Verify it's serving on port 9835
-            try:
-                import socket
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(2)
-                if sock.connect_ex(('127.0.0.1', 9835)) == 0:
-                    sock.close()
-                    return True
-                sock.close()
-            except Exception:
-                pass
-        
-        import urllib.request
-        
-        # Create installation directory
-        os.makedirs("/opt/dc-exporter", exist_ok=True)
-        
-        # Download the collector binary
-        base_url = "https://github.com/cryptolabsza/dc-exporter/releases/latest/download"
-        urllib.request.urlretrieve(f"{base_url}/dc-exporter-collector", "/opt/dc-exporter/dc-exporter-c")
-        subprocess.run(["chmod", "+x", "/opt/dc-exporter/dc-exporter-c"], check=True)
-        
-        # Create the run script (Python HTTP server on port 9835)
-        run_script = '''#!/bin/bash
-cd /opt/dc-exporter
-
-# Kill any existing process on port 9835
-fuser -k 9835/tcp 2>/dev/null || true
-sleep 1
-
-# Run the exporter in a loop to update metrics
-(
-    while true; do
-        ./dc-exporter-c >/dev/null 2>&1 || true
-        sleep 10
-    done
-) &
-
-# Serve the metrics file via HTTP with SO_REUSEADDR
-exec python3 -c "
-import http.server
-import socketserver
-import socket
-
-class ReuseAddrTCPServer(socketserver.TCPServer):
-    allow_reuse_address = True
-
-class MetricsHandler(http.server.SimpleHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == \\"/metrics\\" or self.path == \\"/\\":
-            self.send_response(200)
-            self.send_header(\\"Content-type\\", \\"text/plain\\")
-            self.end_headers()
-            try:
-                with open(\\"metrics.txt\\", \\"r\\") as f:
-                    self.wfile.write(f.read().encode())
-            except FileNotFoundError:
-                self.wfile.write(b\\"# No metrics yet\\\\n\\")
-        else:
-            self.send_response(404)
-            self.end_headers()
-    
-    def log_message(self, format, *args):
-        pass
-
-PORT = 9835
-with ReuseAddrTCPServer((\\"\\"\\", PORT), MetricsHandler) as httpd:
-    print(f\\"DC Exporter serving on port {PORT}\\")
-    httpd.serve_forever()
-"
-'''
-        Path("/opt/dc-exporter/run.sh").write_text(run_script)
-        subprocess.run(["chmod", "+x", "/opt/dc-exporter/run.sh"], check=True)
-        
-        # Create service
-        service = """[Unit]
-Description=DC Exporter - VRAM/Hotspot Temperature Metrics
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/opt/dc-exporter/run.sh
-Restart=always
-RestartSec=5
-WorkingDirectory=/opt/dc-exporter
-
-[Install]
-WantedBy=multi-user.target
-"""
-        Path("/etc/systemd/system/dc-exporter.service").write_text(service)
-        
-        subprocess.run(["systemctl", "daemon-reload"], check=True)
-        subprocess.run(["systemctl", "enable", "dc-exporter"], check=True)
-        subprocess.run(["systemctl", "restart", "dc-exporter"], check=True)
-        
-        return True
+        return ExporterInstaller().install_dc_exporter()
     except Exception:
         return False
-
 
 def setup_master():
     """Set up master monitoring server (Prometheus + Grafana) via Docker."""
@@ -737,6 +647,47 @@ def update_existing_nginx_config(nginx_path: Path, dc_port: int = 5001):
         console.print("[dim]  Run: docker exec cryptolabs-proxy nginx -s reload[/dim]")
 
 
+def _configure_required_grafana_provisioning(
+    config_dir: Path,
+    receiver: Optional[str] = None,
+) -> None:
+    """Create required Grafana files and report success only when all exist."""
+    datasource_dir = config_dir / "grafana" / "provisioning" / "datasources"
+    datasource_dir.mkdir(parents=True, exist_ok=True)
+    datasource_config = """apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    uid: prometheus
+"""
+    (datasource_dir / "prometheus.yml").write_text(datasource_config)
+    install_grafana_alerts(config_dir, receiver=receiver)
+    console.print("[green]✓[/green] Grafana datasource and alert provisioning configured")
+
+
+def _render_quickstart_environment(
+    secret_key: str,
+    grafana_password: str,
+    alert_receiver: Optional[str] = None,
+) -> str:
+    """Render quickstart settings, including the reusable alert receiver."""
+    content = (
+        "# DC Overview Environment Configuration\n"
+        f"SECRET_KEY={secret_key}\n"
+        f"GRAFANA_PASSWORD={grafana_password}\n"
+    )
+    if alert_receiver:
+        content += (
+            "DC_OVERVIEW_GRAFANA_ALERT_RECEIVER="
+            f"{json.dumps(alert_receiver)}\n"
+        )
+    return content
+
+
 def setup_master_docker():
     """Set up master with Docker using cryptolabs-proxy."""
     from jinja2 import Environment, PackageLoader, select_autoescape
@@ -745,6 +696,7 @@ def setup_master_docker():
     
     config_dir = Path("/etc/dc-overview")
     config_dir.mkdir(parents=True, exist_ok=True)
+    alert_receiver = os.environ.get("DC_OVERVIEW_GRAFANA_ALERT_RECEIVER") or None
     
     # ===========================================================================
     # DETECT EXISTING SETUP
@@ -904,10 +856,11 @@ def setup_master_docker():
     secret_key = secrets.token_hex(32)
     
     # Save .env file
-    env_content = f"""# DC Overview Environment Configuration
-SECRET_KEY={secret_key}
-GRAFANA_PASSWORD={grafana_pass}
-"""
+    env_content = _render_quickstart_environment(
+        secret_key,
+        grafana_pass,
+        alert_receiver,
+    )
     (config_dir / ".env").write_text(env_content)
     os.chmod(config_dir / ".env", 0o600)
     
@@ -998,33 +951,9 @@ GRAFANA_PASSWORD={grafana_pass}
         compose_content = generate_basic_compose(dc_port, grafana_pass, setup_proxy)
         (config_dir / "docker-compose.yml").write_text(compose_content)
     
-    # Create Grafana provisioning directories (only datasources, not dashboards)
-    # Dashboards are imported via API to make them fully editable by users
-    grafana_dirs = [
-        config_dir / "grafana" / "provisioning" / "datasources",
-    ]
-    for d in grafana_dirs:
-        d.mkdir(parents=True, exist_ok=True)
-    
-    # Copy Grafana provisioning configs (only datasource, not dashboards)
-    try:
-        # Datasource config
-        datasource_config = """apiVersion: 1
-datasources:
-  - name: Prometheus
-    type: prometheus
-    access: proxy
-    url: http://prometheus:9090
-    isDefault: true
-    editable: false
-    uid: prometheus
-"""
-        (config_dir / "grafana" / "provisioning" / "datasources" / "prometheus.yml").write_text(datasource_config)
-        # Note: Dashboards are NOT provisioned via files - they are imported via API
-        # in configure_grafana() to make them fully editable by users
-        console.print("[green]✓[/green] Grafana datasource provisioning configured")
-    except Exception as e:
-        console.print(f"[yellow]⚠[/yellow] Grafana provisioning warning: {e}")
+    # Alert files are required monitoring state. Abort before starting Docker if
+    # they cannot be written; otherwise quickstart would report a false success.
+    _configure_required_grafana_provisioning(config_dir, alert_receiver)
     
     # Create prometheus targets file with imported servers
     if imported_servers:
@@ -1137,12 +1066,6 @@ datasources:
                         srv_key_path = str(dc_key)
                 
                 console.print(f"  Installing on {name} ({ip})...", end=" ")
-                
-                # Check if already running
-                if test_machine_connection(ip, 9835):
-                    console.print("[green]✓ already running[/green]")
-                    success_count += 1
-                    continue
                 
                 # Skip if no credentials
                 if not srv_key_path and not srv_password:
@@ -1699,12 +1622,6 @@ def parse_server_list(lines: List[str]) -> List[Dict]:
         
         name = f"gpu-{len(machines)+1:02d}"
         
-        # Test if exporters already running
-        if test_machine_connection(ip):
-            console.print(f"[green]✓[/green] {name} ({ip}) - exporters already running")
-            machines.append({"name": name, "ip": ip})
-            continue
-        
         # Try to install exporters remotely
         console.print(f"[dim]Installing on {ip}...[/dim]", end=" ")
         
@@ -1801,12 +1718,6 @@ def add_machines_manual() -> List[Dict]:
     for i, ip in enumerate(ips):
         name = f"gpu-{i+1:02d}"
         
-        # Test if exporters already running
-        if test_machine_connection(ip):
-            console.print(f"[green]✓[/green] {name} ({ip}) - exporters already running")
-            machines.append({"name": name, "ip": ip})
-            continue
-        
         # Try to install exporters remotely
         console.print(f"[dim]Installing on {ip}...[/dim]", end=" ")
         
@@ -1841,8 +1752,68 @@ def test_machine_connection(ip: str, port: int = 9100) -> bool:
         return False
 
 
+def _run_paramiko_command(client, command: str, timeout: int) -> tuple[int, str, str]:
+    """Execute a Paramiko command with an explicit terminal-state deadline."""
+    _, stdout, stderr = client.exec_command(command, timeout=timeout)
+    deadline = time.monotonic() + timeout
+    while not stdout.channel.exit_status_ready():
+        if time.monotonic() >= deadline:
+            stdout.channel.close()
+            return -1, "", "remote command timed out"
+        time.sleep(0.1)
+
+    exit_code = stdout.channel.recv_exit_status()
+    stdout_text = stdout.read()
+    stderr_text = stderr.read()
+    if isinstance(stdout_text, bytes):
+        stdout_text = stdout_text.decode("utf-8", errors="replace")
+    if isinstance(stderr_text, bytes):
+        stderr_text = stderr_text.decode("utf-8", errors="replace")
+    return exit_code, stdout_text, stderr_text
+
+
+def _node_exporter_remote_install_script() -> str:
+    """Return the existing pinned node-exporter installation behaviour."""
+    return f'''set -eu
+if systemctl is-active --quiet node_exporter 2>/dev/null; then
+    echo "NODE_EXPORTER_INSTALL_SUCCESS"
+    exit 0
+fi
+
+work_dir="$(mktemp -d /tmp/node-exporter-install.XXXXXX)"
+trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
+archive="$work_dir/node_exporter.tar.gz"
+curl --fail --show-error --silent --location --connect-timeout 10 --max-time 60 \
+    --output "$archive" \
+    "https://github.com/prometheus/node_exporter/releases/download/v{NODE_EXPORTER_VERSION}/node_exporter-{NODE_EXPORTER_VERSION}.linux-amd64.tar.gz"
+tar -xzf "$archive" -C "$work_dir"
+install -m 0755 "$work_dir/node_exporter-{NODE_EXPORTER_VERSION}.linux-amd64/node_exporter" /usr/local/bin/node_exporter
+useradd -r -s /bin/false node_exporter 2>/dev/null || true
+cat > /etc/systemd/system/node_exporter.service <<'NODE_EXPORTER_SERVICE_EOF'
+[Unit]
+Description=Node Exporter
+After=network.target
+
+[Service]
+Type=simple
+User=node_exporter
+ExecStart=/usr/local/bin/node_exporter
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+NODE_EXPORTER_SERVICE_EOF
+systemctl daemon-reload
+systemctl enable node_exporter
+systemctl restart node_exporter
+systemctl is-active --quiet node_exporter
+echo "NODE_EXPORTER_INSTALL_SUCCESS"
+'''
+
+
 def install_exporters_remote(ip: str, user: str, password: str = None, key_path: str = None, port: int = 22) -> bool:
-    """Install exporters on a remote machine via SSH."""
+    """Install exporters remotely, always verifying the pinned dc-exporter."""
+    client = None
     try:
         import paramiko
         
@@ -1857,27 +1828,37 @@ def install_exporters_remote(ip: str, user: str, password: str = None, key_path:
             client.connect(ip, port=port, username=user, pkey=key, timeout=10)
         else:
             return False  # No credentials available
-        
-        # Install pip if needed, then dc-overview
-        commands = [
-            "which pip3 || apt-get update -qq && apt-get install -y -qq python3-pip",
-            "pip3 install dc-overview --break-system-packages -q 2>/dev/null || pip3 install dc-overview -q",
-            "dc-overview install-exporters",
-        ]
-        
-        for cmd in commands:
-            stdin, stdout, stderr = client.exec_command(cmd, timeout=120)
-            exit_code = stdout.channel.recv_exit_status()
-            if exit_code != 0 and "install-exporters" in cmd:
-                # Failed on the important command
-                client.close()
-                return False
-        
-        client.close()
-        return True
-        
-    except Exception as e:
+
+        # Keep node-exporter installation behaviour independent from the DC
+        # exporter. The latter must never depend on whichever dc-overview
+        # package happens to be installed on the worker.
+        node_command = build_dc_exporter_remote_command(
+            _node_exporter_remote_install_script(), sudo=user != "root"
+        )
+        node_rc, node_stdout, _ = _run_paramiko_command(
+            client, node_command, DC_EXPORTER_CALLER_TIMEOUT_SECONDS
+        )
+        if node_rc != 0 or "NODE_EXPORTER_INSTALL_SUCCESS" not in node_stdout:
+            return False
+
+        dc_script = build_dc_exporter_install_script(mode="install")
+        dc_command = build_dc_exporter_remote_command(
+            dc_script, sudo=user != "root"
+        )
+        dc_rc, dc_stdout, _ = _run_paramiko_command(
+            client, dc_command, DC_EXPORTER_CALLER_TIMEOUT_SECONDS
+        )
+        return (
+            dc_rc == 0
+            and f"DC_EXPORTER_INSTALL_SUCCESS version={DC_EXPORTER_RS_VERSION}"
+            in dc_stdout
+        )
+
+    except Exception:
         return False
+    finally:
+        if client is not None:
+            client.close()
 
 
 def setup_remote_machine(ip: str, name: str):

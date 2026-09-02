@@ -1,0 +1,21 @@
+# Concise notification templates for DC Overview-managed alerts.
+apiVersion: 1
+
+templates:
+  - orgId: 1
+    name: dc-overview-notifications
+    template: |
+      {{ define "cryptolabs.telegram.message" }}
+      {{ with .Alerts.Firing }}🔴 FIRING
+      {{ range . }}
+      {{ .Annotations.summary }}
+      {{ .Annotations.description }}
+      {{ end }}
+      {{ end }}
+      {{ with .Alerts.Resolved }}🟢 RESOLVED
+      {{ range . }}
+      {{ .Annotations.summary }}
+      {{ .Annotations.description }}
+      {{ end }}
+      {{ end }}
+      {{ end }}

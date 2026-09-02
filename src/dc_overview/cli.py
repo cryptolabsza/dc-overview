@@ -23,11 +23,30 @@ from .quickstart import run_quickstart
 from .fleet_wizard import run_fleet_wizard
 from .fleet_manager import deploy_fleet
 from .fleet_config import FleetConfig
+from .grafana_alerts import sync_grafana_alerts
 
 console = Console()
 
 # Docker config directory (where setup puts files)
 DOCKER_CONFIG_DIR = Path("/etc/dc-overview")
+
+
+def _dotenv_value(path: Path, key: str):
+    """Read one simple dotenv value without loading or logging other secrets."""
+    if not path.exists():
+        return None
+    prefix = f"{key}="
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        if not line.startswith(prefix):
+            continue
+        value = line[len(prefix):].strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        return value or None
+    return None
 
 
 @click.group()
@@ -303,6 +322,34 @@ def start():
         console.print(f"[red]Error:[/red] {output}")
 
 
+def _sync_alerts_for_upgrade(
+    config_dir: Path,
+    *,
+    grafana_url: str = "http://localhost:3000",
+):
+    """Materialize/migrate alert files and API-reload them without Docker."""
+    config = FleetConfig.load(config_dir)
+    dotenv_path = Path(config_dir) / ".env"
+    admin_password = (
+        os.environ.get("GRAFANA_PASSWORD")
+        or _dotenv_value(dotenv_path, "GRAFANA_PASSWORD")
+        or config.grafana.admin_password
+    )
+    receiver = (
+        os.environ.get("DC_OVERVIEW_GRAFANA_ALERT_RECEIVER")
+        or config.grafana.alert_receiver
+        or _dotenv_value(dotenv_path, "DC_OVERVIEW_GRAFANA_ALERT_RECEIVER")
+    )
+    arguments = {
+        "grafana_url": grafana_url,
+        "admin_password": admin_password,
+        "migrate_duplicates": True,
+    }
+    if receiver:
+        arguments["receiver"] = receiver
+    return sync_grafana_alerts(config_dir, **arguments)
+
+
 @click.command()
 @click.option("--dev", is_flag=True, help="Switch to dev images (UNSTABLE - may break your system)")
 @click.option("--stable", is_flag=True, help="Switch to stable/latest images (default)")
@@ -340,6 +387,17 @@ def upgrade(dev: bool, stable: bool):
             console.print("[green]Cancelled.[/green] Staying on stable images.")
             return
         console.print()
+
+    alert_sync = _sync_alerts_for_upgrade(DOCKER_CONFIG_DIR)
+    if not alert_sync.success:
+        recovery = (
+            "rollback incomplete; manual recovery required"
+            if not alert_sync.rollback_complete
+            else "prior alert files restored"
+        )
+        raise click.ClickException(
+            f"Grafana alert upgrade failed ({recovery}): {alert_sync.failure_reason}"
+        )
     
     # Detect running containers and their current tags
     FLEET_IMAGES = {
@@ -569,16 +627,162 @@ def generate_compose(output: str):
     
     Creates a compose file with Prometheus, Grafana, and optional exporters.
     """
-    from .templates import generate_docker_compose
+    from .templates import generate_docker_compose, setup_grafana_provisioning
     
     config_path = get_config_dir()
     compose_content = generate_docker_compose(config_path)
-    
-    with open(output, "w") as f:
+
+    output_path = Path(output)
+    receiver = FleetConfig.load(config_path).grafana.alert_receiver
+    setup_grafana_provisioning(
+        output_path.resolve().parent,
+        receiver=receiver,
+    )
+
+    with open(output_path, "w") as f:
         f.write(compose_content)
     
     console.print(f"[green]✓[/green] Generated: {output}")
     console.print("  Start with: [cyan]docker compose up -d[/cyan]")
+
+
+@click.command("sync-alerts")
+@click.option(
+    "--config-dir",
+    type=click.Path(path_type=Path, file_okay=False),
+    default=DOCKER_CONFIG_DIR,
+    show_default=True,
+    help="Existing DC Overview configuration directory",
+)
+@click.option(
+    "--grafana-url",
+    default="http://localhost:3000",
+    envvar="GRAFANA_URL",
+    show_default=True,
+)
+@click.option("--admin-user", default="admin", envvar="GRAFANA_ADMIN_USER")
+@click.option("--instance-matcher", default=".+", show_default=True)
+@click.option("--receiver", envvar="DC_OVERVIEW_GRAFANA_ALERT_RECEIVER")
+@click.option(
+    "--clear-receiver",
+    is_flag=True,
+    help="Explicitly remove direct contact-point selection from managed alerts",
+)
+@click.option(
+    "--migrate-duplicates",
+    is_flag=True,
+    help="Back up legacy files and remove only DC Overview-managed duplicate UIDs",
+)
+def sync_alerts(
+    config_dir: Path,
+    grafana_url: str,
+    admin_user: str,
+    instance_matcher: str,
+    receiver: str,
+    clear_receiver: bool,
+    migrate_duplicates: bool,
+):
+    """Safely sync Grafana fleet alerts without restarting Docker."""
+    from .grafana_alerts import DuplicateManagedAlertError, GrafanaReceiverError
+
+    if receiver is not None and clear_receiver:
+        raise click.ClickException(
+            "--receiver and --clear-receiver cannot be used together"
+        )
+
+    admin_password = os.environ.get("GRAFANA_PASSWORD")
+    if not admin_password:
+        raise click.ClickException(
+            "GRAFANA_PASSWORD must be supplied through the environment"
+        )
+
+    config_transaction = None
+    if receiver is not None or clear_receiver:
+        try:
+            config = FleetConfig.load(config_dir)
+            snapshot = config.snapshot_public_config()
+            config.persist_alert_receiver(None if clear_receiver else receiver)
+        except Exception as error:
+            raise click.ClickException(
+                f"Could not persist the Grafana alert receiver; "
+                f"live Grafana was not changed: {error}"
+            ) from error
+        config_transaction = (config, snapshot)
+
+    def restore_receiver_config():
+        if config_transaction is None:
+            return None
+        config, snapshot = config_transaction
+        try:
+            config.restore_public_config(snapshot)
+            return None
+        except Exception as error:
+            return error
+
+    try:
+        sync_arguments = {
+            "grafana_url": grafana_url,
+            "admin_password": admin_password,
+            "admin_user": admin_user,
+            "instance_matcher": instance_matcher,
+            "clear_receiver": clear_receiver,
+            "migrate_duplicates": migrate_duplicates,
+        }
+        if receiver is not None:
+            sync_arguments["receiver"] = receiver
+        result = sync_grafana_alerts(config_dir, **sync_arguments)
+    except DuplicateManagedAlertError as error:
+        restore_error = restore_receiver_config()
+        if restore_error:
+            raise click.ClickException(
+                f"{error}; receiver config rollback is incomplete: {restore_error}"
+            ) from error
+        raise click.ClickException(
+            f"{error}. Inspect the files, then rerun with --migrate-duplicates"
+        ) from error
+    except GrafanaReceiverError as error:
+        restore_error = restore_receiver_config()
+        if restore_error:
+            raise click.ClickException(
+                f"{error}; receiver config rollback is incomplete: {restore_error}"
+            ) from error
+        raise click.ClickException(str(error)) from error
+    except Exception as error:
+        restore_error = restore_receiver_config()
+        if restore_error:
+            raise click.ClickException(
+                f"Grafana alert sync failed unexpectedly and receiver config "
+                f"rollback is incomplete: {restore_error}"
+            ) from error
+        raise click.ClickException(
+            f"Grafana alert sync failed unexpectedly; receiver config restored: {error}"
+        ) from error
+
+    if not result.success:
+        restore_error = restore_receiver_config()
+        if restore_error:
+            raise click.ClickException(
+                f"Grafana alert sync failed and receiver config rollback is incomplete; "
+                f"manual recovery is required. Backup: {result.backup_dir}. "
+                f"Details: {result.failure_reason}; {restore_error}"
+            )
+        if not result.rollback_complete:
+            raise click.ClickException(
+                f"Grafana alert sync failed and rollback is incomplete; "
+                f"manual recovery is required. Backup: {result.backup_dir}. "
+                f"Details: {result.failure_reason}"
+            )
+        raise click.ClickException(
+            f"Grafana alert sync failed; prior files were restored. "
+            f"Backup: {result.backup_dir}. Details: {result.failure_reason}"
+        )
+
+    console.print("[green]✓[/green] Grafana fleet alerts synchronized")
+    console.print(f"  Backup: [cyan]{result.backup_dir}[/cyan]")
+    if result.migrated_files:
+        console.print(f"  Migrated legacy files: {len(result.migrated_files)}")
+    if result.notification_template_configured:
+        console.print("  Telegram messages use the concise DC Overview template")
 
 
 def get_config_dir() -> Path:
@@ -1032,6 +1236,7 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     # Grafana
     grafana = data.get('grafana') or {}
     config.grafana.admin_password = grafana.get('admin_password', 'admin')
+    config.grafana.alert_receiver = grafana.get('alert_receiver')
     # home_dashboard: "dc-overview-main", "vast-dashboard", or None to disable
     config.grafana.home_dashboard = grafana.get('home_dashboard', 'dc-overview-main')
     
@@ -1679,6 +1884,7 @@ main.add_command(setup_ssl)
 main.add_command(serve)
 main.add_command(reset)
 main.add_command(refresh_dashboards)
+main.add_command(sync_alerts)
 
 
 if __name__ == "__main__":

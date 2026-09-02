@@ -9,6 +9,7 @@ import os
 from jinja2 import Template
 
 from .config import Config, PrometheusConfig
+from .grafana_alerts import install_grafana_alerts
 
 
 DOCKER_COMPOSE_TEMPLATE = """# DC Overview - GPU Datacenter Monitoring Suite
@@ -40,6 +41,7 @@ services:
       - grafana-data:/var/lib/grafana
       - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/alerting:/etc/grafana/provisioning/alerting:ro
     environment:
       - GF_SECURITY_ADMIN_PASSWORD={{ grafana_password | default('admin', true) }}
       - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-piechart-panel
@@ -120,7 +122,11 @@ def generate_prometheus_yml(config_dir: Path) -> str:
     return prom_config.get_prometheus_yml()
 
 
-def setup_grafana_provisioning(config_dir: Path):
+def setup_grafana_provisioning(
+    config_dir: Path,
+    *,
+    receiver: Optional[str] = None,
+):
     """Set up Grafana provisioning directories and files."""
     grafana_dir = config_dir / "grafana"
     
@@ -135,6 +141,8 @@ def setup_grafana_provisioning(config_dir: Path):
     # Write dashboard provisioning
     with open(grafana_dir / "dashboards" / "dashboards.yml", "w") as f:
         f.write(GRAFANA_DASHBOARD_PROVISIONING)
+
+    install_grafana_alerts(config_dir, receiver=receiver)
     
     # Copy default dashboards if available
     # These would be bundled with the package

@@ -4,12 +4,52 @@ Data classes that hold ALL configuration collected upfront.
 Ask once, use everywhere.
 """
 
-from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
-from pathlib import Path
-from enum import Enum
-import yaml
 import os
+import tempfile
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import yaml
+
+
+@dataclass(frozen=True)
+class _PublicConfigSnapshot:
+    existed: bool
+    content: bytes
+    mode: int
+    uid: Optional[int]
+    gid: Optional[int]
+
+
+def _atomic_write_public_config(
+    path: Path,
+    content: bytes,
+    *,
+    mode: int,
+    owner: Optional[Tuple[int, int]] = None,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            delete=False,
+        ) as temporary:
+            temporary.write(content)
+            temp_path = Path(temporary.name)
+        os.chmod(temp_path, mode)
+        if owner is not None:
+            temp_metadata = temp_path.stat()
+            if (temp_metadata.st_uid, temp_metadata.st_gid) != owner:
+                os.chown(temp_path, owner[0], owner[1])
+        os.replace(temp_path, path)
+    finally:
+        if temp_path and temp_path.exists():
+            temp_path.unlink()
 
 
 class SSLMode(Enum):
@@ -149,6 +189,8 @@ class GrafanaConfig:
     # Home dashboard setting: None (disabled), or dashboard UID
     # Available options: "dc-overview-main", "vast-dashboard", etc.
     home_dashboard: Optional[str] = "dc-overview-main"
+    # Optional contact-point name used by file-provisioned fleet alerts.
+    alert_receiver: Optional[str] = None
 
 
 @dataclass
@@ -324,6 +366,77 @@ class FleetConfig:
             pass
         
         return path
+
+    def persist_alert_receiver(self, receiver: Optional[str]) -> Path:
+        """Persist only the public Grafana receiver setting.
+
+        Alert synchronization must not rewrite ``.secrets.yaml``: deployed
+        installations may have intentionally scrubbed service passwords from
+        that file after setup.
+        """
+        path = self.config_dir / "fleet-config.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        metadata = path.stat() if path.exists() else None
+        if path.exists():
+            with open(path) as config_file:
+                data = yaml.safe_load(config_file) or {}
+            if not isinstance(data, dict):
+                raise ValueError("fleet-config.yaml must contain a mapping")
+        else:
+            data = self._to_dict(include_secrets=False)
+
+        grafana = data.get("grafana") or {}
+        if not isinstance(grafana, dict):
+            raise ValueError("fleet-config.yaml grafana section must be a mapping")
+        grafana["alert_receiver"] = receiver
+        data["grafana"] = grafana
+
+        owner = (metadata.st_uid, metadata.st_gid) if metadata else None
+        content = yaml.dump(
+            data,
+            default_flow_style=False,
+            sort_keys=False,
+        ).encode("utf-8")
+        _atomic_write_public_config(
+            path,
+            content,
+            mode=metadata.st_mode & 0o777 if metadata else 0o600,
+            owner=owner,
+        )
+
+        self.grafana.alert_receiver = receiver
+        return path
+
+    def snapshot_public_config(self) -> _PublicConfigSnapshot:
+        """Capture the exact public config for a receiver-sync transaction."""
+        path = self.config_dir / "fleet-config.yaml"
+        if not path.exists():
+            return _PublicConfigSnapshot(False, b"", 0o600, None, None)
+        metadata = path.stat()
+        return _PublicConfigSnapshot(
+            True,
+            path.read_bytes(),
+            metadata.st_mode & 0o777,
+            metadata.st_uid,
+            metadata.st_gid,
+        )
+
+    def restore_public_config(self, snapshot: _PublicConfigSnapshot) -> None:
+        """Restore a public config snapshot without touching secrets."""
+        path = self.config_dir / "fleet-config.yaml"
+        if not snapshot.existed:
+            if path.exists():
+                path.unlink()
+            return
+        owner = None
+        if snapshot.uid is not None and snapshot.gid is not None:
+            owner = (snapshot.uid, snapshot.gid)
+        _atomic_write_public_config(
+            path,
+            snapshot.content,
+            mode=snapshot.mode,
+            owner=owner,
+        )
     
     def _to_dict(self, include_secrets: bool = False) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -356,6 +469,7 @@ class FleetConfig:
             },
             "grafana": {
                 "port": self.grafana.port,
+                "alert_receiver": self.grafana.alert_receiver,
             },
             "prometheus": {
                 "port": self.prometheus.port,
@@ -534,6 +648,7 @@ class FleetConfig:
             # Services
             grafana = data.get("grafana") or {}
             config.grafana.port = grafana.get("port", 3000)
+            config.grafana.alert_receiver = grafana.get("alert_receiver")
             
             prometheus = data.get("prometheus") or {}
             config.prometheus.port = prometheus.get("port", 9090)

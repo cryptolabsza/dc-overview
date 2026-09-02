@@ -1,0 +1,201 @@
+# DC Overview fleet GPU health alerts.
+# Rendered by dc_overview.grafana_alerts; placeholders are replaced at install time.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: Fleet GPU Health
+    folder: Infrastructure Alerts
+    interval: 30s
+    rules:
+      - uid: fleet-gpu-hardware-failure
+        title: Fleet GPU hardware failure detected
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: __DC_OVERVIEW_HARDWARE_USABLE_EXPRESSION__
+              hide: false
+              instant: true
+              intervalMs: 1000
+              legendFormat: '{{ instance }} GPU {{ gpu }}'
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: __DC_OVERVIEW_HARDWARE_TOTAL_EXPRESSION__
+              hide: false
+              instant: true
+              intervalMs: 1000
+              legendFormat: '{{ instance }} GPU {{ gpu }}'
+              maxDataPoints: 43200
+              range: false
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [-1]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        keepFiringFor: 5m
+        annotations:
+          summary: '{{ $labels.instance }} GPU {{ $labels.gpu }} hardware failure'
+          description: 'GPU {{ $labels.gpu }} at {{ $labels.pci_bus_id }} is unusable ({{ $labels.failure_reason }}). Usable GPUs: {{ printf "%.0f" $values.A.Value }}/{{ printf "%.0f" $values.B.Value }}. Temperature unavailable because this GPU telemetry is invalid.'
+        labels:
+          alert_category: gpu_health
+          severity: critical
+        isPaused: false
+
+      - uid: fleet-gpu-inventory-mismatch
+        title: Fleet GPU inventory mismatch detected
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: __DC_OVERVIEW_INVENTORY_USABLE_EXPRESSION__
+              hide: false
+              instant: true
+              intervalMs: 1000
+              legendFormat: '{{ instance }} GPU {{ gpu }}'
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: __DC_OVERVIEW_INVENTORY_TOTAL_EXPRESSION__
+              hide: false
+              instant: true
+              intervalMs: 1000
+              legendFormat: '{{ instance }} GPU {{ gpu }}'
+              maxDataPoints: 43200
+              range: false
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [-1]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        keepFiringFor: 5m
+        annotations:
+          summary: '{{ $labels.instance }} GPU {{ $labels.gpu }} is missing from NVML inventory'
+          description: 'PCIe still sees this GPU, but NVML reports only part of the inventory. Usable GPUs: {{ printf "%.0f" $values.A.Value }}/{{ printf "%.0f" $values.B.Value }}. Temperature unavailable because the driver cannot provide valid telemetry for this GPU.'
+        labels:
+          alert_category: gpu_health
+          severity: critical
+        isPaused: false
+
+      - uid: fleet-gpu-thermal-slowdown
+        title: Fleet GPU thermal slowdown detected
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: __DC_OVERVIEW_THERMAL_EXPRESSION__
+              hide: false
+              instant: true
+              intervalMs: 1000
+              legendFormat: '{{ instance }} GPU {{ gpu }} {{ reason }}'
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        keepFiringFor: 10m
+        annotations:
+          summary: '{{ $labels.instance }} GPU {{ $labels.gpu }} is thermally throttling'
+          description: 'Valid GPU telemetry reports {{ $labels.reason }}. Core temperature: {{ printf "%.0f" $values.A.Value }} °C. Check cooling and airflow.'
+        labels:
+          alert_category: gpu_health
+          severity: critical
+        isPaused: false
