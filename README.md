@@ -174,6 +174,8 @@ components:
 # the exact immutable image@sha256 reference and pulls that reference if absent.
 # A full local Docker image ID (sha256:<64 lowercase hex>) is also accepted for
 # offline delivery; it is inspected for exact equality and is never pulled.
+# VPM first installation also requires the Vast.ai exporter to be running with
+# at least one connected account verified through its authenticated management API.
 vast_price_manager:
   image: null
   master_key_file: /etc/dc-overview/secrets/vpm-master.key

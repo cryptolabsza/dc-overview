@@ -37,6 +37,11 @@ def _manager(tmp_path: Path, calls, image_result: Result) -> VPMServiceManager:
 
     manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "units", runner=runner)
     manager._validate_master_key = lambda _spec: None
+    manager.vast_exporter_prerequisite = lambda: {
+        "configured": True,
+        "reason": "ready",
+        "connected_account_count": 1,
+    }
     return manager
 
 

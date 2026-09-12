@@ -163,6 +163,7 @@ def test_install_installs_units_quiesces_old_work_and_waits_for_health(tmp_path:
         sleeper=lambda _seconds: None,
     )
     manager._validate_master_key = lambda _spec: None
+    manager.vast_exporter_prerequisite = lambda: {"configured": True, "reason": "ready", "connected_account_count": 1}
     manager.install(VPMServiceSpec(image=PIN, allowed_host="dc.example.com"))
 
     assert (tmp_path / "systemd-system" / "vast-price-manager-sync.timer").exists()
@@ -200,6 +201,7 @@ def test_install_reuses_the_exact_locally_loaded_digest_without_pulling(tmp_path
         sleeper=lambda _seconds: None,
     )
     manager._validate_master_key = lambda _spec: None
+    manager.vast_exporter_prerequisite = lambda: {"configured": True, "reason": "ready", "connected_account_count": 1}
 
     manager.install(VPMServiceSpec(image=PIN, allowed_host="dc.example.com"))
 
@@ -235,6 +237,7 @@ def test_install_pulls_an_absent_exact_digest_before_quiescing(tmp_path: Path):
         sleeper=lambda _seconds: None,
     )
     manager._validate_master_key = lambda _spec: None
+    manager.vast_exporter_prerequisite = lambda: {"configured": True, "reason": "ready", "connected_account_count": 1}
 
     manager.install(VPMServiceSpec(image=PIN, allowed_host="dc.example.com"))
 
@@ -263,6 +266,7 @@ def test_failed_pull_keeps_the_existing_vpm_project_running(tmp_path: Path):
     manager.root.mkdir(parents=True)
     manager.compose_file.write_text("previous-compose\n")
     manager._validate_master_key = lambda _spec: None
+    manager._has_existing_managed_vpm = lambda: True
 
     with pytest.raises(RuntimeError, match="private registry denied"):
         manager.install(VPMServiceSpec(image=PIN, allowed_host="dc.example.com"))
@@ -447,6 +451,7 @@ def test_vpm_health_failure_restores_previous_compose_after_candidate_validation
     manager.root.mkdir(parents=True)
     manager.compose_file.write_text("previous-compose\n")
     manager._validate_master_key = lambda _spec: None
+    manager._has_existing_managed_vpm = lambda: True
 
     with pytest.raises(RuntimeError, match="did not pass /healthz"):
         manager.install(VPMServiceSpec(image=PIN, allowed_host="dc.example.com"))
@@ -474,6 +479,7 @@ def test_failed_fresh_install_removes_only_fresh_project_container(tmp_path: Pat
 
     manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
     manager._validate_master_key = lambda _spec: None
+    manager.vast_exporter_prerequisite = lambda: {"configured": True, "reason": "ready", "connected_account_count": 1}
     with pytest.raises(RuntimeError, match="did not pass /healthz"):
         manager.install(VPMServiceSpec(image=PIN, allowed_host="dc.example.com"))
 
@@ -504,6 +510,7 @@ def test_route_promotion_failure_restores_existing_project_and_timers(tmp_path: 
     manager.root.mkdir(parents=True)
     manager.compose_file.write_text("old-image-compose\n")
     manager._validate_master_key = lambda _spec: None
+    manager._has_existing_managed_vpm = lambda: True
 
     with pytest.raises(RuntimeError, match="proxy registration failed"):
         manager.install(

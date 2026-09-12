@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 import re
 import shutil
@@ -21,6 +22,52 @@ _DNS_HOST = re.compile(
     r"(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$"
 )
 _ACCOUNT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+
+# This program runs inside the exporter: the management token never leaves the
+# container, and the host receives only the three-field prerequisite contract.
+_VAST_EXPORTER_PREREQUISITE_PROBE = r'''
+import json
+import os
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
+
+result = {"configured": False, "reason": "unavailable", "connected_account_count": 0}
+try:
+    token = os.environ.get("MGMT_TOKEN")
+    if not isinstance(token, str) or not token.strip():
+        raise ValueError("missing management token")
+    request = Request(
+        "http://localhost:8622/api/accounts",
+        headers={"X-Mgmt-Token": token},
+    )
+    opener = build_opener(ProxyHandler({}), NoRedirect())
+    with opener.open(request, timeout=5) as response:
+        if response.status != 200:
+            raise RuntimeError("unexpected status")
+        payload = json.load(response)
+    accounts = payload.get("accounts")
+    if not isinstance(accounts, list):
+        raise ValueError("malformed accounts response")
+    connected = sum(isinstance(account, dict) and account.get("status") == "connected" for account in accounts)
+    result = {
+        "configured": bool(connected),
+        "reason": "ready" if connected else "no-connected-account",
+        "connected_account_count": connected,
+    }
+except Exception:
+    pass
+print(json.dumps(result, separators=(",", ":")))
+'''
+
+_VAST_EXPORTER_PREREQUISITE_UNAVAILABLE = {
+    "configured": False,
+    "reason": "unavailable",
+    "connected_account_count": 0,
+}
 
 
 @dataclass(frozen=True)
@@ -218,6 +265,87 @@ WantedBy=timers.target
         if present.returncode != 0:
             self._run(["docker", "pull", spec.image])
 
+    def vast_exporter_prerequisite(self) -> dict:
+        """Return only whether the exporter has a connected Vast account.
+
+        The authenticated accounts request runs inside the exporter so its
+        management token and account fields never enter lifecycle output.
+        """
+        try:
+            running = self._run(
+                ["docker", "inspect", "-f", "{{.State.Running}}", "vastai-exporter"],
+                check=False,
+                timeout=10,
+            )
+        except Exception:
+            return dict(_VAST_EXPORTER_PREREQUISITE_UNAVAILABLE)
+        if running.returncode != 0 or running.stdout.strip().lower() != "true":
+            return {
+                "configured": False,
+                "reason": "exporter-not-running",
+                "connected_account_count": 0,
+            }
+        try:
+            probe = self._run(
+                ["docker", "exec", "vastai-exporter", "python3", "-c", _VAST_EXPORTER_PREREQUISITE_PROBE],
+                check=False,
+                timeout=15,
+            )
+            if probe.returncode != 0:
+                return dict(_VAST_EXPORTER_PREREQUISITE_UNAVAILABLE)
+            result = json.loads(probe.stdout)
+        except Exception:
+            return dict(_VAST_EXPORTER_PREREQUISITE_UNAVAILABLE)
+        if (
+            not isinstance(result, dict)
+            or set(result) != {"configured", "reason", "connected_account_count"}
+            or not isinstance(result["configured"], bool)
+            or result["reason"] not in {"ready", "no-connected-account"}
+            or not isinstance(result["connected_account_count"], int)
+            or isinstance(result["connected_account_count"], bool)
+            or result["connected_account_count"] < 0
+        ):
+            return dict(_VAST_EXPORTER_PREREQUISITE_UNAVAILABLE)
+        if result["configured"] != (result["reason"] == "ready" and result["connected_account_count"] >= 1):
+            return dict(_VAST_EXPORTER_PREREQUISITE_UNAVAILABLE)
+        if not result["configured"] and result["connected_account_count"] != 0:
+            return dict(_VAST_EXPORTER_PREREQUISITE_UNAVAILABLE)
+        return result
+
+    def _require_vast_exporter_for_first_install(self) -> None:
+        if self.vast_exporter_prerequisite()["configured"]:
+            return
+        raise RuntimeError(
+            "VPM requires a running Vast.ai exporter with at least one connected account. "
+            "Set up Vast.ai Integration with an API key first."
+        )
+
+    def _has_existing_managed_vpm(self) -> bool:
+        """Return whether the canonical Compose-managed VPM already exists.
+
+        A leftover compose file is not installation evidence: a failed first
+        install must still prove the exporter prerequisite before it can create
+        a usable VPM container.
+        """
+        if not self.compose_file.is_file():
+            return False
+        try:
+            container = self._run(
+                [
+                    "docker", "inspect", "-f",
+                    '{{.Name}} {{index .Config.Labels "com.docker.compose.project"}}',
+                    self.container_name,
+                ],
+                check=False,
+                timeout=10,
+            )
+        except Exception:
+            return False
+        return (
+            container.returncode == 0
+            and container.stdout.strip() == f"/{self.container_name} {self.project_name}"
+        )
+
     @property
     def service_names(self):
         return tuple(timer.removesuffix(".timer") + ".service" for timer in self.timer_names)
@@ -268,6 +396,11 @@ WantedBy=timers.target
     def install(self, spec: VPMServiceSpec, promote_route: Optional[Callable[[], None]] = None) -> None:
         self._validate_master_key(spec)
         self._assert_no_native_conflict()
+        # The initial route/container creation is gated, while an already
+        # installed VPM can still be updated or recovered during an exporter
+        # outage without taking away existing access.
+        if not self._has_existing_managed_vpm():
+            self._require_vast_exporter_for_first_install()
         rendered = self.render(spec)
         old_compose = self.compose_file.read_text() if self.compose_file.exists() else None
         old_units = {
