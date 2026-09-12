@@ -1,8 +1,5 @@
 """
-Prometheus and IPMI-monitor target management for the web application.
-
-Functions for updating Prometheus targets files, syncing the IPMI-monitor
-servers.yaml, and reloading Prometheus.
+Prometheus target management for the web application.
 """
 
 import json
@@ -67,9 +64,6 @@ def update_prometheus_targets(servers, data_dir: str):
         if prometheus_yml.exists():
             update_prometheus_yml_targets(servers)
 
-        # Sync IPMI monitor config
-        sync_ipmi_monitor_targets(servers)
-            
     except Exception:
         logger.debug("Non-critical: failed to update targets", exc_info=True)
 
@@ -151,44 +145,8 @@ def update_prometheus_yml_targets(servers):
 
 
 def sync_ipmi_monitor_targets(servers, config_path: str = None):
-    """Sync the IPMI-monitor servers.yaml with the current server list.
-
-    - Adds entries for servers that are missing (name + server_ip only,
-      so IPMI-monitor can at least do SSH-based monitoring).
-    - Removes entries for servers that were deleted from dc-overview.
-    - Preserves existing IPMI fields (bmc_ip, ipmi_user, ipmi_pass) for
-      servers that already have them.
-    """
-    cfg_path = Path(config_path or IPMI_CONFIG_PATH)
-    if not cfg_path.exists():
-        return
-    
-    try:
-        with open(cfg_path, 'r') as f:
-            ipmi_config = yaml.safe_load(f) or {}
-        
-        existing_entries = {s['name']: s for s in ipmi_config.get('servers', [])}
-        server_names = {s.name for s in servers}
-        
-        new_entries = []
-        for server in servers:
-            if server.name in existing_entries:
-                entry = existing_entries[server.name]
-                entry['server_ip'] = server.server_ip
-                new_entries.append(entry)
-            else:
-                new_entries.append({
-                    'name': server.name,
-                    'server_ip': server.server_ip,
-                })
-        
-        ipmi_config['servers'] = new_entries
-        
-        with open(cfg_path, 'w') as f:
-            yaml.dump(ipmi_config, f, default_flow_style=False)
-        
-    except Exception:
-        logger.debug("Failed to sync IPMI monitor config", exc_info=True)
+    """Deprecated compatibility shim; DC no longer writes IPMI configuration files."""
+    logger.debug("IPMI YAML sync is disabled; use the inventory reconciliation API")
 
 
 def reload_prometheus():

@@ -26,9 +26,12 @@ import os
 import secrets
 import re
 import ipaddress
+import uuid
 from pathlib import Path
 import requests as http_requests
 from werkzeug.security import generate_password_hash, check_password_hash
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 from . import __version__
 from .exporters import DC_EXPORTER_RS_VERSION
@@ -48,7 +51,8 @@ from .web_watchdog import (
     _watchdog_api_cache, _WATCHDOG_CACHE_TTL,
 )
 from .web_prometheus import update_prometheus_targets as _update_prometheus_targets
-from .web_prometheus import reload_prometheus, sync_ipmi_monitor_targets
+from .web_prometheus import reload_prometheus
+from .inventory_sync import deliver_inventory_outbox, inventory_delivery_is_configured
 
 app = Flask(__name__, template_folder='web_templates')
 
@@ -212,6 +216,9 @@ class Server(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), unique=True, nullable=False)
     server_ip = db.Column(db.String(50), nullable=False)
+    bmc_ip = db.Column(db.String(50), nullable=True, unique=True)
+    inventory_server_id = db.Column(db.String(64), nullable=False, unique=True, default=lambda: str(uuid.uuid4()))
+    inventory_revision = db.Column(db.Integer, nullable=False, default=0)
     ssh_user = db.Column(db.String(50), default='root')
     ssh_port = db.Column(db.Integer, default=22)
     ssh_key_id = db.Column(db.Integer, db.ForeignKey('ssh_key.id'), nullable=True)
@@ -275,6 +282,24 @@ class AppSettings(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class InventoryOutbox(db.Model):
+    """A durable desired-state message for the internal IPMI receiver."""
+    id = db.Column(db.Integer, primary_key=True)
+    source_id = db.Column(db.String(64), nullable=False)
+    source_server_id = db.Column(db.String(64), nullable=False)
+    revision = db.Column(db.Integer, nullable=False)
+    payload = db.Column(db.Text, nullable=False)
+    delivered = db.Column(db.Boolean, nullable=False, default=False)
+    attempts = db.Column(db.Integer, nullable=False, default=0)
+    last_error = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('source_server_id', 'revision', name='uq_inventory_outbox_server_revision'),
+    )
+
+
 # =============================================================================
 # PROMETHEUS METRICS
 # =============================================================================
@@ -299,6 +324,46 @@ PROXY_AUTH_HEADER_ROLE = 'X-Fleet-Auth-Role'
 PROXY_AUTH_HEADER_TOKEN = 'X-Fleet-Auth-Token'
 PROXY_AUTH_HEADER_FLAG = 'X-Fleet-Authenticated'
 
+def _begin_inventory_mutation():
+    """Acquire SQLite's cross-process write reservation before reading state.
+
+    Flask workers do not share Python locks. ``BEGIN IMMEDIATE`` instead makes
+    the database itself serialize the read-modify-write sequence that creates a
+    stable source ID, advances a revision, and inserts its outbox record.
+    """
+    if db.engine.dialect.name != 'sqlite':
+        return
+    last_error = None
+    for delay in (0, 0.02, 0.05, 0.1, 0.2, 0.4):
+        if delay:
+            time.sleep(delay)
+        try:
+            db.session.execute(text('BEGIN IMMEDIATE'))
+            return
+        except OperationalError as error:
+            db.session.rollback()
+            if 'locked' not in str(error).lower() and 'busy' not in str(error).lower():
+                raise
+            last_error = error
+    raise last_error
+
+
+def inventory_mutation_serialized(view):
+    """Commit each local inventory mutation under a database-wide write lock."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        _begin_inventory_mutation()
+        try:
+            return view(*args, **kwargs)
+        except Exception:
+            db.session.rollback()
+            raise
+        finally:
+            # Validation exits and post-delivery reads must not retain a SQLite
+            # transaction after the local mutation has committed.
+            db.session.rollback()
+    return wrapped
+
 def get_setting(key, default=None):
     """Get a setting from database."""
     setting = AppSettings.query.filter_by(key=key).first()
@@ -313,6 +378,128 @@ def set_setting(key, value):
         setting = AppSettings(key=key, value=value)
         db.session.add(setting)
     db.session.commit()
+
+
+def inventory_source_id():
+    source_id = get_setting('inventory_source_id')
+    if source_id:
+        return source_id
+    source_id = str(uuid.uuid4())
+    setting = AppSettings(key='inventory_source_id', value=source_id)
+    db.session.add(setting)
+    return source_id
+
+
+def enqueue_inventory_reconcile(server, operation='upsert'):
+    """Persist desired IPMI state before any network request is attempted."""
+    if not server.bmc_ip:
+        return None
+    server.inventory_revision += 1
+    payload = {
+        'source_id': inventory_source_id(),
+        'server_id': server.inventory_server_id,
+        'revision': server.inventory_revision,
+        'operation': operation,
+        'name': server.name,
+        'server_ip': server.server_ip,
+        'bmc_ip': server.bmc_ip,
+    }
+    # A newer desired state supersedes an older undelivered revision for this
+    # stable identity, so restart retries cannot poison the receiver queue.
+    InventoryOutbox.query.filter_by(
+        source_server_id=server.inventory_server_id, delivered=False
+    ).update({
+        InventoryOutbox.delivered: True,
+        InventoryOutbox.last_error: 'Superseded by a newer inventory revision',
+    }, synchronize_session=False)
+    entry = InventoryOutbox(
+        source_id=payload['source_id'],
+        source_server_id=payload['server_id'],
+        revision=payload['revision'],
+        payload=json.dumps(payload),
+    )
+    db.session.add(entry)
+    return entry
+
+
+def attempt_inventory_reconcile(entry):
+    if not entry:
+        return None
+    delivered = deliver_inventory_outbox(entry)
+    db.session.commit()
+    return delivered
+
+
+def inventory_outbox_state(source_server_id):
+    """Return a sanitized durable delivery state for one current DC server."""
+    entry = InventoryOutbox.query.filter_by(source_server_id=source_server_id).order_by(
+        InventoryOutbox.revision.desc(), InventoryOutbox.id.desc()
+    ).first()
+    if not entry:
+        return {'state': 'not_configured', 'revision': 0, 'retry_id': None, 'error': None}
+    return {
+        'state': 'synchronized' if entry.delivered and not entry.last_error else 'pending',
+        'revision': entry.revision,
+        'retry_id': entry.id if not entry.delivered else None,
+        'error': entry.last_error if not entry.delivered else None,
+    }
+
+
+def retry_pending_inventory_outbox(limit=10):
+    """Bounded restart-safe delivery of only the newest desired revision per server."""
+    limit = max(1, min(int(limit), 50))
+    newest = db.session.query(
+        InventoryOutbox.source_server_id,
+        db.func.max(InventoryOutbox.revision).label('revision'),
+    ).group_by(InventoryOutbox.source_server_id).subquery()
+    entries = InventoryOutbox.query.join(
+        newest,
+        db.and_(
+            InventoryOutbox.source_server_id == newest.c.source_server_id,
+            InventoryOutbox.revision == newest.c.revision,
+        ),
+    ).filter(InventoryOutbox.delivered.is_(False)).order_by(InventoryOutbox.id).limit(limit).all()
+    delivered = 0
+    for entry in entries:
+        if attempt_inventory_reconcile(entry):
+            delivered += 1
+    return {'attempted': len(entries), 'delivered': delivered}
+
+
+_inventory_retry_thread = None
+_inventory_retry_worker_lock = threading.Lock()
+
+
+def inventory_retry_loop(stop_event, interval_seconds=60):
+    """Periodically deliver one bounded batch after startup without blocking it."""
+    while not stop_event.is_set():
+        if inventory_delivery_is_configured():
+            try:
+                with app.app_context():
+                    retry_pending_inventory_outbox(limit=10)
+            except Exception:
+                app.logger.exception('Inventory reconciliation retry batch failed')
+        if stop_event.wait(interval_seconds):
+            return
+
+
+def start_inventory_retry_worker():
+    """Start a daemon only when the exact internal destination and secret exist."""
+    global _inventory_retry_thread
+    if not inventory_delivery_is_configured():
+        return False
+    with _inventory_retry_worker_lock:
+        if _inventory_retry_thread and _inventory_retry_thread.is_alive():
+            return True
+        stop_event = threading.Event()
+        _inventory_retry_thread = threading.Thread(
+            target=inventory_retry_loop,
+            args=(stop_event,),
+            name='inventory-reconciliation-retry',
+            daemon=True,
+        )
+        _inventory_retry_thread.start()
+        return True
 
 def is_proxy_authenticated():
     """
@@ -660,6 +847,9 @@ def api_servers():
         'id': s.id,
         'name': s.name,
         'server_ip': s.server_ip,
+        'bmc_ip': s.bmc_ip,
+        'inventory_server_id': s.inventory_server_id,
+        'inventory': inventory_outbox_state(s.inventory_server_id),
         'status': s.status,
         'gpu_count': s.gpu_count,
         # Installation status
@@ -687,12 +877,56 @@ def api_servers():
         'watchdog_agent_last_seen': s.watchdog_agent_last_seen.isoformat() if s.watchdog_agent_last_seen else None
     } for s in servers])
 
+
+@app.route('/api/servers/<int:server_id>', methods=['PUT'])
+@csrf.exempt
+@write_required
+@inventory_mutation_serialized
+def api_update_server(server_id):
+    """Rename or update an OS address while preserving the immutable inventory ID."""
+    server = Server.query.get_or_404(server_id)
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON object required'}), 400
+    if not data.get('name') or not data.get('server_ip'):
+        return jsonify({'error': 'name and server_ip required'}), 400
+    try:
+        name = validate_hostname(data['name'])
+        server_ip = validate_ip_address(data['server_ip'])
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    duplicate = Server.query.filter(
+        Server.id != server.id,
+        db.or_(Server.name == name, Server.server_ip == server_ip),
+    ).first()
+    if duplicate:
+        return jsonify({'error': 'Server with this name or IP already exists'}), 409
+
+    changed = server.name != name or server.server_ip != server_ip
+    server.name = name
+    server.server_ip = server_ip
+    outbox = enqueue_inventory_reconcile(server) if changed else None
+    db.session.commit()
+    delivered = attempt_inventory_reconcile(outbox)
+    return jsonify({
+        'id': server.id,
+        'inventory': inventory_outbox_state(server.inventory_server_id) if not outbox else {
+            'state': 'synchronized' if delivered else 'pending',
+            'revision': outbox.revision,
+            'retry_id': outbox.id if not delivered else None,
+            'error': outbox.last_error if not delivered else None,
+        },
+    })
+
 @app.route('/api/servers', methods=['POST'])
 @csrf.exempt  # Exempt for internal API calls with X-Fleet-Auth headers
 @write_required
+@inventory_mutation_serialized
 def api_add_server():
     """Add a new server to monitor with input validation."""
-    data = request.json
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON object required'}), 400
     
     if not data.get('name') or not data.get('server_ip'):
         return jsonify({'error': 'name and server_ip required'}), 400
@@ -701,6 +935,7 @@ def api_add_server():
     try:
         validated_name = validate_hostname(data['name'])
         validated_ip = validate_ip_address(data['server_ip'])
+        validated_bmc_ip = validate_ip_address(data['bmc_ip']) if data.get('bmc_ip') else None
         validated_user = validate_ssh_username(data.get('ssh_user', 'root'))
         validated_port = validate_port(data.get('ssh_port', 22))
     except ValueError as e:
@@ -713,6 +948,8 @@ def api_add_server():
     ).first()
     if existing:
         return jsonify({'error': 'Server with this name or IP already exists'}), 409
+    if validated_bmc_ip and Server.query.filter_by(bmc_ip=validated_bmc_ip).first():
+        return jsonify({'error': 'BMC is already bound to another server'}), 409
     
     # Validate SSH key if provided
     ssh_key_id = data.get('ssh_key_id')
@@ -728,7 +965,8 @@ def api_add_server():
         ssh_user=validated_user,
         ssh_port=validated_port,
         ssh_key_id=ssh_key_id,
-        ssh_password=data.get('ssh_password') or None
+        ssh_password=data.get('ssh_password') or None,
+        bmc_ip=validated_bmc_ip,
     )
     
     # Allow setting watchdog agent status (e.g., from setup after deploying agents)
@@ -739,28 +977,125 @@ def api_add_server():
         server.watchdog_agent_version = data['watchdog_agent_version']
     
     db.session.add(server)
+    db.session.flush()
+
+    # The desired state is committed before this request can leave DC. A failure
+    # remains retryable and does not roll back the locally created server.
+    outbox = enqueue_inventory_reconcile(server)
     db.session.commit()
+    delivered = attempt_inventory_reconcile(outbox)
     
     app.logger.info(f"Server added: {validated_name} ({validated_ip}) by {session.get('username', 'unknown')}")
     
     # Update Prometheus config
     update_prometheus_targets()
     
-    return jsonify({'id': server.id, 'message': 'Server added'}), 201
+    inventory_state = 'not_configured' if not outbox else ('synchronized' if delivered else 'pending')
+    return jsonify({
+        'id': server.id,
+        'message': 'Server added',
+        'inventory': {'state': inventory_state, 'retry_id': outbox.id if outbox else None},
+    }), 201
 
 @app.route('/api/servers/<int:server_id>', methods=['DELETE'])
 @csrf.exempt
 @write_required
+@inventory_mutation_serialized
 def api_delete_server(server_id):
     """Remove a server from monitoring."""
     server = Server.query.get_or_404(server_id)
+    # Retire before removing the DC parent: the persisted outbox record retains
+    # the immutable identity needed to retry after a process restart.
+    outbox = enqueue_inventory_reconcile(server, operation='retire')
     db.session.delete(server)
     db.session.commit()
+
+    delivered = attempt_inventory_reconcile(outbox)
     
     # Update Prometheus config
     update_prometheus_targets()
     
-    return jsonify({'message': 'Server removed'})
+    inventory_state = 'not_configured' if not outbox else ('synchronized' if delivered else 'pending')
+    return jsonify({'message': 'Server removed', 'inventory': {
+        'state': inventory_state, 'retry_id': outbox.id if outbox else None,
+    }})
+
+
+@app.route('/api/servers/<int:server_id>/inventory', methods=['PUT'])
+@csrf.exempt
+@write_required
+@inventory_mutation_serialized
+def api_bind_server_inventory(server_id):
+    """Bind an existing DC server to an explicit BMC without deriving an address."""
+    server = Server.query.get_or_404(server_id)
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON object required'}), 400
+    if not data.get('bmc_ip'):
+        return jsonify({'error': 'bmc_ip required'}), 400
+    try:
+        bmc_ip = validate_ip_address(data['bmc_ip'])
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    if server.bmc_ip and server.bmc_ip != bmc_ip:
+        return jsonify({'error': 'bound BMC identity cannot be changed'}), 409
+    duplicate = Server.query.filter(Server.bmc_ip == bmc_ip, Server.id != server.id).first()
+    if duplicate:
+        return jsonify({'error': 'BMC is already bound to another server'}), 409
+
+    server.bmc_ip = bmc_ip
+    outbox = enqueue_inventory_reconcile(server)
+    db.session.commit()
+    delivered = attempt_inventory_reconcile(outbox)
+    return jsonify({'inventory': {
+        'state': 'synchronized' if delivered else 'pending', 'retry_id': outbox.id,
+    }})
+
+
+@app.route('/api/inventory/outbox/<int:outbox_id>/retry', methods=['POST'])
+@csrf.exempt
+@write_required
+def api_retry_inventory_outbox(outbox_id):
+    """Retry one durable desired-state record without accepting a request URL."""
+    entry = InventoryOutbox.query.get_or_404(outbox_id)
+    if entry.delivered:
+        if entry.last_error == 'Superseded by a newer inventory revision':
+            latest = InventoryOutbox.query.filter_by(
+                source_server_id=entry.source_server_id
+            ).order_by(InventoryOutbox.revision.desc(), InventoryOutbox.id.desc()).first()
+            return jsonify({
+                'state': 'superseded',
+                'retry_id': latest.id if latest and not latest.delivered else None,
+                'revision': latest.revision if latest else entry.revision,
+            })
+        return jsonify({'state': 'synchronized', 'retry_id': entry.id})
+    delivered = attempt_inventory_reconcile(entry)
+    return jsonify({'state': 'synchronized' if delivered else 'pending', 'retry_id': entry.id})
+
+
+@app.route('/api/inventory/outbox')
+@write_required
+def api_inventory_outbox():
+    """List pending current revisions, including tombstones whose DC parent is gone."""
+    entries = InventoryOutbox.query.filter_by(delivered=False).order_by(InventoryOutbox.created_at.desc()).limit(100).all()
+    response = []
+    for entry in entries:
+        try:
+            payload = json.loads(entry.payload)
+        except (TypeError, json.JSONDecodeError):
+            payload = {}
+        response.append({
+            'id': entry.id,
+            'source_server_id': entry.source_server_id,
+            'revision': entry.revision,
+            'operation': payload.get('operation'),
+            'name': payload.get('name'),
+            'bmc_ip': payload.get('bmc_ip'),
+            'attempts': entry.attempts,
+            'error': entry.last_error,
+            'created_at': entry.created_at.isoformat() if entry.created_at else None,
+        })
+    return jsonify(response)
 
 @app.route('/api/servers/<int:server_id>/check')
 @login_required
@@ -2776,9 +3111,35 @@ def _run_safe_migrations():
         db.session.execute(db.text('ALTER TABLE server ADD COLUMN ssh_password VARCHAR(500)'))
         db.session.commit()
 
+    if 'bmc_ip' not in server_columns:
+        db.session.execute(db.text('ALTER TABLE server ADD COLUMN bmc_ip VARCHAR(50)'))
+        db.session.execute(db.text('CREATE UNIQUE INDEX IF NOT EXISTS idx_server_bmc_ip ON server (bmc_ip)'))
+        db.session.commit()
+    if 'inventory_server_id' not in server_columns:
+        # SQLite cannot add a NOT NULL non-constant value. Backfill stable IDs
+        # before enforcing uniqueness for pre-existing DC installations.
+        db.session.execute(db.text('ALTER TABLE server ADD COLUMN inventory_server_id VARCHAR(64)'))
+        db.session.commit()
+    if 'inventory_revision' not in server_columns:
+        db.session.execute(db.text('ALTER TABLE server ADD COLUMN inventory_revision INTEGER NOT NULL DEFAULT 0'))
+        db.session.commit()
+
+    for server in Server.query.filter(Server.inventory_server_id.is_(None)).all():
+        server.inventory_server_id = str(uuid.uuid4())
+    db.session.commit()
+    db.session.execute(db.text(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_server_inventory_server_id ON server (inventory_server_id)'
+    ))
+    db.session.execute(db.text(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_outbox_server_revision '
+        'ON inventory_outbox (source_server_id, revision)'
+    ))
+    db.session.commit()
+
 
 # Initialize on import
 init_db()
+start_inventory_retry_worker()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=DC_OVERVIEW_PORT, debug=True)
