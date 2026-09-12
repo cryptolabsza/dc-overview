@@ -172,6 +172,8 @@ components:
 # entered only in VPM's encrypted onboarding UI at /vast-pricing/ after installation.
 # An approved image archive may be loaded before installation; VPM reuses only
 # the exact immutable image@sha256 reference and pulls that reference if absent.
+# A full local Docker image ID (sha256:<64 lowercase hex>) is also accepted for
+# offline delivery; it is inspected for exact equality and is never pulled.
 vast_price_manager:
   image: null
   master_key_file: /etc/dc-overview/secrets/vpm-master.key

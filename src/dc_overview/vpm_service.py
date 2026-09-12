@@ -16,6 +16,7 @@ from typing import Callable, Dict, Optional
 
 
 _PINNED_IMAGE = re.compile(r"^[a-z0-9][a-z0-9./_-]*@sha256:[0-9a-f]{64}$")
+_LOCAL_IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
 _DNS_HOST = re.compile(
     r"(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$"
 )
@@ -30,8 +31,8 @@ class VPMServiceSpec:
     expected_account_id: Optional[str] = None
 
     def __post_init__(self) -> None:
-        if _PINNED_IMAGE.fullmatch(self.image) is None:
-            raise ValueError("VPM image must be an immutable image@sha256 pin")
+        if _PINNED_IMAGE.fullmatch(self.image) is None and _LOCAL_IMAGE_ID.fullmatch(self.image) is None:
+            raise ValueError("VPM image must be an immutable image@sha256 pin or full local sha256 image ID")
         if _DNS_HOST.fullmatch(self.allowed_host) is None:
             raise ValueError("VPM container proxy requires one exact DNS hostname")
         key_path = Path(self.master_key_file)
@@ -200,7 +201,19 @@ WantedBy=timers.target
             raise ValueError("VPM master key must be readable only by UID 999 or GID 999")
 
     def _ensure_exact_image_available(self, spec: VPMServiceSpec) -> None:
-        """Reuse the loaded immutable image, pulling only when its exact digest is absent."""
+        """Resolve immutable references without substituting a different local image."""
+        if _LOCAL_IMAGE_ID.fullmatch(spec.image) is not None:
+            present = self._run(
+                ["docker", "image", "inspect", "--format", "{{.Id}}", spec.image],
+                check=False,
+            )
+            if present.returncode != 0 or present.stdout.strip() != spec.image:
+                raise RuntimeError("offline image missing: exact local immutable image ID is unavailable")
+            return
+
+        # Repository digest references preserve the existing inspect/pull
+        # behavior. Unlike a local content ID, an absent repository image can
+        # be fetched under its exact immutable reference.
         present = self._run(["docker", "image", "inspect", spec.image], check=False)
         if present.returncode != 0:
             self._run(["docker", "pull", spec.image])

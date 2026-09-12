@@ -1463,7 +1463,7 @@ def _vpm_install_message(spec: VPMServiceSpec) -> str:
 
 
 @vpm.command("install")
-@click.option("--image", required=True, help="Required immutable image@sha256 candidate.")
+@click.option("--image", required=True, help="Immutable image@sha256 pin or full local sha256 image ID.")
 @click.pass_context
 def vpm_install(ctx: click.Context, image: str):
     """Install Fleet-authenticated VPM and report whether account onboarding is configured."""
