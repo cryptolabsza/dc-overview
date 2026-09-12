@@ -163,7 +163,16 @@ components:
   dc_overview: true
   ipmi_monitor: true
   vast_exporter: false    # Set to true if using Vast.ai
+  vast_price_manager: false # Optional secure pricing UI; no provider key is stored here
   runpod_exporter: false  # Set to true if using RunPod
+
+# Vast Price Manager (optional). The immutable image pin is supplied by the
+# approved release process. The provider API key is entered only in VPM's own
+# encrypted onboarding UI at /vast-pricing/ after installation.
+vast_price_manager:
+  image: null
+  master_key_file: /etc/dc-overview/secrets/vpm-master.key
+  expected_account_id: null
 
 # Vast.ai API Keys (only needed if vast_exporter is true)
 # Supports multiple accounts with labels

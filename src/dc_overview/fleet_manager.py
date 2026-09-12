@@ -264,6 +264,16 @@ class FleetManager:
                     error_msg = f"Vast.ai Exporter: {e}"
                     self.deployment_errors.append(error_msg)
                     console.print(f"[red]✗[/red] Vast.ai exporter failed: {e}")
+
+            # VPM is an isolated Compose project; it never receives exporter
+            # credentials or uses the broad fleet container deployment path.
+            if self.config.components.vast_price_manager:
+                try:
+                    self._deploy_vast_price_manager()
+                except Exception as e:
+                    error_msg = f"Vast Price Manager: {e}"
+                    self.deployment_errors.append(error_msg)
+                    console.print(f"[red]✗[/red] Vast Price Manager failed: {e}")
             
             # Step 8b: RunPod exporter (if enabled - deploys even without keys; add via mgmt API)
             if self.config.components.runpod_exporter:
@@ -2144,6 +2154,30 @@ except Exception as e:
             console.print(f"[yellow]⚠[/yellow] Failed to activate AI license: {e}")
     
     # ============ Step 8: Vast.ai Exporter ============
+
+    def _deploy_vast_price_manager(self):
+        """Install VPM only from an explicit immutable image candidate."""
+        from .vpm_service import VPMServiceManager, VPMServiceSpec
+
+        manager = VPMServiceManager(self.config.config_dir)
+        with manager.operation_lock():
+            vpm_config = self.config.vast_price_manager
+            if not vpm_config.image:
+                raise RuntimeError("VPM needs an explicit immutable image@sha256 pin before installation")
+            if not self.config.ssl.domain:
+                raise RuntimeError("VPM needs ssl.domain as its exact allowed public host")
+            spec = VPMServiceSpec(
+                image=vpm_config.image,
+                allowed_host=self.config.ssl.domain,
+                master_key_file=vpm_config.master_key_file,
+                expected_account_id=vpm_config.expected_account_id,
+            )
+            manager.install(spec, promote_route=manager.enable_proxy_route)
+        url = f"https://{spec.allowed_host}/vast-pricing/"
+        if spec.expected_account_id:
+            console.print(f"[green]✓[/green] Vast Price Manager healthy; complete onboarding at {url}")
+        else:
+            console.print(f"[green]✓[/green] Vast Price Manager healthy at {url}; expected account ID is still required before onboarding")
     
     def _deploy_vast_exporter(self):
         """Deploy Vast.ai exporter with multi-account support and management API."""

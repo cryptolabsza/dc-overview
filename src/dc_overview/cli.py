@@ -7,6 +7,7 @@ import os
 import sys
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 from rich.console import Console
 from rich.panel import Panel
@@ -23,6 +24,7 @@ from .quickstart import run_quickstart
 from .fleet_wizard import run_fleet_wizard
 from .fleet_manager import deploy_fleet
 from .fleet_config import FleetConfig
+from .vpm_service import VPMServiceManager, VPMServiceSpec
 from .grafana_alerts import sync_grafana_alerts
 
 console = Console()
@@ -1199,6 +1201,7 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     config.components.dc_overview = components.get('dc_overview', True)
     config.components.ipmi_monitor = components.get('ipmi_monitor', False)
     config.components.vast_exporter = components.get('vast_exporter', False)
+    config.components.vast_price_manager = components.get('vast_price_manager', False)
     config.components.runpod_exporter = components.get('runpod_exporter', False)
     config.components.dc_watchdog = components.get('dc_watchdog', False)
     
@@ -1216,6 +1219,13 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     # If Vast is enabled via api_keys, also set the component flag
     if config.vast.api_keys or config.vast.api_key:
         config.vast.enabled = True
+
+    vpm = data.get('vast_price_manager') or {}
+    config.vast_price_manager.image = vpm.get('image')
+    config.vast_price_manager.master_key_file = vpm.get(
+        'master_key_file', '/etc/dc-overview/secrets/vpm-master.key'
+    )
+    config.vast_price_manager.expected_account_id = vpm.get('expected_account_id')
     
     # RunPod (supports multiple API keys)
     runpod = data.get('runpod') or {}
@@ -1408,6 +1418,192 @@ def load_config_from_file(config_file: str) -> FleetConfig:
             config.watchdog.api_key = watchdog_key
     
     return config
+
+
+@click.group("vpm")
+@click.option(
+    "--config-dir",
+    type=click.Path(path_type=Path),
+    default=DOCKER_CONFIG_DIR,
+    show_default=True,
+    help="DC Overview configuration directory.",
+)
+@click.pass_context
+def vpm(ctx: click.Context, config_dir: Path):
+    """Manage only the optional Vast Price Manager Compose project."""
+    ctx.ensure_object(dict)
+    ctx.obj["vpm_manager"] = VPMServiceManager(config_dir)
+    ctx.obj["vpm_config_dir"] = config_dir
+
+
+def _vpm_spec(config_dir: Path, image: str) -> VPMServiceSpec:
+    config = FleetConfig.load(config_dir)
+    if not config.ssl.domain:
+        raise click.ClickException("VPM requires ssl.domain as its one exact public hostname")
+    return VPMServiceSpec(
+        image=image,
+        allowed_host=config.ssl.domain,
+        master_key_file=config.vast_price_manager.master_key_file,
+        expected_account_id=config.vast_price_manager.expected_account_id,
+    )
+
+
+def _vpm_install_message(spec: VPMServiceSpec) -> str:
+    url = f"https://{spec.allowed_host}/vast-pricing/"
+    if spec.expected_account_id:
+        return f"VPM is healthy. Complete its encrypted account onboarding at {url}"
+    return (
+        f"VPM is healthy at {url}, but account onboarding remains blocked until "
+        "vast_price_manager.expected_account_id is configured."
+    )
+
+
+@vpm.command("install")
+@click.option("--image", required=True, help="Required immutable image@sha256 candidate.")
+@click.pass_context
+def vpm_install(ctx: click.Context, image: str):
+    """Install VPM and report whether its account onboarding is configured."""
+    manager = ctx.obj["vpm_manager"]
+    try:
+        with manager.operation_lock():
+            spec = _vpm_spec(ctx.obj["vpm_config_dir"], image)
+            manager.install(spec, promote_route=manager.enable_proxy_route)
+    except (ValueError, RuntimeError) as error:
+        raise click.ClickException(str(error))
+    click.echo(_vpm_install_message(spec))
+    click.echo("Provider writes remain disabled until VPM is configured and explicitly enabled there.")
+
+
+@vpm.command("update")
+@click.option("--image", required=True, help="Required immutable image@sha256 candidate.")
+@click.pass_context
+def vpm_update(ctx: click.Context, image: str):
+    """Validate and replace only the VPM image, with health rollback."""
+    manager = ctx.obj["vpm_manager"]
+    try:
+        with manager.operation_lock():
+            manager.install(_vpm_spec(ctx.obj["vpm_config_dir"], image))
+    except (ValueError, RuntimeError) as error:
+        raise click.ClickException(str(error))
+    click.echo("VPM update is healthy; its encrypted data volume was preserved.")
+
+
+@vpm.command("configure")
+@click.option("--expected-account-id", required=True, help="One operator-approved Vast account ID.")
+@click.option("--image", help="Optional immutable candidate to apply after saving settings.")
+@click.pass_context
+def vpm_configure(ctx: click.Context, expected_account_id: str, image: Optional[str]):
+    """Save the non-secret expected account and optionally reinstall VPM."""
+    config_dir = ctx.obj["vpm_config_dir"]
+    manager = ctx.obj["vpm_manager"]
+    try:
+        with manager.operation_lock():
+            config = FleetConfig.load(config_dir)
+            snapshot = config.snapshot_public_config()
+            config.vast_price_manager.expected_account_id = expected_account_id
+            if image:
+                config.vast_price_manager.image = image
+            config.persist_vast_price_manager_settings()
+            if image:
+                try:
+                    manager.install(_vpm_spec(config_dir, image))
+                except (ValueError, RuntimeError):
+                    config.restore_public_config(snapshot)
+                    raise
+    except (ValueError, RuntimeError) as error:
+        raise click.ClickException(str(error))
+    if image:
+        click.echo("VPM settings and container update are healthy; encrypted data was preserved.")
+    else:
+        click.echo("VPM expected account saved. Run `dc-overview vpm update --image IMAGE@sha256:...` to apply it to an existing container.")
+
+
+@vpm.command("start")
+@click.pass_context
+def vpm_start(ctx: click.Context):
+    """Start only VPM and its timers, then restore its proxy route."""
+    manager = ctx.obj["vpm_manager"]
+    try:
+        with manager.operation_lock():
+            manager.enable_proxy_route()
+            try:
+                manager.start()
+            except RuntimeError:
+                manager.disable_proxy_route()
+                raise
+    except RuntimeError as error:
+        raise click.ClickException(str(error))
+
+
+@vpm.command("stop")
+@click.pass_context
+def vpm_stop(ctx: click.Context):
+    """Stop only VPM and its timers; its data volume is retained."""
+    try:
+        manager = ctx.obj["vpm_manager"]
+        with manager.operation_lock():
+            manager.stop()
+    except RuntimeError as error:
+        raise click.ClickException(str(error))
+
+
+@vpm.command("disable")
+@click.pass_context
+def vpm_disable(ctx: click.Context):
+    """Stop VPM and remove only its active proxy route, retaining data."""
+    manager = ctx.obj["vpm_manager"]
+    try:
+        with manager.operation_lock():
+            manager.disable_proxy_route()
+            try:
+                manager.stop()
+            except RuntimeError:
+                manager.enable_proxy_route()
+                raise
+    except RuntimeError as error:
+        raise click.ClickException(str(error))
+
+
+@vpm.command("enable")
+@click.pass_context
+def vpm_enable(ctx: click.Context):
+    """Restore the existing VPM project and its proxy route."""
+    manager = ctx.obj["vpm_manager"]
+    try:
+        with manager.operation_lock():
+            manager.enable_proxy_route()
+            try:
+                manager.start()
+            except RuntimeError:
+                manager.disable_proxy_route()
+                raise
+    except RuntimeError as error:
+        raise click.ClickException(str(error))
+
+
+@vpm.command("status")
+@click.pass_context
+def vpm_status(ctx: click.Context):
+    """Report VPM liveness; readiness is separately held during onboarding."""
+    manager = ctx.obj["vpm_manager"]
+    with manager.operation_lock():
+        state = manager.status()
+    click.echo(state or "not installed")
+
+
+@vpm.command("logs")
+@click.option("--lines", default=100, show_default=True)
+@click.pass_context
+def vpm_logs(ctx: click.Context, lines: int):
+    """Show logs only for the VPM Compose project."""
+    try:
+        manager = ctx.obj["vpm_manager"]
+        with manager.operation_lock():
+            output = manager.logs(lines)
+        if output:
+            click.echo(output, nl=not output.endswith("\n"))
+    except RuntimeError as error:
+        raise click.ClickException(str(error))
 
 
 @click.command("add-machine")
@@ -1885,6 +2081,7 @@ main.add_command(serve)
 main.add_command(reset)
 main.add_command(refresh_dashboards)
 main.add_command(sync_alerts)
+main.add_command(vpm)
 
 
 if __name__ == "__main__":

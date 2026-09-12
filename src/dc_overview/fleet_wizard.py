@@ -223,6 +223,11 @@ class FleetWizard:
                     checked=False
                 ),
                 questionary.Choice(
+                    "Vast Price Manager (secure pricing UI; account setup after install)",
+                    value="vast_price_manager",
+                    checked=False,
+                ),
+                questionary.Choice(
                     "RunPod Integration (Host earnings, rentals & utilization)",
                     value="runpod_exporter",
                     checked=False
@@ -238,6 +243,7 @@ class FleetWizard:
         self.config.components.ipmi_monitor = "ipmi_monitor" in components
         self.config.components.dc_watchdog = "dc_watchdog" in components
         self.config.components.vast_exporter = "vast_exporter" in components
+        self.config.components.vast_price_manager = "vast_price_manager" in components
         self.config.components.runpod_exporter = "runpod_exporter" in components
         
         # Update dependent configs
@@ -720,6 +726,15 @@ class FleetWizard:
                 "Vast.ai API Key:",
                 style=custom_style
             ).ask()
+
+        if self.config.components.vast_price_manager:
+            console.print("\n[bold]Vast Price Manager[/bold]")
+            console.print("[dim]Its encrypted onboarding page collects the one provider key after install. Do not enter a provider key here.[/dim]")
+            self.config.vast_price_manager.expected_account_id = questionary.text(
+                "Expected Vast account ID (leave blank to install before account setup):",
+                default="",
+                style=custom_style,
+            ).ask() or None
         
         # RunPod API Keys (supports multiple accounts)
         if self.config.components.runpod_exporter:
