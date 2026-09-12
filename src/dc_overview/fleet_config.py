@@ -160,8 +160,9 @@ class VastConfig:
 class VastPriceManagerConfig:
     """Public references required by the optional VPM container.
 
-    The account key belongs only to VPM's encrypted onboarding flow.  This
-    configuration deliberately holds no provider credential or key material.
+    VPM reuses the Fleet login; sensitive operations confirm that same Fleet
+    password. The account key belongs only to VPM's encrypted onboarding flow.
+    This configuration deliberately holds no provider credential or key material.
     """
     image: Optional[str] = None
     master_key_file: str = "/etc/dc-overview/secrets/vpm-master.key"

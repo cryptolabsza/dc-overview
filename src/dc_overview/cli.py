@@ -1451,9 +1451,13 @@ def _vpm_spec(config_dir: Path, image: str) -> VPMServiceSpec:
 def _vpm_install_message(spec: VPMServiceSpec) -> str:
     url = f"https://{spec.allowed_host}/vast-pricing/"
     if spec.expected_account_id:
-        return f"VPM is healthy. Complete its encrypted account onboarding at {url}"
+        return (
+            f"VPM is healthy. Sign in with the existing Fleet login at {url} to complete "
+            "encrypted account onboarding. Use the same Fleet password to confirm sensitive operations."
+        )
     return (
-        f"VPM is healthy at {url}, but account onboarding remains blocked until "
+        f"VPM is healthy at {url}. Sign in with the existing Fleet login; use the same Fleet "
+        "password to confirm sensitive operations. Account onboarding remains blocked until "
         "vast_price_manager.expected_account_id is configured."
     )
 
@@ -1462,7 +1466,7 @@ def _vpm_install_message(spec: VPMServiceSpec) -> str:
 @click.option("--image", required=True, help="Required immutable image@sha256 candidate.")
 @click.pass_context
 def vpm_install(ctx: click.Context, image: str):
-    """Install VPM and report whether its account onboarding is configured."""
+    """Install Fleet-authenticated VPM and report whether account onboarding is configured."""
     manager = ctx.obj["vpm_manager"]
     try:
         with manager.operation_lock():

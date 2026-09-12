@@ -167,8 +167,11 @@ components:
   runpod_exporter: false  # Set to true if using RunPod
 
 # Vast Price Manager (optional). The immutable image pin is supplied by the
-# approved release process. The provider API key is entered only in VPM's own
-# encrypted onboarding UI at /vast-pricing/ after installation.
+# approved release process. VPM uses the existing Fleet login; re-enter the
+# same Fleet password to confirm sensitive operations. The provider API key is
+# entered only in VPM's encrypted onboarding UI at /vast-pricing/ after installation.
+# An approved image archive may be loaded before installation; VPM reuses only
+# the exact immutable image@sha256 reference and pulls that reference if absent.
 vast_price_manager:
   image: null
   master_key_file: /etc/dc-overview/secrets/vpm-master.key

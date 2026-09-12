@@ -2175,9 +2175,15 @@ except Exception as e:
             manager.install(spec, promote_route=manager.enable_proxy_route)
         url = f"https://{spec.allowed_host}/vast-pricing/"
         if spec.expected_account_id:
-            console.print(f"[green]✓[/green] Vast Price Manager healthy; complete onboarding at {url}")
+            console.print(
+                f"[green]✓[/green] Vast Price Manager healthy; sign in with the existing Fleet login at {url} "
+                "and use the same Fleet password to confirm sensitive operations"
+            )
         else:
-            console.print(f"[green]✓[/green] Vast Price Manager healthy at {url}; expected account ID is still required before onboarding")
+            console.print(
+                f"[green]✓[/green] Vast Price Manager healthy at {url}; sign in with the existing Fleet login "
+                "and use the same Fleet password to confirm sensitive operations. Expected account ID is still required before onboarding"
+            )
     
     def _deploy_vast_exporter(self):
         """Deploy Vast.ai exporter with multi-account support and management API."""

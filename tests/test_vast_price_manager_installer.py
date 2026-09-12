@@ -103,6 +103,8 @@ def test_vpm_renderer_uses_container_contract_without_public_port_or_secret_valu
     assert "VPM_ALLOWED_HOSTS=dc.example.com" in compose
     assert "VPM_DATA_DIR=/data" in compose
     assert "VPM_CREDENTIAL_MASTER_KEY_FILE=/run/secrets/vpm-master.key" in compose
+    assert "VPM_AUTH_MODE=fleet" in compose
+    assert "VPM_FLEET_AUTH_URL=http://cryptolabs-proxy:8081" in compose
     assert "VPM_WRITES_ENABLED=false" in compose
     assert "VPM_SESSION_INSECURE" not in compose
     assert "VPM_EXPECTED_ACCOUNT_ID" not in compose
@@ -170,6 +172,106 @@ def test_install_installs_units_quiesces_old_work_and_waits_for_health(tmp_path:
     assert ["systemctl", "enable", "--now", *manager.timer_names] in calls
 
 
+def test_install_reuses_the_exact_locally_loaded_digest_without_pulling(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command == ["docker", "image", "inspect", PIN]:
+            return Result()
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        if command[:2] == ["systemctl", "is-enabled"]:
+            return Result(1)
+        if command[:2] == ["systemctl", "is-active"]:
+            return Result(3)
+        if command[:2] == ["docker", "inspect"]:
+            return Result(stdout="healthy\n")
+        return Result()
+
+    manager = VPMServiceManager(
+        tmp_path,
+        unit_dir=tmp_path / "systemd-system",
+        runner=runner,
+        sleeper=lambda _seconds: None,
+    )
+    manager._validate_master_key = lambda _spec: None
+
+    manager.install(VPMServiceSpec(image=PIN, allowed_host="dc.example.com"))
+
+    assert ["docker", "image", "inspect", PIN] in calls
+    assert ["docker", "pull", PIN] not in calls
+
+
+def test_install_pulls_an_absent_exact_digest_before_quiescing(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command == ["docker", "image", "inspect", PIN]:
+            return Result(1, stderr="No such image")
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        if command[:2] == ["systemctl", "is-enabled"]:
+            return Result(1)
+        if command[:2] == ["systemctl", "is-active"]:
+            return Result(3)
+        if command[:2] == ["docker", "inspect"]:
+            return Result(stdout="healthy\n")
+        return Result()
+
+    manager = VPMServiceManager(
+        tmp_path,
+        unit_dir=tmp_path / "systemd-system",
+        runner=runner,
+        sleeper=lambda _seconds: None,
+    )
+    manager._validate_master_key = lambda _spec: None
+
+    manager.install(VPMServiceSpec(image=PIN, allowed_host="dc.example.com"))
+
+    assert calls.index(["docker", "image", "inspect", PIN]) < calls.index(["docker", "pull", PIN])
+    assert calls.index(["docker", "pull", PIN]) < calls.index(["systemctl", "disable", "--now", *manager.timer_names])
+
+
+def test_failed_pull_keeps_the_existing_vpm_project_running(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command == ["docker", "image", "inspect", PIN]:
+            return Result(1, stderr="No such image")
+        if command == ["docker", "pull", PIN]:
+            return Result(1, stderr="private registry denied")
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        return Result()
+
+    manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
+    manager.root.mkdir(parents=True)
+    manager.compose_file.write_text("previous-compose\n")
+    manager._validate_master_key = lambda _spec: None
+
+    with pytest.raises(RuntimeError, match="private registry denied"):
+        manager.install(VPMServiceSpec(image=PIN, allowed_host="dc.example.com"))
+
+    assert manager.compose_file.read_text() == "previous-compose\n"
+    assert ["systemctl", "disable", "--now", *manager.timer_names] not in calls
+    assert ["systemctl", "stop", *manager.service_names] not in calls
+
+
 def test_logs_returns_captured_project_output(tmp_path: Path):
     class Result:
         returncode = 0
@@ -230,6 +332,34 @@ def test_install_route_failure_stops_new_vpm_project(monkeypatch, tmp_path: Path
     result = CliRunner().invoke(main, ["vpm", "--config-dir", str(tmp_path), "install", "--image", PIN])
     assert result.exit_code != 0
     assert FakeManager.calls == ["install", "enable-route", "stop"]
+
+
+def test_vpm_install_reports_existing_fleet_login_for_encrypted_onboarding(monkeypatch, tmp_path: Path):
+    class FakeManager:
+        def __init__(self, _config_dir):
+            pass
+
+        def operation_lock(self):
+            return nullcontext()
+
+        def install(self, _spec, promote_route=None):
+            if promote_route:
+                promote_route()
+
+        def enable_proxy_route(self):
+            pass
+
+    config = FleetConfig(config_dir=tmp_path)
+    config.ssl.domain = "dc.example.com"
+    config.vast_price_manager.expected_account_id = "account-123"
+    config.save()
+    monkeypatch.setattr(cli_module, "VPMServiceManager", FakeManager)
+
+    result = CliRunner().invoke(main, ["vpm", "--config-dir", str(tmp_path), "install", "--image", PIN])
+
+    assert result.exit_code == 0
+    assert "existing Fleet login" in result.output
+    assert "same Fleet password" in result.output
 
 
 def test_configure_rolls_back_public_settings_when_reinstall_fails(monkeypatch, tmp_path: Path):

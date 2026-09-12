@@ -98,6 +98,8 @@ class VPMServiceManager:
       - VPM_ALLOWED_HOSTS={spec.allowed_host}
       - VPM_DATA_DIR=/data
       - VPM_CREDENTIAL_MASTER_KEY_FILE=/run/secrets/vpm-master.key
+      - VPM_AUTH_MODE=fleet
+      - VPM_FLEET_AUTH_URL=http://cryptolabs-proxy:8081
       - VPM_WRITES_ENABLED=false
 {expected_account}    volumes:
       - vast-price-manager-data:/data
@@ -197,6 +199,12 @@ WantedBy=timers.target
         if not owner_only and not vpm_group_only:
             raise ValueError("VPM master key must be readable only by UID 999 or GID 999")
 
+    def _ensure_exact_image_available(self, spec: VPMServiceSpec) -> None:
+        """Reuse the loaded immutable image, pulling only when its exact digest is absent."""
+        present = self._run(["docker", "image", "inspect", spec.image], check=False)
+        if present.returncode != 0:
+            self._run(["docker", "pull", spec.image])
+
     @property
     def service_names(self):
         return tuple(timer.removesuffix(".timer") + ".service" for timer in self.timer_names)
@@ -260,8 +268,8 @@ WantedBy=timers.target
         try:
             # Parse the exact generated candidate before it can replace a project.
             self._run(self._compose_prefix(candidate_file) + ["config"])
-            # Pull before quiescing a working project.
-            self._run(["docker", "pull", spec.image])
+            # Resolve the exact immutable image before quiescing a working project.
+            self._ensure_exact_image_available(spec)
         finally:
             candidate_file.unlink(missing_ok=True)
 
