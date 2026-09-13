@@ -2171,6 +2171,7 @@ except Exception as e:
                 allowed_host=self.config.ssl.domain,
                 master_key_file=vpm_config.master_key_file,
                 expected_account_id=vpm_config.expected_account_id,
+                writes_enabled=vpm_config.writes_enabled,
             )
             manager.install(spec, promote_route=manager.enable_proxy_route)
         url = f"https://{spec.allowed_host}/vast-pricing/"

@@ -1226,6 +1226,8 @@ def load_config_from_file(config_file: str) -> FleetConfig:
         'master_key_file', '/etc/dc-overview/secrets/vpm-master.key'
     )
     config.vast_price_manager.expected_account_id = vpm.get('expected_account_id')
+    config.vast_price_manager.writes_enabled = vpm.get('writes_enabled', False)
+    config.vast_price_manager.validate()
     
     # RunPod (supports multiple API keys)
     runpod = data.get('runpod') or {}
@@ -1445,6 +1447,7 @@ def _vpm_spec(config_dir: Path, image: str) -> VPMServiceSpec:
         allowed_host=config.ssl.domain,
         master_key_file=config.vast_price_manager.master_key_file,
         expected_account_id=config.vast_price_manager.expected_account_id,
+        writes_enabled=config.vast_price_manager.writes_enabled,
     )
 
 
@@ -1501,30 +1504,75 @@ def vpm_update(ctx: click.Context, image: str, schema_migration_forward_hold: bo
 
 
 @vpm.command("configure")
-@click.option("--expected-account-id", required=True, help="One operator-approved Vast account ID.")
+@click.option("--expected-account-id", help="One operator-approved Vast account ID.")
 @click.option("--image", help="Optional immutable candidate to apply after saving settings.")
+@click.option("--writes-enabled", is_flag=True, help="Enable the process write capability.")
+@click.option("--writes-disabled", is_flag=True, help="Disable the process write capability.")
 @click.pass_context
-def vpm_configure(ctx: click.Context, expected_account_id: str, image: Optional[str]):
-    """Save the non-secret expected account and optionally reinstall VPM."""
+def vpm_configure(
+    ctx: click.Context,
+    expected_account_id: Optional[str],
+    image: Optional[str],
+    writes_enabled: bool,
+    writes_disabled: bool,
+):
+    """Save non-secret VPM settings and safely apply an explicit capability change."""
+    if writes_enabled and writes_disabled:
+        raise click.UsageError("--writes-enabled and --writes-disabled cannot be used together.")
+    requested_writes_enabled = True if writes_enabled else False if writes_disabled else None
+    if expected_account_id is None and image is None and requested_writes_enabled is None:
+        raise click.UsageError("Provide at least one setting to configure.")
     config_dir = ctx.obj["vpm_config_dir"]
     manager = ctx.obj["vpm_manager"]
     try:
         with manager.operation_lock():
             config = FleetConfig.load(config_dir)
             snapshot = config.snapshot_public_config()
-            config.vast_price_manager.expected_account_id = expected_account_id
+            runtime_state = (
+                manager.managed_runtime_state()
+                if requested_writes_enabled is not None
+                else None
+            )
+            capability_change = (
+                requested_writes_enabled is not None
+                and (
+                    runtime_state is None
+                    or requested_writes_enabled != runtime_state["writes_enabled"]
+                )
+            )
+            image_to_apply = image
+            if capability_change and image_to_apply is None:
+                image_to_apply = manager.current_managed_image()
+            if capability_change and not image_to_apply:
+                raise ValueError(
+                    "Changing VPM write capability requires an existing managed immutable image or --image."
+                )
+            if requested_writes_enabled is True and capability_change:
+                if runtime_state is None or runtime_state["automation_paused"] is not True:
+                    raise RuntimeError(
+                        "VPM must be installed with persistent pause automation enabled before enabling writes. "
+                        "Initialize VPM disabled, then pause automation before enabling this capability."
+                    )
+            if expected_account_id is not None:
+                config.vast_price_manager.expected_account_id = expected_account_id
             if image:
                 config.vast_price_manager.image = image
+            elif capability_change:
+                # Capability changes always recreate the actual managed image;
+                # persist that exact image rather than a stale YAML reference.
+                config.vast_price_manager.image = image_to_apply
+            if requested_writes_enabled is not None:
+                config.vast_price_manager.writes_enabled = requested_writes_enabled
             config.persist_vast_price_manager_settings()
-            if image:
+            if image or capability_change:
                 try:
-                    manager.install(_vpm_spec(config_dir, image))
+                    manager.install(_vpm_spec(config_dir, image_to_apply))
                 except (ValueError, RuntimeError):
                     config.restore_public_config(snapshot)
                     raise
     except (ValueError, RuntimeError) as error:
         raise click.ClickException(str(error))
-    if image:
+    if image or requested_writes_enabled is not None:
         click.echo("VPM settings and container update are healthy; encrypted data was preserved.")
     else:
         click.echo("VPM expected account saved. Run `dc-overview vpm update --image IMAGE@sha256:...` to apply it to an existing container.")

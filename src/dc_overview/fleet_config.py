@@ -167,6 +167,12 @@ class VastPriceManagerConfig:
     image: Optional[str] = None
     master_key_file: str = "/etc/dc-overview/secrets/vpm-master.key"
     expected_account_id: Optional[str] = None
+    writes_enabled: bool = False
+
+    def validate(self) -> None:
+        """Reject YAML strings and integers for the write capability."""
+        if type(self.writes_enabled) is not bool:
+            raise ValueError("vast_price_manager.writes_enabled must be a boolean")
 
 
 @dataclass
@@ -424,6 +430,7 @@ class FleetConfig:
 
     def persist_vast_price_manager_settings(self) -> Path:
         """Persist only VPM's public references without rewriting secrets."""
+        self.vast_price_manager.validate()
         path = self.config_dir / "fleet-config.yaml"
         if path.exists():
             metadata = path.stat()
@@ -440,6 +447,7 @@ class FleetConfig:
             "image": self.vast_price_manager.image,
             "master_key_file": self.vast_price_manager.master_key_file,
             "expected_account_id": self.vast_price_manager.expected_account_id,
+            "writes_enabled": self.vast_price_manager.writes_enabled,
         })
         data["vast_price_manager"] = vpm
         owner = (metadata.st_uid, metadata.st_gid) if metadata else None
@@ -484,6 +492,7 @@ class FleetConfig:
     
     def _to_dict(self, include_secrets: bool = False) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
+        self.vast_price_manager.validate()
         data = {
             "site_name": self.site_name,
             "master_ip": self.master_ip,
@@ -534,6 +543,7 @@ class FleetConfig:
                 "image": self.vast_price_manager.image,
                 "master_key_file": self.vast_price_manager.master_key_file,
                 "expected_account_id": self.vast_price_manager.expected_account_id,
+                "writes_enabled": self.vast_price_manager.writes_enabled,
             },
             "runpod": {
                 "enabled": self.runpod.enabled,
@@ -721,6 +731,8 @@ class FleetConfig:
                 "master_key_file", "/etc/dc-overview/secrets/vpm-master.key"
             )
             config.vast_price_manager.expected_account_id = vpm.get("expected_account_id")
+            config.vast_price_manager.writes_enabled = vpm.get("writes_enabled", False)
+            config.vast_price_manager.validate()
             
             # RunPod (supports multiple API keys)
             runpod = data.get("runpod") or {}

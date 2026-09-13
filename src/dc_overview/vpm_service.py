@@ -69,6 +69,66 @@ _VAST_EXPORTER_PREREQUISITE_UNAVAILABLE = {
     "connected_account_count": 0,
 }
 
+_VPM_AUTOMATION_PAUSED_PROBE = r'''
+import json
+import sqlite3
+from vast_price_manager.config import Settings
+
+result = {"writes_enabled": False, "automation_paused": False}
+try:
+    settings = Settings.from_env()
+    connection = sqlite3.connect(f"{settings.database_path.resolve().as_uri()}?mode=ro", uri=True)
+    row = connection.execute(
+        "SELECT automation_paused FROM settings WHERE singleton=1"
+    ).fetchone()
+    connection.close()
+    if row is not None and type(row[0]) is int and row[0] == 1:
+        result["automation_paused"] = True
+    result["writes_enabled"] = settings.writes_enabled
+except Exception:
+    pass
+print(json.dumps(result, separators=(",", ":")))
+'''
+
+_VPM_STOPPED_AUTOMATION_PAUSED_PROBE = r'''
+import json
+import os
+import shutil
+import sqlite3
+from urllib.parse import quote
+
+result = {"automation_paused": False}
+connection = None
+try:
+    path = os.environ["VPM_FINAL_PAUSE_DB"]
+    snapshot_dir = os.environ["VPM_FINAL_PAUSE_SNAPSHOT_DIR"]
+    snapshot = os.path.join(snapshot_dir, "state.sqlite3")
+    for suffix in ("", "-wal", "-shm"):
+        source = path + suffix
+        if suffix or os.path.isfile(source):
+            if os.path.isfile(source):
+                shutil.copyfile(source, snapshot + suffix)
+    if not os.path.isfile(snapshot):
+        raise RuntimeError("database snapshot is missing")
+    connection = sqlite3.connect(
+        "file:" + quote(snapshot, safe="/") + "?mode=ro", uri=True
+    )
+    row = connection.execute(
+        "SELECT automation_paused FROM settings WHERE singleton=1"
+    ).fetchone()
+    result["automation_paused"] = bool(
+        row is not None and type(row[0]) is int and row[0] == 1
+    )
+except Exception:
+    pass
+finally:
+    if connection is not None:
+        connection.close()
+print(json.dumps(result, separators=(",", ":")))
+'''
+
+_VPM_PAUSE_PROBE_ENV = frozenset({"VPM_DATA_DIR", "VPM_DATABASE_PATH"})
+
 
 @dataclass(frozen=True)
 class VPMServiceSpec:
@@ -76,6 +136,7 @@ class VPMServiceSpec:
     allowed_host: str
     master_key_file: str = "/etc/dc-overview/secrets/vpm-master.key"
     expected_account_id: Optional[str] = None
+    writes_enabled: bool = False
 
     def __post_init__(self) -> None:
         if _PINNED_IMAGE.fullmatch(self.image) is None and _LOCAL_IMAGE_ID.fullmatch(self.image) is None:
@@ -87,6 +148,8 @@ class VPMServiceSpec:
             raise ValueError("VPM master key must be an absolute provisioned file path")
         if self.expected_account_id and _ACCOUNT_ID.fullmatch(self.expected_account_id) is None:
             raise ValueError("VPM expected account ID has invalid syntax")
+        if type(self.writes_enabled) is not bool:
+            raise ValueError("VPM writes_enabled must be a boolean")
 
 
 @dataclass(frozen=True)
@@ -148,7 +211,7 @@ class VPMServiceManager:
       - VPM_CREDENTIAL_MASTER_KEY_FILE=/run/secrets/vpm-master.key
       - VPM_AUTH_MODE=fleet
       - VPM_FLEET_AUTH_URL=http://cryptolabs-proxy:8081
-      - VPM_WRITES_ENABLED=false
+      - VPM_WRITES_ENABLED={str(spec.writes_enabled).lower()}
 {expected_account}    volumes:
       - vast-price-manager-data:/data
       - {spec.master_key_file}:/run/secrets/vpm-master.key:ro
@@ -346,6 +409,152 @@ WantedBy=timers.target
             and container.stdout.strip() == f"/{self.container_name} {self.project_name}"
         )
 
+    def current_managed_image(self) -> Optional[str]:
+        """Return the immutable image of the existing managed container only."""
+        if not self._has_existing_managed_vpm():
+            return None
+        try:
+            result = self._run(
+                ["docker", "inspect", "-f", "{{.Config.Image}}", self.container_name],
+                check=False,
+                timeout=10,
+            )
+        except Exception:
+            return None
+        image = result.stdout.strip() if result.returncode == 0 else ""
+        if _PINNED_IMAGE.fullmatch(image) is None and _LOCAL_IMAGE_ID.fullmatch(image) is None:
+            return None
+        return image
+
+    def managed_runtime_state(self) -> Optional[dict]:
+        """Read only VPM's process capability and persisted pause state.
+
+        No environment values are returned: the in-container probe emits only
+        two booleans. Missing or malformed state is unknown and therefore
+        unsafe for a write-capability transition.
+        """
+        if not self._has_existing_managed_vpm():
+            return None
+        try:
+            result = self._run(
+                ["docker", "exec", self.container_name, "python3", "-c", _VPM_AUTOMATION_PAUSED_PROBE],
+                check=False,
+                timeout=10,
+            )
+            payload = json.loads(result.stdout) if result.returncode == 0 else None
+        except Exception:
+            return None
+        if (
+            not isinstance(payload, dict)
+            or set(payload) != {"writes_enabled", "automation_paused"}
+            or type(payload["writes_enabled"]) is not bool
+            or type(payload["automation_paused"]) is not bool
+        ):
+            return None
+        return payload
+
+    def persistent_automation_paused(self) -> bool:
+        """Compatibility helper for callers that require the positive pause proof."""
+        state = self.managed_runtime_state()
+        return state is not None and state["automation_paused"] is True
+
+    def _stopped_managed_database_path(self) -> Optional[str]:
+        """Read only the database-path inputs needed for an offline Pause proof."""
+        try:
+            result = self._run(
+                [
+                    "docker", "inspect", "-f",
+                    "{{range .Config.Env}}{{println .}}{{end}}",
+                    self.container_name,
+                ],
+                check=False,
+                timeout=10,
+            )
+        except Exception:
+            return None
+        if result.returncode != 0:
+            return None
+        values: dict[str, str] = {}
+        for line in result.stdout.splitlines():
+            key, separator, value = line.partition("=")
+            if key not in _VPM_PAUSE_PROBE_ENV:
+                continue
+            if not separator or key in values:
+                return None
+            values[key] = value
+        data_dir = values.get("VPM_DATA_DIR", "/var/lib/vast-price-manager")
+        database_path = values.get("VPM_DATABASE_PATH", f"{data_dir}/vpm.sqlite3")
+        if (
+            not database_path.startswith("/")
+            or len(database_path) > 4096
+            or any(character in database_path for character in ("\x00", "\n", "\r"))
+        ):
+            return None
+        return database_path
+
+    def _stopped_persistent_automation_paused(self, image: str) -> bool:
+        """Prove Pause from a stopped managed container without app startup or network."""
+        database_path = self._stopped_managed_database_path()
+        if database_path is None:
+            return False
+        try:
+            result = self._run(
+                [
+                    "docker", "run", "--rm", "--network", "none", "--read-only",
+                    "--volumes-from", f"{self.container_name}:ro",
+                    "--tmpfs", "/probe:rw,nosuid,nodev,noexec,size=64m",
+                    "--entrypoint", "python3",
+                    "--env", "PYTHONDONTWRITEBYTECODE=1",
+                    "--env", f"VPM_FINAL_PAUSE_DB={database_path}",
+                    "--env", "VPM_FINAL_PAUSE_SNAPSHOT_DIR=/probe",
+                    image, "-c", _VPM_STOPPED_AUTOMATION_PAUSED_PROBE,
+                ],
+                check=False,
+                timeout=15,
+            )
+            payload = json.loads(result.stdout) if result.returncode == 0 else None
+        except Exception:
+            return False
+        return (
+            isinstance(payload, dict)
+            and set(payload) == {"automation_paused"}
+            and type(payload["automation_paused"]) is bool
+            and payload["automation_paused"] is True
+        )
+
+    @staticmethod
+    def _disabled_rollback_compose(compose: str, image: str) -> Optional[str]:
+        """Keep a failed capability transition on the exact prior image with writes off."""
+        image_matches = list(re.finditer(r"(?m)^    image: .+$", compose))
+        write_matches = list(
+            re.finditer(r"(?m)^(\s*- VPM_WRITES_ENABLED=)(?:true|false)\s*$", compose)
+        )
+        if len(image_matches) != 1 or len(write_matches) != 1:
+            return None
+        restored = re.sub(r"(?m)^    image: .+$", f"    image: {image}", compose, count=1)
+        return re.sub(
+            r"(?m)^(\s*- VPM_WRITES_ENABLED=)(?:true|false)\s*$",
+            r"\1false",
+            restored,
+            count=1,
+        )
+
+    def _restore_after_final_pause_failure(
+        self, old_compose: Optional[str], old_image: str, timer_state: dict
+    ) -> Optional[str]:
+        if old_compose is None:
+            return "previous managed Compose file is unavailable"
+        rollback_compose = self._disabled_rollback_compose(old_compose, old_image)
+        if rollback_compose is None:
+            return "previous managed Compose file cannot be restored with process writes disabled"
+        try:
+            self.compose_file.write_text(rollback_compose)
+            self._run(self._compose_prefix() + ["up", "-d"])
+            self._restore_timer_state(timer_state)
+        except Exception as error:
+            return str(error) or "previous project restoration failed"
+        return None
+
     @property
     def service_names(self):
         return tuple(timer.removesuffix(".timer") + ".service" for timer in self.timer_names)
@@ -422,7 +631,27 @@ WantedBy=timers.target
         # The initial route/container creation is gated, while an already
         # installed VPM can still be updated or recovered during an exporter
         # outage without taking away existing access.
-        if not self._has_existing_managed_vpm():
+        existing_managed = self._has_existing_managed_vpm()
+        final_pause_proof_image: Optional[str] = None
+        if spec.writes_enabled:
+            runtime_state = self.managed_runtime_state() if existing_managed else None
+            # Only a false/unknown-to-true process transition requires pause.
+            # Existing true->true maintenance preserves the operator's choice.
+            capability_enabling = (
+                runtime_state is None
+                or runtime_state["writes_enabled"] is not True
+            )
+            if capability_enabling:
+                if runtime_state is None or runtime_state["automation_paused"] is not True:
+                    raise RuntimeError(
+                        "Enabling VPM process writes requires an existing managed VPM with persistent automation pause enabled."
+                    )
+                final_pause_proof_image = self.current_managed_image()
+                if final_pause_proof_image is None:
+                    raise RuntimeError(
+                        "Enabling VPM process writes requires the exact current managed image for final Pause proof."
+                    )
+        if not existing_managed:
             self._require_vast_exporter_for_first_install()
         rendered = self.render(spec)
         old_compose = self.compose_file.read_text() if self.compose_file.exists() else None
@@ -444,6 +673,28 @@ WantedBy=timers.target
 
         timer_state = self._timer_state()
         self._quiesce()
+        if final_pause_proof_image is not None:
+            try:
+                self._run(self._compose_prefix() + ["stop"])
+                pause_confirmed = self._stopped_persistent_automation_paused(
+                    final_pause_proof_image
+                )
+            except Exception:
+                pause_confirmed = False
+            if not pause_confirmed:
+                restore_error = self._restore_after_final_pause_failure(
+                    old_compose, final_pause_proof_image, timer_state
+                )
+                if restore_error is not None:
+                    raise RuntimeError(
+                        "Enabling VPM process writes requires persistent automation pause after "
+                        "the managed container is stopped; restoration of the prior process-disabled "
+                        f"project failed: {restore_error}"
+                    )
+                raise RuntimeError(
+                    "Enabling VPM process writes requires persistent automation pause after "
+                    "the managed container is stopped; the prior process-disabled project was restored."
+                )
         self.compose_file.write_text(rendered.compose)
         self._install_units(rendered)
         try:

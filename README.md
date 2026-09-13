@@ -180,6 +180,14 @@ vast_price_manager:
   image: null
   master_key_file: /etc/dc-overview/secrets/vpm-master.key
   expected_account_id: null
+  writes_enabled: false  # Host capability; VPM's persisted Pause remains the operator switch
+
+# To change the host capability, pass exactly one or more settings:
+# dc-overview vpm configure --writes-enabled [--image IMAGE@sha256:...]
+# dc-overview vpm configure --writes-disabled [--image IMAGE@sha256:...]
+# dc-overview vpm configure --expected-account-id ACCOUNT_ID [--image IMAGE@sha256:...]
+# Enabling requires a managed VPM with persistent automation already paused.
+# With no --image, the capability transition recreates the exact current managed image.
 
 # For a reviewed database-schema migration:
 # dc-overview vpm update --image IMAGE@sha256:... --schema-migration-forward-hold
