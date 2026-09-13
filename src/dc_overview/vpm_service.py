@@ -376,6 +376,23 @@ WantedBy=timers.target
         for name, content in rendered.units.items():
             (self.unit_dir / name).write_text(content)
 
+    def _hold_candidate_for_forward_repair(self) -> list[str]:
+        """Leave the rendered candidate in place without any VPM work running."""
+        failures = []
+        for label, command in (
+            ("candidate stop", self._compose_prefix() + ["stop"]),
+            ("timer disable", ["systemctl", "disable", "--now", *self.timer_names]),
+            ("oneshot stop", ["systemctl", "stop", *self.service_names]),
+        ):
+            try:
+                result = self._run(command, check=False)
+                if result.returncode != 0:
+                    detail = (result.stderr or result.stdout).strip()
+                    failures.append(f"{label}: {detail or f'exit {result.returncode}'}")
+            except (RuntimeError, OSError) as cleanup_error:
+                failures.append(f"{label}: {cleanup_error}")
+        return failures
+
     def _wait_for_health(self) -> None:
         deadline = self.monotonic() + self.health_timeout
         last_status = "unknown"
@@ -393,7 +410,13 @@ WantedBy=timers.target
             self.sleeper(self.health_interval)
         raise RuntimeError(f"VPM container did not pass /healthz (last state: {last_status})")
 
-    def install(self, spec: VPMServiceSpec, promote_route: Optional[Callable[[], None]] = None) -> None:
+    def install(
+        self,
+        spec: VPMServiceSpec,
+        promote_route: Optional[Callable[[], None]] = None,
+        *,
+        schema_migration_forward_hold: bool = False,
+    ) -> None:
         self._validate_master_key(spec)
         self._assert_no_native_conflict()
         # The initial route/container creation is gated, while an already
@@ -430,7 +453,19 @@ WantedBy=timers.target
             if promote_route is not None:
                 promote_route()
             self._run(["systemctl", "enable", "--now", *self.timer_names])
-        except Exception:
+        except Exception as error:
+            if schema_migration_forward_hold:
+                cleanup_failures = self._hold_candidate_for_forward_repair()
+                cleanup_status = (
+                    "Candidate stop and timer-disable commands completed."
+                    if not cleanup_failures
+                    else "Candidate hold is unverified because cleanup failed: " + "; ".join(cleanup_failures)
+                )
+                raise RuntimeError(
+                    "VPM forward repair required after the schema-migration candidate failed. "
+                    f"{cleanup_status} The previous VPM image and timers were not restarted. "
+                    f"Original candidate failure: {error}"
+                ) from error
             self._run(self._compose_prefix() + ["stop"], check=False)
             if old_compose is not None:
                 self.compose_file.write_text(old_compose)

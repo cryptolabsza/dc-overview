@@ -181,6 +181,12 @@ vast_price_manager:
   master_key_file: /etc/dc-overview/secrets/vpm-master.key
   expected_account_id: null
 
+# For a reviewed database-schema migration:
+# dc-overview vpm update --image IMAGE@sha256:... --schema-migration-forward-hold
+# The flag keeps preflight checks before quiescing. If a started candidate fails,
+# its compose and units remain for forward repair and VPM work stays stopped;
+# the prior image is never restarted. Updates without it retain health rollback.
+
 # Vast.ai API Keys (only needed if vast_exporter is true)
 # Supports multiple accounts with labels
 vast:

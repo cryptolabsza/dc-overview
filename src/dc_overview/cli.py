@@ -1480,13 +1480,21 @@ def vpm_install(ctx: click.Context, image: str):
 
 @vpm.command("update")
 @click.option("--image", required=True, help="Required immutable image@sha256 candidate.")
+@click.option(
+    "--schema-migration-forward-hold",
+    is_flag=True,
+    help="On a post-start failure, hold the candidate for forward repair instead of restarting the previous image.",
+)
 @click.pass_context
-def vpm_update(ctx: click.Context, image: str):
-    """Validate and replace only the VPM image, with health rollback."""
+def vpm_update(ctx: click.Context, image: str, schema_migration_forward_hold: bool):
+    """Validate and replace only the VPM image, with health rollback by default."""
     manager = ctx.obj["vpm_manager"]
     try:
         with manager.operation_lock():
-            manager.install(_vpm_spec(ctx.obj["vpm_config_dir"], image))
+            manager.install(
+                _vpm_spec(ctx.obj["vpm_config_dir"], image),
+                schema_migration_forward_hold=schema_migration_forward_hold,
+            )
     except (ValueError, RuntimeError) as error:
         raise click.ClickException(str(error))
     click.echo("VPM update is healthy; its encrypted data volume was preserved.")

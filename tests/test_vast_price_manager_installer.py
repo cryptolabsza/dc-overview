@@ -462,6 +462,235 @@ def test_vpm_health_failure_restores_previous_compose_after_candidate_validation
     assert ["systemctl", "start", "vast-price-manager-sync.timer"] in calls
 
 
+def test_schema_migration_forward_hold_keeps_failed_candidate_and_stops_vpm_work(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        if command[:2] == ["systemctl", "is-enabled"]:
+            return Result(0, "enabled\n")
+        if command[:2] == ["systemctl", "is-active"]:
+            return Result(0, "active\n")
+        if command[:2] == ["docker", "inspect"]:
+            return Result(0, "unhealthy\n")
+        return Result()
+
+    manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
+    manager.root.mkdir(parents=True)
+    manager.compose_file.write_text("old-schema-compose\n")
+    for name in manager.render(VPMServiceSpec(image=PIN, allowed_host="dc.example.com")).units:
+        path = manager.unit_dir / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"old {name}\n")
+    manager._validate_master_key = lambda _spec: None
+    manager._has_existing_managed_vpm = lambda: True
+    rendered = manager.render(VPMServiceSpec(image=PIN, allowed_host="dc.example.com"))
+
+    with pytest.raises(RuntimeError, match="forward repair required"):
+        manager.install(
+            VPMServiceSpec(image=PIN, allowed_host="dc.example.com"),
+            schema_migration_forward_hold=True,
+        )
+
+    assert manager.compose_file.read_text() == rendered.compose
+    assert {name: (manager.unit_dir / name).read_text() for name in rendered.units} == rendered.units
+    assert sum(command[-2:] == ["up", "-d"] for command in calls) == 1
+    assert ["systemctl", "disable", "--now", *manager.timer_names] in calls
+    assert ["systemctl", "stop", *manager.service_names] in calls
+    assert ["systemctl", "enable", "vast-price-manager-sync.timer"] not in calls
+    assert ["systemctl", "start", "vast-price-manager-sync.timer"] not in calls
+
+
+def test_schema_migration_forward_hold_reports_failed_cleanup_without_rollback(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        if command[:2] == ["systemctl", "is-enabled"]:
+            return Result(0, "enabled\n")
+        if command[:2] == ["systemctl", "is-active"]:
+            return Result(0, "active\n")
+        if command[:2] == ["docker", "inspect"]:
+            return Result(0, "unhealthy\n")
+        if command[-1:] == ["stop"] and manager.project_name in command:
+            return Result(1, stderr="candidate stop unavailable")
+        return Result()
+
+    manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
+    manager.root.mkdir(parents=True)
+    manager.compose_file.write_text("old-schema-compose\n")
+    manager._validate_master_key = lambda _spec: None
+    manager._has_existing_managed_vpm = lambda: True
+
+    with pytest.raises(
+        RuntimeError,
+        match="Candidate hold is unverified.*candidate stop unavailable.*last state: unhealthy",
+    ):
+        manager.install(
+            VPMServiceSpec(image=PIN, allowed_host="dc.example.com"),
+            schema_migration_forward_hold=True,
+        )
+
+    assert manager.compose_file.read_text() != "old-schema-compose\n"
+    assert sum(command[-2:] == ["up", "-d"] for command in calls) == 1
+    assert ["systemctl", "enable", "vast-price-manager-sync.timer"] not in calls
+    assert ["systemctl", "start", "vast-price-manager-sync.timer"] not in calls
+
+
+def test_schema_migration_forward_hold_records_candidate_stop_launch_failure(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        if command[:2] == ["systemctl", "is-enabled"]:
+            return Result(0, "enabled\n")
+        if command[:2] == ["systemctl", "is-active"]:
+            return Result(0, "active\n")
+        if command[:2] == ["docker", "inspect"]:
+            return Result(0, "unhealthy\n")
+        if command[-1:] == ["stop"] and manager.project_name in command:
+            raise OSError(11, "Resource temporarily unavailable")
+        return Result()
+
+    manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
+    manager.root.mkdir(parents=True)
+    manager.compose_file.write_text("old-schema-compose\n")
+    manager._validate_master_key = lambda _spec: None
+    manager._has_existing_managed_vpm = lambda: True
+
+    with pytest.raises(
+        RuntimeError,
+        match="Candidate hold is unverified.*candidate stop.*Resource temporarily unavailable.*last state: unhealthy",
+    ):
+        manager.install(
+            VPMServiceSpec(image=PIN, allowed_host="dc.example.com"),
+            schema_migration_forward_hold=True,
+        )
+
+    assert ["systemctl", "disable", "--now", *manager.timer_names] in calls
+    assert ["systemctl", "stop", *manager.service_names] in calls
+    assert sum(command[-2:] == ["up", "-d"] for command in calls) == 1
+    assert ["systemctl", "enable", "vast-price-manager-sync.timer"] not in calls
+    assert ["systemctl", "start", "vast-price-manager-sync.timer"] not in calls
+
+
+def test_schema_migration_forward_hold_preflight_failure_leaves_existing_runtime_untouched(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command == ["docker", "image", "inspect", PIN]:
+            return Result(1, stderr="image missing")
+        if command == ["docker", "pull", PIN]:
+            return Result(1, stderr="registry denied")
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        return Result()
+
+    manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
+    manager.root.mkdir(parents=True)
+    manager.compose_file.write_text("old-schema-compose\n")
+    manager._validate_master_key = lambda _spec: None
+    manager._has_existing_managed_vpm = lambda: True
+
+    with pytest.raises(RuntimeError, match="registry denied"):
+        manager.install(
+            VPMServiceSpec(image=PIN, allowed_host="dc.example.com"),
+            schema_migration_forward_hold=True,
+        )
+
+    assert manager.compose_file.read_text() == "old-schema-compose\n"
+    assert ["systemctl", "disable", "--now", *manager.timer_names] not in calls
+    assert ["systemctl", "stop", *manager.service_names] not in calls
+    assert not (manager.root / ".vpm-compose-candidate.yml").exists()
+
+
+def test_schema_migration_forward_hold_success_enables_candidate_timers(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        if command[:2] == ["systemctl", "is-enabled"]:
+            return Result(1)
+        if command[:2] == ["systemctl", "is-active"]:
+            return Result(3)
+        if command[:2] == ["docker", "inspect"]:
+            return Result(0, "healthy\n")
+        return Result()
+
+    manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
+    manager.root.mkdir(parents=True)
+    manager.compose_file.write_text("old-schema-compose\n")
+    manager._validate_master_key = lambda _spec: None
+    manager._has_existing_managed_vpm = lambda: True
+
+    manager.install(
+        VPMServiceSpec(image=PIN, allowed_host="dc.example.com"),
+        schema_migration_forward_hold=True,
+    )
+
+    assert manager.compose_file.read_text() == manager.render(VPMServiceSpec(image=PIN, allowed_host="dc.example.com")).compose
+    assert ["systemctl", "enable", "--now", *manager.timer_names] in calls
+
+
+def test_vpm_update_passes_schema_migration_forward_hold_to_manager(monkeypatch, tmp_path: Path):
+    class FakeManager:
+        observed = None
+
+        def __init__(self, _config_dir):
+            pass
+
+        def operation_lock(self):
+            return nullcontext()
+
+        def install(self, _spec, schema_migration_forward_hold=False):
+            type(self).observed = schema_migration_forward_hold
+
+    config = FleetConfig(config_dir=tmp_path)
+    config.ssl.domain = "dc.example.com"
+    config.save()
+    monkeypatch.setattr(cli_module, "VPMServiceManager", FakeManager)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "vpm", "--config-dir", str(tmp_path), "update", "--image", PIN,
+            "--schema-migration-forward-hold",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert FakeManager.observed is True
+
+
 def test_failed_fresh_install_removes_only_fresh_project_container(tmp_path: Path):
     calls = []
 
