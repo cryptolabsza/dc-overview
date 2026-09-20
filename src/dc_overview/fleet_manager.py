@@ -264,6 +264,16 @@ class FleetManager:
                     error_msg = f"Vast.ai Exporter: {e}"
                     self.deployment_errors.append(error_msg)
                     console.print(f"[red]✗[/red] Vast.ai exporter failed: {e}")
+
+            # VPM is an isolated Compose project; it never receives exporter
+            # credentials or uses the broad fleet container deployment path.
+            if self.config.components.vast_price_manager:
+                try:
+                    self._deploy_vast_price_manager()
+                except Exception as e:
+                    error_msg = f"Vast Price Manager: {e}"
+                    self.deployment_errors.append(error_msg)
+                    console.print(f"[red]✗[/red] Vast Price Manager failed: {e}")
             
             # Step 8b: RunPod exporter (if enabled - deploys even without keys; add via mgmt API)
             if self.config.components.runpod_exporter:
@@ -1076,39 +1086,14 @@ echo "node_exporter installed successfully"
         
         prometheus_file = self.config.config_dir / "prometheus.yml"
         
-        # Load existing or start fresh
-        master_ip = self.config.master_ip or get_local_ip()
-        
         scrape_configs = [
-            {
-                "job_name": "prometheus",
-                "metrics_path": "/prometheus/metrics",
-                "static_configs": [{"targets": ["prometheus:9090"]}]
-            },
-            {
-                "job_name": "master",
-                "static_configs": [{
-                    "targets": [f"{master_ip}:9100", f"{master_ip}:9835"],
-                    "labels": {"instance": "master"}
-                }]
-            }
+            {"job_name": "prometheus", "metrics_path": "/prometheus/metrics",
+             "static_configs": [{"targets": ["prometheus:9090"]}]},
+            {"job_name": "dc-managed", "http_sd_configs": [
+                {"url": "http://dc-overview:5001/api/prometheus/discovery", "refresh_interval": "30s"}
+            ]},
         ]
-        
-        # Add workers (skip master since it's already added above)
-        for server in self.config.servers:
-            if server.exporters_installed and server.server_ip != master_ip:
-                targets = [
-                    f"{server.server_ip}:9100",  # node_exporter
-                    f"{server.server_ip}:9835",  # dc-exporter (includes DCGM metrics)
-                ]
-                scrape_configs.append({
-                    "job_name": server.name,
-                    "static_configs": [{
-                        "targets": targets,
-                        "labels": {"instance": server.name}
-                    }]
-                })
-        
+
         # Add Vast.ai exporter if enabled (scrapes even without keys - accounts added via mgmt API)
         if self.config.components.vast_exporter:
             scrape_configs.append({
@@ -1148,6 +1133,7 @@ echo "node_exporter installed successfully"
                 "scrape_interval": "15s",
                 "evaluation_interval": "15s"
             },
+            "rule_files": ["/etc/prometheus/recording_rules.yml"],
             "scrape_configs": scrape_configs
         }
         
@@ -2144,6 +2130,37 @@ except Exception as e:
             console.print(f"[yellow]⚠[/yellow] Failed to activate AI license: {e}")
     
     # ============ Step 8: Vast.ai Exporter ============
+
+    def _deploy_vast_price_manager(self):
+        """Install VPM only from an explicit immutable image candidate."""
+        from .vpm_service import VPMServiceManager, VPMServiceSpec
+
+        manager = VPMServiceManager(self.config.config_dir)
+        with manager.operation_lock():
+            vpm_config = self.config.vast_price_manager
+            if not vpm_config.image:
+                raise RuntimeError("VPM needs an explicit immutable image@sha256 pin before installation")
+            if not self.config.ssl.domain:
+                raise RuntimeError("VPM needs ssl.domain as its exact allowed public host")
+            spec = VPMServiceSpec(
+                image=vpm_config.image,
+                allowed_host=self.config.ssl.domain,
+                master_key_file=vpm_config.master_key_file,
+                expected_account_id=vpm_config.expected_account_id,
+                writes_enabled=vpm_config.writes_enabled,
+            )
+            manager.install(spec, promote_route=manager.enable_proxy_route)
+        url = f"https://{spec.allowed_host}/vast-pricing/"
+        if spec.expected_account_id:
+            console.print(
+                f"[green]✓[/green] Vast Price Manager healthy; sign in with the existing Fleet login at {url} "
+                "and use the same Fleet password to confirm sensitive operations"
+            )
+        else:
+            console.print(
+                f"[green]✓[/green] Vast Price Manager healthy at {url}; sign in with the existing Fleet login "
+                "and use the same Fleet password to confirm sensitive operations. Expected account ID is still required before onboarding"
+            )
     
     def _deploy_vast_exporter(self):
         """Deploy Vast.ai exporter with multi-account support and management API."""

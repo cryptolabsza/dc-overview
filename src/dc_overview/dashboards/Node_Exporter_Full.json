@@ -23202,11 +23202,11 @@
         "name": "job",
         "options": [],
         "query": {
-          "query": "label_values(node_uname_info, job)",
+          "query": "query_result(count by (job) (node_uname_info))",
           "refId": "Prometheus-job-Variable-Query"
         },
         "refresh": 1,
-        "regex": "",
+        "regex": "/job=\"([^\"]+)\"/",
         "sort": 1,
         "type": "query"
       },
@@ -23219,17 +23219,17 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "definition": "label_values(node_uname_info{job=\"$job\"}, instance)",
+        "definition": "query_result(node_uname_info{job=\"$job\"})",
         "includeAll": false,
         "label": "Host:",
         "name": "node",
         "options": [],
         "query": {
-          "query": "label_values(node_uname_info{job=\"$job\"}, instance)",
+          "query": "query_result(node_uname_info{job=\"$job\"})",
           "refId": "Prometheus-node-Variable-Query"
         },
         "refresh": 1,
-        "regex": "",
+        "regex": "/instance=\"([^\"]+)\"/",
         "sort": 1,
         "type": "query"
       },

@@ -47,53 +47,8 @@ scrape_configs:
       - targets: ['runpod-exporter:8623']
 {% endif %}
 
-  # ==========================================================================
-  # GPU Worker Exporters - File-based service discovery
-  # Targets are auto-updated by dc-overview when servers are added/removed
-  # ==========================================================================
-  
-  # Node Exporter (CPU, RAM, disk)
-  - job_name: 'node-exporter'
-    file_sd_configs:
-      - files:
-          - /etc/prometheus/targets/dc_targets.json
+  # Server Manager owns worker inventory. No writable config mount is needed.
+  - job_name: 'dc-managed'
+    http_sd_configs:
+      - url: 'http://dc-overview:{{ dc_port | default(5001) }}/api/prometheus/discovery'
         refresh_interval: 30s
-    relabel_configs:
-      - source_labels: [job]
-        regex: node-exporter
-        action: keep
-
-  # DC Exporter (VRAM temp, hotspot temp, AER errors)
-  - job_name: 'dc-exporter'
-    file_sd_configs:
-      - files:
-          - /etc/prometheus/targets/dc_targets.json
-        refresh_interval: 30s
-    relabel_configs:
-      - source_labels: [job]
-        regex: dc-exporter
-        action: keep
-
-  # DCGM Exporter (NVIDIA official metrics)
-  - job_name: 'dcgm-exporter'
-    file_sd_configs:
-      - files:
-          - /etc/prometheus/targets/dc_targets.json
-        refresh_interval: 30s
-    relabel_configs:
-      - source_labels: [job]
-        regex: dcgm-exporter
-        action: keep
-
-{% if static_targets %}
-  # ==========================================================================
-  # Static targets (legacy - use file_sd instead)
-  # ==========================================================================
-  - job_name: 'gpu-workers'
-    static_configs:
-{% for server in static_targets %}
-      - targets: ['{{ server.ip }}:9100', '{{ server.ip }}:9835']
-        labels:
-          instance: '{{ server.name }}'
-{% endfor %}
-{% endif %}

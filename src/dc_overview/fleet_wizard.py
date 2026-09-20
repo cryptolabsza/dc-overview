@@ -238,6 +238,9 @@ class FleetWizard:
         self.config.components.ipmi_monitor = "ipmi_monitor" in components
         self.config.components.dc_watchdog = "dc_watchdog" in components
         self.config.components.vast_exporter = "vast_exporter" in components
+        # VPM is deliberately offered only after the operator supplies a Vast
+        # exporter key in the next stage; it is never an unchecked component.
+        self.config.components.vast_price_manager = False
         self.config.components.runpod_exporter = "runpod_exporter" in components
         
         # Update dependent configs
@@ -249,6 +252,7 @@ class FleetWizard:
         # If DC Watchdog is selected, we'll collect credentials later
         if self.config.components.dc_watchdog:
             console.print("[dim]DC Watchdog requires a CryptoLabs account. We'll set this up later.[/dim]")
+        console.print("[dim]Vast Price Manager requires a running Vast.ai exporter with a connected account; it can be selected after Vast.ai setup.[/dim]")
         
         console.print()
     
@@ -720,6 +724,22 @@ class FleetWizard:
                 "Vast.ai API Key:",
                 style=custom_style
             ).ask()
+            if self.config.vast.api_key:
+                console.print("\n[bold]Vast Price Manager[/bold]")
+                console.print("[dim]VPM will be installed only after the Vast.ai exporter validates this account. It uses the existing Fleet login and does not copy this API key.[/dim]")
+                self.config.components.vast_price_manager = questionary.confirm(
+                    "Add Vast Price Manager after Vast.ai setup succeeds?",
+                    default=False,
+                    style=custom_style,
+                ).ask() is True
+                if self.config.components.vast_price_manager:
+                    self.config.vast_price_manager.expected_account_id = questionary.text(
+                        "Expected Vast account ID (leave blank to install before account setup):",
+                        default="",
+                        style=custom_style,
+                    ).ask() or None
+            else:
+                console.print("[yellow]Vast Price Manager is unavailable until a Vast.ai API key is configured for the exporter.[/yellow]")
         
         # RunPod API Keys (supports multiple accounts)
         if self.config.components.runpod_exporter:

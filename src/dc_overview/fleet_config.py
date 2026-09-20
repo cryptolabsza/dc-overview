@@ -121,6 +121,7 @@ class ComponentConfig:
     dc_overview: bool = True  # Prometheus + Grafana + dashboards
     ipmi_monitor: bool = False  # IPMI/BMC monitoring
     vast_exporter: bool = False  # Vast.ai earnings/reliability
+    vast_price_manager: bool = False  # Optional, separately managed Vast pricing UI
     runpod_exporter: bool = False  # RunPod earnings/reliability
     dc_watchdog: bool = False  # External uptime monitoring (requires CryptoLabs subscription)
 
@@ -153,6 +154,25 @@ class VastConfig:
         if self.api_key and not any(k.key == self.api_key for k in keys):
             keys.insert(0, VastApiKey(name="default", key=self.api_key))
         return keys
+
+
+@dataclass
+class VastPriceManagerConfig:
+    """Public references required by the optional VPM container.
+
+    VPM reuses the Fleet login; sensitive operations confirm that same Fleet
+    password. The account key belongs only to VPM's encrypted onboarding flow.
+    This configuration deliberately holds no provider credential or key material.
+    """
+    image: Optional[str] = None
+    master_key_file: str = "/etc/dc-overview/secrets/vpm-master.key"
+    expected_account_id: Optional[str] = None
+    writes_enabled: bool = False
+
+    def validate(self) -> None:
+        """Reject YAML strings and integers for the write capability."""
+        if type(self.writes_enabled) is not bool:
+            raise ValueError("vast_price_manager.writes_enabled must be a boolean")
 
 
 @dataclass
@@ -278,6 +298,7 @@ class FleetConfig:
     prometheus: PrometheusConfig = field(default_factory=PrometheusConfig)
     ipmi_monitor: IPMIMonitorConfig = field(default_factory=IPMIMonitorConfig)
     vast: VastConfig = field(default_factory=VastConfig)
+    vast_price_manager: VastPriceManagerConfig = field(default_factory=VastPriceManagerConfig)
     runpod: RunPodConfig = field(default_factory=RunPodConfig)
     watchdog: WatchdogConfig = field(default_factory=WatchdogConfig)
     
@@ -407,6 +428,37 @@ class FleetConfig:
         self.grafana.alert_receiver = receiver
         return path
 
+    def persist_vast_price_manager_settings(self) -> Path:
+        """Persist only VPM's public references without rewriting secrets."""
+        self.vast_price_manager.validate()
+        path = self.config_dir / "fleet-config.yaml"
+        if path.exists():
+            metadata = path.stat()
+            data = yaml.safe_load(path.read_text()) or {}
+            if not isinstance(data, dict):
+                raise ValueError("fleet-config.yaml must contain a mapping")
+        else:
+            metadata = None
+            data = self._to_dict(include_secrets=False)
+        vpm = data.get("vast_price_manager") or {}
+        if not isinstance(vpm, dict):
+            raise ValueError("fleet-config.yaml vast_price_manager section must be a mapping")
+        vpm.update({
+            "image": self.vast_price_manager.image,
+            "master_key_file": self.vast_price_manager.master_key_file,
+            "expected_account_id": self.vast_price_manager.expected_account_id,
+            "writes_enabled": self.vast_price_manager.writes_enabled,
+        })
+        data["vast_price_manager"] = vpm
+        owner = (metadata.st_uid, metadata.st_gid) if metadata else None
+        _atomic_write_public_config(
+            path,
+            yaml.dump(data, default_flow_style=False, sort_keys=False).encode("utf-8"),
+            mode=metadata.st_mode & 0o777 if metadata else 0o600,
+            owner=owner,
+        )
+        return path
+
     def snapshot_public_config(self) -> _PublicConfigSnapshot:
         """Capture the exact public config for a receiver-sync transaction."""
         path = self.config_dir / "fleet-config.yaml"
@@ -440,6 +492,7 @@ class FleetConfig:
     
     def _to_dict(self, include_secrets: bool = False) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
+        self.vast_price_manager.validate()
         data = {
             "site_name": self.site_name,
             "master_ip": self.master_ip,
@@ -447,6 +500,7 @@ class FleetConfig:
                 "dc_overview": self.components.dc_overview,
                 "ipmi_monitor": self.components.ipmi_monitor,
                 "vast_exporter": self.components.vast_exporter,
+                "vast_price_manager": self.components.vast_price_manager,
                 "runpod_exporter": self.components.runpod_exporter,
                 "dc_watchdog": self.components.dc_watchdog,
             },
@@ -484,6 +538,12 @@ class FleetConfig:
             "vast": {
                 "enabled": self.vast.enabled,
                 "port": self.vast.port,
+            },
+            "vast_price_manager": {
+                "image": self.vast_price_manager.image,
+                "master_key_file": self.vast_price_manager.master_key_file,
+                "expected_account_id": self.vast_price_manager.expected_account_id,
+                "writes_enabled": self.vast_price_manager.writes_enabled,
             },
             "runpod": {
                 "enabled": self.runpod.enabled,
@@ -622,6 +682,7 @@ class FleetConfig:
             config.components.ipmi_monitor = comp.get("ipmi_monitor", False)
             config.components.dc_watchdog = comp.get("dc_watchdog", False)
             config.components.vast_exporter = comp.get("vast_exporter", False)
+            config.components.vast_price_manager = comp.get("vast_price_manager", False)
             config.components.runpod_exporter = comp.get("runpod_exporter", False)
             config.enable_watchtower_all = data.get("enable_watchtower_all", False)
             
@@ -663,6 +724,15 @@ class FleetConfig:
             vast = data.get("vast") or {}
             config.vast.enabled = vast.get("enabled", False)
             config.vast.port = vast.get("port", 8622)
+
+            vpm = data.get("vast_price_manager") or {}
+            config.vast_price_manager.image = vpm.get("image")
+            config.vast_price_manager.master_key_file = vpm.get(
+                "master_key_file", "/etc/dc-overview/secrets/vpm-master.key"
+            )
+            config.vast_price_manager.expected_account_id = vpm.get("expected_account_id")
+            config.vast_price_manager.writes_enabled = vpm.get("writes_enabled", False)
+            config.vast_price_manager.validate()
             
             # RunPod (supports multiple API keys)
             runpod = data.get("runpod") or {}
