@@ -142,6 +142,77 @@ def test_invalid_or_duplicate_existing_bmc_mapping_returns_4xx(app, client, auth
     assert client.put(f"/api/servers/{second_id}/inventory", json={"bmc_ip": "10.20.1.1"}, headers=auth_headers).status_code == 409
 
 
+def test_readding_then_mapping_a_retired_bmc_restores_its_identity(app, client, auth_headers):
+    """An exact retired record may resume only through its original receiver identity."""
+    original = client.post('/api/servers', headers=auth_headers, json={
+        'name': 'worker', 'server_ip': '10.0.0.1', 'bmc_ip': '10.0.1.1',
+    })
+    original_id = original.get_json()['id']
+    from dc_overview.app import InventoryOutbox, Server, db
+    with app.app_context():
+        identity = Server.query.get(original_id).inventory_server_id
+    assert client.delete(f'/api/servers/{original_id}', headers=auth_headers).status_code == 200
+    recreated = client.post('/api/servers', headers=auth_headers, json={
+        'name': 'worker', 'server_ip': '10.0.0.1',
+    })
+    assert recreated.status_code == 201
+    response = client.put(f"/api/servers/{recreated.get_json()['id']}/inventory",
+                          headers=auth_headers, json={'bmc_ip': '10.0.1.1'})
+    assert response.status_code == 200
+    with app.app_context():
+        restored = Server.query.get(recreated.get_json()['id'])
+        assert restored.inventory_server_id == identity
+        assert restored.inventory_revision == 3
+        assert InventoryOutbox.query.filter_by(source_server_id=identity).order_by(
+            InventoryOutbox.revision.desc()).first().revision == 3
+
+
+def test_mapping_retired_bmc_rejects_a_different_server_identity(app, client, auth_headers):
+    original = client.post('/api/servers', headers=auth_headers, json={
+        'name': 'worker', 'server_ip': '10.0.0.1', 'bmc_ip': '10.0.1.1',
+    })
+    assert client.delete(f"/api/servers/{original.get_json()['id']}", headers=auth_headers).status_code == 200
+    different = client.post('/api/servers', headers=auth_headers, json={
+        'name': 'replacement', 'server_ip': '10.0.0.2',
+    })
+    response = client.put(f"/api/servers/{different.get_json()['id']}/inventory",
+                          headers=auth_headers, json={'bmc_ip': '10.0.1.1'})
+    assert response.status_code == 409
+
+
+def test_rebinding_the_same_current_bmc_keeps_its_identity_and_advances_revision(app, client, auth_headers):
+    created = client.post('/api/servers', headers=auth_headers, json={
+        'name': 'worker', 'server_ip': '10.0.0.1', 'bmc_ip': '10.0.1.1',
+    })
+    server_id = created.get_json()['id']
+    from dc_overview.app import Server
+    identity = Server.query.get(server_id).inventory_server_id
+    rebound = client.put(f'/api/servers/{server_id}/inventory', headers=auth_headers,
+                         json={'bmc_ip': '10.0.1.1'})
+    assert rebound.status_code == 200
+    current = Server.query.get(server_id)
+    assert (current.inventory_server_id, current.inventory_revision) == (identity, 2)
+
+
+def test_inventory_retries_do_not_starve_new_records(app, monkeypatch):
+    """Retry scheduling prefers less-attempted entries over an old failure."""
+    import dc_overview.app as module
+    from dc_overview.app import InventoryOutbox, db
+    for i in range(11):
+        db.session.add(InventoryOutbox(source_id='source', source_server_id=str(i), revision=1, payload='{}'))
+    db.session.commit()
+    attempted = []
+    def fail(entry):
+        attempted.append(entry.source_server_id)
+        entry.attempts += 1
+        db.session.commit()
+        return False
+    monkeypatch.setattr(module, 'attempt_inventory_reconcile', fail)
+    module.retry_pending_inventory_outbox()
+    module.retry_pending_inventory_outbox()
+    assert '10' in attempted
+
+
 def test_server_inventory_endpoints_reject_non_object_json_and_duplicate_bmc(app, client, auth_headers):
     """Malformed JSON and an already-bound BMC are client errors, never SQLite 500s."""
     from dc_overview.app import Server, db

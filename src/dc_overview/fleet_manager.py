@@ -1086,39 +1086,14 @@ echo "node_exporter installed successfully"
         
         prometheus_file = self.config.config_dir / "prometheus.yml"
         
-        # Load existing or start fresh
-        master_ip = self.config.master_ip or get_local_ip()
-        
         scrape_configs = [
-            {
-                "job_name": "prometheus",
-                "metrics_path": "/prometheus/metrics",
-                "static_configs": [{"targets": ["prometheus:9090"]}]
-            },
-            {
-                "job_name": "master",
-                "static_configs": [{
-                    "targets": [f"{master_ip}:9100", f"{master_ip}:9835"],
-                    "labels": {"instance": "master"}
-                }]
-            }
+            {"job_name": "prometheus", "metrics_path": "/prometheus/metrics",
+             "static_configs": [{"targets": ["prometheus:9090"]}]},
+            {"job_name": "dc-managed", "http_sd_configs": [
+                {"url": "http://dc-overview:5001/api/prometheus/discovery", "refresh_interval": "30s"}
+            ]},
         ]
-        
-        # Add workers (skip master since it's already added above)
-        for server in self.config.servers:
-            if server.exporters_installed and server.server_ip != master_ip:
-                targets = [
-                    f"{server.server_ip}:9100",  # node_exporter
-                    f"{server.server_ip}:9835",  # dc-exporter (includes DCGM metrics)
-                ]
-                scrape_configs.append({
-                    "job_name": server.name,
-                    "static_configs": [{
-                        "targets": targets,
-                        "labels": {"instance": server.name}
-                    }]
-                })
-        
+
         # Add Vast.ai exporter if enabled (scrapes even without keys - accounts added via mgmt API)
         if self.config.components.vast_exporter:
             scrape_configs.append({
@@ -1158,6 +1133,7 @@ echo "node_exporter installed successfully"
                 "scrape_interval": "15s",
                 "evaluation_interval": "15s"
             },
+            "rule_files": ["/etc/prometheus/recording_rules.yml"],
             "scrape_configs": scrape_configs
         }
         

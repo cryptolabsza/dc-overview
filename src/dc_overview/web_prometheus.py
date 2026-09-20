@@ -16,10 +16,28 @@ logger = logging.getLogger(__name__)
 # These are never added or removed by the sync logic.
 _INFRA_JOB_NAMES = frozenset({
     'prometheus', 'vastai', 'runpod', 'ipmi-monitor', 'cadvisor',
-    'node-exporter', 'grafana', 'dc-overview',
+    'node-exporter', 'grafana', 'dc-overview', 'dc-managed',
 })
 
 IPMI_CONFIG_PATH = '/etc/ipmi-monitor/servers.yaml'
+
+
+def build_discovery_targets(servers):
+    """Use one inventory for every exporter; preserve explicit legacy aliases."""
+    targets = []
+    exporters = (('node_exporter', 'node', 9100), ('dc_exporter', 'dc', 9835),
+                 ('dcgm_exporter', 'dcgm', 9400), ('watchdog_agent', 'watchdog', 9878))
+    for server in servers:
+        name = server.monitoring_name or server.name
+        address = server.server_ip
+        if ':' in address:
+            address = f'[{address}]'
+        for field, label, port in exporters:
+            if getattr(server, field + '_installed') and getattr(server, field + '_enabled'):
+                targets.append({'targets': [f'{address}:{port}'], 'labels': {
+                    'instance': name, 'job': name, 'exporter': label,
+                }})
+    return targets
 
 
 def update_prometheus_targets(servers, data_dir: str):

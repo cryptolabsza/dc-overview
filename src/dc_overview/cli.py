@@ -401,151 +401,17 @@ def upgrade(dev: bool, stable: bool):
             f"Grafana alert upgrade failed ({recovery}): {alert_sync.failure_reason}"
         )
     
-    # Detect running containers and their current tags
-    FLEET_IMAGES = {
-        'dc-overview': 'ghcr.io/cryptolabsza/dc-overview',
-        'cryptolabs-proxy': 'ghcr.io/cryptolabsza/cryptolabs-proxy',
-        'ipmi-monitor': 'ghcr.io/cryptolabsza/ipmi-monitor',
-    }
-    
-    console.print(f"[bold]Upgrading fleet to :{tag}[/bold]\n")
-    
-    updated = 0
-    skipped = 0
-    
-    for container_name, image_base in FLEET_IMAGES.items():
-        # Check if container exists
-        result = subprocess.run(
-            ["docker", "inspect", "--format", "{{.Config.Image}}", container_name],
-            capture_output=True, text=True
-        )
-        if result.returncode != 0:
-            console.print(f"[dim]  {container_name}: not running (skip)[/dim]")
-            skipped += 1
-            continue
-        
-        current_image = result.stdout.strip()
-        target_image = f"{image_base}:{tag}"
-        
-        # Pull new image
-        console.print(f"[dim]  Pulling {container_name}:{tag}...[/dim]")
-        pull_result = subprocess.run(
-            ["docker", "pull", target_image],
-            capture_output=True, text=True, timeout=120
-        )
-        if pull_result.returncode != 0:
-            console.print(f"[red]  ✗ Failed to pull {target_image}[/red]")
-            continue
-        
-        # Check if image actually changed
-        if current_image == target_image:
-            # Check if digest changed (new build of same tag)
-            console.print(f"[dim]  {container_name}: already on :{tag}, checking for updates...[/dim]")
-        
-        # Get current container config for recreation
-        inspect_result = subprocess.run(
-            ["docker", "inspect", container_name],
-            capture_output=True, text=True
-        )
-        if inspect_result.returncode != 0:
-            console.print(f"[yellow]  ⚠ Could not inspect {container_name}[/yellow]")
-            continue
-        
-        import json as json_module
-        try:
-            container_info = json_module.loads(inspect_result.stdout)[0]
-            env_vars = container_info['Config'].get('Env', [])
-            
-            # Stop and remove old container
-            subprocess.run(["docker", "stop", container_name], capture_output=True, timeout=30)
-            subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
-            
-            # Rebuild the run command from inspection
-            config = container_info['Config']
-            host_config = container_info['HostConfig']
-            
-            cmd = ["docker", "run", "-d", "--name", container_name, "--restart", "unless-stopped"]
-            
-            # Environment variables - skip system vars and build-time vars
-            # (build vars like GIT_COMMIT must come from the new image, not old container)
-            skip_env = {
-                'PATH', 'HOSTNAME', 'HOME',
-                'GIT_COMMIT', 'GIT_BRANCH', 'BUILD_TIME', 'APP_VERSION',
-                'NGINX_VERSION', 'PKG_RELEASE', 'DYNPKG_RELEASE',
-                'NJS_VERSION', 'NJS_RELEASE', 'ACME_VERSION',
-            }
-            for env in env_vars:
-                key = env.split('=')[0]
-                if key not in skip_env:
-                    cmd.extend(["-e", env])
-            
-            # Volumes/mounts
-            for mount in container_info.get('Mounts', []):
-                if mount['Type'] == 'volume':
-                    cmd.extend(["-v", f"{mount['Name']}:{mount['Destination']}"])
-                elif mount['Type'] == 'bind':
-                    ro = ':ro' if not mount.get('RW', True) else ''
-                    cmd.extend(["-v", f"{mount['Source']}:{mount['Destination']}{ro}"])
-            
-            # Port bindings
-            port_bindings = host_config.get('PortBindings') or {}
-            for container_port, bindings in port_bindings.items():
-                if bindings:
-                    for binding in bindings:
-                        host_port = binding.get('HostPort', '')
-                        host_ip = binding.get('HostIp', '')
-                        if host_ip:
-                            cmd.extend(["-p", f"{host_ip}:{host_port}:{container_port}"])
-                        else:
-                            cmd.extend(["-p", f"{host_port}:{container_port}"])
-            
-            # Network
-            networks = container_info['NetworkSettings'].get('Networks', {})
-            for net_name, net_config in networks.items():
-                if net_name != 'bridge':
-                    cmd.extend(["--network", net_name])
-                    if net_config.get('IPAddress'):
-                        cmd.extend(["--ip", net_config['IPAddress']])
-            
-            # Labels (watchtower etc.)
-            labels = config.get('Labels', {})
-            for label_key, label_val in labels.items():
-                if label_key.startswith('com.centurylinklabs') or label_key.startswith('org.opencontainers'):
-                    cmd.extend(["--label", f"{label_key}={label_val}"])
-            
-            # Health check
-            healthcheck = config.get('Healthcheck')
-            if healthcheck and healthcheck.get('Test'):
-                test = healthcheck['Test']
-                if isinstance(test, list) and len(test) > 1 and test[0] == 'CMD':
-                    cmd.extend(["--health-cmd", ' '.join(test[1:])])
-            
-            # The image
-            cmd.append(target_image)
-            
-            # Start new container
-            run_result = subprocess.run(cmd, capture_output=True, text=True)
-            if run_result.returncode == 0:
-                console.print(f"[green]  ✓ {container_name}: upgraded to :{tag}[/green]")
-                updated += 1
-            else:
-                console.print(f"[red]  ✗ {container_name}: failed to start - {run_result.stderr[:100]}[/red]")
-                
-        except Exception as e:
-            console.print(f"[red]  ✗ {container_name}: error - {str(e)[:100]}[/red]")
-    
-    # Also update compose-managed services (prometheus, grafana)
-    if DOCKER_CONFIG_DIR.exists() and (DOCKER_CONFIG_DIR / "docker-compose.yml").exists():
-        console.print("[dim]  Updating compose services (prometheus, grafana)...[/dim]")
-        success, output = run_docker_compose_cmd("pull")
-        if success:
-            success, output = run_docker_compose_cmd("up -d")
-            if success:
-                console.print("[green]  ✓ Compose services updated[/green]")
-    
-    console.print(f"\n[bold]Done:[/bold] {updated} upgraded, {skipped} skipped")
-    if dev:
-        console.print("[yellow]⚠ Running dev images. Switch back with: sudo dc-overview upgrade --stable[/yellow]")
+    from .fleet_upgrade import run_fleet_upgrade
+    console.print("[bold]Updating through Fleet's durable updater...[/bold]")
+    try:
+        result = run_fleet_upgrade('dev' if dev else 'main')
+    except RuntimeError as error:
+        raise click.ClickException(str(error)) from error
+    for service, outcome in result.get('results', {}).items():
+        console.print(f"{service}: {outcome.get('message', outcome.get('state', 'unknown'))}")
+    if not result.get('success'):
+        raise click.ClickException("One or more services failed to update. Check Fleet update results; healthy originals are retained for recovery.")
+    console.print("[green]Fleet update completed and verified.[/green]")
 
 
 @click.command()

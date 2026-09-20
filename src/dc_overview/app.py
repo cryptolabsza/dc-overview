@@ -216,6 +216,7 @@ class Server(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), unique=True, nullable=False)
     server_ip = db.Column(db.String(50), nullable=False)
+    monitoring_name = db.Column(db.String(100), nullable=True)
     bmc_ip = db.Column(db.String(50), nullable=True, unique=True)
     inventory_server_id = db.Column(db.String(64), nullable=False, unique=True, default=lambda: str(uuid.uuid4()))
     inventory_revision = db.Column(db.Integer, nullable=False, default=0)
@@ -422,6 +423,36 @@ def enqueue_inventory_reconcile(server, operation='upsert'):
     return entry
 
 
+def restore_retired_inventory_identity(server):
+    """Re-adding the exact retired BMC advances its original revision stream."""
+    if not server.bmc_ip:
+        return
+    source = get_setting('inventory_source_id')
+    if not source:
+        return
+    newest = {}
+    for entry in InventoryOutbox.query.filter_by(source_id=source).order_by(
+        InventoryOutbox.revision.desc(), InventoryOutbox.id.desc()
+    ).all():
+        newest.setdefault(entry.source_server_id, entry)
+    candidates = []
+    for entry in newest.values():
+        payload = json.loads(entry.payload)
+        if payload.get('bmc_ip') == server.bmc_ip:
+            candidates.append((entry, payload))
+    if not candidates:
+        return
+    if len(candidates) != 1:
+        raise ValueError('BMC has ambiguous inventory history; resolve the existing bindings first')
+    entry, payload = candidates[0]
+    if (payload.get('operation') != 'retire' or payload.get('name') != server.name
+            or payload.get('server_ip') != server.server_ip
+            or Server.query.filter_by(inventory_server_id=entry.source_server_id).first()):
+        raise ValueError('BMC has an existing identity. Re-add its previous name and OS address, then edit the restored server.')
+    server.inventory_server_id = entry.source_server_id
+    server.inventory_revision = entry.revision
+
+
 def attempt_inventory_reconcile(entry):
     if not entry:
         return None
@@ -458,7 +489,9 @@ def retry_pending_inventory_outbox(limit=10):
             InventoryOutbox.source_server_id == newest.c.source_server_id,
             InventoryOutbox.revision == newest.c.revision,
         ),
-    ).filter(InventoryOutbox.delivered.is_(False)).order_by(InventoryOutbox.id).limit(limit).all()
+    ).filter(InventoryOutbox.delivered.is_(False)).order_by(
+        InventoryOutbox.attempts, InventoryOutbox.updated_at, InventoryOutbox.id
+    ).limit(limit).all()
     delivered = 0
     for entry in entries:
         if attempt_inventory_reconcile(entry):
@@ -897,7 +930,7 @@ def api_update_server(server_id):
         return jsonify({'error': str(e)}), 400
     duplicate = Server.query.filter(
         Server.id != server.id,
-        db.or_(Server.name == name, Server.server_ip == server_ip),
+        db.or_(Server.name == name, Server.server_ip == server_ip, Server.monitoring_name == name),
     ).first()
     if duplicate:
         return jsonify({'error': 'Server with this name or IP already exists'}), 409
@@ -944,7 +977,7 @@ def api_add_server():
     
     # Check for duplicate
     existing = Server.query.filter(
-        (Server.name == validated_name) | (Server.server_ip == validated_ip)
+        (Server.name == validated_name) | (Server.server_ip == validated_ip) | (Server.monitoring_name == validated_name)
     ).first()
     if existing:
         return jsonify({'error': 'Server with this name or IP already exists'}), 409
@@ -976,6 +1009,10 @@ def api_add_server():
     if data.get('watchdog_agent_version'):
         server.watchdog_agent_version = data['watchdog_agent_version']
     
+    try:
+        restore_retired_inventory_identity(server)
+    except ValueError as error:
+        return jsonify({'error': str(error)}), 409
     db.session.add(server)
     db.session.flush()
 
@@ -1043,7 +1080,13 @@ def api_bind_server_inventory(server_id):
     if duplicate:
         return jsonify({'error': 'BMC is already bound to another server'}), 409
 
+    was_unbound = server.bmc_ip is None
     server.bmc_ip = bmc_ip
+    if was_unbound:
+        try:
+            restore_retired_inventory_identity(server)
+        except ValueError as error:
+            return jsonify({'error': str(error)}), 409
     outbox = enqueue_inventory_reconcile(server)
     db.session.commit()
     delivered = attempt_inventory_reconcile(outbox)
@@ -2218,6 +2261,18 @@ def api_prometheus_targets():
     
     return jsonify(targets)
 
+@app.route('/api/prometheus/discovery')
+@limiter.exempt
+def api_prometheus_discovery():
+    """Internal HTTP discovery: read committed inventory on every refresh.
+
+    The reverse proxy requires Fleet authentication for public /dc requests.
+    Prometheus consumes this endpoint directly on the private Docker network.
+    """
+    from .web_prometheus import build_discovery_targets
+    return jsonify(build_discovery_targets(Server.query.all()))
+
+
 @app.route('/api/prometheus/targets.json')
 @csrf.exempt
 @limiter.limit("10 per minute")  # Rate limit unauthenticated endpoint
@@ -3105,6 +3160,10 @@ def _run_safe_migrations():
     
     # Migrations for 'server' table
     server_columns = {col['name'] for col in inspector.get_columns('server')}
+
+    if 'monitoring_name' not in server_columns:
+        db.session.execute(db.text('ALTER TABLE server ADD COLUMN monitoring_name VARCHAR(100)'))
+        db.session.commit()
     
     if 'ssh_password' not in server_columns:
         app.logger.info("Migration: Adding ssh_password column to server table")
