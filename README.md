@@ -163,7 +163,37 @@ components:
   dc_overview: true
   ipmi_monitor: true
   vast_exporter: false    # Set to true if using Vast.ai
+  vast_price_manager: false # Optional secure pricing UI; no provider key is stored here
   runpod_exporter: false  # Set to true if using RunPod
+
+# Vast Price Manager (optional). The immutable image pin is supplied by the
+# approved release process. VPM uses the existing Fleet login; re-enter the
+# same Fleet password to confirm sensitive operations. The provider API key is
+# entered only in VPM's encrypted onboarding UI at /vast-pricing/ after installation.
+# An approved image archive may be loaded before installation; VPM reuses only
+# the exact immutable image@sha256 reference and pulls that reference if absent.
+# A full local Docker image ID (sha256:<64 lowercase hex>) is also accepted for
+# offline delivery; it is inspected for exact equality and is never pulled.
+# VPM first installation also requires the Vast.ai exporter to be running with
+# at least one connected account verified through its authenticated management API.
+vast_price_manager:
+  image: null
+  master_key_file: /etc/dc-overview/secrets/vpm-master.key
+  expected_account_id: null
+  writes_enabled: false  # Host capability; VPM's persisted Pause remains the operator switch
+
+# To change the host capability, pass exactly one or more settings:
+# dc-overview vpm configure --writes-enabled [--image IMAGE@sha256:...]
+# dc-overview vpm configure --writes-disabled [--image IMAGE@sha256:...]
+# dc-overview vpm configure --expected-account-id ACCOUNT_ID [--image IMAGE@sha256:...]
+# Enabling requires a managed VPM with persistent automation already paused.
+# With no --image, the capability transition recreates the exact current managed image.
+
+# For a reviewed database-schema migration:
+# dc-overview vpm update --image IMAGE@sha256:... --schema-migration-forward-hold
+# The flag keeps preflight checks before quiescing. If a started candidate fails,
+# its compose and units remain for forward repair and VPM work stays stopped;
+# the prior image is never restarted. Updates without it retain health rollback.
 
 # Vast.ai API Keys (only needed if vast_exporter is true)
 # Supports multiple accounts with labels

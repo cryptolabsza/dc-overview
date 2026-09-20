@@ -365,6 +365,10 @@
                         <input type="text" name="server_ip" placeholder="192.168.1.101" required>
                     </div>
                     <div class="form-group">
+                        <label>BMC IP <small style="color:var(--text-secondary)">(optional, explicit)</small></label>
+                        <input type="text" name="bmc_ip" placeholder="192.168.1.100">
+                    </div>
+                    <div class="form-group">
                         <label>SSH User</label>
                         <input type="text" name="ssh_user" value="root">
                     </div>
@@ -410,6 +414,7 @@
                     <tr>
                         <th>Name</th>
                         <th>IP</th>
+                        <th>IPMI inventory</th>
                         <th>SSH</th>
                         <th>Exporters</th>
                         <th>Actions</th>
@@ -417,9 +422,13 @@
                 </thead>
                 <tbody id="serversTable">
                     {% for server in servers %}
-                    <tr data-id="{{ server.id }}">
+                    <tr data-id="{{ server.id }}" data-bmc-ip="{{ server.bmc_ip or '' }}">
                         <td><strong>{{ server.name }}</strong></td>
                         <td>{{ server.server_ip }}</td>
+                        <td id="inventory-{{ server.id }}">
+                            {% if server.bmc_ip %}BMC {{ server.bmc_ip }}<br><small>Checking sync state…</small>{% else %}
+                            <small style="color: var(--text-secondary);">Not configured</small>{% endif %}
+                        </td>
                         <td>
                             {{ server.ssh_user }}@:{{ server.ssh_port }}
                             {% if server.ssh_key %}
@@ -438,13 +447,21 @@
                         </td>
                         <td>
                             <button class="btn btn-secondary" onclick="openServerDetail({{ server.id }}, '{{ server.name }}')">Manage</button>
+                            <button class="btn btn-secondary" data-write-action onclick="editInventoryServer({{ server.id }}, '{{ server.name }}', '{{ server.server_ip }}')">Edit</button>
+                            <button class="btn btn-secondary" data-write-action onclick="mapInventoryBmc({{ server.id }}, '{{ server.bmc_ip or '' }}')">Map BMC</button>
                             <button class="btn btn-secondary" onclick="checkServer(this, {{ server.id }})">Check</button>
-                            <button class="btn btn-danger" onclick="deleteServer({{ server.id }})">Delete</button>
+                            <button class="btn btn-danger" data-write-action onclick="deleteServer({{ server.id }})">Delete</button>
                         </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
+        </div>
+
+        <div class="card" id="pendingInventorySection" hidden>
+            <h2>Pending inventory sync</h2>
+            <p style="color: var(--text-secondary);">Retry durable inventory updates that still need delivery.</p>
+            <div id="pendingInventoryEntries"></div>
         </div>
         
         <p class="version">Server Manager v{{ version }}</p>
@@ -636,12 +653,9 @@
                 addServerCard.style.display = 'none';
             }
             
-            // Hide delete buttons for readonly users
-            if (!userPermissions.can_write) {
-                document.querySelectorAll('.btn-danger').forEach(btn => {
-                    if (btn.textContent.includes('Delete')) btn.style.display = 'none';
-                });
-            }
+            document.querySelectorAll('[data-write-action]').forEach(button => {
+                button.hidden = !userPermissions.can_write;
+            });
             
             // Hide Settings link for non-admin users
             if (!userPermissions.can_admin) {
@@ -674,46 +688,53 @@
     // Run permission check on load, then auto-check all servers
     document.addEventListener('DOMContentLoaded', async () => {
         await checkUserPermissions();
-        // Sync WD status from watchdog API first, then check all servers
-        await syncWatchdogStatus();
-        await checkAllServersQuietly();
+        // Inventory state is independent of SSH checks, which can stall on an
+        // offline host. Each background loop is individually overlap-safe.
+        void syncWatchdogStatus();
+        void checkAllServersQuietly();
+        void refreshInventoryStates();
         // Set up periodic refresh every 30 seconds
-        setInterval(async () => {
-            await syncWatchdogStatus();
-            await checkAllServersQuietly();
+        setInterval(() => {
+            void syncWatchdogStatus();
+            void checkAllServersQuietly();
+            void refreshInventoryStates();
         }, 30000);
     });
+
+    let serverCheckInFlight = false;
     
     async function checkAllServersQuietly() {
         // Check all servers and update table without showing alerts
+        if (serverCheckInFlight) return;
+        serverCheckInFlight = true;
         const indicator = document.getElementById('checkingIndicator');
         const rows = document.querySelectorAll('#serversTable tr[data-id]');
         
         if (indicator && rows.length > 0) indicator.style.display = 'inline';
         
-        for (const row of rows) {
-            const id = row.dataset.id;
-            try {
-                const response = await fetch(`${basePath}/api/servers/${id}/check`);
-                if (response.ok) {
-                    const result = await response.json();
-                    updateServerRow(row, result);
+        try {
+            for (const row of rows) {
+                const id = row.dataset.id;
+                try {
+                    const response = await fetch(`${basePath}/api/servers/${id}/check`);
+                    if (response.ok) {
+                        const result = await response.json();
+                        updateServerRow(row, result);
+                    }
+                } catch (e) {
+                    console.error(`Failed to check server ${id}:`, e);
                 }
-            } catch (e) {
-                console.error(`Failed to check server ${id}:`, e);
             }
+        } finally {
+            serverCheckInFlight = false;
+            if (indicator) indicator.style.display = 'none';
         }
-        
-        if (indicator) indicator.style.display = 'none';
     }
     
     function updateServerRow(row, result) {
-        // Update all columns in the table row
-        const cells = row.querySelectorAll('td');
-        if (cells.length < 5) return;  // Expect: Name, IP, SSH, Exporters, Actions
-        
-        // Exporter status column (index 3)
-        const exporterCell = cells[3];
+        // The exporter cell has a stable semantic selector. Do not use column
+        // indexes: inventory columns can be added without mutating actions.
+        const exporterCell = row.querySelector('.exporter-status');
         if (exporterCell) {
             let html = '';
             html += `<span class="status-indicator ${result.node_exporter?.running ? 'status-enabled' : 'status-not-installed'}"></span>node`;
@@ -727,14 +748,6 @@
             if (result.watchdog_agent?.version) html += ` ${result.watchdog_agent.version}`;
             exporterCell.innerHTML = html;
         }
-        
-        // Last Seen column (index 5)
-        const lastSeenCell = cells[5];
-        if (lastSeenCell && result.last_seen) {
-            lastSeenCell.textContent = result.last_seen;
-        } else if (lastSeenCell && result.status === 'offline') {
-            lastSeenCell.textContent = '\u2014';  // em dash
-        }
     }
     
     document.getElementById('addServerForm').onsubmit = async (e) => {
@@ -743,6 +756,7 @@
         const data = {
             name: form.name.value,
             server_ip: form.server_ip.value,
+            bmc_ip: form.bmc_ip.value || null,
             ssh_user: form.ssh_user.value,
             ssh_port: parseInt(form.ssh_port.value) || 22
         };
@@ -770,6 +784,132 @@
             alert(result.error || 'Failed to add server');
         }
     };
+
+    async function mapInventoryBmc(id, currentBmc) {
+        if (!userPermissions.can_write) return;
+        const bmcIp = prompt('Enter the explicit BMC IP for this server. It cannot be derived from the OS IP.', currentBmc || '');
+        if (bmcIp === null || !bmcIp.trim()) return;
+        const response = await fetch(`${basePath}/api/servers/${id}/inventory`, {
+            method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({bmc_ip: bmcIp.trim()})
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) return alert(result.error || 'Could not map this BMC');
+        await refreshInventoryStates();
+    }
+
+    async function editInventoryServer(id, currentName, currentIp) {
+        if (!userPermissions.can_write) return;
+        const name = prompt('Server name', currentName);
+        if (name === null) return;
+        const serverIp = prompt('OS IP address', currentIp);
+        if (serverIp === null) return;
+        const response = await fetch(`${basePath}/api/servers/${id}`, {
+            method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name, server_ip: serverIp})
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) return alert(result.error || 'Could not update this server');
+        location.reload();
+    }
+
+    async function retryInventoryOutbox(retryId) {
+        if (!userPermissions.can_write) return;
+        const response = await fetch(`${basePath}/api/inventory/outbox/${retryId}/retry`, {method: 'POST'});
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) return alert(result.error || 'Retry failed');
+        await refreshInventoryStates();
+    }
+
+    let inventoryRefreshPromise = null;
+
+    function renderInventoryState(cell, server) {
+        const inventory = server.inventory || {};
+        cell.replaceChildren();
+        if (!server.bmc_ip) {
+            const status = document.createElement('small');
+            status.style.color = 'var(--text-secondary)';
+            status.textContent = 'Not configured';
+            cell.appendChild(status);
+            return;
+        }
+
+        cell.append(`BMC ${server.bmc_ip}`, document.createElement('br'));
+        const status = document.createElement('small');
+        if (inventory.state === 'pending') {
+            status.textContent = `Pending revision ${inventory.revision}`;
+            if (inventory.error) status.title = String(inventory.error);
+            cell.append(status, document.createTextNode(' '));
+            if (userPermissions.can_write && Number.isInteger(inventory.retry_id)) {
+                const retry = document.createElement('button');
+                retry.className = 'btn btn-secondary';
+                retry.dataset.inventoryRetry = String(inventory.retry_id);
+                retry.textContent = 'Retry';
+                retry.addEventListener('click', () => retryInventoryOutbox(inventory.retry_id));
+                cell.appendChild(retry);
+            }
+            return;
+        }
+
+        status.style.color = 'var(--accent-green)';
+        status.textContent = `Synchronized revision ${inventory.revision}`;
+        cell.appendChild(status);
+    }
+
+    function renderPendingInventoryOutbox(entries) {
+        const section = document.getElementById('pendingInventorySection');
+        const container = document.getElementById('pendingInventoryEntries');
+        if (!section || !container) return;
+        container.replaceChildren();
+        section.hidden = entries.length === 0;
+        for (const entry of entries) {
+            const item = document.createElement('div');
+            item.className = 'exporter-card';
+            const name = document.createElement('strong');
+            name.textContent = entry.name || 'Unknown server';
+            const details = document.createElement('div');
+            const operation = entry.operation === 'retire' ? 'Retire' : 'Synchronize';
+            details.textContent = `BMC ${entry.bmc_ip || 'not configured'}\n${operation} · attempt ${entry.attempts || 0}`;
+            item.append(name, details);
+            if (entry.error) {
+                const error = document.createElement('small');
+                error.style.color = 'var(--accent-red)';
+                error.textContent = String(entry.error);
+                item.appendChild(error);
+            }
+            if (userPermissions.can_write && Number.isInteger(entry.id)) {
+                const retry = document.createElement('button');
+                retry.className = 'btn btn-secondary';
+                retry.dataset.inventoryRetry = String(entry.id);
+                retry.textContent = 'Retry';
+                retry.addEventListener('click', () => retryInventoryOutbox(entry.id));
+                item.appendChild(retry);
+            }
+            container.appendChild(item);
+        }
+    }
+
+    function refreshInventoryStates() {
+        if (inventoryRefreshPromise) return inventoryRefreshPromise;
+        inventoryRefreshPromise = (async () => {
+            const [serversResult, outboxResult] = await Promise.allSettled([
+                fetch(`${basePath}/api/servers`),
+                fetch(`${basePath}/api/inventory/outbox`),
+            ]);
+            if (serversResult.status === 'fulfilled' && serversResult.value.ok) {
+                for (const server of await serversResult.value.json()) {
+                    const cell = document.getElementById(`inventory-${server.id}`);
+                    if (cell) renderInventoryState(cell, server);
+                }
+            }
+            if (outboxResult.status === 'fulfilled' && outboxResult.value.ok) {
+                renderPendingInventoryOutbox(await outboxResult.value.json());
+            }
+        })().catch(error => {
+            console.error('Failed to refresh inventory state:', error);
+        }).finally(() => {
+            inventoryRefreshPromise = null;
+        });
+        return inventoryRefreshPromise;
+    }
     
     function switchTab(tabName) {
         // Update tab buttons

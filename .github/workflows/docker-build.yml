@@ -169,7 +169,7 @@ jobs:
           elif [[ "${{ github.ref }}" == refs/heads/main ]]; then
             TAGS="$REPO:main,$REPO:sha-$SHA_SHORT"
           elif [[ "${{ github.ref }}" == refs/heads/develop ]] || [[ "${{ github.ref }}" == refs/heads/dev ]]; then
-            TAGS="$REPO:dev,$REPO:latest,$REPO:sha-$SHA_SHORT"
+            TAGS="$REPO:dev,$REPO:sha-$SHA_SHORT"
           else
             TAGS="$REPO:sha-$SHA_SHORT"
           fi
@@ -251,7 +251,7 @@ jobs:
           elif [[ "${{ github.ref }}" == refs/heads/main ]]; then
             TAGS="$REPO:main,$REPO:sha-$SHA_SHORT"
           elif [[ "${{ github.ref }}" == refs/heads/develop ]] || [[ "${{ github.ref }}" == refs/heads/dev ]]; then
-            TAGS="$REPO:dev,$REPO:latest,$REPO:sha-$SHA_SHORT"
+            TAGS="$REPO:dev,$REPO:sha-$SHA_SHORT"
           else
             TAGS="$REPO:sha-$SHA_SHORT"
           fi

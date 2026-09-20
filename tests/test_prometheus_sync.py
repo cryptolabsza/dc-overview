@@ -118,3 +118,21 @@ class TestPrometheusYmlSync:
             assert "prometheus" in job_names, "Infrastructure jobs must be preserved"
 
             yml_path.unlink()
+
+    def test_legacy_writer_preserves_http_discovery_job(self, app):
+        """Writable legacy configs cannot erase the live inventory source."""
+        with tempfile.NamedTemporaryFile(suffix='.yml', delete=False, mode='w') as f:
+            yml_path = Path(f.name)
+        discovery = {
+            'job_name': 'dc-managed',
+            'http_sd_configs': [{'url': 'http://dc-overview:5001/api/prometheus/discovery',
+                                 'refresh_interval': '30s'}],
+        }
+        yml_path.write_text(yaml.dump({'scrape_configs': [discovery]}))
+        with patch('dc_overview.web_prometheus.Path') as mock_path:
+            mock_path.side_effect = lambda value: yml_path if 'prometheus.yml' in str(value) else Path(value)
+            with patch('dc_overview.web_prometheus.reload_prometheus'):
+                update_prometheus_yml_targets([])
+        result = yaml.safe_load(yml_path.read_text())['scrape_configs']
+        assert result == [discovery]
+        yml_path.unlink()

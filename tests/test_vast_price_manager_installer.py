@@ -1,0 +1,1331 @@
+import contextlib
+import io
+import json
+import os
+import sqlite3
+from pathlib import Path
+import subprocess
+import stat
+import multiprocessing
+import time
+from contextlib import nullcontext
+from types import SimpleNamespace
+
+import pytest
+import yaml
+from click.testing import CliRunner
+
+import dc_overview.cli as cli_module
+from dc_overview.cli import load_config_from_file, main
+from dc_overview.fleet_config import FleetConfig
+from dc_overview.vpm_service import (
+    VPMServiceSpec,
+    VPMServiceManager,
+    _VPM_STOPPED_AUTOMATION_PAUSED_PROBE,
+)
+
+
+PIN = "ghcr.io/cryptolabsza/vast-price-manager@sha256:" + "a" * 64
+
+
+def _concurrent_configure_worker(config_dir: str, expected_account_id: str, hold_seconds: float, fail: bool):
+    """Model the CLI configure transaction in a separate process."""
+    path = Path(config_dir)
+    manager = VPMServiceManager(path)
+    with manager.operation_lock():
+        config = FleetConfig.load(path)
+        snapshot = config.snapshot_public_config()
+        config.vast_price_manager.expected_account_id = expected_account_id
+        config.persist_vast_price_manager_settings()
+        time.sleep(hold_seconds)
+        if fail:
+            config.restore_public_config(snapshot)
+
+
+def test_vpm_component_defaults_off_and_round_trips_both_config_loaders(tmp_path: Path):
+    config = FleetConfig(config_dir=tmp_path)
+    assert config.components.vast_price_manager is False
+    config.components.vast_price_manager = True
+    config.vast_price_manager.image = PIN
+    config.vast_price_manager.master_key_file = "/etc/dc-overview/secrets/vpm-master.key"
+    config.save()
+
+    persisted = yaml.safe_load((tmp_path / "fleet-config.yaml").read_text())
+    assert persisted["components"]["vast_price_manager"] is True
+    assert "master_key_file" in persisted["vast_price_manager"]
+    assert "VAST" not in (tmp_path / "fleet-config.yaml").read_text()
+    assert FleetConfig.load(tmp_path).vast_price_manager.image == PIN
+
+    unattended = tmp_path / "unattended.yaml"
+    unattended.write_text((tmp_path / "fleet-config.yaml").read_text())
+    loaded = load_config_from_file(str(unattended))
+    assert loaded.components.vast_price_manager is True
+    assert loaded.vast_price_manager.image == PIN
+
+
+def test_vpm_writes_capability_defaults_off_round_trips_and_rejects_string_booleans(tmp_path: Path):
+    config = FleetConfig(config_dir=tmp_path)
+    assert config.vast_price_manager.writes_enabled is False
+    config.vast_price_manager.writes_enabled = True
+    config.save()
+
+    persisted = yaml.safe_load((tmp_path / "fleet-config.yaml").read_text())
+    assert persisted["vast_price_manager"]["writes_enabled"] is True
+    assert FleetConfig.load(tmp_path).vast_price_manager.writes_enabled is True
+
+    invalid_dir = tmp_path / "invalid-dir"
+    invalid_dir.mkdir()
+    invalid = invalid_dir / "fleet-config.yaml"
+    invalid.write_text("vast_price_manager:\n  writes_enabled: 'false'\n")
+    with pytest.raises(ValueError, match="writes_enabled must be a boolean"):
+        FleetConfig.load(invalid_dir)
+    with pytest.raises(ValueError, match="writes_enabled must be a boolean"):
+        load_config_from_file(str(invalid))
+
+
+def test_vpm_public_settings_update_does_not_rewrite_secret_file(tmp_path: Path):
+    config = FleetConfig(config_dir=tmp_path)
+    config.save()
+    secret_path = tmp_path / ".secrets.yaml"
+    original_secrets = secret_path.read_text()
+    config.vast_price_manager.expected_account_id = "account-123"
+    config.persist_vast_price_manager_settings()
+    assert secret_path.read_text() == original_secrets
+    assert yaml.safe_load((tmp_path / "fleet-config.yaml").read_text())["vast_price_manager"]["expected_account_id"] == "account-123"
+
+
+def test_vpm_renderer_requires_immutable_image_and_exact_dns_host():
+    with pytest.raises(ValueError, match="immutable"):
+        VPMServiceSpec(image="ghcr.io/cryptolabsza/vast-price-manager:latest", allowed_host="dc.example.com")
+    with pytest.raises(ValueError, match="exact DNS"):
+        VPMServiceSpec(image=PIN, allowed_host="*.example.com")
+    with pytest.raises(ValueError, match="account ID"):
+        VPMServiceSpec(image=PIN, allowed_host="dc.example.com", expected_account_id="bad id")
+    with pytest.raises(ValueError, match="writes_enabled"):
+        VPMServiceSpec(image=PIN, allowed_host="dc.example.com", writes_enabled="false")
+
+
+def test_vpm_master_key_rejects_world_readable_mode(monkeypatch, tmp_path: Path):
+    manager = VPMServiceManager(tmp_path)
+    monkeypatch.setattr(Path, "is_file", lambda _self: True)
+    monkeypatch.setattr(
+        Path,
+        "stat",
+        lambda _self: SimpleNamespace(st_mode=stat.S_IFREG | 0o644, st_uid=999, st_gid=999),
+    )
+    with pytest.raises(ValueError, match="only by UID"):
+        manager._validate_master_key(VPMServiceSpec(image=PIN, allowed_host="dc.example.com"))
+
+
+def test_vpm_persistent_pause_probe_fails_closed_without_a_managed_container(tmp_path: Path):
+    calls = []
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        raise AssertionError("no Docker exec is permitted without managed-container evidence")
+
+    manager = VPMServiceManager(tmp_path, runner=runner)
+    manager._has_existing_managed_vpm = lambda: False
+
+    assert manager.persistent_automation_paused() is False
+    assert calls == []
+
+
+def test_vpm_persistent_pause_probe_accepts_only_the_read_only_true_result(tmp_path: Path):
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = '{"writes_enabled":false,"automation_paused":true}'
+        stderr = ""
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        return Result()
+
+    manager = VPMServiceManager(tmp_path, runner=runner)
+    manager._has_existing_managed_vpm = lambda: True
+
+    assert manager.managed_runtime_state() == {
+        "writes_enabled": False,
+        "automation_paused": True,
+    }
+    assert calls[0][:4] == ["docker", "exec", "vast-price-manager", "python3"]
+    probe = calls[0][-1]
+    assert "Settings.from_env()" in probe
+    assert "settings.database_path" in probe
+    assert "SELECT automation_paused FROM settings" in probe
+    assert "UPDATE " not in probe
+
+
+def test_stopped_pause_probe_reads_a_real_wal_snapshot_without_writing_the_source(
+    monkeypatch, tmp_path: Path,
+):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    source = source_dir / "state.sqlite3"
+    connection = sqlite3.connect(source)
+    try:
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA wal_autocheckpoint=0")
+        connection.execute(
+            "CREATE TABLE settings (singleton INTEGER PRIMARY KEY, automation_paused INTEGER)"
+        )
+        connection.execute("INSERT INTO settings VALUES (1, 0)")
+        connection.commit()
+        connection.execute("UPDATE settings SET automation_paused=1 WHERE singleton=1")
+        connection.commit()
+        assert Path(f"{source}-wal").exists()
+
+        source_sizes = {
+            suffix: Path(f"{source}{suffix}").stat().st_size
+            for suffix in ("", "-wal", "-shm")
+            if Path(f"{source}{suffix}").exists()
+        }
+        source.chmod(0o444)
+        source_dir.chmod(0o555)
+        snapshot_dir = tmp_path / "snapshot"
+        snapshot_dir.mkdir()
+        monkeypatch.setenv("VPM_FINAL_PAUSE_DB", str(source))
+        monkeypatch.setenv("VPM_FINAL_PAUSE_SNAPSHOT_DIR", str(snapshot_dir))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            exec(_VPM_STOPPED_AUTOMATION_PAUSED_PROBE, {"__name__": "__main__"})
+
+        assert json.loads(output.getvalue()) == {"automation_paused": True}
+        assert {
+            suffix: Path(f"{source}{suffix}").stat().st_size
+            for suffix in source_sizes
+        } == source_sizes
+    finally:
+        source_dir.chmod(0o755)
+        source.chmod(0o644)
+        connection.close()
+
+
+def test_vpm_current_managed_image_requires_canonical_container_and_immutable_reference(tmp_path: Path):
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = PIN + "\n"
+        stderr = ""
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        return Result()
+
+    manager = VPMServiceManager(tmp_path, runner=runner)
+    manager._has_existing_managed_vpm = lambda: True
+
+    assert manager.current_managed_image() == PIN
+    assert calls == [["docker", "inspect", "-f", "{{.Config.Image}}", "vast-price-manager"]]
+
+
+def test_vpm_renderer_uses_container_contract_without_public_port_or_secret_value():
+    rendered = VPMServiceManager.render(
+        VPMServiceSpec(
+            image=PIN,
+            allowed_host="dc.example.com",
+            master_key_file="/etc/dc-overview/secrets/vpm-master.key",
+        )
+    )
+    compose = rendered.compose
+    assert "ports:" not in compose
+    assert "cryptolabs:" in compose
+    assert "external: true" in compose
+    assert "VPM_DEPLOYMENT_MODE=container_proxy" in compose
+    assert "VPM_BASE_PATH=/vast-pricing" in compose
+    assert "VPM_ALLOWED_HOSTS=dc.example.com" in compose
+    assert "VPM_DATA_DIR=/data" in compose
+    assert "VPM_CREDENTIAL_MASTER_KEY_FILE=/run/secrets/vpm-master.key" in compose
+    assert "VPM_AUTH_MODE=fleet" in compose
+    assert "VPM_FLEET_AUTH_URL=http://cryptolabs-proxy:8081" in compose
+    assert "VPM_WRITES_ENABLED=false" in compose
+    assert "VPM_SESSION_INSECURE" not in compose
+    assert "VPM_EXPECTED_ACCOUNT_ID" not in compose
+    assert "/etc/dc-overview/secrets/vpm-master.key:/run/secrets/vpm-master.key:ro" in compose
+    assert "user: \"999:999\"" in compose
+    assert "vpm sync" in rendered.units["vast-price-manager-sync.service"]
+    assert "vpm cycle --all" in rendered.units["vast-price-manager-cycle.service"]
+    assert "vpm reconcile-horizons" in rendered.units["vast-price-manager-horizon.service"]
+    assert "RandomizedDelaySec=30s" in rendered.units["vast-price-manager-sync.timer"]
+
+    configured = VPMServiceManager.render(
+        VPMServiceSpec(
+            image=PIN,
+            allowed_host="dc.example.com",
+            expected_account_id="account-123",
+            writes_enabled=True,
+        )
+    ).compose
+    assert "VPM_EXPECTED_ACCOUNT_ID=account-123" in configured
+    assert "VPM_WRITES_ENABLED=true" in configured
+
+
+def test_rendered_compose_is_accepted_by_docker_compose(tmp_path: Path):
+    compose_file = tmp_path / "docker-compose.yml"
+    compose_file.write_text(
+        VPMServiceManager.render(
+            VPMServiceSpec(image=PIN, allowed_host="dc.example.com")
+        ).compose
+    )
+    result = subprocess.run(
+        ["docker-compose", "-f", str(compose_file), "config"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_install_installs_units_quiesces_old_work_and_waits_for_health(tmp_path: Path):
+    calls = []
+    health_states = iter(["starting\n", "healthy\n"])
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        if command[:2] == ["systemctl", "is-enabled"]:
+            return Result(1, "disabled\n")
+        if command[:2] == ["systemctl", "is-active"]:
+            return Result(3, "inactive\n")
+        if command[:2] == ["docker", "inspect"]:
+            return Result(stdout=next(health_states))
+        return Result()
+
+    manager = VPMServiceManager(
+        tmp_path,
+        unit_dir=tmp_path / "systemd-system",
+        runner=runner,
+        sleeper=lambda _seconds: None,
+    )
+    manager._validate_master_key = lambda _spec: None
+    manager.vast_exporter_prerequisite = lambda: {"configured": True, "reason": "ready", "connected_account_count": 1}
+    manager.install(VPMServiceSpec(image=PIN, allowed_host="dc.example.com"))
+
+    assert (tmp_path / "systemd-system" / "vast-price-manager-sync.timer").exists()
+    assert ["systemctl", "disable", "--now", *manager.timer_names] in calls
+    assert ["systemctl", "stop", "vast-price-manager-sync.service", "vast-price-manager-cycle.service", "vast-price-manager-horizon.service"] in calls
+    assert sum(command[:2] == ["docker", "inspect"] for command in calls) == 2
+    assert ["systemctl", "enable", "--now", *manager.timer_names] in calls
+
+
+def test_install_reuses_the_exact_locally_loaded_digest_without_pulling(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command == ["docker", "image", "inspect", PIN]:
+            return Result()
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        if command[:2] == ["systemctl", "is-enabled"]:
+            return Result(1)
+        if command[:2] == ["systemctl", "is-active"]:
+            return Result(3)
+        if command[:2] == ["docker", "inspect"]:
+            return Result(stdout="healthy\n")
+        return Result()
+
+    manager = VPMServiceManager(
+        tmp_path,
+        unit_dir=tmp_path / "systemd-system",
+        runner=runner,
+        sleeper=lambda _seconds: None,
+    )
+    manager._validate_master_key = lambda _spec: None
+    manager.vast_exporter_prerequisite = lambda: {"configured": True, "reason": "ready", "connected_account_count": 1}
+
+    manager.install(VPMServiceSpec(image=PIN, allowed_host="dc.example.com"))
+
+    assert ["docker", "image", "inspect", PIN] in calls
+    assert ["docker", "pull", PIN] not in calls
+
+
+def test_install_pulls_an_absent_exact_digest_before_quiescing(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command == ["docker", "image", "inspect", PIN]:
+            return Result(1, stderr="No such image")
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        if command[:2] == ["systemctl", "is-enabled"]:
+            return Result(1)
+        if command[:2] == ["systemctl", "is-active"]:
+            return Result(3)
+        if command[:2] == ["docker", "inspect"]:
+            return Result(stdout="healthy\n")
+        return Result()
+
+    manager = VPMServiceManager(
+        tmp_path,
+        unit_dir=tmp_path / "systemd-system",
+        runner=runner,
+        sleeper=lambda _seconds: None,
+    )
+    manager._validate_master_key = lambda _spec: None
+    manager.vast_exporter_prerequisite = lambda: {"configured": True, "reason": "ready", "connected_account_count": 1}
+
+    manager.install(VPMServiceSpec(image=PIN, allowed_host="dc.example.com"))
+
+    assert calls.index(["docker", "image", "inspect", PIN]) < calls.index(["docker", "pull", PIN])
+    assert calls.index(["docker", "pull", PIN]) < calls.index(["systemctl", "disable", "--now", *manager.timer_names])
+
+
+def test_failed_pull_keeps_the_existing_vpm_project_running(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command == ["docker", "image", "inspect", PIN]:
+            return Result(1, stderr="No such image")
+        if command == ["docker", "pull", PIN]:
+            return Result(1, stderr="private registry denied")
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        return Result()
+
+    manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
+    manager.root.mkdir(parents=True)
+    manager.compose_file.write_text("previous-compose\n")
+    manager._validate_master_key = lambda _spec: None
+    manager._has_existing_managed_vpm = lambda: True
+
+    with pytest.raises(RuntimeError, match="private registry denied"):
+        manager.install(VPMServiceSpec(image=PIN, allowed_host="dc.example.com"))
+
+    assert manager.compose_file.read_text() == "previous-compose\n"
+    assert ["systemctl", "disable", "--now", *manager.timer_names] not in calls
+    assert ["systemctl", "stop", *manager.service_names] not in calls
+
+
+def test_logs_returns_captured_project_output(tmp_path: Path):
+    class Result:
+        returncode = 0
+        stdout = "vpm log line\n"
+        stderr = ""
+
+    manager = VPMServiceManager(tmp_path, runner=lambda *_args, **_kwargs: Result())
+    assert manager.logs() == "vpm log line\n"
+
+
+def test_cli_logs_prints_captured_project_output(monkeypatch, tmp_path: Path):
+    class FakeManager:
+        def __init__(self, _config_dir):
+            pass
+
+        def operation_lock(self):
+            return nullcontext()
+
+        def logs(self, _lines):
+            return "vpm log line\n"
+
+    monkeypatch.setattr(cli_module, "VPMServiceManager", FakeManager)
+    result = CliRunner().invoke(main, ["vpm", "--config-dir", str(tmp_path), "logs"])
+    assert result.exit_code == 0
+    assert result.output == "vpm log line\n"
+
+
+def test_install_route_failure_stops_new_vpm_project(monkeypatch, tmp_path: Path):
+    class FakeManager:
+        calls = []
+
+        def __init__(self, _config_dir):
+            pass
+
+        def operation_lock(self):
+            return nullcontext()
+
+        def install(self, _spec, promote_route=None):
+            self.calls.append("install")
+            try:
+                if promote_route:
+                    promote_route()
+            except RuntimeError:
+                self.stop()
+                raise
+
+        def enable_proxy_route(self):
+            self.calls.append("enable-route")
+            raise RuntimeError("proxy registration failed")
+
+        def stop(self):
+            self.calls.append("stop")
+
+    config = FleetConfig(config_dir=tmp_path)
+    config.ssl.domain = "dc.example.com"
+    config.save()
+    monkeypatch.setattr(cli_module, "VPMServiceManager", FakeManager)
+    result = CliRunner().invoke(main, ["vpm", "--config-dir", str(tmp_path), "install", "--image", PIN])
+    assert result.exit_code != 0
+    assert FakeManager.calls == ["install", "enable-route", "stop"]
+
+
+def test_vpm_install_reports_existing_fleet_login_for_encrypted_onboarding(monkeypatch, tmp_path: Path):
+    class FakeManager:
+        def __init__(self, _config_dir):
+            pass
+
+        def operation_lock(self):
+            return nullcontext()
+
+        def install(self, _spec, promote_route=None):
+            if promote_route:
+                promote_route()
+
+        def enable_proxy_route(self):
+            pass
+
+    config = FleetConfig(config_dir=tmp_path)
+    config.ssl.domain = "dc.example.com"
+    config.vast_price_manager.expected_account_id = "account-123"
+    config.save()
+    monkeypatch.setattr(cli_module, "VPMServiceManager", FakeManager)
+
+    result = CliRunner().invoke(main, ["vpm", "--config-dir", str(tmp_path), "install", "--image", PIN])
+
+    assert result.exit_code == 0
+    assert "existing Fleet login" in result.output
+    assert "same Fleet password" in result.output
+
+
+def test_configure_rolls_back_public_settings_when_reinstall_fails(monkeypatch, tmp_path: Path):
+    class FakeManager:
+        def __init__(self, _config_dir):
+            pass
+
+        def operation_lock(self):
+            return nullcontext()
+
+        def install(self, _spec):
+            raise RuntimeError("candidate unhealthy")
+
+    config = FleetConfig(config_dir=tmp_path)
+    config.ssl.domain = "dc.example.com"
+    config.vast_price_manager.expected_account_id = "old-account"
+    config.save()
+    monkeypatch.setattr(cli_module, "VPMServiceManager", FakeManager)
+    result = CliRunner().invoke(
+        main,
+        ["vpm", "--config-dir", str(tmp_path), "configure", "--expected-account-id", "new-account", "--image", PIN],
+    )
+    assert result.exit_code != 0
+    assert FleetConfig.load(tmp_path).vast_price_manager.expected_account_id == "old-account"
+
+
+def test_configure_rejects_an_empty_invocation(monkeypatch, tmp_path: Path):
+    config = FleetConfig(config_dir=tmp_path)
+    config.ssl.domain = "dc.example.com"
+    config.save()
+
+    result = CliRunner().invoke(main, ["vpm", "--config-dir", str(tmp_path), "configure"])
+
+    assert result.exit_code != 0
+    assert "at least one setting" in result.output
+
+
+def test_configure_enabling_writes_requires_persisted_vpm_pause_before_mutation(monkeypatch, tmp_path: Path):
+    class FakeManager:
+        install_called = False
+
+        def __init__(self, _config_dir):
+            pass
+
+        def operation_lock(self):
+            return nullcontext()
+
+        def current_managed_image(self):
+            return PIN
+
+        def managed_runtime_state(self):
+            return {"writes_enabled": False, "automation_paused": False}
+
+        def install(self, _spec):
+            type(self).install_called = True
+
+    config = FleetConfig(config_dir=tmp_path)
+    config.ssl.domain = "dc.example.com"
+    config.vast_price_manager.image = PIN
+    config.save()
+    monkeypatch.setattr(cli_module, "VPMServiceManager", FakeManager)
+
+    result = CliRunner().invoke(
+        main, ["vpm", "--config-dir", str(tmp_path), "configure", "--writes-enabled"]
+    )
+
+    assert result.exit_code != 0
+    assert "pause automation" in result.output
+    assert FleetConfig.load(tmp_path).vast_price_manager.writes_enabled is False
+    assert FakeManager.install_called is False
+
+
+def test_configure_enabling_writes_recreates_current_image_only_after_positive_pause(monkeypatch, tmp_path: Path):
+    class FakeManager:
+        installed = None
+
+        def __init__(self, _config_dir):
+            pass
+
+        def operation_lock(self):
+            return nullcontext()
+
+        def current_managed_image(self):
+            return PIN
+
+        def managed_runtime_state(self):
+            return {"writes_enabled": False, "automation_paused": True}
+
+        def install(self, spec):
+            type(self).installed = spec
+
+    config = FleetConfig(config_dir=tmp_path)
+    config.ssl.domain = "dc.example.com"
+    config.vast_price_manager.image = PIN
+    config.save()
+    monkeypatch.setattr(cli_module, "VPMServiceManager", FakeManager)
+
+    result = CliRunner().invoke(
+        main, ["vpm", "--config-dir", str(tmp_path), "configure", "--writes-enabled"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert FleetConfig.load(tmp_path).vast_price_manager.writes_enabled is True
+    assert FakeManager.installed.image == PIN
+    assert FakeManager.installed.writes_enabled is True
+
+
+def test_configure_rolls_back_writes_capability_when_recreate_fails(monkeypatch, tmp_path: Path):
+    class FakeManager:
+        def __init__(self, _config_dir):
+            pass
+
+        def operation_lock(self):
+            return nullcontext()
+
+        def current_managed_image(self):
+            return PIN
+
+        def managed_runtime_state(self):
+            return {"writes_enabled": False, "automation_paused": True}
+
+        def install(self, _spec):
+            raise RuntimeError("candidate unhealthy")
+
+    config = FleetConfig(config_dir=tmp_path)
+    config.ssl.domain = "dc.example.com"
+    config.vast_price_manager.image = PIN
+    config.save()
+    monkeypatch.setattr(cli_module, "VPMServiceManager", FakeManager)
+
+    result = CliRunner().invoke(
+        main, ["vpm", "--config-dir", str(tmp_path), "configure", "--writes-enabled"]
+    )
+
+    assert result.exit_code != 0
+    assert FleetConfig.load(tmp_path).vast_price_manager.writes_enabled is False
+
+
+def test_configure_disabling_writes_recreates_the_current_managed_image(monkeypatch, tmp_path: Path):
+    class FakeManager:
+        installed = None
+
+        def __init__(self, _config_dir):
+            pass
+
+        def operation_lock(self):
+            return nullcontext()
+
+        def current_managed_image(self):
+            return PIN
+
+        def managed_runtime_state(self):
+            return {"writes_enabled": True, "automation_paused": False}
+
+        def install(self, spec):
+            type(self).installed = spec
+
+    config = FleetConfig(config_dir=tmp_path)
+    config.ssl.domain = "dc.example.com"
+    config.vast_price_manager.image = PIN
+    config.vast_price_manager.writes_enabled = True
+    config.save()
+    monkeypatch.setattr(cli_module, "VPMServiceManager", FakeManager)
+
+    result = CliRunner().invoke(
+        main, ["vpm", "--config-dir", str(tmp_path), "configure", "--writes-disabled"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert FakeManager.installed.writes_enabled is False
+    assert FleetConfig.load(tmp_path).vast_price_manager.writes_enabled is False
+
+
+def test_configure_capability_change_uses_managed_current_image_not_stale_yaml(monkeypatch, tmp_path: Path):
+    current = "ghcr.io/cryptolabsza/vast-price-manager@sha256:" + "b" * 64
+
+    class FakeManager:
+        installed = None
+
+        def __init__(self, _config_dir):
+            pass
+
+        def operation_lock(self):
+            return nullcontext()
+
+        def current_managed_image(self):
+            return current
+
+        def managed_runtime_state(self):
+            return {"writes_enabled": False, "automation_paused": True}
+
+        def install(self, spec):
+            type(self).installed = spec
+
+    config = FleetConfig(config_dir=tmp_path)
+    config.ssl.domain = "dc.example.com"
+    config.vast_price_manager.image = PIN
+    config.save()
+    monkeypatch.setattr(cli_module, "VPMServiceManager", FakeManager)
+
+    result = CliRunner().invoke(
+        main, ["vpm", "--config-dir", str(tmp_path), "configure", "--writes-enabled"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert FakeManager.installed.image == current
+    assert FleetConfig.load(tmp_path).vast_price_manager.image == current
+
+
+def test_configure_repeated_enabled_capability_does_not_recheck_or_change_pause(monkeypatch, tmp_path: Path):
+    class FakeManager:
+        def __init__(self, _config_dir):
+            pass
+
+        def operation_lock(self):
+            return nullcontext()
+
+        def managed_runtime_state(self):
+            return {"writes_enabled": True, "automation_paused": False}
+
+        def install(self, _spec):
+            pass
+
+    config = FleetConfig(config_dir=tmp_path)
+    config.ssl.domain = "dc.example.com"
+    config.vast_price_manager.image = PIN
+    config.vast_price_manager.writes_enabled = True
+    config.save()
+    monkeypatch.setattr(cli_module, "VPMServiceManager", FakeManager)
+
+    result = CliRunner().invoke(
+        main, ["vpm", "--config-dir", str(tmp_path), "configure", "--writes-enabled"]
+    )
+
+    assert result.exit_code == 0, result.output
+
+
+def test_configure_rejects_contradictory_write_capability_flags(monkeypatch, tmp_path: Path):
+    class FakeManager:
+        calls = []
+
+        def __init__(self, _config_dir):
+            pass
+
+        def operation_lock(self):
+            return nullcontext()
+
+        def managed_runtime_state(self):
+            type(self).calls.append("runtime")
+            return {"writes_enabled": False, "automation_paused": True}
+
+    config = FleetConfig(config_dir=tmp_path)
+    config.ssl.domain = "dc.example.com"
+    config.vast_price_manager.image = PIN
+    config.vast_price_manager.writes_enabled = True
+    config.save()
+    monkeypatch.setattr(cli_module, "VPMServiceManager", FakeManager)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "vpm", "--config-dir", str(tmp_path), "configure",
+            "--writes-enabled", "--writes-disabled",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "cannot be used together" in result.output
+    assert FakeManager.calls == []
+    assert FleetConfig.load(tmp_path).vast_price_manager.writes_enabled is True
+
+
+def test_configure_reconciles_actual_process_capability_when_yaml_already_enabled(monkeypatch, tmp_path: Path):
+    class FakeManager:
+        installed = None
+
+        def __init__(self, _config_dir):
+            pass
+
+        def operation_lock(self):
+            return nullcontext()
+
+        def managed_runtime_state(self):
+            return {"writes_enabled": False, "automation_paused": True}
+
+        def current_managed_image(self):
+            return PIN
+
+        def install(self, spec):
+            type(self).installed = spec
+
+    config = FleetConfig(config_dir=tmp_path)
+    config.ssl.domain = "dc.example.com"
+    config.vast_price_manager.image = PIN
+    config.vast_price_manager.writes_enabled = True
+    config.save()
+    monkeypatch.setattr(cli_module, "VPMServiceManager", FakeManager)
+
+    result = CliRunner().invoke(
+        main, ["vpm", "--config-dir", str(tmp_path), "configure", "--writes-enabled"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert FakeManager.installed.writes_enabled is True
+
+
+def test_manager_install_blocks_process_write_enable_without_positive_persistent_pause(tmp_path: Path):
+    manager = VPMServiceManager(tmp_path)
+    manager._validate_master_key = lambda _spec: None
+    manager._assert_no_native_conflict = lambda: None
+    manager._has_existing_managed_vpm = lambda: True
+    manager.managed_runtime_state = lambda: {"writes_enabled": False, "automation_paused": False}
+
+    with pytest.raises(RuntimeError, match="persistent automation pause"):
+        manager.install(VPMServiceSpec(image=PIN, allowed_host="dc.example.com", writes_enabled=True))
+
+
+def test_manager_install_rechecks_persistent_pause_after_stopping_old_container(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        if command[:2] == ["systemctl", "is-enabled"]:
+            return Result(1)
+        if command[:2] == ["systemctl", "is-active"]:
+            return Result(3)
+        if command[:2] == ["docker", "run"]:
+            return Result(stdout='{"automation_paused":true}')
+        if command[:2] == ["docker", "inspect"] and "{{range .Config.Env}}{{println .}}{{end}}" in command:
+            return Result(stdout="VPM_DATA_DIR=/data\n")
+        if command[:2] == ["docker", "inspect"]:
+            return Result(stdout="healthy\n")
+        return Result()
+
+    manager = VPMServiceManager(
+        tmp_path,
+        unit_dir=tmp_path / "systemd-system",
+        runner=runner,
+        sleeper=lambda _seconds: None,
+    )
+    manager.root.mkdir(parents=True)
+    manager.compose_file.write_text(VPMServiceManager.render(
+        VPMServiceSpec(image=PIN, allowed_host="dc.example.com")
+    ).compose)
+    manager._validate_master_key = lambda _spec: None
+    manager._assert_no_native_conflict = lambda: None
+    manager._has_existing_managed_vpm = lambda: True
+    manager.managed_runtime_state = lambda: {"writes_enabled": False, "automation_paused": True}
+    manager.current_managed_image = lambda: PIN
+    manager._ensure_exact_image_available = lambda _spec: None
+    manager._wait_for_health = lambda: None
+
+    manager.install(VPMServiceSpec(image=PIN, allowed_host="dc.example.com", writes_enabled=True))
+
+    final_probe = next(command for command in calls if command[:2] == ["docker", "run"])
+    stop_index = next(
+        index for index, command in enumerate(calls)
+        if command[-1:] == ["stop"] and "-p" in command
+    )
+    assert calls.index(final_probe) > stop_index
+    assert final_probe[:8] == [
+        "docker", "run", "--rm", "--network", "none", "--read-only",
+        "--volumes-from", "vast-price-manager:ro",
+    ]
+    assert "--entrypoint" in final_probe and final_probe[final_probe.index("--entrypoint") + 1] == "python3"
+    assert f"VPM_FINAL_PAUSE_DB=/data/vpm.sqlite3" in final_probe
+    assert PIN in final_probe
+    assert all("CREDENTIAL_MASTER_KEY" not in part for part in final_probe)
+
+
+def test_manager_install_restores_old_disabled_project_when_final_pause_proof_fails(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        if command[:2] == ["systemctl", "is-enabled"]:
+            return Result(1)
+        if command[:2] == ["systemctl", "is-active"]:
+            return Result(3)
+        if command[:2] == ["docker", "run"]:
+            return Result(stdout='{"automation_paused":false}')
+        return Result()
+
+    manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
+    manager.root.mkdir(parents=True)
+    stale_image = "ghcr.io/cryptolabsza/vast-price-manager@sha256:" + "b" * 64
+    old_compose = VPMServiceManager.render(
+        VPMServiceSpec(image=stale_image, allowed_host="dc.example.com")
+    ).compose
+    manager.compose_file.write_text(old_compose)
+    manager._validate_master_key = lambda _spec: None
+    manager._assert_no_native_conflict = lambda: None
+    manager._has_existing_managed_vpm = lambda: True
+    manager.managed_runtime_state = lambda: {"writes_enabled": False, "automation_paused": True}
+    manager.current_managed_image = lambda: PIN
+    manager._ensure_exact_image_available = lambda _spec: None
+    manager._wait_for_health = lambda: None
+
+    with pytest.raises(RuntimeError, match="persistent automation pause"):
+        manager.install(VPMServiceSpec(image=PIN, allowed_host="dc.example.com", writes_enabled=True))
+
+    restored = manager.compose_file.read_text()
+    assert f"image: {PIN}" in restored
+    assert "VPM_WRITES_ENABLED=false" in restored
+    assert any(command[:2] == ["docker", "run"] for command in calls)
+    assert any(command[-2:] == ["up", "-d"] for command in calls)
+
+
+def test_manager_install_true_to_true_preserves_unpaused_operator_choice(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        if command[:2] == ["systemctl", "is-enabled"]:
+            return Result(1)
+        if command[:2] == ["systemctl", "is-active"]:
+            return Result(3)
+        return Result()
+
+    manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
+    manager.root.mkdir(parents=True)
+    manager.compose_file.write_text(VPMServiceManager.render(
+        VPMServiceSpec(image=PIN, allowed_host="dc.example.com", writes_enabled=True)
+    ).compose)
+    manager._validate_master_key = lambda _spec: None
+    manager._assert_no_native_conflict = lambda: None
+    manager._has_existing_managed_vpm = lambda: True
+    manager.managed_runtime_state = lambda: {"writes_enabled": True, "automation_paused": False}
+    manager.current_managed_image = lambda: (_ for _ in ()).throw(AssertionError("no final proof"))
+    manager._ensure_exact_image_available = lambda _spec: None
+    manager._wait_for_health = lambda: None
+
+    manager.install(VPMServiceSpec(image=PIN, allowed_host="dc.example.com", writes_enabled=True))
+
+    assert not any(command[:2] == ["docker", "run"] for command in calls)
+
+
+def test_concurrent_configure_rollback_cannot_overwrite_later_success(tmp_path: Path):
+    config = FleetConfig(config_dir=tmp_path)
+    config.vast_price_manager.expected_account_id = "initial-account"
+    config.save()
+    context = multiprocessing.get_context("spawn")
+    failed = context.Process(
+        target=_concurrent_configure_worker,
+        args=(str(tmp_path), "failed-account", 0.25, True),
+    )
+    successful = context.Process(
+        target=_concurrent_configure_worker,
+        args=(str(tmp_path), "winning-account", 0, False),
+    )
+    failed.start()
+    time.sleep(0.05)
+    successful.start()
+    failed.join(10)
+    successful.join(10)
+    assert failed.exitcode == 0
+    assert successful.exitcode == 0
+    assert FleetConfig.load(tmp_path).vast_price_manager.expected_account_id == "winning-account"
+
+
+def test_vpm_lifecycle_is_scoped_and_stop_preserves_data(tmp_path: Path):
+    calls = []
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        class Result:
+            returncode = 0
+            stdout = "active\n"
+            stderr = ""
+        return Result()
+
+    manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
+    manager.stop()
+    assert ["systemctl", "disable", "--now", "vast-price-manager-sync.timer", "vast-price-manager-cycle.timer", "vast-price-manager-horizon.timer"] in calls
+    assert any(command[-1] == "stop" and "vast-price-manager" in command for command in calls)
+    assert all("down" not in command for command in calls)
+    assert all("dc-overview" not in command for command in calls)
+
+
+def test_vpm_health_failure_restores_previous_compose_after_candidate_validation(tmp_path: Path):
+    class Result:
+        returncode = 0
+        stdout = "unhealthy\n"
+        stderr = ""
+
+    calls = []
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        result = Result()
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            result.returncode = 3
+        return result
+
+    manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
+    manager.root.mkdir(parents=True)
+    manager.compose_file.write_text("previous-compose\n")
+    manager._validate_master_key = lambda _spec: None
+    manager._has_existing_managed_vpm = lambda: True
+
+    with pytest.raises(RuntimeError, match="did not pass /healthz"):
+        manager.install(VPMServiceSpec(image=PIN, allowed_host="dc.example.com"))
+
+    assert manager.compose_file.read_text() == "previous-compose\n"
+    assert ["systemctl", "daemon-reload"] in calls
+    assert ["systemctl", "enable", "vast-price-manager-sync.timer"] in calls
+    assert ["systemctl", "start", "vast-price-manager-sync.timer"] in calls
+
+
+def test_schema_migration_forward_hold_keeps_failed_candidate_and_stops_vpm_work(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        if command[:2] == ["systemctl", "is-enabled"]:
+            return Result(0, "enabled\n")
+        if command[:2] == ["systemctl", "is-active"]:
+            return Result(0, "active\n")
+        if command[:2] == ["docker", "inspect"]:
+            return Result(0, "unhealthy\n")
+        return Result()
+
+    manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
+    manager.root.mkdir(parents=True)
+    manager.compose_file.write_text("old-schema-compose\n")
+    for name in manager.render(VPMServiceSpec(image=PIN, allowed_host="dc.example.com")).units:
+        path = manager.unit_dir / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"old {name}\n")
+    manager._validate_master_key = lambda _spec: None
+    manager._has_existing_managed_vpm = lambda: True
+    rendered = manager.render(VPMServiceSpec(image=PIN, allowed_host="dc.example.com"))
+
+    with pytest.raises(RuntimeError, match="forward repair required"):
+        manager.install(
+            VPMServiceSpec(image=PIN, allowed_host="dc.example.com"),
+            schema_migration_forward_hold=True,
+        )
+
+    assert manager.compose_file.read_text() == rendered.compose
+    assert {name: (manager.unit_dir / name).read_text() for name in rendered.units} == rendered.units
+    assert sum(command[-2:] == ["up", "-d"] for command in calls) == 1
+    assert ["systemctl", "disable", "--now", *manager.timer_names] in calls
+    assert ["systemctl", "stop", *manager.service_names] in calls
+    assert ["systemctl", "enable", "vast-price-manager-sync.timer"] not in calls
+    assert ["systemctl", "start", "vast-price-manager-sync.timer"] not in calls
+
+
+def test_schema_migration_forward_hold_reports_failed_cleanup_without_rollback(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        if command[:2] == ["systemctl", "is-enabled"]:
+            return Result(0, "enabled\n")
+        if command[:2] == ["systemctl", "is-active"]:
+            return Result(0, "active\n")
+        if command[:2] == ["docker", "inspect"]:
+            return Result(0, "unhealthy\n")
+        if command[-1:] == ["stop"] and manager.project_name in command:
+            return Result(1, stderr="candidate stop unavailable")
+        return Result()
+
+    manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
+    manager.root.mkdir(parents=True)
+    manager.compose_file.write_text("old-schema-compose\n")
+    manager._validate_master_key = lambda _spec: None
+    manager._has_existing_managed_vpm = lambda: True
+
+    with pytest.raises(
+        RuntimeError,
+        match="Candidate hold is unverified.*candidate stop unavailable.*last state: unhealthy",
+    ):
+        manager.install(
+            VPMServiceSpec(image=PIN, allowed_host="dc.example.com"),
+            schema_migration_forward_hold=True,
+        )
+
+    assert manager.compose_file.read_text() != "old-schema-compose\n"
+    assert sum(command[-2:] == ["up", "-d"] for command in calls) == 1
+    assert ["systemctl", "enable", "vast-price-manager-sync.timer"] not in calls
+    assert ["systemctl", "start", "vast-price-manager-sync.timer"] not in calls
+
+
+def test_schema_migration_forward_hold_records_candidate_stop_launch_failure(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        if command[:2] == ["systemctl", "is-enabled"]:
+            return Result(0, "enabled\n")
+        if command[:2] == ["systemctl", "is-active"]:
+            return Result(0, "active\n")
+        if command[:2] == ["docker", "inspect"]:
+            return Result(0, "unhealthy\n")
+        if command[-1:] == ["stop"] and manager.project_name in command:
+            raise OSError(11, "Resource temporarily unavailable")
+        return Result()
+
+    manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
+    manager.root.mkdir(parents=True)
+    manager.compose_file.write_text("old-schema-compose\n")
+    manager._validate_master_key = lambda _spec: None
+    manager._has_existing_managed_vpm = lambda: True
+
+    with pytest.raises(
+        RuntimeError,
+        match="Candidate hold is unverified.*candidate stop.*Resource temporarily unavailable.*last state: unhealthy",
+    ):
+        manager.install(
+            VPMServiceSpec(image=PIN, allowed_host="dc.example.com"),
+            schema_migration_forward_hold=True,
+        )
+
+    assert ["systemctl", "disable", "--now", *manager.timer_names] in calls
+    assert ["systemctl", "stop", *manager.service_names] in calls
+    assert sum(command[-2:] == ["up", "-d"] for command in calls) == 1
+    assert ["systemctl", "enable", "vast-price-manager-sync.timer"] not in calls
+    assert ["systemctl", "start", "vast-price-manager-sync.timer"] not in calls
+
+
+def test_schema_migration_forward_hold_preflight_failure_leaves_existing_runtime_untouched(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command == ["docker", "image", "inspect", PIN]:
+            return Result(1, stderr="image missing")
+        if command == ["docker", "pull", PIN]:
+            return Result(1, stderr="registry denied")
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        return Result()
+
+    manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
+    manager.root.mkdir(parents=True)
+    manager.compose_file.write_text("old-schema-compose\n")
+    manager._validate_master_key = lambda _spec: None
+    manager._has_existing_managed_vpm = lambda: True
+
+    with pytest.raises(RuntimeError, match="registry denied"):
+        manager.install(
+            VPMServiceSpec(image=PIN, allowed_host="dc.example.com"),
+            schema_migration_forward_hold=True,
+        )
+
+    assert manager.compose_file.read_text() == "old-schema-compose\n"
+    assert ["systemctl", "disable", "--now", *manager.timer_names] not in calls
+    assert ["systemctl", "stop", *manager.service_names] not in calls
+    assert not (manager.root / ".vpm-compose-candidate.yml").exists()
+
+
+def test_schema_migration_forward_hold_success_enables_candidate_timers(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        if command[:2] == ["systemctl", "is-enabled"]:
+            return Result(1)
+        if command[:2] == ["systemctl", "is-active"]:
+            return Result(3)
+        if command[:2] == ["docker", "inspect"]:
+            return Result(0, "healthy\n")
+        return Result()
+
+    manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
+    manager.root.mkdir(parents=True)
+    manager.compose_file.write_text("old-schema-compose\n")
+    manager._validate_master_key = lambda _spec: None
+    manager._has_existing_managed_vpm = lambda: True
+
+    manager.install(
+        VPMServiceSpec(image=PIN, allowed_host="dc.example.com"),
+        schema_migration_forward_hold=True,
+    )
+
+    assert manager.compose_file.read_text() == manager.render(VPMServiceSpec(image=PIN, allowed_host="dc.example.com")).compose
+    assert ["systemctl", "enable", "--now", *manager.timer_names] in calls
+
+
+def test_vpm_update_passes_schema_migration_forward_hold_to_manager(monkeypatch, tmp_path: Path):
+    class FakeManager:
+        observed = None
+
+        def __init__(self, _config_dir):
+            pass
+
+        def operation_lock(self):
+            return nullcontext()
+
+        def install(self, _spec, schema_migration_forward_hold=False):
+            type(self).observed = schema_migration_forward_hold
+
+    config = FleetConfig(config_dir=tmp_path)
+    config.ssl.domain = "dc.example.com"
+    config.save()
+    monkeypatch.setattr(cli_module, "VPMServiceManager", FakeManager)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "vpm", "--config-dir", str(tmp_path), "update", "--image", PIN,
+            "--schema-migration-forward-hold",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert FakeManager.observed is True
+
+
+def test_failed_fresh_install_removes_only_fresh_project_container(tmp_path: Path):
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = "unhealthy\n"
+        stderr = ""
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        result = Result()
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            result.returncode = 3
+        return result
+
+    manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
+    manager._validate_master_key = lambda _spec: None
+    manager.vast_exporter_prerequisite = lambda: {"configured": True, "reason": "ready", "connected_account_count": 1}
+    with pytest.raises(RuntimeError, match="did not pass /healthz"):
+        manager.install(VPMServiceSpec(image=PIN, allowed_host="dc.example.com"))
+
+    assert not manager.compose_file.exists()
+    assert any(command[-2:] == ["rm", "-f"] and manager.project_name in command for command in calls)
+
+
+def test_route_promotion_failure_restores_existing_project_and_timers(tmp_path: Path):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        if command[:3] == ["systemctl", "is-active", "--quiet"]:
+            return Result(3)
+        if command[:2] == ["systemctl", "is-enabled"]:
+            return Result(0, "enabled\n")
+        if command[:2] == ["systemctl", "is-active"]:
+            return Result(0, "active\n")
+        if command[:2] == ["docker", "inspect"]:
+            return Result(0, "healthy\n")
+        return Result()
+
+    manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
+    manager.root.mkdir(parents=True)
+    manager.compose_file.write_text("old-image-compose\n")
+    manager._validate_master_key = lambda _spec: None
+    manager._has_existing_managed_vpm = lambda: True
+
+    with pytest.raises(RuntimeError, match="proxy registration failed"):
+        manager.install(
+            VPMServiceSpec(image=PIN, allowed_host="dc.example.com"),
+            promote_route=lambda: (_ for _ in ()).throw(RuntimeError("proxy registration failed")),
+        )
+
+    assert manager.compose_file.read_text() == "old-image-compose\n"
+    assert sum(command[-2:] == ["up", "-d"] for command in calls) == 2
+    assert ["systemctl", "enable", "vast-price-manager-sync.timer"] in calls
+    assert ["systemctl", "start", "vast-price-manager-sync.timer"] in calls
+
+
+def test_vpm_cli_exposes_scoped_lifecycle_commands():
+    result = CliRunner().invoke(main, ["vpm", "--help"])
+    assert result.exit_code == 0
+    for command in ("install", "start", "stop", "status", "logs", "update", "configure", "disable", "enable"):
+        assert command in result.output

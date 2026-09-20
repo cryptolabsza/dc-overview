@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 # Vast.ai API endpoint
 VASTAI_API_URL = "https://console.vast.ai/api/v0"
+GPU_OCCUPANCY_STATES = {"x": 0, "I": 1, "D": 2, "R": 3}
 
 
 class VastAIClient:
@@ -92,20 +93,6 @@ class VastAIClient:
             return data
         return None
     
-    def get_instances(self) -> Optional[List[Dict[str, Any]]]:
-        """Get all instances (rentals) running on host machines.
-        
-        Each instance has machine_id, num_gpus, and rental type info
-        which allows us to determine per-GPU occupancy state.
-        """
-        data = self._request("/instances/")
-        if data and 'instances' in data:
-            return data['instances']
-        elif isinstance(data, list):
-            return data
-        return None
-
-
 class MetricsCollector:
     """Collects metrics from multiple Vast.ai accounts"""
     
@@ -138,7 +125,6 @@ class MetricsCollector:
             all_metrics = {
                 'accounts': [],
                 'machines': [],
-                'instances_by_machine': {},  # machine_id -> list of instances
             }
             
             for client in self.clients:
@@ -171,28 +157,6 @@ class MetricsCollector:
                         for machine in machines:
                             machine['_account'] = client.account_name
                             all_metrics['machines'].append(machine)
-                    
-                    # Get instances (rentals on host machines) for accurate per-GPU occupancy
-                    instances = client.get_instances()
-                    if instances:
-                        # Log instance fields on first fetch for diagnostics
-                        if not self.metrics_cache and instances:
-                            sample = instances[0]
-                            logger.info(f"Instance fields for {client.account_name}: {sorted(sample.keys())}")
-                            for field in ['machine_id', 'num_gpus', 'gpu_num',
-                                          'type', 'rental_type', 'hosting_type',
-                                          'bid_type', 'is_bid', 'static_ip',
-                                          'actual_status', 'intended_status',
-                                          'start_date', 'gpu_lanes']:
-                                if field in sample:
-                                    logger.info(f"  {field} = {sample[field]}")
-                        
-                        for inst in instances:
-                            mid = str(inst.get('machine_id', ''))
-                            if mid:
-                                if mid not in all_metrics['instances_by_machine']:
-                                    all_metrics['instances_by_machine'][mid] = []
-                                all_metrics['instances_by_machine'][mid].append(inst)
                     
                 except Exception as e:
                     logger.error(f"Error collecting metrics for {client.account_name}: {e}")
@@ -293,7 +257,7 @@ class MetricsCollector:
         lines.append("# TYPE vast_machine_Verification gauge")
         for m in metrics.get('machines', []):
             labels = self._machine_labels(m)
-            verified = 1 if m.get('verification') else 0
+            verified = self._verification_value(m.get('verification'))
             lines.append(f'vast_machine_Verification{{{labels}}} {verified}')
         
         # Machine Reliability
@@ -440,96 +404,56 @@ class MetricsCollector:
             lines.append(f'vastai_machine_ErrorDescription{{account="{account}",error_description="{error_desc}",hostname="{hostname}",machine_id="{machine_id}"}} 1')
         
         # GPU occupancy (per-GPU rental state)
-        # Values: 0=Idle, 1=Rented(Bid/Interruptible), 2=Rented(On-Demand), 3=Reserved/Resident
+        # Values: -1=Unknown, 0=Idle, 1=Rented(Bid/Interruptible),
+        # 2=Rented(On-Demand), 3=Reserved/Resident.
         #
-        # Strategy: Use per-instance data from /instances/ API when available (accurate),
-        # fall back to machine-level rental counts (approximation for multi-GPU rentals).
+        # Vast supplies the only provider source that identifies individual GPU slots:
+        # gpu_occupancy glyphs. Rental counters identify rentals, not GPUs, so they
+        # cannot be expanded or assigned to arbitrary slots.
         lines.append("")
-        lines.append("# HELP vastai_machine_gpu_occupancy GPU occupancy state per machine and GPU slot. 0=Idle 1=Bid 2=OnDemand 3=Reserved")
+        lines.append("# HELP vastai_machine_gpu_occupancy GPU occupancy state per machine and GPU slot. -1=Unknown 0=Idle 1=Bid 2=OnDemand 3=Reserved")
         lines.append("# TYPE vastai_machine_gpu_occupancy gauge")
-        
-        instances_by_machine = metrics.get('instances_by_machine', {})
-        
+        machine_gpu_capacity = []
         for m in metrics.get('machines', []):
             account = m.get('_account', 'default')
             hostname = (m.get('hostname', '') or '').replace('"', '\\"')
             machine_id = str(m.get('id', m.get('machine_id', 'unknown')))
             num_gpus = self._safe_int(m.get('num_gpus', 0))
-            
-            # Build per-GPU state array
-            gpu_states = [0] * num_gpus  # Default: all idle
-            
-            # Method 1: Use per-instance data (accurate - knows GPU count + type per rental)
-            machine_instances = instances_by_machine.get(machine_id, [])
-            if machine_instances:
-                gpu_slot = 0
-                # Sort: reserved first, then on-demand, then bid (interruptible)
-                for inst in sorted(machine_instances, key=lambda x: self._instance_type_priority(x)):
-                    actual_status = (inst.get('actual_status') or '').lower()
-                    intended_status = (inst.get('intended_status') or '').lower()
-                    # Only count running/active instances
-                    if actual_status not in ('running', 'loading', 'created') and intended_status != 'running':
-                        continue
-                    
-                    inst_gpus = self._safe_int(inst.get('num_gpus', 1))
-                    rental_type = self._classify_instance_type(inst)
-                    
-                    for _ in range(inst_gpus):
-                        if gpu_slot < num_gpus:
-                            gpu_states[gpu_slot] = rental_type
-                            gpu_slot += 1
-            else:
-                # Method 2: Fallback - infer from machine-level fields
-                gpu_occupancy = m.get('gpu_occupancy', '') or ''
-                rentals_resident = self._safe_int(m.get('current_rentals_resident', 0))
-                rentals_on_demand = self._safe_int(m.get('current_rentals_running_on_demand',
-                                                   m.get('current_rentals_on_demand', 0)))
-                
-                try:
-                    if '/' in str(gpu_occupancy):
-                        rented_str, _ = gpu_occupancy.split('/')
-                        rented = int(rented_str)
-                    else:
-                        rented = int(gpu_occupancy) if gpu_occupancy else 0
-                    
-                    # NOTE: rental counts may not equal GPU counts for multi-GPU rentals.
-                    # This is a best-effort approximation.
-                    rentals_bid = max(0, rented - rentals_on_demand - rentals_resident)
-                    
-                    for i in range(num_gpus):
-                        if i < rentals_resident:
-                            gpu_states[i] = 3  # Reserved/Resident
-                        elif i < rentals_resident + rentals_on_demand:
-                            gpu_states[i] = 2  # On-Demand
-                        elif i < rentals_resident + rentals_on_demand + rentals_bid:
-                            gpu_states[i] = 1  # Bid/Interruptible
-                        # else: stays 0 (Idle)
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Could not parse gpu_occupancy for {hostname}: {e}")
-            
+            gpu_states, aggregates = self._gpu_occupancy(m, num_gpus)
+            machine_gpu_capacity.append((m, gpu_states, aggregates))
             # Emit per-GPU metrics
             for i in range(num_gpus):
                 lines.append(f'vastai_machine_gpu_occupancy{{account="{account}",gpu="{i}",Hostname="{hostname}",hostname="{hostname}",machine_id="{machine_id}"}} {gpu_states[i]}')
         
-        # GPU rented metrics
+        # GPU capacity aggregates use the same authoritative state as the individual
+        # slot metrics, including NaN when the provider data cannot prove capacity.
         lines.append("")
         lines.append("# HELP vastai_machine_gpu_rented_on_demand Number of GPUs rented on-demand")
         lines.append("# TYPE vastai_machine_gpu_rented_on_demand gauge")
-        for m in metrics.get('machines', []):
+        for m, _, aggregates in machine_gpu_capacity:
             labels = self._machine_labels(m)
-            # Estimate from rentals
-            rentals = self._safe_int(m.get('current_rentals_on_demand', 0))
-            lines.append(f'vastai_machine_gpu_rented_on_demand{{{labels}}} {rentals}')
+            lines.append(f'vastai_machine_gpu_rented_on_demand{{{labels}}} {aggregates["on_demand"]}')
+
+        lines.append("")
+        lines.append("# HELP vastai_machine_gpu_rented_bid_demand Number of GPUs rented on bid demand")
+        lines.append("# TYPE vastai_machine_gpu_rented_bid_demand gauge")
+        for m, _, aggregates in machine_gpu_capacity:
+            labels = self._machine_labels(m)
+            lines.append(f'vastai_machine_gpu_rented_bid_demand{{{labels}}} {aggregates["bid_demand"]}')
+
+        lines.append("")
+        lines.append("# HELP vastai_machine_gpu_rented_on_reserved Number of reserved GPUs")
+        lines.append("# TYPE vastai_machine_gpu_rented_on_reserved gauge")
+        for m, _, aggregates in machine_gpu_capacity:
+            labels = self._machine_labels(m)
+            lines.append(f'vastai_machine_gpu_rented_on_reserved{{{labels}}} {aggregates["on_reserved"]}')
         
         lines.append("")
         lines.append("# HELP vastai_machine_gpu_idle Number of GPUs idle")
         lines.append("# TYPE vastai_machine_gpu_idle gauge")
-        for m in metrics.get('machines', []):
+        for m, _, aggregates in machine_gpu_capacity:
             labels = self._machine_labels(m)
-            num_gpus = self._safe_int(m.get('num_gpus', 0))
-            running = self._safe_int(m.get('current_rentals_running', 0))
-            idle = max(0, num_gpus - running)
-            lines.append(f'vastai_machine_gpu_idle{{{labels}}} {idle}')
+            lines.append(f'vastai_machine_gpu_idle{{{labels}}} {aggregates["idle"]}')
         
         # Summary totals per account
         account_earnings = {}
@@ -569,62 +493,54 @@ class MetricsCollector:
         hostname = (machine.get('hostname', '') or machine_id).replace('"', '\\"')
         
         return f'account="{account}",hostname="{hostname}",machine_id="{machine_id}"'
-    
-    def _classify_instance_type(self, instance: Dict) -> int:
-        """Classify an instance's rental type.
-        
-        Returns: 0=Idle, 1=Bid/Interruptible, 2=On-Demand, 3=Reserved/Resident
-        
-        The Vast.ai API uses various fields to indicate rental type:
-        - is_bid: True for interruptible/bid instances
-        - bid_type: 'on_demand', 'bid', 'reserved', etc.
-        - type: may contain rental type info
-        - hosting_type: may indicate on-demand vs bid
-        - static_ip: reserved instances often have static IPs
-        - min_bid: non-zero for bid instances
-        """
-        # Check explicit rental type fields (try multiple field names)
-        bid_type = str(instance.get('bid_type', '') or '').lower()
-        rental_type = str(instance.get('rental_type', '') or instance.get('type', '') or '').lower()
-        hosting_type = str(instance.get('hosting_type', '') or '').lower()
-        is_bid = instance.get('is_bid')
-        
-        # Reserved/Resident detection
-        if 'reserved' in bid_type or 'resident' in rental_type or 'reserved' in rental_type:
-            return 3
-        
-        # On-demand detection
-        if bid_type == 'on_demand' or 'on_demand' in rental_type or 'on-demand' in rental_type:
-            return 2
-        if hosting_type in ('on_demand', 'on-demand', 'dedicated'):
-            return 2
-        
-        # Bid/Interruptible detection
-        if is_bid is True or bid_type == 'bid' or 'bid' in rental_type or 'interruptible' in rental_type:
-            return 1
-        if hosting_type in ('bid', 'interruptible', 'spot'):
-            return 1
-        
-        # If is_bid is explicitly False, it's on-demand
-        if is_bid is False:
-            return 2
-        
-        # Default: if we can't determine type, use on-demand (most common for hosts)
-        # The min_bid field can help: if it's > 0 it's a bid rental
-        if instance.get('min_bid') and float(instance.get('min_bid', 0) or 0) > 0:
-            return 1
-        
-        return 2  # Default to on-demand if we can't determine
-    
-    def _instance_type_priority(self, instance: Dict) -> int:
-        """Sort key: reserved first (lowest priority number), then on-demand, then bid.
-        
-        This ensures GPU slot assignment fills reserved first, then on-demand, then bid.
-        """
-        t = self._classify_instance_type(instance)
-        # Map: 3 (reserved) -> 0, 2 (on-demand) -> 1, 1 (bid) -> 2
-        return {3: 0, 2: 1, 1: 2, 0: 3}.get(t, 3)
 
+    def _verification_value(self, value) -> str:
+        """Map only documented verification states to Prometheus values."""
+        if value is True or value == 1 and not isinstance(value, str):
+            return "1"
+        if value is False or value == 0 and not isinstance(value, str):
+            return "0"
+        if isinstance(value, str):
+            status = value.strip().lower()
+            if status == "verified":
+                return "1"
+            if status in ("unverified", "deverified"):
+                return "0"
+        return "NaN"
+
+    def _gpu_occupancy(self, machine: Dict, num_gpus: int):
+        """Return trusted per-slot states and aggregates, or unknown values."""
+        unknown = {"on_demand": "NaN", "bid_demand": "NaN", "on_reserved": "NaN", "idle": "NaN"}
+        running = self._known_nonnegative_int(machine.get('current_rentals_running'))
+        if running == 0:
+            return [0] * num_gpus, {"on_demand": 0, "bid_demand": 0, "on_reserved": 0, "idle": num_gpus}
+
+        glyphs = machine.get('gpu_occupancy')
+        symbols = glyphs.split() if isinstance(glyphs, str) else []
+        if running is None or len(symbols) != num_gpus or not all(symbol in GPU_OCCUPANCY_STATES for symbol in symbols):
+            return [-1] * num_gpus, unknown
+
+        states = [GPU_OCCUPANCY_STATES[symbol] for symbol in symbols]
+        occupied = [state for state in states if state != 0]
+        occupied_types = len({state for state in occupied})
+        if not occupied_types <= running <= len(occupied):
+            return [-1] * num_gpus, unknown
+        return states, {
+            "on_demand": states.count(2),
+            "bid_demand": states.count(1),
+            "on_reserved": states.count(3),
+            "idle": states.count(0),
+        }
+
+    def _known_nonnegative_int(self, value) -> Optional[int]:
+        """Accept provider integer counters without turning missing data into zero."""
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value if value >= 0 else None
+        if isinstance(value, str) and value.strip().isdigit():
+            return int(value.strip())
+        return None
 
 class AccountManager:
     """Manages Vast.ai API key accounts with file persistence."""
