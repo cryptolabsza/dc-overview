@@ -305,6 +305,10 @@ dc-overview setup-ssl               # Configure HTTPS
 
 ## Development Workflow
 
+For the deployed Charlotte fleet, see the
+[credential operations runbook](docs/credential-operations-runbook.md) for
+1Password authority, manual refresh, verification and rollback.
+
 ### GitHub Actions
 
 The repository uses GitHub Actions for CI/CD:

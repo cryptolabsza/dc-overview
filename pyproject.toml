@@ -44,6 +44,7 @@ dependencies = [
     # Security
     "flask-wtf>=1.2.0",
     "flask-limiter>=3.5.0",
+    "cryptography>=42.0.0",
 ]
 
 [project.optional-dependencies]

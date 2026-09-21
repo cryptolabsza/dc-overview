@@ -32,6 +32,7 @@ import requests as http_requests
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
+from cryptography.hazmat.primitives import serialization
 
 from . import __version__
 from .exporters import DC_EXPORTER_RS_VERSION
@@ -53,6 +54,9 @@ from .web_watchdog import (
 from .web_prometheus import update_prometheus_targets as _update_prometheus_targets
 from .web_prometheus import reload_prometheus
 from .inventory_sync import deliver_inventory_outbox, inventory_delivery_is_configured
+from .inventory_sync import configured_inventory_secret
+from .credential_authority import credential_authority, credential_mutation_error
+from .credential_crypto import CredentialCryptoError, decrypt_bmc_password, encrypt_bmc_password, encrypt_transport
 
 app = Flask(__name__, template_folder='web_templates')
 
@@ -165,6 +169,18 @@ def validate_port(port, default=22):
         raise ValueError(f"Invalid port: {port}. Must be 1-65535.")
 
 
+def validate_credential_username(value, label):
+    if not isinstance(value, str) or not value.strip() or len(value.strip()) > 50:
+        raise ValueError(f"Invalid {label} username")
+    return value.strip()
+
+
+def validate_credential_password(value, maximum, label):
+    if not isinstance(value, str) or not value or len(value) > maximum:
+        raise ValueError(f"Invalid {label} password")
+    return value
+
+
 def update_prometheus_targets():
     """Thin wrapper: queries the DB and delegates to web_prometheus module."""
     try:
@@ -226,6 +242,9 @@ class Server(db.Model):
     # Password-based SSH auth (alternative to key-based)
     # If both key and password are set, key takes priority
     ssh_password = db.Column(db.String(500), nullable=True)
+    bmc_username = db.Column(db.String(50), nullable=True)
+    bmc_password = db.Column(db.Text, nullable=True)
+    bmc_managed = db.Column(db.Boolean, nullable=False, default=False)
     
     # Exporter installation status
     node_exporter_installed = db.Column(db.Boolean, default=False)
@@ -405,6 +424,8 @@ def enqueue_inventory_reconcile(server, operation='upsert'):
         'server_ip': server.server_ip,
         'bmc_ip': server.bmc_ip,
     }
+    if operation == 'upsert' and credential_authority() == 'local':
+        payload['credential_pending'] = True
     # A newer desired state supersedes an older undelivered revision for this
     # stable identity, so restart retries cannot poison the receiver queue.
     InventoryOutbox.query.filter_by(
@@ -456,9 +477,78 @@ def restore_retired_inventory_identity(server):
 def attempt_inventory_reconcile(entry):
     if not entry:
         return None
+    # Persist the one-time encrypted token before the receiver can see it. A
+    # restart after receiver commit must retry the exact same token/revision.
+    entry_id = entry.id
+    _begin_inventory_mutation()
+    try:
+        entry = db.session.get(InventoryOutbox, entry_id, populate_existing=True)
+        if not entry or not _materialize_credential_bundle(entry):
+            db.session.commit()
+            return False
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
     delivered = deliver_inventory_outbox(entry)
     db.session.commit()
     return delivered
+
+
+def _read_effective_private_key(server):
+    key_path = resolve_ssh_key_path(server)
+    if not key_path:
+        return None
+    try:
+        raw = Path(key_path).read_bytes()
+        if not raw or len(raw) > 32768:
+            raise ValueError
+        try:
+            serialization.load_ssh_private_key(raw, password=None)
+        except ValueError:
+            serialization.load_pem_private_key(raw, password=None)
+        return raw.decode('utf-8')
+    except (OSError, TypeError, UnicodeDecodeError, ValueError) as error:
+        raise ValueError('Invalid SSH private key') from error
+
+
+def _materialize_credential_bundle(entry):
+    """Persist an encrypted snapshot only for the current local revision."""
+    try:
+        payload = json.loads(entry.payload)
+    except (TypeError, json.JSONDecodeError):
+        entry.attempts += 1; entry.last_error = 'Invalid inventory outbox record'; return False
+    if payload.get('credential_bundle'):
+        if credential_authority() != 'local':
+            entry.attempts += 1; entry.last_error = 'Credential authority is no longer local'; return False
+        return True
+    if not payload.get('credential_pending'):
+        return True
+    if credential_authority() != 'local':
+        entry.attempts += 1; entry.last_error = 'Credential authority is no longer local'; return False
+    secret = configured_inventory_secret()
+    if not secret:
+        entry.attempts += 1; entry.last_error = 'IPMI credential transport key is not configured'; return False
+    server = Server.query.filter_by(inventory_server_id=entry.source_server_id).first()
+    if not server or server.inventory_revision != entry.revision:
+        entry.attempts += 1; entry.last_error = 'Credential snapshot is no longer current'; return False
+    try:
+        ssh_password = server.ssh_password
+        if ssh_password is not None: validate_credential_password(ssh_password, 500, 'SSH')
+        credentials = {'ssh': {'username': validate_credential_username(server.ssh_user or 'root', 'SSH'),
+                               'port': validate_port(server.ssh_port, 22),
+                               'private_key': _read_effective_private_key(server), 'password': ssh_password},
+                       'bmc_managed': bool(server.bmc_managed), 'bmc': None}
+        if server.bmc_managed and server.bmc_username and server.bmc_password:
+            credentials['bmc'] = {'username': validate_credential_username(server.bmc_username, 'BMC'),
+                                  'password': validate_credential_password(decrypt_bmc_password(server.bmc_password, secret), 100, 'BMC')}
+        plaintext = {'version': 1, **{key: payload[key] for key in ('source_id', 'server_id', 'revision', 'operation', 'name', 'server_ip', 'bmc_ip')}, 'credentials': credentials}
+        payload['credential_bundle'] = encrypt_transport(plaintext, secret)
+    except (CredentialCryptoError, ValueError):
+        entry.attempts += 1; entry.last_error = 'Credential bundle cannot be prepared'; return False
+    payload.pop('credential_pending', None)
+    entry.payload = json.dumps(payload, sort_keys=True, separators=(',', ':'))
+    return True
 
 
 def inventory_outbox_state(source_server_id):
@@ -971,9 +1061,20 @@ def api_add_server():
         validated_bmc_ip = validate_ip_address(data['bmc_ip']) if data.get('bmc_ip') else None
         validated_user = validate_ssh_username(data.get('ssh_user', 'root'))
         validated_port = validate_port(data.get('ssh_port', 22))
+        ssh_password = data.get('ssh_password') or None
+        if ssh_password:
+            validate_credential_password(ssh_password, 500, 'SSH')
     except ValueError as e:
         app.logger.warning(f"Invalid server input from {get_client_ip()}: {e}")
         return jsonify({'error': str(e)}), 400
+    authority_error = credential_mutation_error()
+    explicit_ssh_credentials = bool(
+        ssh_password or data.get('ssh_key_id')
+        or ('ssh_user' in data and validated_user != 'root')
+        or ('ssh_port' in data and validated_port != 22)
+    )
+    if authority_error and explicit_ssh_credentials:
+        return jsonify({'error': authority_error}), 409
     
     # Check for duplicate
     existing = Server.query.filter(
@@ -986,11 +1087,34 @@ def api_add_server():
     
     # Validate SSH key if provided
     ssh_key_id = data.get('ssh_key_id')
+    ssh_key = None
     if ssh_key_id:
         ssh_key_id = int(ssh_key_id)
-        key = SSHKey.query.get(ssh_key_id)
-        if not key:
+        ssh_key = SSHKey.query.get(ssh_key_id)
+        if not ssh_key:
             return jsonify({'error': 'SSH key not found'}), 404
+        try:
+            _read_effective_private_key(Server(name=validated_name, server_ip=validated_ip, ssh_key=ssh_key))
+        except ValueError as error:
+            return jsonify({'error': str(error)}), 400
+
+    bmc_username = bmc_password = None
+    if 'bmc_username' in data or 'bmc_password' in data:
+        error = credential_mutation_error()
+        if error:
+            return jsonify({'error': error}), 409
+        if not validated_bmc_ip:
+            return jsonify({'error': 'Bind a BMC before managing BMC credentials'}), 409
+        secret = configured_inventory_secret()
+        if not secret:
+            return jsonify({'error': 'IPMI credential transport key is not configured'}), 503
+        try:
+            bmc_username = validate_credential_username(data.get('bmc_username'), 'BMC')
+            bmc_password = encrypt_bmc_password(
+                validate_credential_password(data.get('bmc_password'), 100, 'BMC'), secret
+            )
+        except (CredentialCryptoError, ValueError) as error:
+            return jsonify({'error': str(error)}), 400
     
     server = Server(
         name=validated_name,
@@ -998,8 +1122,11 @@ def api_add_server():
         ssh_user=validated_user,
         ssh_port=validated_port,
         ssh_key_id=ssh_key_id,
-        ssh_password=data.get('ssh_password') or None,
+        ssh_password=ssh_password,
         bmc_ip=validated_bmc_ip,
+        bmc_username=bmc_username,
+        bmc_password=bmc_password,
+        bmc_managed=bool(bmc_username),
     )
     
     # Allow setting watchdog agent status (e.g., from setup after deploying agents)
@@ -2337,6 +2464,9 @@ def api_ssh_keys():
 @admin_required
 def api_add_ssh_key():
     """Add a new SSH key."""
+    authority_error = credential_mutation_error()
+    if authority_error:
+        return jsonify({'error': authority_error}), 409
     data = request.json
     
     if not data.get('name') or not data.get('key_path'):
@@ -2382,12 +2512,20 @@ def api_add_ssh_key():
 @admin_required
 def api_delete_ssh_key(key_id):
     """Delete an SSH key."""
+    authority_error = credential_mutation_error()
+    if authority_error:
+        return jsonify({'error': authority_error}), 409
     key = SSHKey.query.get_or_404(key_id)
     
     # Check if any servers are using this key
     servers_using = Server.query.filter_by(ssh_key_id=key_id).count()
     if servers_using > 0:
-        return jsonify({'error': f'SSH key is in use by {servers_using} server(s)'}), 400
+        return jsonify({
+            'error': (
+                f'SSH key is assigned to {servers_using} server(s). Assign a replacement '
+                'or unassign it through Server Management before deleting this key.'
+            )
+        }), 409
     
     db.session.delete(key)
     db.session.commit()
@@ -2416,6 +2554,9 @@ def api_ssh_key_pubkey(key_id):
 @admin_required
 def api_generate_ssh_key():
     """Generate a new ed25519 key pair, save to disk, register in DB."""
+    authority_error = credential_mutation_error()
+    if authority_error:
+        return jsonify({'error': authority_error}), 409
     data = request.json or {}
     name = (data.get('name') or '').strip()
     if not name:
@@ -2470,6 +2611,9 @@ def api_deploy_ssh_key(key_id):
     Body (optional):
         server_ids: list[int]  — deploy only to these servers (default: all)
     """
+    authority_error = credential_mutation_error()
+    if authority_error:
+        return jsonify({'error': authority_error}), 409
     key = SSHKey.query.get_or_404(key_id)
     pub_path = Path(key.key_path + '.pub')
     if not pub_path.exists():
@@ -2519,32 +2663,24 @@ def api_deploy_ssh_key(key_id):
 @csrf.exempt
 @admin_required
 def api_sync_ssh_key_to_ipmi(key_id):
-    """Push an SSH key to IPMI Monitor so both tools share the same key."""
-    key = SSHKey.query.get_or_404(key_id)
-    key_file = Path(key.key_path)
-    if not key_file.exists():
-        return jsonify({'error': 'Private key file not found'}), 404
-
-    key_content = key_file.read_text()
-
-    try:
-        resp = http_requests.post(
-            'http://ipmi-monitor:5000/api/ssh-keys',
-            data=json.dumps({'name': key.name, 'key_content': key_content}),
-            headers={'Content-Type': 'application/json'},
-            timeout=10,
-        )
-        if resp.status_code in (200, 201):
-            return jsonify({'success': True, 'ipmi_key_id': resp.json().get('id')})
-        return jsonify({'error': f'IPMI Monitor returned {resp.status_code}', 'detail': resp.text}), 502
-    except Exception as e:
-        return jsonify({'error': f'Failed to reach IPMI Monitor: {e}'}), 502
+    """Retire the raw-key side channel in favour of revisioned reconciliation."""
+    error = credential_mutation_error()
+    if error:
+        return jsonify({'error': error}), 409
+    SSHKey.query.get_or_404(key_id)
+    return jsonify({
+        'error': 'Assign this key to a server and save SSH configuration to synchronize it securely'
+    }), 409
 
 
 @app.route('/api/servers/<int:server_id>/ssh-key', methods=['POST'])
 @admin_required
+@inventory_mutation_serialized
 def api_set_server_ssh_key(server_id):
     """Set the SSH key for a server."""
+    error = credential_mutation_error()
+    if error:
+        return jsonify({'error': error}), 409
     server = Server.query.get_or_404(server_id)
     data = request.json or {}
     
@@ -2559,12 +2695,23 @@ def api_set_server_ssh_key(server_id):
     else:
         server.ssh_key_id = None
     
+    if key_id:
+        try:
+            _read_effective_private_key(server)
+        except ValueError as error:
+            return jsonify({'error': str(error)}), 400
+    outbox = enqueue_inventory_reconcile(server) if server.bmc_ip else None
     db.session.commit()
+    delivered = attempt_inventory_reconcile(outbox)
     
     return jsonify({
         'success': True,
         'server_id': server.id,
-        'ssh_key_id': server.ssh_key_id
+        'ssh_key_id': server.ssh_key_id,
+        'inventory': inventory_outbox_state(server.inventory_server_id) if not outbox else {
+            'state': 'synchronized' if delivered else 'pending', 'revision': outbox.revision,
+            'retry_id': outbox.id if not delivered else None, 'error': outbox.last_error if not delivered else None,
+        },
     })
 
 # =============================================================================
@@ -2586,6 +2733,11 @@ def api_get_server_ssh_config(server_id):
         'ssh_key_id': server.ssh_key_id,
         'ssh_key_name': server.ssh_key.name if server.ssh_key else None,
         'has_password': bool(server.ssh_password),
+        'credential_authority': credential_authority(),
+        'inventory': inventory_outbox_state(server.inventory_server_id),
+        'bmc_username': server.bmc_username,
+        'bmc_managed': bool(server.bmc_managed),
+        'has_bmc_password': bool(server.bmc_password),
         'auth_method': 'key' if (server.ssh_key_id or resolve_ssh_key_path(server)) else ('password' if server.ssh_password else 'none'),
         'available_keys': [{
             'id': k.id,
@@ -2598,6 +2750,7 @@ def api_get_server_ssh_config(server_id):
 @app.route('/api/servers/<int:server_id>/ssh-config', methods=['POST'])
 @csrf.exempt
 @admin_required
+@inventory_mutation_serialized
 def api_update_server_ssh_config(server_id):
     """Update SSH configuration for a server.
     
@@ -2607,27 +2760,64 @@ def api_update_server_ssh_config(server_id):
         ssh_key_id: int or null (to use a registered key)
         ssh_password: string or null (for password-based auth)
     """
+    error = credential_mutation_error()
+    if error:
+        return jsonify({'error': error}), 409
     server = Server.query.get_or_404(server_id)
-    data = request.json or {}
-    
-    if 'ssh_user' in data:
-        server.ssh_user = data['ssh_user'] or 'root'
-    if 'ssh_port' in data:
-        server.ssh_port = int(data['ssh_port']) if data['ssh_port'] else 22
-    if 'ssh_key_id' in data:
-        key_id = data['ssh_key_id']
-        if key_id:
-            key = SSHKey.query.get(key_id)
-            if not key:
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON object required'}), 400
+    try:
+        ssh_user = validate_credential_username(data['ssh_user'], 'SSH') if 'ssh_user' in data else server.ssh_user
+        ssh_port = validate_port(data['ssh_port'], 22) if 'ssh_port' in data else server.ssh_port
+        ssh_password = server.ssh_password
+        if 'ssh_password' in data:
+            ssh_password = data['ssh_password']
+            if ssh_password is not None:
+                validate_credential_password(ssh_password, 500, 'SSH')
+        key_id = server.ssh_key_id
+        if 'ssh_key_id' in data:
+            key_id = data['ssh_key_id'] or None
+            if key_id and not SSHKey.query.get(key_id):
                 return jsonify({'error': 'SSH key not found'}), 404
-            server.ssh_key_id = key_id
-        else:
-            server.ssh_key_id = None
-    if 'ssh_password' in data:
-        # Set or clear the password
-        server.ssh_password = data['ssh_password'] if data['ssh_password'] else None
-    
+        bmc_update = any(key in data for key in ('bmc_username', 'bmc_password', 'clear_bmc_credentials'))
+        bmc_username, bmc_password, bmc_managed = server.bmc_username, server.bmc_password, server.bmc_managed
+        secret = configured_inventory_secret()
+        # A browser password input is intentionally blank after load. Preserve
+        # an unchanged stored username/password pair when that blank is posted.
+        if (bmc_update and data.get('bmc_password') == ''
+                and data.get('bmc_username') == server.bmc_username
+                and not data.get('clear_bmc_credentials')):
+            bmc_update = False
+        if bmc_update:
+            if not server.bmc_ip:
+                return jsonify({'error': 'Bind a BMC before managing BMC credentials'}), 409
+            if not secret:
+                return jsonify({'error': 'IPMI credential transport key is not configured'}), 503
+            if data.get('clear_bmc_credentials'):
+                if data.get('bmc_username') or data.get('bmc_password'):
+                    return jsonify({'error': 'Clear BMC credentials cannot be combined with BMC fields'}), 400
+                bmc_username, bmc_password, bmc_managed = None, None, True
+            elif 'bmc_username' in data or 'bmc_password' in data:
+                candidate_user = data.get('bmc_username') or bmc_username
+                candidate_password = data.get('bmc_password')
+                if not candidate_user or not candidate_password:
+                    return jsonify({'error': 'BMC username and password are required together'}), 400
+                bmc_username = validate_credential_username(candidate_user, 'BMC')
+                bmc_password = encrypt_bmc_password(validate_credential_password(candidate_password, 100, 'BMC'), secret)
+                bmc_managed = True
+    except (CredentialCryptoError, ValueError) as error:
+        return jsonify({'error': str(error)}), 400
+    server.ssh_user, server.ssh_port, server.ssh_password, server.ssh_key_id = ssh_user, ssh_port, ssh_password, key_id
+    server.bmc_username, server.bmc_password, server.bmc_managed = bmc_username, bmc_password, bmc_managed
+    if key_id:
+        try:
+            _read_effective_private_key(server)
+        except ValueError as error:
+            return jsonify({'error': str(error)}), 400
+    outbox = enqueue_inventory_reconcile(server) if server.bmc_ip else None
     db.session.commit()
+    delivered = attempt_inventory_reconcile(outbox)
     
     return jsonify({
         'success': True,
@@ -2635,7 +2825,13 @@ def api_update_server_ssh_config(server_id):
         'ssh_user': server.ssh_user,
         'ssh_port': server.ssh_port,
         'ssh_key_id': server.ssh_key_id,
-        'has_password': bool(server.ssh_password)
+        'has_password': bool(server.ssh_password),
+        'bmc_managed': bool(server.bmc_managed),
+        'has_bmc_password': bool(server.bmc_password),
+        'inventory': inventory_outbox_state(server.inventory_server_id) if not outbox else {
+            'state': 'synchronized' if delivered else 'pending', 'revision': outbox.revision,
+            'retry_id': outbox.id if not delivered else None, 'error': outbox.last_error if not delivered else None,
+        },
     })
 
 
@@ -3168,6 +3364,15 @@ def _run_safe_migrations():
     if 'ssh_password' not in server_columns:
         app.logger.info("Migration: Adding ssh_password column to server table")
         db.session.execute(db.text('ALTER TABLE server ADD COLUMN ssh_password VARCHAR(500)'))
+        db.session.commit()
+    if 'bmc_username' not in server_columns:
+        db.session.execute(db.text('ALTER TABLE server ADD COLUMN bmc_username VARCHAR(50)'))
+        db.session.commit()
+    if 'bmc_password' not in server_columns:
+        db.session.execute(db.text('ALTER TABLE server ADD COLUMN bmc_password TEXT'))
+        db.session.commit()
+    if 'bmc_managed' not in server_columns:
+        db.session.execute(db.text('ALTER TABLE server ADD COLUMN bmc_managed BOOLEAN NOT NULL DEFAULT 0'))
         db.session.commit()
 
     if 'bmc_ip' not in server_columns:

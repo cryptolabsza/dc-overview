@@ -20,12 +20,20 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - GRAFANA_URL=http://grafana:3000
       - PROMETHEUS_URL=http://prometheus:9090
+{% if ipmi_enabled %}
+      - DC_IPMI_INVENTORY_SECRET_FILE=/run/secrets/dc-ipmi-inventory
+      - IPMI_INVENTORY_URL=http://ipmi-monitor:5000
+      - FLEET_CREDENTIAL_AUTHORITY={{ credential_authority }}
+{% endif %}
 {% if enable_proxy %}
       - APPLICATION_ROOT=/dc
 {% endif %}
     volumes:
       - dc_data:/data
       - ./prometheus_targets.json:/data/prometheus_targets.json
+{% if ipmi_enabled %}
+      - {{ inventory_secret_path }}:/run/secrets/dc-ipmi-inventory:ro
+{% endif %}
 {% if ssh_keys_dir %}
       - ./ssh_keys:/etc/dc-overview/ssh_keys:ro
 {% endif %}

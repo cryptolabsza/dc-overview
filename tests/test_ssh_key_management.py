@@ -192,10 +192,10 @@ class TestDeployKey:
 
 
 class TestSyncIPMI:
-    """POST /api/ssh-keys/<id>/sync-ipmi must push the key to IPMI Monitor."""
+    """The retired raw-key side channel must never transmit a private key."""
 
     @patch("dc_overview.app.http_requests.post")
-    def test_syncs_key_to_ipmi_monitor(self, mock_post, app, auth_headers):
+    def test_requires_revisioned_server_assignment_without_network_egress(self, mock_post, app, auth_headers):
         with app.app_context():
             tmpdir = tempfile.mkdtemp()
             key_path = os.path.join(tmpdir, "sync_key")
@@ -207,8 +207,6 @@ class TestSyncIPMI:
             db.session.commit()
             key_id = key.id
 
-        mock_post.return_value = MagicMock(status_code=201, json=lambda: {"id": 1})
-
         client = app.test_client()
         resp = client.post(
             f"/api/ssh-keys/{key_id}/sync-ipmi",
@@ -216,8 +214,18 @@ class TestSyncIPMI:
             headers=auth_headers,
         )
 
-        assert resp.status_code == 200
-        mock_post.assert_called_once()
-        call_data = json.loads(mock_post.call_args[1].get("data", "{}"))
-        assert call_data["name"] == "sync-test"
-        assert "PRIVATE KEY CONTENT" in call_data["key_content"]
+        assert resp.status_code == 409
+        assert "Assign this key to a server" in resp.get_json()["error"]
+        mock_post.assert_not_called()
+
+
+def test_assigned_key_cannot_be_deleted_outside_revisioned_server_management(app, auth_headers):
+    with app.app_context():
+        key = SSHKey(name='assigned-key', key_path='/tmp/assigned-key')
+        db.session.add(key); db.session.flush()
+        db.session.add(Server(name='key-server', server_ip='10.0.0.10', ssh_key_id=key.id))
+        db.session.commit()
+        key_id = key.id
+    response = app.test_client().delete(f'/api/ssh-keys/{key_id}', headers=auth_headers)
+    assert response.status_code == 409
+    assert 'Assign a replacement' in response.get_json()['error']
