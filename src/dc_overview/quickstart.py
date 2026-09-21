@@ -38,6 +38,11 @@ from .exporters import (
     build_dc_exporter_remote_command,
 )
 from .grafana_alerts import install_grafana_alerts
+from .fleet_manager import (
+    inspect_ipmi_monitor,
+    ipmi_transport_is_wired,
+    prepare_inventory_credential_transport,
+)
 
 console = Console()
 
@@ -673,6 +678,8 @@ def _render_quickstart_environment(
     secret_key: str,
     grafana_password: str,
     alert_receiver: Optional[str] = None,
+    inventory_secret_path: Optional[str] = None,
+    credential_authority: Optional[str] = None,
 ) -> str:
     """Render quickstart settings, including the reusable alert receiver."""
     content = (
@@ -685,6 +692,8 @@ def _render_quickstart_environment(
             "DC_OVERVIEW_GRAFANA_ALERT_RECEIVER="
             f"{json.dumps(alert_receiver)}\n"
         )
+    if inventory_secret_path and credential_authority:
+        content += f"FLEET_CREDENTIAL_AUTHORITY={credential_authority}\n"
     return content
 
 
@@ -731,6 +740,22 @@ def setup_master_docker():
             if len(imported_servers) > 10:
                 console.print(f"  ... and {len(imported_servers) - 10} more")
             console.print()
+
+    inventory_secret_path = None
+    credential_authority = None
+    if ipmi_enabled:
+        existing_ipmi = inspect_ipmi_monitor()
+        inventory_secret_path, credential_authority = prepare_inventory_credential_transport(
+            config_dir,
+            existing_ipmi=existing_ipmi,
+        )
+        if not ipmi_transport_is_wired(
+            existing_ipmi, inventory_secret_path, credential_authority
+        ):
+            raise RuntimeError(
+                "Existing IPMI Monitor is not wired for DC inventory credentials. "
+                "Run the Fleet setup to recreate it with the shared secret before quickstart."
+            )
     
     # If proxy already running, skip proxy setup
     if existing_proxy and existing_proxy.get("running"):
@@ -860,6 +885,8 @@ def setup_master_docker():
         secret_key,
         grafana_pass,
         alert_receiver,
+        str(inventory_secret_path) if inventory_secret_path else None,
+        credential_authority,
     )
     (config_dir / ".env").write_text(env_content)
     os.chmod(config_dir / ".env", 0o600)
@@ -885,6 +912,8 @@ def setup_master_docker():
             use_letsencrypt=use_letsencrypt,
             external_port=external_port,
             ipmi_enabled=ipmi_enabled,
+            inventory_secret_path=inventory_secret_path,
+            credential_authority=credential_authority,
             vast_enabled=False,
             ssh_keys_dir=True if (config_dir / "ssh_keys").exists() else False
         )
@@ -948,7 +977,13 @@ def setup_master_docker():
     except Exception as e:
         console.print(f"[yellow]⚠[/yellow] Template error: {e}, using fallback")
         # Fallback to basic compose file
-        compose_content = generate_basic_compose(dc_port, grafana_pass, setup_proxy)
+        compose_content = generate_basic_compose(
+            dc_port,
+            grafana_pass,
+            setup_proxy,
+            inventory_secret_path=inventory_secret_path,
+            credential_authority=credential_authority,
+        )
         (config_dir / "docker-compose.yml").write_text(compose_content)
     
     # Alert files are required monitoring state. Abort before starting Docker if
@@ -1188,7 +1223,14 @@ def _set_grafana_home_dashboard(grafana_pass: str, dashboard_uid: str):
         console.print(f"[dim]Note: Could not set home dashboard: {str(e)[:40]}[/dim]")
 
 
-def generate_basic_compose(dc_port: int, grafana_pass: str, enable_proxy: bool) -> str:
+def generate_basic_compose(
+    dc_port: int,
+    grafana_pass: str,
+    enable_proxy: bool,
+    *,
+    inventory_secret_path: Optional[Path] = None,
+    credential_authority: Optional[str] = None,
+) -> str:
     """Generate basic docker-compose.yml without templates."""
     tag = 'latest'
     return f"""services:
@@ -1203,9 +1245,12 @@ def generate_basic_compose(dc_port: int, grafana_pass: str, enable_proxy: bool) 
       - SECRET_KEY=${{SECRET_KEY}}
       - GRAFANA_URL=http://grafana:3000
       - PROMETHEUS_URL=http://prometheus:9090
-    volumes:
+""" + (f"""      - DC_IPMI_INVENTORY_SECRET_FILE=/run/secrets/dc-ipmi-inventory
+      - IPMI_INVENTORY_URL=http://ipmi-monitor:5000
+      - FLEET_CREDENTIAL_AUTHORITY={credential_authority}
+""" if inventory_secret_path and credential_authority else "") + f"""    volumes:
       - dc_data:/data
-    networks:
+""" + (f"      - {inventory_secret_path}:/run/secrets/dc-ipmi-inventory:ro\n" if inventory_secret_path else "") + """    networks:
       - cryptolabs
 
   prometheus:

@@ -1,5 +1,7 @@
 """Durable DC-to-IPMI inventory reconciliation client."""
 
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -55,6 +57,15 @@ def inventory_delivery_is_configured():
     return bool(configured_inventory_secret() and configured_inventory_url())
 
 
+def _canonical_json(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _request_headers(secret, payload):
+    signature = hmac.new(secret.encode("utf-8"), _canonical_json(payload), hashlib.sha256).hexdigest()
+    return {"Authorization": f"DC-HMAC {signature}"}
+
+
 def deliver_inventory_outbox(entry):
     """Deliver a persisted desired state and accept only an exact receiver acknowledgment."""
     secret = configured_inventory_secret()
@@ -65,11 +76,17 @@ def deliver_inventory_outbox(entry):
         return False
 
     payload = json.loads(entry.payload)
+    if payload.pop("credential_pending", False):
+        entry.last_error = "IPMI credential bundle is pending a configured transport key"
+        entry.attempts += 1
+        return False
+    response = None
+    response_body = None
     try:
         response = requests.post(
             url,
             json=payload,
-            headers={"Authorization": f"Bearer {secret}"},
+            headers=_request_headers(secret, payload),
             timeout=5,
             allow_redirects=False,
         )
@@ -81,7 +98,23 @@ def deliver_inventory_outbox(entry):
     expected = {key: payload[key] for key in ("source_id", "server_id", "revision", "name", "server_ip", "bmc_ip")}
     expected["status"] = "deprecated" if payload["operation"] == "retire" else "active"
     expected["enabled"] = payload["operation"] != "retire"
-    if isinstance(accepted, dict) and all(accepted.get(key) == value for key, value in expected.items()):
+    credential_acknowledged = True
+    bundle = payload.get("credential_bundle")
+    if bundle is not None:
+        digest = hashlib.sha256(bundle.encode("utf-8")).hexdigest()
+        signature = getattr(response, "headers", {}).get("X-DC-Response-Signature", "")
+        if not isinstance(signature, str):
+            signature = ""
+        canonical_response = _canonical_json(response_body) if isinstance(response_body, dict) else b""
+        expected_signature = hmac.new(secret.encode("utf-8"), canonical_response, hashlib.sha256).hexdigest()
+        credential_acknowledged = (
+            isinstance(response_body, dict)
+            and hmac.compare_digest(signature, expected_signature)
+            and response_body.get("credential_revision") == payload["revision"]
+            and hmac.compare_digest(str(response_body.get("credential_digest", "")), digest)
+        )
+    if (isinstance(accepted, dict) and all(accepted.get(key) == value for key, value in expected.items())
+            and credential_acknowledged):
         entry.delivered = True
         entry.last_error = None
         return True

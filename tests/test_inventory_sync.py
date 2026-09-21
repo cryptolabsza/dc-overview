@@ -1,6 +1,9 @@
 """Regression coverage for DC's durable IPMI inventory sender."""
 
 from unittest.mock import Mock, patch
+import hashlib
+import hmac
+import json
 from types import SimpleNamespace
 import os
 import sqlite3
@@ -25,7 +28,18 @@ def _acknowledgment(payload):
     }
     accepted["status"] = "deprecated" if payload["operation"] == "retire" else "active"
     accepted["enabled"] = payload["operation"] != "retire"
-    return Mock(ok=True, json=lambda: {"accepted": accepted})
+    body = {"accepted": accepted}
+    if "credential_bundle" in payload:
+        body.update({
+            "credential_revision": payload["revision"],
+            "credential_digest": hashlib.sha256(payload["credential_bundle"].encode()).hexdigest(),
+        })
+    signature = hmac.new(
+        b"test-inventory-secret",
+        json.dumps(body, sort_keys=True, separators=(",", ":")).encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    return Mock(ok=True, headers={"X-DC-Response-Signature": signature}, json=lambda: body)
 
 
 def test_add_server_persists_and_delivers_revisioned_inventory(app, client, auth_headers, monkeypatch, tmp_path):
@@ -45,7 +59,7 @@ def test_add_server_persists_and_delivers_revisioned_inventory(app, client, auth
     payload = post.call_args.kwargs["json"]
     assert payload["operation"] == "upsert"
     assert payload["revision"] == 1
-    assert post.call_args.kwargs["headers"] == {"Authorization": "Bearer test-inventory-secret"}
+    assert post.call_args.kwargs["headers"]["Authorization"].startswith("DC-HMAC ")
 
     from dc_overview.app import InventoryOutbox, Server, db
     with app.app_context():
