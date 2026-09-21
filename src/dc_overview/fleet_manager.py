@@ -12,6 +12,7 @@ import json
 import urllib.request
 import urllib.error
 import base64
+import secrets
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
@@ -96,6 +97,130 @@ DEFAULT_UFW_PORTS = {
     9100: "Node Exporter",
     9400: "DC Exporter",
 }
+
+INVENTORY_SECRET_FILENAME = "dc-ipmi-inventory"
+INVENTORY_SECRET_CONTAINER_PATH = "/run/secrets/dc-ipmi-inventory"
+INTERNAL_IPMI_INVENTORY_URL = "http://ipmi-monitor:5000"
+
+
+def inspect_ipmi_monitor() -> Optional[Dict[str, Any]]:
+    """Read the running IPMI container configuration without changing it."""
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "ipmi-monitor"], capture_output=True, text=True
+        )
+        inspected = json.loads(result.stdout) if result.returncode == 0 else []
+        return inspected[0] if isinstance(inspected, list) and inspected else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _environment_values(inspected: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    values: Dict[str, str] = {}
+    for item in (inspected or {}).get("Config", {}).get("Env", []) or []:
+        key, separator, value = item.partition("=")
+        if key and separator:
+            values[key] = value
+    return values
+
+
+def _ipmi_mount_specs(inspected: Optional[Dict[str, Any]]) -> List[str]:
+    """Normalize Docker inspect mount forms to safe ``docker run -v`` specs."""
+    specs: List[str] = []
+    destinations = set()
+    for binding in (inspected or {}).get("HostConfig", {}).get("Binds", []) or []:
+        parts = binding.split(":")
+        if len(parts) < 2:
+            raise RuntimeError(f"Unsupported existing IPMI mount: {binding}")
+        specs.append(binding)
+        destinations.add(parts[1])
+
+    mount_groups = [
+        (inspected or {}).get("HostConfig", {}).get("Mounts", []) or [],
+        (inspected or {}).get("Mounts", []) or [],
+    ]
+    for mounts in mount_groups:
+        for mount in mounts:
+            mount_type = mount.get("Type")
+            destination = mount.get("Destination") or mount.get("Target")
+            source = (
+                mount.get("Name")
+                if mount_type == "volume"
+                else mount.get("Source")
+            )
+            if mount_type not in {"bind", "volume"} or not destination or not source:
+                raise RuntimeError(
+                    f"Unsupported existing IPMI mount type: {mount_type or 'unknown'}"
+                )
+            if destination in destinations:
+                continue
+            read_only = mount.get("ReadOnly") is True or mount.get("RW") is False
+            specs.append(f"{source}:{destination}{':ro' if read_only else ''}")
+            destinations.add(destination)
+    return specs
+
+
+def ipmi_transport_is_wired(
+    inspected: Optional[Dict[str, Any]], secret_path: Path, authority: str
+) -> bool:
+    environment = _environment_values(inspected)
+    if environment.get("IPMI_INVENTORY_SECRET_FILE") != INVENTORY_SECRET_CONTAINER_PATH:
+        return False
+    if environment.get("FLEET_CREDENTIAL_AUTHORITY") != authority:
+        return False
+    expected = f"{secret_path}:{INVENTORY_SECRET_CONTAINER_PATH}:ro"
+    return expected in _ipmi_mount_specs(inspected)
+
+
+def prepare_inventory_credential_transport(
+    config_dir: Path,
+    *,
+    existing_ipmi: Optional[Dict[str, Any]] = None,
+) -> tuple[Path, str]:
+    """Create the shared transport secret once and select local or vault mode."""
+    secrets_dir = config_dir / "secrets"
+    secret_path = secrets_dir / INVENTORY_SECRET_FILENAME
+    for binding in _ipmi_mount_specs(existing_ipmi):
+        source, separator, remainder = binding.partition(":")
+        if separator and remainder.split(":", 1)[0] == INVENTORY_SECRET_CONTAINER_PATH:
+            secret_path = Path(source)
+            break
+    if secret_path.exists():
+        if not secret_path.is_file():
+            raise RuntimeError(f"Inventory credential secret is invalid: {secret_path}")
+        secret = secret_path.read_text(encoding="utf-8").strip()
+        if len(secret) < 32 or any(character.isspace() for character in secret):
+            raise RuntimeError(f"Inventory credential secret is invalid: {secret_path}")
+    else:
+        if secret_path.parent != secrets_dir:
+            raise RuntimeError(
+                f"Existing IPMI inventory secret mount is unavailable: {secret_path}"
+            )
+        secrets_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            descriptor = os.open(
+                secret_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+            )
+        except FileExistsError:
+            return prepare_inventory_credential_transport(
+                config_dir, existing_ipmi=existing_ipmi
+            )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as secret_file:
+            secret_file.write(secrets.token_urlsafe(32))
+    if secret_path.parent == secrets_dir:
+        os.chmod(secret_path, 0o600)
+
+    existing_environment = _environment_values(existing_ipmi)
+    explicit_authority = existing_environment.get("FLEET_CREDENTIAL_AUTHORITY", "").strip()
+    if explicit_authority:
+        if explicit_authority not in {"local", "vault"}:
+            raise RuntimeError("FLEET_CREDENTIAL_AUTHORITY must be local or vault")
+        return secret_path, explicit_authority
+    if (secrets_dir / "credential-sources.json").exists() or existing_environment.get(
+        "IPMI_BMC_CREDENTIALS_FILE", ""
+    ).strip():
+        return secret_path, "vault"
+    return secret_path, "local"
 
 
 def _get_docker_compose_cmd() -> list:
@@ -198,6 +323,49 @@ class FleetManager:
         self.ssh = SSHManager(config.config_dir)
         self.prerequisites = PrerequisitesInstaller()
         self.deployment_errors = []  # Track non-fatal errors
+
+    def _inspect_ipmi_monitor(self) -> Optional[Dict[str, Any]]:
+        return inspect_ipmi_monitor()
+
+    def _prepare_inventory_credential_transport(
+        self,
+        existing_ipmi: Optional[Dict[str, Any]] = None,
+    ) -> tuple[Path, str]:
+        if existing_ipmi is None:
+            existing_ipmi = self._inspect_ipmi_monitor()
+        return prepare_inventory_credential_transport(
+            self.config.config_dir,
+            existing_ipmi=existing_ipmi,
+        )
+
+    @staticmethod
+    def _ipmi_transport_is_wired(
+        inspected: Dict[str, Any], secret_path: Path, authority: str
+    ) -> bool:
+        return ipmi_transport_is_wired(inspected, secret_path, authority)
+
+    @staticmethod
+    def _preserved_ipmi_bind_args(
+        inspected: Optional[Dict[str, Any]], managed_destinations: set[str]
+    ) -> List[str]:
+        args: List[str] = []
+        for binding in _ipmi_mount_specs(inspected):
+            parts = binding.split(":")
+            if len(parts) < 2 or parts[1] in managed_destinations:
+                continue
+            args.extend(["-v", binding])
+            managed_destinations.add(parts[1])
+        return args
+
+    @staticmethod
+    def _ipmi_bind_for_destination(
+        inspected: Optional[Dict[str, Any]], destination: str
+    ) -> Optional[str]:
+        for binding in _ipmi_mount_specs(inspected):
+            parts = binding.split(":")
+            if len(parts) >= 2 and parts[1] == destination:
+                return binding
+        return None
     
     def deploy(self) -> bool:
         """
@@ -669,6 +837,16 @@ datasources:
             root_url = f"https://{domain}:{external_port}/grafana/"
         else:
             root_url = f"%(protocol)s://{domain}/grafana/"
+
+        inventory_dc_environment = ""
+        inventory_dc_mount = ""
+        if self.config.components.ipmi_monitor:
+            secret_path, authority = self._prepare_inventory_credential_transport()
+            inventory_dc_environment = f"""      - DC_IPMI_INVENTORY_SECRET_FILE={INVENTORY_SECRET_CONTAINER_PATH}
+      - IPMI_INVENTORY_URL={INTERNAL_IPMI_INVENTORY_URL}
+      - FLEET_CREDENTIAL_AUTHORITY={authority}
+"""
+            inventory_dc_mount = f"      - {secret_path}:{INVENTORY_SECRET_CONTAINER_PATH}:ro\n"
         
         # When using existing proxy, don't expose ports (proxy handles routing)
         # and use cryptolabs network with static IPs
@@ -685,10 +863,10 @@ datasources:
       - GRAFANA_URL=http://grafana:3000
       - PROMETHEUS_URL=http://prometheus:9090
       - TRUSTED_PROXY_IPS=127.0.0.1,{PROXY_STATIC_IP}
-    volumes:
+{inventory_dc_environment}    volumes:
       - dc-data:/data
       - ./ssh_keys:/etc/dc-overview/ssh_keys:ro
-    networks:
+{inventory_dc_mount}    networks:
       cryptolabs:
         ipv4_address: {STATIC_IPS['dc-overview']}
 """ + ('''
@@ -1723,46 +1901,52 @@ echo "node_exporter installed successfully"
         """Deploy IPMI Monitor as a Docker container on the cryptolabs network."""
         console.print("\n[bold]Step 7: Installing IPMI Monitor[/bold]\n")
         
-        # Check if container is already running with the correct image tag
-        try:
-            result = subprocess.run(
-                ["docker", "inspect", "--format", "{{.Config.Image}}", "ipmi-monitor"],
-                capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                current_image = result.stdout.strip()
-                target_image = f"ghcr.io/cryptolabsza/ipmi-monitor:{self.config.image_tag}"
-                if current_image == target_image:
-                    console.print(f"[green]✓[/green] IPMI Monitor container already running (:{self.config.image_tag})")
-                    return
-                else:
-                    console.print(f"[dim]  IPMI Monitor running {current_image}, updating to {target_image}...[/dim]")
-                    subprocess.run(["docker", "stop", "ipmi-monitor"], capture_output=True)
-                    subprocess.run(["docker", "rm", "-f", "ipmi-monitor"], capture_output=True)
-        except Exception:
-            pass
+        existing_ipmi = self._inspect_ipmi_monitor()
+        secret_path, authority = self._prepare_inventory_credential_transport(existing_ipmi)
+        target_image = f"ghcr.io/cryptolabsza/ipmi-monitor:{self.config.image_tag}"
+        if existing_ipmi:
+            current_image = existing_ipmi.get("Config", {}).get("Image", "")
+            if current_image == target_image and self._ipmi_transport_is_wired(
+                existing_ipmi, secret_path, authority
+            ):
+                console.print(f"[green]✓[/green] IPMI Monitor container already has credential transport wiring")
+                return
+            console.print("[dim]  Recreating IPMI Monitor to apply credential transport wiring...[/dim]")
         
-        # Create config directory
+        existing_servers_mount = self._ipmi_bind_for_destination(
+            existing_ipmi, "/app/config/servers.yaml"
+        )
+        existing_data_mount = self._ipmi_bind_for_destination(existing_ipmi, "/app/data")
+
+        # Create config directory only when this installation owns the server config.
         ipmi_config_dir = Path("/etc/ipmi-monitor")
-        ipmi_config_dir.mkdir(parents=True, exist_ok=True)
+        servers_config_path = ipmi_config_dir / "servers.yaml"
+        preserve_server_config = bool(existing_servers_mount) or (
+            existing_ipmi is not None and servers_config_path.exists()
+        )
+        if not preserve_server_config:
+            ipmi_config_dir.mkdir(parents=True, exist_ok=True)
         
         # Build servers config for IPMI Monitor
         # Note: ipmi-monitor expects 'ipmi_user' and 'ipmi_pass' (not bmc_user/bmc_password)
         # Also: ipmi-monitor's parser expects each server to START with '- name:' 
         servers = []
-        for server in self.config.servers:
-            if server.bmc_ip:
-                bmc_creds = self.config.get_server_bmc_creds(server)
-                servers.append({
-                    "name": server.name,
-                    "bmc_ip": server.bmc_ip,
-                    "ipmi_user": bmc_creds.username,
-                    "ipmi_pass": bmc_creds.password,
-                    "server_ip": server.server_ip,
-                })
+        if not preserve_server_config:
+            for server in self.config.servers:
+                if server.bmc_ip:
+                    bmc_creds = self.config.get_server_bmc_creds(server)
+                    servers.append({
+                        "name": server.name,
+                        "bmc_ip": server.bmc_ip,
+                        "ipmi_user": bmc_creds.username,
+                        "ipmi_pass": bmc_creds.password,
+                        "server_ip": server.server_ip,
+                    })
         
         # Write servers.yaml config with specific format (name must be first key)
-        if servers:
+        if preserve_server_config:
+            servers_mount = existing_servers_mount or f"{servers_config_path}:/app/config/servers.yaml:ro"
+        elif servers:
             yaml_lines = ["servers:"]
             for srv in servers:
                 # Ensure 'name' is first as ipmi-monitor parser requires '- name:' to start
@@ -1771,13 +1955,17 @@ echo "node_exporter installed successfully"
                 yaml_lines.append(f"    ipmi_user: {srv['ipmi_user']}")
                 yaml_lines.append(f"    ipmi_pass: {srv['ipmi_pass']}")
                 yaml_lines.append(f"    server_ip: {srv['server_ip']}")
-            with open(ipmi_config_dir / "servers.yaml", "w") as f:
+            with open(servers_config_path, "w") as f:
                 f.write("\n".join(yaml_lines) + "\n")
-            os.chmod(ipmi_config_dir / "servers.yaml", 0o600)
+            os.chmod(servers_config_path, 0o600)
+            servers_mount = f"{servers_config_path}:/app/config/servers.yaml:ro"
         else:
             # Create empty servers file so container starts
-            with open(ipmi_config_dir / "servers.yaml", "w") as f:
+            with open(servers_config_path, "w") as f:
                 yaml.dump({"servers": []}, f)
+            servers_mount = f"{servers_config_path}:/app/config/servers.yaml:ro"
+
+        data_mount = existing_data_mount or "ipmi-monitor-data:/app/data"
         
         # Ensure cryptolabs network exists with correct subnet
         _ensure_docker_network()
@@ -1807,6 +1995,8 @@ echo "node_exporter installed successfully"
             "-e", f"ADMIN_PASS={admin_pass}",
             "-e", f"SECRET_KEY={os.urandom(32).hex()}",
             "-e", "POLL_INTERVAL=300",
+            "-e", f"IPMI_INVENTORY_SECRET_FILE={INVENTORY_SECRET_CONTAINER_PATH}",
+            "-e", f"FLEET_CREDENTIAL_AUTHORITY={authority}",
         ]
         
         # Add default BMC credentials if configured
@@ -1848,6 +2038,10 @@ echo "node_exporter installed successfully"
         env_vars.extend([
             "-e", f"TRUSTED_PROXY_IPS=127.0.0.1,{PROXY_STATIC_IP}",
         ])
+
+        for key, value in _environment_values(existing_ipmi).items():
+            if key not in {"IPMI_INVENTORY_SECRET_FILE", "FLEET_CREDENTIAL_AUTHORITY"}:
+                env_vars.extend(["-e", f"{key}={value}"])
         
         # Prepare SSH keys mount if available
         ssh_keys_dir = self.config.config_dir / "ssh_keys"
@@ -1855,6 +2049,15 @@ echo "node_exporter installed successfully"
         if ssh_keys_dir.exists() and any(ssh_keys_dir.iterdir()):
             ssh_keys_mount = ["-v", f"{ssh_keys_dir}:/app/ssh_keys:ro"]
             console.print("[dim]  Mounting shared SSH keys for ipmi-monitor[/dim]")
+
+        managed_destinations = {
+            "/app/data",
+            "/app/config/servers.yaml",
+            INVENTORY_SECRET_CONTAINER_PATH,
+        }
+        if ssh_keys_mount:
+            managed_destinations.add("/app/ssh_keys")
+        preserved_mounts = self._preserved_ipmi_bind_args(existing_ipmi, managed_destinations)
         
         # Run container on cryptolabs network with static IP for security
         docker_cmd = [
@@ -1863,9 +2066,10 @@ echo "node_exporter installed successfully"
             "--restart", "unless-stopped",
             "--network", DOCKER_NETWORK_NAME,
             "--ip", STATIC_IPS["ipmi-monitor"],
-            "-v", "ipmi-monitor-data:/app/data",
-            "-v", f"{ipmi_config_dir}/servers.yaml:/app/config/servers.yaml:ro",
-        ] + ssh_keys_mount + (
+            "-v", data_mount,
+            "-v", servers_mount,
+            "-v", f"{secret_path}:{INVENTORY_SECRET_CONTAINER_PATH}:ro",
+        ] + ssh_keys_mount + preserved_mounts + (
             ["--label", "com.centurylinklabs.watchtower.enable=true"] if getattr(self.config, 'enable_watchtower_all', False) else []
         ) + env_vars + [
             f"ghcr.io/cryptolabsza/ipmi-monitor:{self.config.image_tag}"
@@ -2932,6 +3136,15 @@ echo "[+] Installation complete"
             pass
         
         watchdog_key = self.config.watchdog.api_key or ""
+        inventory_args = []
+        if self.config.components.ipmi_monitor:
+            secret_path, authority = self._prepare_inventory_credential_transport()
+            inventory_args = [
+                "-e", f"DC_IPMI_INVENTORY_SECRET_FILE={INVENTORY_SECRET_CONTAINER_PATH}",
+                "-e", f"IPMI_INVENTORY_URL={INTERNAL_IPMI_INVENTORY_URL}",
+                "-e", f"FLEET_CREDENTIAL_AUTHORITY={authority}",
+                "-v", f"{secret_path}:{INVENTORY_SECRET_CONTAINER_PATH}:ro",
+            ]
         cmd = [
             "docker", "run", "-d",
             "--name", "dc-overview",
@@ -2947,6 +3160,7 @@ echo "[+] Installation complete"
             "-v", "dc-overview-data:/data",
             "-v", "fleet-auth-data:/data/auth",  # Shared with proxy for SSO API keys
             "-v", f"{self.config.config_dir}:/etc/dc-overview:ro",
+        ] + inventory_args + [
             "--health-cmd", "curl -f http://127.0.0.1:5001/api/health || exit 1",
             "--health-interval", "10s",
             "--health-timeout", "5s",

@@ -1015,9 +1015,16 @@
             container.innerHTML = `<p style="color: var(--accent-red);">Failed to load SSH config: ${e.message}</p>`;
         }
     }
+
+    function escapeHtmlAttribute(value) {
+        return String(value || '').replace(/[&<>"']/g, character => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        })[character]);
+    }
     
     function renderSSHConfig(data) {
-        const canWrite = userPermissions.can_write;
+        const localAuthority = data.credential_authority === 'local';
+        const canWrite = userPermissions.can_write && localAuthority;
         const container = document.getElementById('sshConfigContent');
         
         let keyOptions = '<option value="">Default (fleet key)</option>';
@@ -1048,12 +1055,12 @@
         
         <div style="border-top: 1px solid var(--border-color); padding-top: 15px;">
             <h3 style="margin-bottom: 12px;">Connection Settings</h3>
-            ${!canWrite ? '<p style="color: var(--accent-yellow); font-size: 12px; margin-bottom: 10px;">Read-only mode: You cannot modify SSH settings.</p>' : ''}
+            ${!canWrite ? `<p style="color: var(--accent-yellow); font-size: 12px; margin-bottom: 10px;">${localAuthority ? 'Read-only mode: You cannot modify SSH settings.' : 'Credentials are vault-managed and read-only here.'}</p>` : ''}
             
             <div class="ssh-config-group">
                 <div class="form-group">
                     <label>SSH User</label>
-                    <input type="text" id="sshConfigUser" value="${data.ssh_user || 'root'}" ${canWrite ? '' : 'disabled'}>
+                    <input type="text" id="sshConfigUser" value="${escapeHtmlAttribute(data.ssh_user || 'root')}" ${canWrite ? '' : 'disabled'}>
                 </div>
                 <div class="form-group">
                     <label>SSH Port</label>
@@ -1078,11 +1085,25 @@
             <p style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
                 If both a key and password are configured, key-based auth is tried first. Password uses <code>sshpass</code> on the server.
             </p>
+
+            <h3 style="margin-bottom: 12px; margin-top: 20px;">BMC Credentials</h3>
+            <p style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Authority: ${data.credential_authority || 'unknown'} · ${data.inventory?.state || 'not configured'}.</p>
+            <div class="ssh-config-group">
+                <div class="form-group">
+                    <label>BMC User</label>
+                    <input type="text" id="bmcConfigUser" value="${escapeHtmlAttribute(data.bmc_username)}" placeholder="Not configured" ${canWrite ? '' : 'disabled'}>
+                </div>
+                <div class="form-group">
+                    <label>BMC Password</label>
+                    <input type="password" id="bmcConfigPassword" placeholder="${data.has_bmc_password ? '••••••••' : 'Not configured'}" ${canWrite ? '' : 'disabled'}>
+                </div>
+            </div>
             
             ${canWrite ? `
             <div style="margin-top: 20px; display: flex; gap: 10px;">
                 <button class="btn btn-primary" onclick="saveSSHConfig()">Save SSH Config</button>
                 ${data.has_password ? '<button class="btn btn-danger btn-sm" onclick="clearSSHPassword()">Clear Password</button>' : ''}
+                ${data.bmc_managed ? '<button class="btn btn-danger btn-sm" onclick="clearBmcCredentials()">Clear BMC Credentials</button>' : ''}
             </div>
             ` : ''}
         </div>
@@ -1126,6 +1147,12 @@
         const passwordField = document.getElementById('sshConfigPassword');
         if (passwordField.value && passwordField.value !== '') {
             data.ssh_password = passwordField.value;
+        }
+        const bmcUser = document.getElementById('bmcConfigUser');
+        const bmcPassword = document.getElementById('bmcConfigPassword');
+        if (bmcPassword.value || bmcUser.value !== (data.bmc_username || '')) {
+            data.bmc_username = bmcUser.value;
+            data.bmc_password = bmcPassword.value;
         }
         
         try {
@@ -1172,6 +1199,19 @@
         } catch (e) {
             alert('Error: ' + e.message);
         }
+    }
+
+    async function clearBmcCredentials() {
+        if (!confirm('Clear the propagated BMC credentials for this server?')) return;
+        try {
+            const response = await fetch(`${basePath}/api/servers/${currentServerId}/ssh-config`, {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({clear_bmc_credentials: true})
+            });
+            const result = await response.json();
+            if (result.success) loadSSHConfig(currentServerId);
+            else alert('Failed to clear BMC credentials: ' + (result.error || 'Unknown error'));
+        } catch (e) { alert('Error: ' + e.message); }
     }
     
     function renderExporterManagement(data) {
