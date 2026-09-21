@@ -17,8 +17,9 @@ ENV BUILD_TIME=${BUILD_TIME}
 
 WORKDIR /app
 
-# Copy exporter script
+# Copy exporter and durable health-state modules
 COPY runpod_exporter.py /app/
+COPY health_state.py /app/
 
 # No additional dependencies needed - uses stdlib only
 RUN chmod +x /app/runpod_exporter.py

@@ -90,6 +90,54 @@ API keys can be specified in two formats:
 | `runpod_account_machines_total` | Gauge | Total machines per account |
 | `runpod_account_gpus_total` | Gauge | Total GPUs per account |
 
+### Health alert contract
+
+The exporter also publishes a small health contract for Grafana managed alerts:
+
+| Metric | Scope | Meaning |
+|--------|-------|---------|
+| `runpod_api_poll_success{account="..."}` | Account | The most recent complete, valid RunPod inventory poll succeeded. It is emitted even when that account has zero machines. |
+| `runpod_api_last_success_timestamp_seconds{account="..."}` | Account | Unix time of the last complete, valid inventory. |
+| `runpod_health_state_persist_success` | Exporter service | The durable health-state file loaded or was last saved successfully. |
+| `runpod_health_state_schema_version` | Exporter service | The health-state metric contract version. Alert rules currently require version `1`. |
+| `runpod_machine_health_known{account,machine_id,hostname}` | Machine | A valid listing boolean has been committed for this observed provider record. |
+| `runpod_machine_present{account,machine_id,hostname}` | Machine | The observed provider record appeared in the most recent committed inventory. |
+
+When any required account or service metric is absent, Grafana raises one static
+**RunPod exporter health contract unavailable** alert for that account. A healthy
+account with zero machines does not fire it. The contract alert means monitoring
+is incomplete; it never implies a listing transition and does not trigger any
+listing action.
+
+The per-machine unknown rule only fires for an observed provider record that is
+both present and explicitly `health_known=0`. Its no-data state is `OK`, so a
+missing exporter contract cannot retain or fan out stale machine alerts. Listing,
+missing-inventory, and stale-observation rules retain their last confirmed state
+until a valid observation changes it.
+
+## Grafana managed alerts
+
+`grafana_alerts.py` builds the 12 established operational rules plus the
+service-level compatibility rule. It takes all deployment-specific values from
+the caller:
+
+```python
+from grafana_alerts import build_alert_rules
+
+rules = build_alert_rules(
+    account="provider-account",
+    folder_uid="grafana-folder-uid",
+    datasource_uid="prometheus-datasource-uid",
+    uid_prefix="provider-account-runpod",
+)
+```
+
+The default `uid_prefix="runpod"` preserves the existing RunPod rule UIDs.
+Use a distinct prefix per account when provisioning more than one account. The
+factory does not set notification routes or contact points; callers should merge
+each generated rule with its existing Grafana notification settings before a
+provisioning update.
+
 ### Labels
 
 Machine metrics include these labels:
