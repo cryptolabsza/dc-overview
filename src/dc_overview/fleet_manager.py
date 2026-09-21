@@ -209,6 +209,16 @@ def prepare_inventory_credential_transport(
             secret_file.write(secrets.token_urlsafe(32))
     if secret_path.parent == secrets_dir:
         os.chmod(secret_path, 0o600)
+        if os.geteuid() == 0:
+            os.chown(secret_path, 1000, -1)
+    elif os.geteuid() == 0:
+        secret_stat = secret_path.stat()
+        mode = secret_stat.st_mode & 0o777
+        if secret_stat.st_uid != 1000 or not mode & 0o400 or mode & 0o077:
+            raise RuntimeError(
+                "Existing IPMI inventory secret mount is unsafe for the DC container; "
+                "use a UID 1000 owner-readable, non-group/world-readable file"
+            )
 
     existing_environment = _environment_values(existing_ipmi)
     explicit_authority = existing_environment.get("FLEET_CREDENTIAL_AUTHORITY", "").strip()

@@ -1,6 +1,7 @@
 """Installer coverage for the shared DC/IPMI credential transport secret."""
 
 import stat
+from types import SimpleNamespace as Namespace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -38,6 +39,24 @@ def test_fleet_manager_creates_one_shared_local_secret_and_compose_wires_dc(tmp_
     assert f"{secret_path}:/run/secrets/dc-ipmi-inventory:ro" in compose
 
 
+def test_root_provisioning_assigns_canonical_secret_to_dc_container_uid(tmp_path, monkeypatch):
+    manager = FleetManager(_fleet_config(tmp_path))
+    chowns = []
+    monkeypatch.setattr("dc_overview.fleet_manager.os.geteuid", lambda: 0)
+    monkeypatch.setattr(
+        "dc_overview.fleet_manager.os.chown",
+        lambda path, uid, gid: chowns.append((Path(path), uid, gid)),
+    )
+
+    secret_path, _ = manager._prepare_inventory_credential_transport()
+    secret = secret_path.read_text(encoding="utf-8")
+    manager._prepare_inventory_credential_transport()
+
+    assert stat.S_IMODE(secret_path.stat().st_mode) == 0o600
+    assert secret_path.read_text(encoding="utf-8") == secret
+    assert chowns == [(secret_path, 1000, -1), (secret_path, 1000, -1)]
+
+
 def test_fleet_manager_preserves_vault_authority_from_manifest(tmp_path):
     secrets_dir = tmp_path / "secrets"
     secrets_dir.mkdir()
@@ -72,6 +91,66 @@ def test_existing_noncanonical_ipmi_secret_mount_is_preserved(tmp_path):
     assert secret_path == existing_secret
     assert authority == "local"
     assert not (tmp_path / "secrets" / "dc-ipmi-inventory").exists()
+
+
+@pytest.mark.parametrize("owner, mode", [(0, 0o600), (1000, 0o640)])
+def test_root_provisioning_rejects_unsafe_custom_inventory_secret(
+    tmp_path, monkeypatch, owner, mode
+):
+    custom_secret = tmp_path / "custom-inventory-secret"
+    custom_secret.write_text("a" * 32, encoding="utf-8")
+    manager = FleetManager(_fleet_config(tmp_path))
+    import dc_overview.fleet_manager as fleet_manager
+
+    real_stat = fleet_manager.os.stat
+
+    def custom_stat(path, *args, **kwargs):
+        current = real_stat(path, *args, **kwargs)
+        if Path(path) == custom_secret:
+            return Namespace(st_mode=(current.st_mode & ~0o777) | mode, st_uid=owner)
+        return current
+
+    monkeypatch.setattr(fleet_manager.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(fleet_manager.os, "stat", custom_stat)
+
+    with pytest.raises(RuntimeError, match="unsafe"):
+        manager._prepare_inventory_credential_transport(
+            {"HostConfig": {"Binds": [f"{custom_secret}:/run/secrets/dc-ipmi-inventory:ro"]}}
+        )
+
+
+def test_root_provisioning_preserves_safe_custom_inventory_secret_without_mutation(
+    tmp_path, monkeypatch
+):
+    custom_secret = tmp_path / "custom-inventory-secret"
+    custom_secret.write_text("b" * 32, encoding="utf-8")
+    manager = FleetManager(_fleet_config(tmp_path))
+    import dc_overview.fleet_manager as fleet_manager
+
+    real_stat = fleet_manager.os.stat
+    chmod_calls = []
+    chown_calls = []
+
+    def custom_stat(path, *args, **kwargs):
+        current = real_stat(path, *args, **kwargs)
+        if Path(path) == custom_secret:
+            return Namespace(st_mode=(current.st_mode & ~0o777) | 0o400, st_uid=1000)
+        return current
+
+    monkeypatch.setattr(fleet_manager.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(fleet_manager.os, "stat", custom_stat)
+    monkeypatch.setattr(fleet_manager.os, "chmod", lambda *args: chmod_calls.append(args))
+    monkeypatch.setattr(fleet_manager.os, "chown", lambda *args: chown_calls.append(args))
+
+    secret_path, authority = manager._prepare_inventory_credential_transport(
+        {"HostConfig": {"Binds": [f"{custom_secret}:/run/secrets/dc-ipmi-inventory:ro"]}}
+    )
+
+    assert secret_path == custom_secret
+    assert authority == "local"
+    assert custom_secret.read_text(encoding="utf-8") == "b" * 32
+    assert chmod_calls == []
+    assert chown_calls == []
 
 
 def test_quickstart_template_wires_local_transport_when_ipmi_is_present(tmp_path):
