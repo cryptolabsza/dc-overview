@@ -35,6 +35,7 @@ from typing import Dict, List, Optional, Any
 import urllib.request
 import urllib.error
 import ssl
+from health_state import HEALTH_QUERY, HealthState
 
 # Configure logging
 logging.basicConfig(
@@ -106,7 +107,7 @@ class RunPodClient:
         self.api_key = api_key
         self.account_name = account_name
         
-    def query(self, query: str) -> Optional[Dict[str, Any]]:
+    def query(self, query: str, timeout: int = 30) -> Optional[Dict[str, Any]]:
         """Execute a GraphQL query"""
         headers = {
             "Content-Type": "application/json",
@@ -127,31 +128,35 @@ class RunPodClient:
         ctx = ssl.create_default_context()
         
         try:
-            with urllib.request.urlopen(req, context=ctx, timeout=30) as response:
+            with urllib.request.urlopen(req, context=ctx, timeout=timeout) as response:
                 result = json.loads(response.read().decode('utf-8'))
                 if 'errors' in result:
-                    logger.error(f"GraphQL errors for {self.account_name}: {result['errors']}")
+                    logger.error("GraphQL query failed for account %s", self.account_name)
                     return None
                 return result.get('data')
         except urllib.error.HTTPError as e:
-            logger.error(f"HTTP error for {self.account_name}: {e.code} - {e.reason}")
+            logger.error("HTTP query failed for account %s with status %s", self.account_name, e.code)
             return None
-        except urllib.error.URLError as e:
-            logger.error(f"URL error for {self.account_name}: {e.reason}")
+        except urllib.error.URLError:
+            logger.error("Network query failed for account %s", self.account_name)
             return None
-        except Exception as e:
-            logger.error(f"Error querying RunPod API for {self.account_name}: {e}")
+        except Exception:
+            logger.error("Unexpected query failure for account %s", self.account_name)
             return None
     
     def get_host_metrics(self) -> Optional[Dict[str, Any]]:
         """Get host metrics from RunPod API"""
         return self.query(HOST_METRICS_QUERY)
 
+    def get_machine_health(self) -> Optional[Dict[str, Any]]:
+        """Query operational state independently of income fields."""
+        return self.query(HEALTH_QUERY, timeout=8)
+
 
 class MetricsCollector:
     """Collects metrics from multiple RunPod accounts"""
     
-    def __init__(self, api_keys: List[tuple]):
+    def __init__(self, api_keys: List[tuple], health_state_path: Optional[str] = None):
         """
         Initialize collector with API keys
         
@@ -166,6 +171,13 @@ class MetricsCollector:
         self.last_update = 0
         self.cache_ttl = 60  # Cache for 60 seconds
         self.lock = threading.Lock()
+        self._account_metrics_cache = {}
+        self.health_state = HealthState(
+            [name for name, _ in api_keys],
+            path=health_state_path if health_state_path is not None else os.environ.get(
+                'RUNPOD_HEALTH_STATE_FILE', '/data/health-state.json'
+            ),
+        )
     
     def collect(self) -> str:
         """Collect metrics from all accounts and return Prometheus format"""
@@ -186,32 +198,41 @@ class MetricsCollector:
             for client in self.clients:
                 try:
                     data = client.get_host_metrics()
-                    if not data or 'myself' not in data:
+                    if not isinstance(data, dict) or not isinstance(data.get('myself'), dict):
                         logger.warning(f"No data for account {client.account_name}")
-                        continue
-                    
-                    myself = data['myself']
-                    account = client.account_name
-                    
-                    # Host balance
-                    if myself.get('hostBalance') is not None:
-                        all_metrics['host_balance'].append({
-                            'account': account,
-                            'value': myself['hostBalance']
-                        })
-                    
-                    # Machine metrics
-                    for machine in myself.get('machines', []):
-                        machine['_account'] = account
-                        all_metrics['machines'].append(machine)
-                    
-                    # Today's earnings
-                    for earning in myself.get('machineEarnings', []):
-                        earning['_account'] = account
-                        all_metrics['earnings_today'].append(earning)
+                    else:
+                        myself = data['myself']
+                        if not isinstance(myself.get('machines'), list):
+                            raise ValueError("Incomplete income inventory")
+                        account = client.account_name
+                        account_metrics = {'host_balance': [], 'machines': [], 'earnings_today': []}
+                        if myself.get('hostBalance') is not None:
+                            account_metrics['host_balance'].append({
+                                'account': account, 'value': myself['hostBalance']
+                            })
+                        for machine in myself['machines']:
+                            if not isinstance(machine, dict) or not machine.get('id'):
+                                raise ValueError("Invalid income machine record")
+                            account_metrics['machines'].append(dict(machine, _account=account))
+                        for earning in myself.get('machineEarnings', []) or []:
+                            account_metrics['earnings_today'].append(dict(earning, _account=account))
+                        self._account_metrics_cache[account] = account_metrics
                         
                 except Exception as e:
-                    logger.error(f"Error collecting metrics for {client.account_name}: {e}")
+                    logger.error("Error collecting income metrics for %s: %s", client.account_name, type(e).__name__)
+
+                try:
+                    health = client.get_machine_health()
+                    myself = health.get('myself') if isinstance(health, dict) else None
+                    machines = myself.get('machines') if isinstance(myself, dict) else None
+                    self.health_state.success(client.account_name, machines, time.time())
+                except Exception as e:
+                    logger.error("Error collecting health metrics for %s: %s", client.account_name, type(e).__name__)
+                    self.health_state.failure(client.account_name, time.time())
+
+                account_metrics = self._account_metrics_cache.get(client.account_name, {})
+                for key in all_metrics:
+                    all_metrics[key].extend(account_metrics.get(key, []))
             
             self.metrics_cache = all_metrics
             self.last_update = now
@@ -416,7 +437,9 @@ class MetricsCollector:
             lines.append(f'runpod_account_gpus_total{{account="{account}"}} {count}')
         
         lines.append("")
-        return "\n".join(lines)
+        return "\n".join(lines) + "\n" + self.health_state.format_metrics(
+            [client.account_name for client in self.clients]
+        )
     
     def _machine_labels(self, machine: Dict) -> str:
         """Generate Prometheus labels for a machine"""
@@ -516,55 +539,51 @@ class AccountManager:
     def add_account(self, name: str, key: str) -> Dict:
         """Add a new API key account."""
         with self.lock:
-            # Check for duplicate name
-            for client in self.collector.clients:
-                if client.account_name == name:
-                    return {'error': f'Account "{name}" already exists', 'status': 409}
-            
-            # Verify the key works
-            test_client = RunPodClient(key, name)
-            data = test_client.get_host_metrics()
-            if not data or 'myself' not in data:
-                return {'error': 'API key validation failed - could not connect to RunPod', 'status': 400}
-            
-            # Add to collector
-            self.collector.clients.append(test_client)
-            
-            # Invalidate metrics cache
-            self.collector.last_update = 0
-            self.collector.metrics_cache = {}
-            
-            # Save to file
-            self._save()
-            
-            balance = data['myself'].get('hostBalance', 0) or 0
-            machine_count = len(data['myself'].get('machines', []) or [])
-            logger.info(f"Added account '{name}' (balance: ${balance}, machines: {machine_count})")
-            return {
-                'name': name,
-                'balance': balance,
-                'machine_count': machine_count,
-                'status': 'connected'
-            }
+            with self.collector.lock:
+                for client in self.collector.clients:
+                    if client.account_name == name:
+                        return {'error': f'Account "{name}" already exists', 'status': 409}
+
+                test_client = RunPodClient(key, name)
+                data = test_client.get_host_metrics()
+                if not data or 'myself' not in data:
+                    return {'error': 'API key validation failed - could not connect to RunPod', 'status': 400}
+
+                if not self.collector.health_state.clear_account(name):
+                    return {'error': 'Could not reset prior account health state', 'status': 503}
+                self.collector._account_metrics_cache.pop(name, None)
+                self.collector.clients.append(test_client)
+                self.collector.last_update = 0
+                self.collector.metrics_cache = {}
+                self._save()
+
+                balance = data['myself'].get('hostBalance', 0) or 0
+                machine_count = len(data['myself'].get('machines', []) or [])
+                logger.info(f"Added account '{name}' (balance: ${balance}, machines: {machine_count})")
+                return {
+                    'name': name,
+                    'balance': balance,
+                    'machine_count': machine_count,
+                    'status': 'connected'
+                }
     
     def remove_account(self, name: str) -> Dict:
         """Remove an API key account."""
         with self.lock:
-            for i, client in enumerate(self.collector.clients):
-                if client.account_name == name:
-                    self.collector.clients.pop(i)
-                    
-                    # Invalidate metrics cache
-                    self.collector.last_update = 0
-                    self.collector.metrics_cache = {}
-                    
-                    # Save to file
-                    self._save()
-                    
-                    logger.info(f"Removed account '{name}'")
-                    return {'success': True, 'name': name}
-            
-            return {'error': f'Account "{name}" not found', 'status': 404}
+            with self.collector.lock:
+                for i, client in enumerate(self.collector.clients):
+                    if client.account_name == name:
+                        if not self.collector.health_state.clear_account(name):
+                            return {'error': 'Could not remove persisted account health state', 'status': 503}
+                        self.collector.clients.pop(i)
+                        self.collector._account_metrics_cache.pop(name, None)
+                        self.collector.last_update = 0
+                        self.collector.metrics_cache = {}
+                        self._save()
+                        logger.info(f"Removed account '{name}'")
+                        return {'success': True, 'name': name}
+
+                return {'error': f'Account "{name}" not found', 'status': 404}
     
     def test_account(self, name: str) -> Dict:
         """Test connectivity for a specific account."""
