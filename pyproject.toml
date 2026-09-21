@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dc-overview"
-version = "1.2.0"
+version = "1.2.1"
 description = "GPU Datacenter Monitoring Suite - Prometheus, Grafana & Exporters"
 readme = "README.md"
 license = {text = "MIT"}
@@ -42,7 +42,7 @@ dependencies = [
     "prometheus-client>=0.19.0",
     "werkzeug>=2.3.0",
     # Security
-    "flask-wtf>=1.2.0",
+    "flask-wtf>=1.2.1",
     "flask-limiter>=3.5.0",
     "cryptography>=42.0.0",
 ]

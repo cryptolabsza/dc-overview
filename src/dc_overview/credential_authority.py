@@ -13,7 +13,14 @@ def credential_authority():
     if explicit is not None:
         selected = explicit.strip().lower()
         return selected if selected in {"local", "vault"} else "invalid"
-    if _VAULT_MANIFEST.exists() or os.environ.get("IPMI_BMC_CREDENTIALS_FILE", "").strip():
+    if os.environ.get("IPMI_BMC_CREDENTIALS_FILE", "").strip():
+        return "vault"
+    try:
+        if _VAULT_MANIFEST.exists():
+            return "vault"
+    except OSError:
+        # An uninspectable protected marker is vault configuration, not a
+        # reason to silently enable local credential authority.
         return "vault"
     return "local"
 
