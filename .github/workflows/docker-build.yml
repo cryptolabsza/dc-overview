@@ -149,6 +149,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Verify RunPod exporter health and alert contract
+        run: |
+          TEST_VENV=$(mktemp -d /tmp/runpod-exporter-tests.XXXXXX)
+          cleanup() {
+            rm -rf "$TEST_VENV"
+          }
+          trap cleanup EXIT
+          python3 -m venv "$TEST_VENV"
+          "$TEST_VENV/bin/pip" install --disable-pip-version-check pytest
+          "$TEST_VENV/bin/python" -m pytest -q \
+            tests/test_runpod_health_state.py \
+            tests/test_runpod_exporter_health.py \
+            tests/test_runpod_alerts.py
+
       - name: Docker login
         if: github.event_name != 'pull_request'
         run: |
@@ -191,6 +205,27 @@ jobs:
             --build-arg GIT_BRANCH=${{ github.ref_name }} \
             --build-arg BUILD_TIME="$(date -u '+%Y-%m-%d %H:%M UTC')" \
             ./runpod-exporter
+
+      - name: Verify packaged RunPod health contract
+        run: |
+          PRIMARY_TAG="${{ steps.tags.outputs.tags }}"
+          PRIMARY_TAG="${PRIMARY_TAG%%,*}"
+          docker run --rm --network none --entrypoint python3 "$PRIMARY_TAG" -c '
+          import runpod_exporter
+          from health_state import HealthState
+
+          metrics = HealthState(path=None).format_metrics(["contract-check"])
+          required = (
+              "runpod_health_state_schema_version 1",
+              "runpod_health_state_persist_success 1",
+              "runpod_api_poll_success{account=\"contract-check\"} 0",
+              "# HELP runpod_machine_health_known",
+              "# HELP runpod_machine_present",
+              "# HELP runpod_machine_health_listed",
+          )
+          missing = [metric for metric in required if metric not in metrics]
+          assert not missing, f"RunPod health contract missing: {missing}"
+          '
 
       - name: Push RunPod Exporter
         if: github.event_name != 'pull_request'
