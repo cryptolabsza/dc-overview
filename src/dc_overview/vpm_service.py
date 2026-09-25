@@ -18,6 +18,12 @@ from typing import Callable, Dict, Optional
 
 _PINNED_IMAGE = re.compile(r"^[a-z0-9][a-z0-9./_-]*@sha256:[0-9a-f]{64}$")
 _LOCAL_IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+# The image this dc-overview release installs when the operator does not
+# supply one: a public, signed VPM release. The 64-zero digest below is a
+# placeholder the orchestrator replaces with the real released digest
+# immediately before merge; see test_default_vpm_image_is_a_real_release_pin.
+DEFAULT_VPM_IMAGE = "ghcr.io/cryptolabsza/vast-price-manager@sha256:" + "0" * 64
 _DNS_HOST = re.compile(
     r"(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$"
 )

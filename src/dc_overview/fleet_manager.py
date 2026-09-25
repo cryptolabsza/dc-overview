@@ -2346,18 +2346,24 @@ except Exception as e:
     # ============ Step 8: Vast.ai Exporter ============
 
     def _deploy_vast_price_manager(self):
-        """Install VPM only from an explicit immutable image candidate."""
-        from .vpm_service import VPMServiceManager, VPMServiceSpec
+        """Install VPM, defaulting to this release's pinned image when unset."""
+        from .vpm_service import DEFAULT_VPM_IMAGE, VPMServiceManager, VPMServiceSpec
 
         manager = VPMServiceManager(self.config.config_dir)
         with manager.operation_lock():
             vpm_config = self.config.vast_price_manager
-            if not vpm_config.image:
-                raise RuntimeError("VPM needs an explicit immutable image@sha256 pin before installation")
+            image = vpm_config.image
+            if not image:
+                image = DEFAULT_VPM_IMAGE
+                console.print(
+                    "[dim]No VPM image configured; using this release's pinned image: "
+                    f"{DEFAULT_VPM_IMAGE}[/dim]",
+                    soft_wrap=True,
+                )
             if not self.config.ssl.domain:
                 raise RuntimeError("VPM needs ssl.domain as its exact allowed public host")
             spec = VPMServiceSpec(
-                image=vpm_config.image,
+                image=image,
                 allowed_host=self.config.ssl.domain,
                 master_key_file=vpm_config.master_key_file,
                 expected_account_id=vpm_config.expected_account_id,

@@ -30,6 +30,7 @@ from .fleet_config import (
     BMCCredentials, AuthMethod, ComponentConfig, VastConfig,
     GrafanaConfig, IPMIMonitorConfig, SecurityConfig, WatchdogConfig, get_local_ip
 )
+from .vpm_service import DEFAULT_VPM_IMAGE, _LOCAL_IMAGE_ID, _PINNED_IMAGE
 
 # CryptoLabs WordPress API endpoints
 CRYPTOLABS_API_BASE = "https://www.cryptolabs.co.za/wp-json/cryptolabs/v1"
@@ -733,6 +734,7 @@ class FleetWizard:
                     style=custom_style,
                 ).ask() is True
                 if self.config.components.vast_price_manager:
+                    self.config.vast_price_manager.image = self._select_vpm_image()
                     self.config.vast_price_manager.expected_account_id = questionary.text(
                         "Expected Vast account ID (leave blank to install before account setup):",
                         default="",
@@ -785,7 +787,40 @@ class FleetWizard:
             self._collect_watchdog_credentials()
         
         console.print()
-    
+
+    def _select_vpm_image(self) -> str:
+        """Ask which VPM image to install: the release's default, or a custom pin.
+
+        Custom input reuses vpm_service's own compiled patterns so the wizard
+        can never drift from the validation VPMServiceSpec enforces.
+        """
+        choice = questionary.select(
+            "Vast Price Manager image:",
+            choices=[
+                questionary.Choice(
+                    f"Released image (recommended) [{DEFAULT_VPM_IMAGE}]",
+                    value="default",
+                ),
+                questionary.Choice(
+                    "Custom image@sha256 pin or local sha256 image ID",
+                    value="custom",
+                ),
+            ],
+            default="default",
+            style=custom_style,
+        ).ask()
+        if choice != "custom":
+            return DEFAULT_VPM_IMAGE
+        return questionary.text(
+            "VPM image (image@sha256:<64 hex> or sha256:<64 hex>):",
+            validate=lambda value: (
+                _PINNED_IMAGE.fullmatch(value) is not None
+                or _LOCAL_IMAGE_ID.fullmatch(value) is not None
+                or "Must be an immutable image@sha256 pin or a full local sha256 image ID"
+            ),
+            style=custom_style,
+        ).ask()
+
     def _collect_watchdog_credentials(self):
         """Collect DC Watchdog credentials and validate with WordPress API."""
         console.print("\n[bold]DC Watchdog - Uptime Monitoring[/bold]")
