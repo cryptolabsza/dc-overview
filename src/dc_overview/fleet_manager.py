@@ -2347,7 +2347,12 @@ except Exception as e:
 
     def _deploy_vast_price_manager(self):
         """Install VPM, defaulting to this release's pinned image when unset."""
-        from .vpm_service import DEFAULT_VPM_IMAGE, VPMServiceManager, VPMServiceSpec
+        from .vpm_service import (
+            DEFAULT_VPM_IMAGE,
+            VPMServiceManager,
+            VPMServiceSpec,
+            create_master_key_if_missing,
+        )
 
         manager = VPMServiceManager(self.config.config_dir)
         with manager.operation_lock():
@@ -2362,6 +2367,12 @@ except Exception as e:
                 )
             if not self.config.ssl.domain:
                 raise RuntimeError("VPM needs ssl.domain as its exact allowed public host")
+            if create_master_key_if_missing(vpm_config.master_key_file):
+                console.print(
+                    f"[dim]Created VPM master key at {vpm_config.master_key_file}; if it is "
+                    "lost, the Vast API key must be entered again in VPM's onboarding UI.[/dim]",
+                    soft_wrap=True,
+                )
             spec = VPMServiceSpec(
                 image=image,
                 allowed_host=self.config.ssl.domain,
