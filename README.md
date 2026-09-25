@@ -166,10 +166,14 @@ components:
   vast_price_manager: false # Optional secure pricing UI; no provider key is stored here
   runpod_exporter: false  # Set to true if using RunPod
 
-# Vast Price Manager (optional). The immutable image pin is supplied by the
-# approved release process. VPM uses the existing Fleet login; re-enter the
-# same Fleet password to confirm sensitive operations. The provider API key is
-# entered only in VPM's encrypted onboarding UI at /vast-pricing/ after installation.
+# Vast Price Manager (optional). `image: null` means "use the VPM image
+# pinned by this dc-overview release" -- the setup wizard offers this as the
+# recommended choice, and an unattended install falls back to it and prints
+# which pin it used. To override, set image to your own immutable
+# image@sha256 reference (or a full local sha256 image ID, see below) instead
+# of null; VPM uses the existing Fleet login, and re-enter the same Fleet
+# password to confirm sensitive operations. The provider API key is entered
+# only in VPM's encrypted onboarding UI at /vast-pricing/ after installation.
 # An approved image archive may be loaded before installation; VPM reuses only
 # the exact immutable image@sha256 reference and pulls that reference if absent.
 # A full local Docker image ID (sha256:<64 lowercase hex>) is also accepted for

@@ -10,14 +10,19 @@ import shutil
 import stat
 import subprocess
 import time
-from dataclasses import dataclass
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
+from cryptography.fernet import Fernet
 
 _PINNED_IMAGE = re.compile(r"^[a-z0-9][a-z0-9./_-]*@sha256:[0-9a-f]{64}$")
 _LOCAL_IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+# The image this dc-overview release installs when the operator does not
+# supply one: the public, cosign-signed VPM 0.3.0 release (tag v0.3.0).
+DEFAULT_VPM_IMAGE = "ghcr.io/cryptolabsza/vast-price-manager@sha256:5080eaf420f997b8943496a036c16153208fa2661cf6d25b45f89dc2a9e63984"
 _DNS_HOST = re.compile(
     r"(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$"
 )
@@ -128,6 +133,50 @@ print(json.dumps(result, separators=(",", ":")))
 '''
 
 _VPM_PAUSE_PROBE_ENV = frozenset({"VPM_DATA_DIR", "VPM_DATABASE_PATH"})
+
+
+def create_master_key_if_missing(master_key_file: str) -> bool:
+    """Create a Fernet VPM master key at ``master_key_file`` if none exists.
+
+    Used only on the first-install path (fleet_manager._deploy_vast_price_manager
+    -> VPMServiceManager.install); `vpm configure` and `vpm update` never call
+    this. An existing key is never overwritten or rewritten -- doing so would
+    make credentials already encrypted with it undecryptable -- and a lost
+    O_EXCL race (another process created the file first) is treated the same
+    as a pre-existing key.
+
+    The key is written with mode 0o400 and owned by UID/GID 999 so it
+    immediately satisfies VPMServiceManager._validate_master_key. The VPM
+    container reads it with `.read_bytes().strip()` before constructing a
+    Fernet instance, so a trailing newline would be tolerated, but none is
+    written here.
+
+    Returns True if this call created the key, False if a key already existed
+    (including the lost-race case).
+    """
+    path = Path(master_key_file)
+    if path.is_file():
+        return False
+
+    parent = path.parent
+    if not parent.is_dir():
+        parent.mkdir(parents=True, mode=0o700)
+        os.chmod(parent, 0o700)  # enforce exact mode regardless of umask
+
+    key = Fernet.generate_key()
+    try:
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o400)
+    except FileExistsError:
+        # Another process won the race; that key is now the existing one.
+        return False
+    try:
+        os.chmod(str(path), 0o400)  # enforce exact mode regardless of umask
+        os.write(fd, key)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.chown(str(path), 999, 999)
+    return True
 
 
 @dataclass(frozen=True)
