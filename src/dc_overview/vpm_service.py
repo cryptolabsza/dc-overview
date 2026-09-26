@@ -21,8 +21,8 @@ _PINNED_IMAGE = re.compile(r"^[a-z0-9][a-z0-9./_-]*@sha256:[0-9a-f]{64}$")
 _LOCAL_IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 # The image this dc-overview release installs when the operator does not
-# supply one: the public, cosign-signed VPM 0.3.0 release (tag v0.3.0).
-DEFAULT_VPM_IMAGE = "ghcr.io/cryptolabsza/vast-price-manager@sha256:5080eaf420f997b8943496a036c16153208fa2661cf6d25b45f89dc2a9e63984"
+# supply one: the public, cosign-signed VPM 0.3.2 release (tag v0.3.2).
+DEFAULT_VPM_IMAGE = "ghcr.io/cryptolabsza/vast-price-manager@sha256:b99d1c88723e0182ca297725219ed65e603ed3fa939d1d8caa61b1417940e927"
 _DNS_HOST = re.compile(
     r"(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$"
 )

@@ -14,7 +14,7 @@ Quick Start:
     sudo dc-overview setup
 """
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 __author__ = "CryptoLabs"
 __email__ = "info@cryptolabs.co.za"
 
