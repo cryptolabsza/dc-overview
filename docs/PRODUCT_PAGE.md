@@ -196,7 +196,7 @@ External uptime monitoring. Know when your datacenter goes offline before your c
 
 ## Support
 
-- **Discord**: [Join our community](https://discord.gg/cryptolabs)
+- **Discord**: [Join our community](https://discord.gg/7yeHdf5BuC)
 - **Email**: support@cryptolabs.co.za
 - **GitHub Issues**: [Report bugs](https://github.com/cryptolabsza/dc-overview/issues)
 

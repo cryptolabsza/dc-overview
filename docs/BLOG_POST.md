@@ -149,7 +149,7 @@ DC-Overview is **free and open source**.
 
 - **GitHub**: [github.com/cryptolabsza/dc-overview](https://github.com/cryptolabsza/dc-overview)
 - **Documentation**: Full setup guide in the README
-- **Support**: [Discord](https://discord.gg/cryptolabs) | support@cryptolabs.co.za
+- **Support**: [Discord](https://discord.gg/7yeHdf5BuC) | support@cryptolabs.co.za
 
 ### Related Tools
 
