@@ -193,3 +193,15 @@ def test_verification_status_mapping_is_explicit(exporter_module, verification, 
         assert math.isnan(actual)
     else:
         assert actual == expected
+
+
+@pytest.mark.parametrize("service_fee", [0, 0.25, 25])
+def test_host_earnings_are_not_adjusted_by_client_service_fee(exporter_module, service_fee):
+    collector = exporter_module.MetricsCollector([])
+    metrics = collector._format_metrics({
+        "accounts": [{"account": "test", "balance": 100, "credit": 5, "service_fee": service_fee}],
+        "machines": [{"_account": "test", "id": 1, "num_gpus": 0, "earn_hour": 26.3, "earn_day": 283.1}],
+    })
+    assert machine_sample(metrics, "vastai_machine_earn_hour") == 26.3
+    assert machine_sample(metrics, "vastai_machine_earn_day") == 283.1
+    assert machine_sample(metrics, "vastai_current_total") == 105
