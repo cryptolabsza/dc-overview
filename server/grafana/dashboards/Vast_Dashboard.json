@@ -473,7 +473,7 @@
         "type": "prometheus",
         "uid": "ffamzhijdn1fke"
       },
-      "description": "This shows how many of the GPUs are detected by the systems vs what each machine has registered on vast. ",
+      "description": "Detected GPUs on matching Vast hosts divided by their registered GPU counts. Each physical GPU UUID is counted once; unrelated hosts and duplicate scrape targets are excluded. Missing host telemetry lowers coverage; missing identities, ambiguous hostnames or zero registered GPUs are unavailable.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -492,10 +492,15 @@
               {
                 "color": "green",
                 "value": 100
+              },
+              {
+                "color": "red",
+                "value": 100.000001
               }
             ]
           },
-          "unit": "%"
+          "unit": "%",
+          "noValue": "Unavailable"
         },
         "overrides": []
       },
@@ -529,13 +534,14 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "count(gpu:utilization:percent{})/sum(vast_machine_gpu_name) * 100",
+          "expr": "100 * sum((count by (hostname) (count by (hostname, UUID) (label_replace(DCGM_FI_DEV_GPU_UTIL{Hostname!=\"\",UUID!=\"\",UUID!=\"VM-PASSTHROUGH\"}, \"hostname\", \"$1\", \"Hostname\", \"(.+)\")))) and on (hostname) (max by (hostname, machine_id) (vast_machine_num_gpus{hostname!=\"\"}))) / (sum(max by (hostname, machine_id) (vast_machine_num_gpus{hostname!=\"\"})) > 0) and on () (count(max by (hostname, machine_id) (vast_machine_num_gpus{hostname!=\"\"})) == count(count by (hostname) (max by (hostname, machine_id) (vast_machine_num_gpus{hostname!=\"\"})))) unless on () count((label_replace(DCGM_FI_DEV_GPU_UTIL{Hostname!=\"\",UUID=~\"(|VM-PASSTHROUGH)\"}, \"hostname\", \"$1\", \"Hostname\", \"(.+)\")) and on (hostname) (max by (hostname, machine_id) (vast_machine_num_gpus{hostname!=\"\"}))) and on () (count((count by (hostname, UUID) (label_replace(DCGM_FI_DEV_GPU_UTIL{Hostname!=\"\",UUID!=\"\",UUID!=\"VM-PASSTHROUGH\"}, \"hostname\", \"$1\", \"Hostname\", \"(.+)\"))) and on (hostname) (max by (hostname, machine_id) (vast_machine_num_gpus{hostname!=\"\"}))) == count(count by (UUID) ((count by (hostname, UUID) (label_replace(DCGM_FI_DEV_GPU_UTIL{Hostname!=\"\",UUID!=\"\",UUID!=\"VM-PASSTHROUGH\"}, \"hostname\", \"$1\", \"Hostname\", \"(.+)\"))) and on (hostname) (max by (hostname, machine_id) (vast_machine_num_gpus{hostname!=\"\"})))))",
           "legendFormat": "__auto",
-          "range": true,
-          "refId": "A"
+          "range": false,
+          "refId": "A",
+          "instant": true
         }
       ],
-      "title": "Actual vs Vast registred",
+      "title": "Actual vs Vast registered",
       "type": "gauge"
     },
     {
@@ -543,7 +549,7 @@
         "type": "prometheus",
         "uid": "ffamzhijdn1fke"
       },
-      "description": "Reported by vast api. ",
+      "description": "Vast-reported host earnings from the provider earn_hour field. No client surcharge is added or deducted. Reporting periods follow Vast; this is not a pending-balance growth estimate.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -631,7 +637,7 @@
           "refId": "A"
         }
       ],
-      "title": "Current Machine earnings per day",
+      "title": "Machine earnings / hour",
       "transformations": [
         {
           "filter": {
@@ -653,7 +659,7 @@
         "type": "prometheus",
         "uid": "ffamzhijdn1fke"
       },
-      "description": "Reported by vast for all machines",
+      "description": "Vast-reported host earnings from the provider earn_hour field. No client surcharge is added or deducted. Reporting periods follow Vast; this is not a pending-balance growth estimate.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -715,7 +721,7 @@
           "refId": "A"
         }
       ],
-      "title": "Reported Income per day",
+      "title": "Reported earnings / hour",
       "type": "stat"
     },
     {
@@ -723,7 +729,7 @@
         "type": "prometheus",
         "uid": "ffamzhijdn1fke"
       },
-      "description": "Based on incress of the pending balance over the laste hour",
+      "description": "Vast-reported host earnings from the provider earn_day field. No client surcharge is added or deducted. Reporting periods follow Vast; this is not a pending-balance growth estimate.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -779,13 +785,13 @@
             "uid": "ffamzhijdn1fke"
           },
           "editorMode": "code",
-          "expr": "deriv(vastai_current_total[1h]) * 3600",
+          "expr": "sum(vastai_machine_earn_day)",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Current Income per hour",
+      "title": "Reported earnings / day",
       "type": "stat"
     },
     {

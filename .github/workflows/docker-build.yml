@@ -30,6 +30,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Test Vast dashboards
+        env:
+          REQUIRE_PROMTOOL: "1"
+        run: |
+          set -euo pipefail
+          TEST_DIR=$(mktemp -d /tmp/vast-dashboard-tests.XXXXXX)
+          trap 'rm -rf "$TEST_DIR"' EXIT
+          ARCHIVE=prometheus-3.13.1.linux-amd64.tar.gz
+          curl --fail --location --retry 3 \
+            "https://github.com/prometheus/prometheus/releases/download/v3.13.1/$ARCHIVE" \
+            --output "$TEST_DIR/$ARCHIVE"
+          printf '%s  %s\n' \
+            962b812371aff838d152b6ff2d56fdb7a6396f5542f48ebf73421b9721f0d103 \
+            "$TEST_DIR/$ARCHIVE" | sha256sum --check -
+          tar -xzf "$TEST_DIR/$ARCHIVE" -C "$TEST_DIR" \
+            prometheus-3.13.1.linux-amd64/promtool
+          export PATH="$TEST_DIR/prometheus-3.13.1.linux-amd64:$PATH"
+          promtool --version
+          python3 -m venv "$TEST_DIR/venv"
+          "$TEST_DIR/venv/bin/pip" install --disable-pip-version-check pytest pyyaml
+          "$TEST_DIR/venv/bin/python" -m pytest -q \
+            tests/test_vast_dashboard_registration.py \
+            tests/test_vast_income_dashboard.py \
+            tests/test_vastai_exporter_metrics.py
+
       - name: Docker login
         if: github.event_name != 'pull_request'
         run: |
