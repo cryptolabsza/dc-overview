@@ -2751,7 +2751,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "",
+      "description": "GPU rental status per slot.\n\n**Legend:**\n- **U (Unlisted)** — GPU not listed on Vast.ai or no data available (gray)\n- **Idle** — Listed but not rented (no color)\n- **Rented (Bid)** — Rented via interruptible/bid pricing (blue)\n- **Rented (On-Demand)** — Rented via on-demand/dedicated pricing (green)\n- **Reserved** — Reserved/resident rental (orange)",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2873,7 +2873,6 @@
         "x": 0,
         "y": 40
       },
-      "description": "GPU rental status per slot.\n\n**Legend:**\n- **U (Unlisted)** — GPU not listed on Vast.ai or no data available (gray)\n- **Idle** — Listed but not rented (no color)\n- **Rented (Bid)** — Rented via interruptible/bid pricing (blue)\n- **Rented (On-Demand)** — Rented via on-demand/dedicated pricing (green)\n- **Reserved** — Reserved/resident rental (orange)",
       "id": 37,
       "options": {
         "cellHeight": "sm",
@@ -3303,6 +3302,156 @@
       "type": "timeseries"
     },
     {
+      "id": 43,
+      "title": "30-day machine occupancy",
+      "type": "table",
+      "description": "Occupancy % (observed data) counts on-demand + reserved GPUs, weighted by GPU capacity and time; bid contributes capacity but is excluded from occupied GPUs. The fixed trailing 30 days end at the dashboard evaluation time, independently of the selected range. 30-day data coverage % is valid 1-minute grid observations / 43,200, so partial history is visibly partial. Missing, unknown, invalid and zero-capacity snapshots are excluded; no valid history is unavailable, while known idle is 0%. A freshly registered machine with no valid history shows 0% coverage and unavailable occupancy. Each observation requires all four finite nonnegative states from the same scrape, with raw samples younger than 90 seconds (60-second scrape cadence plus 30-second grace). Identical replicas are deduplicated by account + machine ID before integration; conflicting fresh replica values are excluded conservatively. Coverage is sampled completeness, not proof of uninterrupted data between grid points. Machine shows account / stable machine ID; hostname renames do not split history. Unknown registered machines retain an explicit Unavailable occupancy cell even when all machines lack valid history; the display-only NaN sentinel never contributes to occupancy or coverage arithmetic.",
+      "gridPos": {
+        "x": 0,
+        "y": 48,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "decimals": 1,
+          "noValue": "Unavailable",
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "Unavailable",
+                  "index": 0
+                }
+              }
+            }
+          ]
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Machine (account / ID)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "string"
+              },
+              {
+                "id": "custom.width",
+                "value": 300
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "countRows": false,
+          "fields": ""
+        },
+        "sortBy": [
+          {
+            "displayName": "Machine (account / ID)",
+            "desc": false
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "editorMode": "code",
+          "expr": "label_join(((100 * sum_over_time((max by (account, machine_id) (((vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} >= 0 and vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} < +Inf) + (vastai_machine_gpu_rented_on_reserved >= 0 and vastai_machine_gpu_rented_on_reserved < +Inf)) and (((vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} >= 0 and vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} < +Inf) + (vastai_machine_gpu_rented_on_reserved >= 0 and vastai_machine_gpu_rented_on_reserved < +Inf) + (vastai_machine_gpu_rented_bid_demand >= 0 and vastai_machine_gpu_rented_bid_demand < +Inf) + (vastai_machine_gpu_idle >= 0 and vastai_machine_gpu_idle < +Inf)) > 0 and ((vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} >= 0 and vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} < +Inf) + (vastai_machine_gpu_rented_on_reserved >= 0 and vastai_machine_gpu_rented_on_reserved < +Inf) + (vastai_machine_gpu_rented_bid_demand >= 0 and vastai_machine_gpu_rented_bid_demand < +Inf) + (vastai_machine_gpu_idle >= 0 and vastai_machine_gpu_idle < +Inf)) < +Inf and (timestamp(vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"}) == timestamp(vastai_machine_gpu_rented_on_reserved)) and (timestamp(vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"}) == timestamp(vastai_machine_gpu_rented_bid_demand)) and (timestamp(vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"}) == timestamp(vastai_machine_gpu_idle)) and (timestamp(vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"}) > time() - 90))) unless on (account, machine_id) ((stddev by (account, machine_id) ((vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} >= 0 and vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} < +Inf) and (timestamp(vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"}) > time() - 90)) > 0) or (stddev by (account, machine_id) ((vastai_machine_gpu_rented_on_reserved >= 0 and vastai_machine_gpu_rented_on_reserved < +Inf) and (timestamp(vastai_machine_gpu_rented_on_reserved) > time() - 90)) > 0) or (stddev by (account, machine_id) ((vastai_machine_gpu_rented_bid_demand >= 0 and vastai_machine_gpu_rented_bid_demand < +Inf) and (timestamp(vastai_machine_gpu_rented_bid_demand) > time() - 90)) > 0) or (stddev by (account, machine_id) ((vastai_machine_gpu_idle >= 0 and vastai_machine_gpu_idle < +Inf) and (timestamp(vastai_machine_gpu_idle) > time() - 90)) > 0)))[30d:1m]) / sum_over_time((max by (account, machine_id) ((((vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} >= 0 and vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} < +Inf) + (vastai_machine_gpu_rented_on_reserved >= 0 and vastai_machine_gpu_rented_on_reserved < +Inf) + (vastai_machine_gpu_rented_bid_demand >= 0 and vastai_machine_gpu_rented_bid_demand < +Inf) + (vastai_machine_gpu_idle >= 0 and vastai_machine_gpu_idle < +Inf)) > 0 and ((vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} >= 0 and vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} < +Inf) + (vastai_machine_gpu_rented_on_reserved >= 0 and vastai_machine_gpu_rented_on_reserved < +Inf) + (vastai_machine_gpu_rented_bid_demand >= 0 and vastai_machine_gpu_rented_bid_demand < +Inf) + (vastai_machine_gpu_idle >= 0 and vastai_machine_gpu_idle < +Inf)) < +Inf and (timestamp(vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"}) == timestamp(vastai_machine_gpu_rented_on_reserved)) and (timestamp(vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"}) == timestamp(vastai_machine_gpu_rented_bid_demand)) and (timestamp(vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"}) == timestamp(vastai_machine_gpu_idle)) and (timestamp(vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"}) > time() - 90))) unless on (account, machine_id) ((stddev by (account, machine_id) ((vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} >= 0 and vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} < +Inf) and (timestamp(vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"}) > time() - 90)) > 0) or (stddev by (account, machine_id) ((vastai_machine_gpu_rented_on_reserved >= 0 and vastai_machine_gpu_rented_on_reserved < +Inf) and (timestamp(vastai_machine_gpu_rented_on_reserved) > time() - 90)) > 0) or (stddev by (account, machine_id) ((vastai_machine_gpu_rented_bid_demand >= 0 and vastai_machine_gpu_rented_bid_demand < +Inf) and (timestamp(vastai_machine_gpu_rented_bid_demand) > time() - 90)) > 0) or (stddev by (account, machine_id) ((vastai_machine_gpu_idle >= 0 and vastai_machine_gpu_idle < +Inf) and (timestamp(vastai_machine_gpu_idle) > time() - 90)) > 0)))[30d:1m])) or ((0 / 0) * max by (account, machine_id) (vast_machine_num_gpus{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} > 0 and vast_machine_num_gpus{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} < +Inf and (timestamp(vast_machine_num_gpus{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"}) > time() - 90)))), \"machine\", \" / \", \"account\", \"machine_id\")",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "legendFormat": "__auto",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "editorMode": "code",
+          "expr": "label_join(((100 * count_over_time((max by (account, machine_id) ((((vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} >= 0 and vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} < +Inf) + (vastai_machine_gpu_rented_on_reserved >= 0 and vastai_machine_gpu_rented_on_reserved < +Inf) + (vastai_machine_gpu_rented_bid_demand >= 0 and vastai_machine_gpu_rented_bid_demand < +Inf) + (vastai_machine_gpu_idle >= 0 and vastai_machine_gpu_idle < +Inf)) > 0 and ((vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} >= 0 and vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} < +Inf) + (vastai_machine_gpu_rented_on_reserved >= 0 and vastai_machine_gpu_rented_on_reserved < +Inf) + (vastai_machine_gpu_rented_bid_demand >= 0 and vastai_machine_gpu_rented_bid_demand < +Inf) + (vastai_machine_gpu_idle >= 0 and vastai_machine_gpu_idle < +Inf)) < +Inf and (timestamp(vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"}) == timestamp(vastai_machine_gpu_rented_on_reserved)) and (timestamp(vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"}) == timestamp(vastai_machine_gpu_rented_bid_demand)) and (timestamp(vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"}) == timestamp(vastai_machine_gpu_idle)) and (timestamp(vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"}) > time() - 90))) unless on (account, machine_id) ((stddev by (account, machine_id) ((vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} >= 0 and vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} < +Inf) and (timestamp(vastai_machine_gpu_rented_on_demand{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"}) > time() - 90)) > 0) or (stddev by (account, machine_id) ((vastai_machine_gpu_rented_on_reserved >= 0 and vastai_machine_gpu_rented_on_reserved < +Inf) and (timestamp(vastai_machine_gpu_rented_on_reserved) > time() - 90)) > 0) or (stddev by (account, machine_id) ((vastai_machine_gpu_rented_bid_demand >= 0 and vastai_machine_gpu_rented_bid_demand < +Inf) and (timestamp(vastai_machine_gpu_rented_bid_demand) > time() - 90)) > 0) or (stddev by (account, machine_id) ((vastai_machine_gpu_idle >= 0 and vastai_machine_gpu_idle < +Inf) and (timestamp(vastai_machine_gpu_idle) > time() - 90)) > 0)))[30d:1m]) / 43200) or (0 * max by (account, machine_id) (vast_machine_num_gpus{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} > 0 and vast_machine_num_gpus{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"} < +Inf and (timestamp(vast_machine_num_gpus{account!=\"\",account!~\"(?i:unknown|null|none|n/a)\",machine_id!=\"\",machine_id!~\"(?i:unknown|null|none|n/a)\"}) > time() - 90)))), \"machine\", \" / \", \"account\", \"machine_id\")",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "legendFormat": "__auto",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "machine",
+            "mode": "outerTabular"
+          }
+        },
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "machine",
+                "Value #A",
+                "Value #B"
+              ]
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "includeByName": {
+              "machine": true,
+              "Value #A": true,
+              "Value #B": true
+            },
+            "excludeByName": {},
+            "indexByName": {
+              "machine": 0,
+              "Value #A": 1,
+              "Value #B": 2
+            },
+            "renameByName": {
+              "machine": "Machine (account / ID)",
+              "Value #A": "Occupancy % (observed data)",
+              "Value #B": "30-day data coverage %"
+            }
+          }
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -3344,7 +3493,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 48
+        "y": 56
       },
       "id": 13,
       "options": {
@@ -3455,7 +3604,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 48
+        "y": 56
       },
       "id": 35,
       "options": {
@@ -3823,7 +3972,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 56
+        "y": 64
       },
       "id": 20,
       "options": {
@@ -3943,7 +4092,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 56
+        "y": 64
       },
       "id": 31,
       "options": {
@@ -4360,7 +4509,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 64
+        "y": 72
       },
       "id": 32,
       "options": {
@@ -4766,7 +4915,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 64
+        "y": 72
       },
       "id": 28,
       "options": {
@@ -5173,7 +5322,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 72
+        "y": 80
       },
       "id": 25,
       "options": {
@@ -5558,7 +5707,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 72
+        "y": 80
       },
       "id": 33,
       "options": {
@@ -5965,7 +6114,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 80
+        "y": 88
       },
       "id": 34,
       "options": {
@@ -6372,7 +6521,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 80
+        "y": 88
       },
       "id": 36,
       "options": {
@@ -6758,7 +6907,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 88
+        "y": 96
       },
       "id": 15,
       "options": {
@@ -6867,7 +7016,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 88
+        "y": 96
       },
       "id": 14,
       "options": {
@@ -6976,7 +7125,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 96
+        "y": 104
       },
       "id": 18,
       "options": {
@@ -7085,7 +7234,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 96
+        "y": 104
       },
       "id": 16,
       "options": {
@@ -7194,7 +7343,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 104
+        "y": 112
       },
       "id": 17,
       "options": {
@@ -7303,7 +7452,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 104
+        "y": 112
       },
       "id": 24,
       "options": {
@@ -7412,7 +7561,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 112
+        "y": 120
       },
       "id": 23,
       "options": {
