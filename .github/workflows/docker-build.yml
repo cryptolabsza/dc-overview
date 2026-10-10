@@ -45,7 +45,8 @@ jobs:
             962b812371aff838d152b6ff2d56fdb7a6396f5542f48ebf73421b9721f0d103 \
             "$TEST_DIR/$ARCHIVE" | sha256sum --check -
           tar -xzf "$TEST_DIR/$ARCHIVE" -C "$TEST_DIR" \
-            prometheus-3.13.1.linux-amd64/promtool
+            prometheus-3.13.1.linux-amd64/promtool \
+            prometheus-3.13.1.linux-amd64/prometheus
           export PATH="$TEST_DIR/prometheus-3.13.1.linux-amd64:$PATH"
           promtool --version
           python3 -m venv "$TEST_DIR/venv"
@@ -53,6 +54,7 @@ jobs:
           "$TEST_DIR/venv/bin/python" -m pytest -q \
             tests/test_vast_dashboard_registration.py \
             tests/test_vast_income_dashboard.py \
+            tests/test_vast_occupancy_dashboard.py \
             tests/test_vastai_exporter_metrics.py
 
       - name: Docker login
