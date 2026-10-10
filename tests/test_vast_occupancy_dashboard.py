@@ -4,6 +4,7 @@ import copy
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import re
 import shutil
@@ -284,15 +285,34 @@ def semantic_cases():
     add(
         "registered machine unknown history remains unavailable",
         constant(["NaN", "NaN", "NaN", "NaN"]) + registered,
-        None,
+        "NaN",
         0,
     )
     add(
         "registered legacy history remains unavailable",
         constant([4, 0, 0, 4], omit=METRICS[1:3]) + registered,
-        None,
+        "NaN",
         0,
     )
+    add("registered-only machine has no state history", registered, "NaN", 0)
+    add(
+        "known idle beside current CCC153016 with unknown history",
+        constant([0, 0, 0, 8])
+        + constant(["NaN", "NaN", "NaN", "NaN"], machine_id="153016", hostname="CCC")
+        + [
+            {
+                "series": sample["series"]
+                .replace('machine_id="7"', 'machine_id="153016"')
+                .replace('hostname="host"', 'hostname="CCC"'),
+                "values": sample["values"],
+            }
+            for sample in registered
+        ],
+        [0, "NaN"],
+        [coverage, 0],
+        identities=[("team", "7"), ("team", "153016")],
+    )
+
     add(
         "absent account identity",
         [
@@ -393,7 +413,7 @@ def duration_seconds(value):
 
 
 @pytest.fixture(scope="module")
-def prometheus_fixture(tmp_path_factory):
+def prometheus_fixture(tmp_path_factory, request):
     promtool = shutil.which("promtool")
     prometheus = shutil.which("prometheus")
     if not promtool or not prometheus:
@@ -404,6 +424,9 @@ def prometheus_fixture(tmp_path_factory):
     storage = directory / "data"
     evaluation = int(time.time() // 60) * 60
     cases = semantic_cases()
+    if hasattr(request, "param"):
+        cases = [case for case in cases if case[0] in request.param]
+        assert len(cases) == len(request.param)
     expectations = {"A": {}, "B": {}}
     scenario_names = {}
     (directory / "scenario-inputs.json").write_text(
@@ -571,12 +594,65 @@ def test_shipped_occupancy_queries_with_prometheus(filename, prometheus_fixture)
                 "scenarios": scenarios,
             }
             for labels, expected_value in expected_samples.items():
+                if expected_value == "NaN":
+                    assert target["refId"] == "A", "only explicit unavailable occupancy can be NaN"
+                    assert math.isnan(actual[labels]), {"labels": labels, "value": actual[labels]}
+                    assert expectations["B"][labels] == 0
+                    continue
+                assert math.isfinite(actual[labels]) and 0 <= actual[labels] <= 100
                 assert actual[labels] == pytest.approx(expected_value, abs=1e-9), {
                     "labels": labels,
                     "actual": actual[labels],
                     "expected": expected_value,
                     "scenarios": scenarios,
                 }
+
+
+UNKNOWN_ONLY_CASES = (
+    "registered machine unknown history remains unavailable",
+    "registered legacy history remains unavailable",
+    "registered-only machine has no state history",
+)
+
+
+@pytest.mark.parametrize("filename", DASHBOARDS)
+@pytest.mark.parametrize("prometheus_fixture", [UNKNOWN_ONLY_CASES], indirect=True)
+def test_registered_unknown_history_keeps_both_numeric_columns(filename, prometheus_fixture):
+    test_shipped_occupancy_queries_with_prometheus(filename, prometheus_fixture)
+    _, _, evaluation, expectations, _, directory = prometheus_fixture
+    current = panel(filename)
+    assert expectations["A"] and set(expectations["A"]) == set(expectations["B"])
+    nan_maps = [
+        mapping
+        for mapping in current["fieldConfig"]["defaults"].get("mappings", [])
+        if mapping["type"] == "special" and mapping["options"]["match"] == "nan"
+    ]
+    assert len(nan_maps) == 1
+    assert nan_maps[0]["options"]["result"]["text"] == "Unavailable"
+    assert current["fieldConfig"]["defaults"]["noValue"] == "Unavailable"
+    for timestamp in [evaluation, evaluation + 30]:
+        responses = {}
+        for ref in ["A", "B"]:
+            evidence = json.loads(
+                (directory / (filename.replace("/", "-") + f"-{ref}-{timestamp}.json")).read_text()
+            )
+            responses[ref] = json.loads(evidence["stdout"])
+            assert responses[
+                ref
+            ], f"{ref} must retain its numeric table field when all history is unknown"
+            assert all("machine" in sample["metric"] for sample in responses[ref])
+        # Grafana transformDFToTable names fields Value #<refId> when both
+        # populated query refs exist; joinByField now has a machine in each.
+        # This checks the source-established naming precondition, not a Python
+        # implementation of the Grafana renderer; root verifies the live UI.
+        numeric_fields = {f"Value #{ref}" for ref in responses}
+        kept = set(current["transformations"][1]["options"]["include"]["names"])
+        assert numeric_fields <= kept
+        names = current["transformations"][-1]["options"]["renameByName"]
+        assert names["Value #A"] == "Occupancy % (observed data)"
+        assert names["Value #B"] == "30-day data coverage %"
+        assert all(sample["value"][1] == "NaN" for sample in responses["A"])
+        assert all(float(sample["value"][1]) == 0 for sample in responses["B"])
 
 
 def test_docker_publish_requires_occupancy_semantics():
