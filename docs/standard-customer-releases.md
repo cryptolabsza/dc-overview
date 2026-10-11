@@ -145,11 +145,14 @@ roots. The complete proxy declaration must use that same release directory.
    sudo sh -eu <<'SH'
    umask 022
    store=/etc/dc-overview/releases
-   test ! -e "$store/selection.json" && test ! -L "$store/selection.json"
-   test ! -e "$store/.lifecycle-publication.json" && test ! -L "$store/.lifecycle-publication.json"
+   test ! -e "$store/selection.json"
+   test ! -L "$store/selection.json"
+   test ! -e "$store/.lifecycle-publication.json"
+   test ! -L "$store/.lifecycle-publication.json"
    for directory in /etc/dc-overview "$store" "$store/manifests"; do
      if test -e "$directory" || test -L "$directory"; then
-       test ! -L "$directory" && test -d "$directory"
+       test ! -L "$directory"
+       test -d "$directory"
        test "$(stat -c '%u:%g:%a' "$directory")" = '0:0:755'
      else
        install -d -o 0 -g 0 -m 0755 "$directory"
@@ -159,13 +162,15 @@ roots. The complete proxy declaration must use that same release directory.
    manifest_file="$store/manifests/$manifest_sha.json"
    set -C
    if test -e "$manifest_file" || test -L "$manifest_file"; then
-     test ! -L "$manifest_file" && test -f "$manifest_file"
+     test ! -L "$manifest_file"
+     test -f "$manifest_file"
      test "$(stat -c '%u:%g:%a' "$manifest_file")" = '0:0:644'
      cmp -s suite-release.json "$manifest_file"
    else
      cat suite-release.json > "$manifest_file"
    fi
-   test ! -e "$store/.lifecycle-publication.json" && test ! -L "$store/.lifecycle-publication.json"
+   test ! -e "$store/.lifecycle-publication.json"
+   test ! -L "$store/.lifecycle-publication.json"
    cat customer-selection.json > "$store/selection.json"
    test "$(stat -c '%u:%g:%a' "$store/selection.json")" = '0:0:644'
    sha256sum "$manifest_file" "$store/selection.json"
