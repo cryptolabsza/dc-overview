@@ -31,6 +31,11 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Allocate unique job temporary directory
+        id: release_paths
+        run: |
+          release_job_dir=$(mktemp -d "$RUNNER_TEMP/python-release-build.XXXXXX")
+          printf 'RELEASE_JOB_DIR=%s\n' "$release_job_dir" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.RELEASE_TAG }}
@@ -47,20 +52,20 @@ jobs:
         run: python scripts/release_publication.py context
       - name: Build once from the checked-out revision
         run: |
-          mkdir "$RUNNER_TEMP/release-source" "$RUNNER_TEMP/release-dist"
-          git archive HEAD | tar -x -C "$RUNNER_TEMP/release-source"
-          GIT_DIR="$GITHUB_WORKSPACE/.git" GIT_WORK_TREE="$RUNNER_TEMP/release-source" GITHUB_REF_NAME="$RELEASE_TAG" \
-            python -m build "$RUNNER_TEMP/release-source" --outdir "$RUNNER_TEMP/release-dist"
+          mkdir "$RELEASE_JOB_DIR/release-source" "$RELEASE_JOB_DIR/release-dist"
+          git archive HEAD | tar -x -C "$RELEASE_JOB_DIR/release-source"
+          GIT_DIR="$GITHUB_WORKSPACE/.git" GIT_WORK_TREE="$RELEASE_JOB_DIR/release-source" GITHUB_REF_NAME="$RELEASE_TAG" \
+            python -m build "$RELEASE_JOB_DIR/release-source" --outdir "$RELEASE_JOB_DIR/release-dist"
       - name: Validate wheel and sdist metadata and retain checksums
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python scripts/release_publication.py prepare --dist "$RUNNER_TEMP/release-dist" --plan "$RUNNER_TEMP/build-receipt.json"
+        run: python scripts/release_publication.py prepare --dist "$RELEASE_JOB_DIR/release-dist" --plan "$RELEASE_JOB_DIR/build-receipt.json"
       - uses: actions/upload-artifact@v4
         with:
           name: python-release-build
           path: |
-            ${{ runner.temp }}/release-dist/*
-            ${{ runner.temp }}/build-receipt.json
+            ${{ env.RELEASE_JOB_DIR }}/release-dist/*
+            ${{ env.RELEASE_JOB_DIR }}/build-receipt.json
           if-no-files-found: error
           retention-days: 30
 
@@ -70,6 +75,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Allocate unique job temporary directory
+        id: release_paths
+        run: |
+          release_job_dir=$(mktemp -d "$RUNNER_TEMP/python-release-publish.XXXXXX")
+          printf 'RELEASE_JOB_DIR=%s\n' "$release_job_dir" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.RELEASE_TAG }}
@@ -85,7 +95,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: python-release-build
-          path: ${{ runner.temp }}/release-bundle
+          path: ${{ env.RELEASE_JOB_DIR }}/release-bundle
       - name: Publish and verify exact artifacts
         env:
           GH_TOKEN: ${{ github.token }}
@@ -93,13 +103,14 @@ jobs:
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
         run: |
           python scripts/release_publication.py publish \
-            --dist "$RUNNER_TEMP/release-bundle/release-dist" \
-            --plan "$RUNNER_TEMP/release-bundle/build-receipt.json" \
-            --receipt "$RUNNER_TEMP/verified-publication.json"
+            --dist "$RELEASE_JOB_DIR/release-bundle/release-dist" \
+            --plan "$RELEASE_JOB_DIR/release-bundle/build-receipt.json" \
+            --receipt "$RELEASE_JOB_DIR/verified-publication.json"
       - name: Retain verified publication receipt
+        if: always() && steps.release_paths.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: verified-python-publication
-          path: ${{ runner.temp }}/verified-publication.json
+          path: ${{ env.RELEASE_JOB_DIR }}/verified-publication.json
           if-no-files-found: error
           retention-days: 90
