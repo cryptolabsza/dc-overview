@@ -810,8 +810,10 @@ class FleetWizard:
             style=custom_style,
         ).ask()
         if choice != "custom":
+            if getattr(self.config, '_release_manifest_path', None):
+                self.config.release_selection.components['vast-price-manager'] = {'origin':'baseline','enabled':True}
             return DEFAULT_VPM_IMAGE
-        return questionary.text(
+        image = questionary.text(
             "VPM image (image@sha256:<64 hex> or sha256:<64 hex>):",
             validate=lambda value: (
                 _PINNED_IMAGE.fullmatch(value) is not None
@@ -820,6 +822,9 @@ class FleetWizard:
             ),
             style=custom_style,
         ).ask()
+        if getattr(self.config, '_release_manifest_path', None):
+            self.config.release_selection.components['vast-price-manager'] = {'origin':'customer-pin','enabled':True,'pin':image}
+        return image
 
     def _collect_watchdog_credentials(self):
         """Collect DC Watchdog credentials and validate with WordPress API."""
@@ -2005,7 +2010,9 @@ class FleetWizard:
             raise KeyboardInterrupt()
 
 
-def run_fleet_wizard(config_dir: Path = None) -> FleetConfig:
+def run_fleet_wizard(config_dir: Path = None, *, release_manifest=None) -> FleetConfig:
     """Run the fleet wizard and return configuration."""
     wizard = FleetWizard(config_dir)
+    if release_manifest:
+        wizard.config._release_manifest_path = release_manifest
     return wizard.run()

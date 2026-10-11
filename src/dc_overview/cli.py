@@ -129,6 +129,19 @@ def status():
     
     table.add_row("Version", __version__)
     table.add_row("Config Dir", str(config_path))
+    from .fleet_upgrade import load_release, observe_component
+    try:
+        release = load_release(FleetConfig.load(config_path))
+        if release:
+            table.add_row('Release selection', release.selection['selection_id'])
+            table.add_row('Manifest SHA256', release.manifest.sha256)
+            for name, target in release.targets.items():
+                desired = target.get('reference', target.get('url', ''))
+                table.add_row(name + ' desired (' + target['origin'] + ')', desired)
+                observed = observe_component(name, target)
+                table.add_row(name + ' observed', str(observed['identity'] or 'unknown') + ' (' + observed['state'] + ')')
+    except (ValueError, OSError) as error:
+        raise click.ClickException(str(error)) from error
     
     # Check Docker deployment
     docker_status = get_docker_container_status("dc-overview")
@@ -355,7 +368,8 @@ def _sync_alerts_for_upgrade(
 @click.command()
 @click.option("--dev", is_flag=True, help="Switch to dev images (UNSTABLE - may break your system)")
 @click.option("--stable", is_flag=True, help="Switch to stable/latest images (default)")
-def upgrade(dev: bool, stable: bool):
+@click.option('--release-manifest', type=click.Path(exists=True, dir_okay=False, path_type=Path), help='Import/select a trusted post-build immutable suite manifest.')
+def upgrade(dev: bool, stable: bool, release_manifest: Optional[Path] = None):
     """
     Upgrade all fleet containers to the latest images.
     
@@ -371,6 +385,14 @@ def upgrade(dev: bool, stable: bool):
     if dev and stable:
         console.print("[red]Error:[/red] Cannot use --dev and --stable together")
         sys.exit(1)
+    from .fleet_upgrade import preflight_release, commit_release, run_selected_upgrade, load_release
+    config = FleetConfig.load(DOCKER_CONFIG_DIR)
+    try:
+        if dev and (release_manifest or config.release_selection.selection_id or (DOCKER_CONFIG_DIR/'releases/selection.json').exists()):
+            raise ValueError('Explicit dev channel conflicts with the installed release selection')
+        plan = preflight_release(config, release_manifest)
+    except (ValueError, RuntimeError, OSError, TypeError) as error:
+        raise click.ClickException(str(error)) from error
     
     tag = 'dev' if dev else 'latest'
     
@@ -390,6 +412,8 @@ def upgrade(dev: bool, stable: bool):
             return
         console.print()
 
+    if plan and release_manifest:
+        commit_release(config, plan)
     alert_sync = _sync_alerts_for_upgrade(DOCKER_CONFIG_DIR)
     if not alert_sync.success:
         recovery = (
@@ -404,11 +428,13 @@ def upgrade(dev: bool, stable: bool):
     from .fleet_upgrade import run_fleet_upgrade
     console.print("[bold]Updating through Fleet's durable updater...[/bold]")
     try:
-        result = run_fleet_upgrade('dev' if dev else 'main')
+        result = run_selected_upgrade(config, plan) if plan else run_fleet_upgrade('dev' if dev else 'main')
     except RuntimeError as error:
         raise click.ClickException(str(error)) from error
     for service, outcome in result.get('results', {}).items():
         console.print(f"{service}: {outcome.get('message', outcome.get('state', 'unknown'))}")
+    for service, outcome in result.get('external_owners', {}).items():
+        console.print(f"{service} ({outcome.get('owner', 'separate owner')}): {outcome.get('state', 'unknown')}")
     if not result.get('success'):
         raise click.ClickException("One or more services failed to update. Check Fleet update results; healthy originals are retained for recovery.")
     console.print("[green]Fleet update completed and verified.[/green]")
@@ -839,7 +865,8 @@ def deploy_vast(api_key: str, status: bool):
 @click.option("--config", "-c", "config_file", type=click.Path(exists=True), help="YAML config file for automated setup")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompts (use with --config)")
 @click.option("--dev", is_flag=True, help="Use dev Docker images instead of stable (latest)")
-def setup(legacy: bool, config_file: str, yes: bool, dev: bool):
+@click.option('--release-manifest', type=click.Path(exists=True, dir_okay=False, path_type=Path), help='Trusted post-build immutable suite manifest.')
+def setup(legacy: bool, config_file: str, yes: bool, dev: bool, release_manifest: Optional[Path] = None):
     """
     ⚡ One-command setup - does everything!
     
@@ -870,18 +897,22 @@ def setup(legacy: bool, config_file: str, yes: bool, dev: bool):
         sudo dc-overview setup -c config.yaml -y  # Skip confirmations
     """
     if legacy:
+        if release_manifest:
+            raise click.ClickException('Release manifests require supported fleet setup')
         run_quickstart()
     else:
-        run_fleet_quickstart(config_file, yes, dev=dev)
+        run_fleet_quickstart(config_file, yes, dev=dev, release_manifest=release_manifest)
 
 
-def run_fleet_quickstart(config_file: str = None, auto_confirm: bool = False, dev: bool = False):
+def run_fleet_quickstart(config_file: str = None, auto_confirm: bool = False, dev: bool = False, release_manifest: Optional[Path] = None):
     """Run the fleet setup (collects config then deploys everything)."""
     if os.geteuid() != 0:
         console.print("[red]Error:[/red] This command requires root privileges.")
         console.print("Run with: [cyan]sudo dc-overview setup[/cyan]")
         sys.exit(1)
     
+    if release_manifest and dev:
+        raise click.ClickException('Explicit dev channel conflicts with release selection')
     try:
         if config_file:
             # Load configuration from file
@@ -910,12 +941,14 @@ def run_fleet_quickstart(config_file: str = None, auto_confirm: bool = False, de
                     return
         else:
             # Step 1: Collect all configuration upfront via wizard
-            config = run_fleet_wizard()
+            config = run_fleet_wizard(release_manifest=release_manifest)
             config.image_tag = 'dev' if dev else 'latest'
         
         if dev:
             console.print("[yellow]⚠ Using dev Docker images (--dev flag)[/yellow]")
         
+        if release_manifest:
+            config._release_manifest_path = release_manifest
         # Step 2: Deploy everything using collected config
         success = deploy_fleet(config)
         
@@ -962,6 +995,13 @@ def load_config_from_file(config_file: str) -> FleetConfig:
         sys.exit(1)
     
     config = FleetConfig()
+    if data.get('config_dir'):
+        declared_root = Path(data['config_dir'])
+        if not declared_root.is_absolute() or '..' in declared_root.parts:
+            raise ValueError('config_dir must be an absolute path')
+        config.config_dir = declared_root
+    from .fleet_config import ReleaseSelectionConfig
+    config.release_selection = ReleaseSelectionConfig(**(data.get('release_selection') or {}))
     
     # Site info
     config.site_name = data.get('site_name', 'DC Overview')
@@ -1093,6 +1133,9 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     )
     config.vast_price_manager.expected_account_id = vpm.get('expected_account_id')
     config.vast_price_manager.writes_enabled = vpm.get('writes_enabled', False)
+    for name in ('data_source', 'data_kind', 'credential_mode', 'credential_reference', 'database_relative_path', 'layout'):
+        if name in vpm:
+            setattr(config.vast_price_manager, name, vpm[name])
     config.vast_price_manager.validate()
     
     # RunPod (supports multiple API keys)
@@ -1115,6 +1158,13 @@ def load_config_from_file(config_file: str) -> FleetConfig:
     grafana = data.get('grafana') or {}
     config.grafana.admin_password = grafana.get('admin_password', 'admin')
     config.grafana.alert_receiver = grafana.get('alert_receiver')
+    for name in ('customer_dashboard_dir', 'prometheus_datasource_uid', 'overwrite_product_dashboards'):
+        if name in grafana:
+            setattr(config.grafana, name, grafana[name])
+    prometheus = data.get('prometheus') or {}
+    for name in ('port', 'retention_days', 'extra_scrape_configs', 'rule_files', 'customer_config_dir', 'legacy_managed_jobs'):
+        if name in prometheus:
+            setattr(config.prometheus, name, prometheus[name])
     # home_dashboard: "dc-overview-main", "vast-dashboard", or None to disable
     config.grafana.home_dashboard = grafana.get('home_dashboard', 'dc-overview-main')
     
@@ -1314,6 +1364,11 @@ def _vpm_spec(config_dir: Path, image: str) -> VPMServiceSpec:
         master_key_file=config.vast_price_manager.master_key_file,
         expected_account_id=config.vast_price_manager.expected_account_id,
         writes_enabled=config.vast_price_manager.writes_enabled,
+        data_source=config.vast_price_manager.data_source,
+        data_kind=config.vast_price_manager.data_kind,
+        credential_mode=config.vast_price_manager.credential_mode,
+        credential_reference=config.vast_price_manager.credential_reference,
+        database_relative_path=config.vast_price_manager.database_relative_path,
     )
 
 

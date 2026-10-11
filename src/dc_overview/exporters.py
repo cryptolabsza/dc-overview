@@ -144,8 +144,120 @@ def build_dc_exporter_remote_command(script: str, *, sudo: bool = False) -> str:
     payload = base64.b64encode(script.encode("utf-8")).decode("ascii")
     runner = dc_exporter_remote_bash_command()
     if sudo:
-        runner = f"sudo -- {runner}"
+        runner = f"sudo -n -- {runner}"
     return f"printf '%s' {shlex.quote(payload)} | base64 --decode | {runner}"
+
+
+def build_node_exporter_install_script(*, selected_artifact=None, mode='install', binary_path='/usr/local/bin/node_exporter',
+                                       service_path='/etc/systemd/system/node_exporter.service',
+                                       temp_parent='/tmp'):
+    """Stage and verify node_exporter, restoring files and service state on failure."""
+    if mode not in ('install', 'update'):
+        raise ValueError('invalid node exporter installation mode')
+    script = '\n'.join([
+        'set -Eeuo pipefail',
+        f'TARGET={shlex.quote(binary_path)}',
+        f'MODE={shlex.quote(mode)}',
+        f'UNIT={shlex.quote(service_path)}',
+        f'STAGE=$(mktemp -d {shlex.quote(temp_parent + "/node-exporter.XXXXXX")})',
+        '''
+changed=0
+had_binary=0
+had_unit=0
+was_active=0
+was_enabled=0
+cleanup() { rm -rf "$STAGE"; }
+trap cleanup EXIT
+if [ -e "$TARGET" ]; then cp -p "$TARGET" "$STAGE/old-binary"; had_binary=1; fi
+if [ -e "$UNIT" ]; then cp -p "$UNIT" "$STAGE/old-unit"; had_unit=1; fi
+state=$(systemctl is-active node_exporter) || [ "$state" = inactive ] || [ "$state" = failed ]
+[ "$state" != active ] || was_active=1
+state=$(systemctl is-enabled node_exporter) || [ "$state" = disabled ] || [ "$state" = not-found ] || [ "$state" = masked ]
+[ "$state" != enabled ] || was_enabled=1
+recover() {
+    trap - ERR HUP INT TERM
+    recovery_failed=0
+    if [ "$changed" = 1 ]; then
+        systemctl stop node_exporter >/dev/null 2>&1 || true
+        if [ "$had_binary" = 1 ]; then cp -p "$STAGE/old-binary" "$TARGET" || recovery_failed=1; else rm -f "$TARGET" || recovery_failed=1; fi
+        if [ "$had_unit" = 1 ]; then cp -p "$STAGE/old-unit" "$UNIT" || recovery_failed=1; else rm -f "$UNIT" || recovery_failed=1; fi
+        systemctl daemon-reload || recovery_failed=1
+        if [ "$was_enabled" = 1 ]; then systemctl enable node_exporter || recovery_failed=1; else systemctl disable node_exporter || recovery_failed=1; fi
+        if [ "$was_active" = 1 ]; then systemctl start node_exporter || recovery_failed=1; systemctl is-active --quiet node_exporter || recovery_failed=1; fi
+        if [ "$recovery_failed" = 0 ]; then echo 'previous installation restored' >&2; else echo 'rollback incomplete' >&2; fi
+    fi
+    exit 1
+}
+trap recover ERR HUP INT TERM
+case $(uname -m) in
+    x86_64) ARCH=amd64 ;;
+    aarch64|arm64) ARCH=arm64 ;;
+    *) echo 'Unsupported architecture' >&2; exit 1 ;;
+esac
+curl -fsSL "https://github.com/prometheus/node_exporter/releases/download/v1.10.2/node_exporter-1.10.2.linux-$ARCH.tar.gz" -o "$STAGE/release.tar.gz"
+tar xzf "$STAGE/release.tar.gz" -C "$STAGE"
+CANDIDATE="$STAGE/node_exporter-1.10.2.linux-$ARCH/node_exporter"
+"$CANDIDATE" --version 2>&1 | grep -q 'version 1.10.2'
+candidate_sha=$(sha256sum "$CANDIDATE")
+candidate_sha=${candidate_sha%% *}
+useradd -r -s /bin/false node_exporter 2>/dev/null || true
+changed=1
+systemctl stop node_exporter 2>/dev/null || true
+cp "$CANDIDATE" "$TARGET"
+chmod 755 "$TARGET"
+cat > "$UNIT" <<EOF
+[Unit]
+Description=Node Exporter
+After=network.target
+[Service]
+Type=simple
+User=node_exporter
+ExecStart=$TARGET
+Restart=always
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+installed_sha=$(sha256sum "$TARGET")
+[ "${installed_sha%% *}" = "$candidate_sha" ]
+if [ "$MODE" = install ] || [ "$was_enabled" = 1 ]; then systemctl enable node_exporter; else systemctl disable node_exporter; fi
+if [ "$MODE" = update ] && [ "$was_active" = 0 ]; then
+    state=$(systemctl is-active node_exporter) || [ "$state" = inactive ]
+    [ "$state" = inactive ]
+    echo "NODE_EXPORTER_CANDIDATE_SHA256=$candidate_sha"
+    echo NODE_EXPORTER_INSTALL_SUCCESS
+    exit 0
+fi
+systemctl start node_exporter
+systemctl is-active --quiet node_exporter
+verified=0
+for attempt in 1 2 3 4 5; do
+    if curl -fsS --max-time 5 http://127.0.0.1:9100/metrics > "$STAGE/metrics" && grep -q '^node_exporter_build_info' "$STAGE/metrics"; then verified=1; break; fi
+    sleep 1
+done
+[ "$verified" = 1 ]
+echo "NODE_EXPORTER_CANDIDATE_SHA256=$candidate_sha"
+echo NODE_EXPORTER_INSTALL_SUCCESS
+'''])
+    if selected_artifact:
+        validate_selected_worker_artifact('node-exporter', selected_artifact)
+        version = _normalise_dc_exporter_version(selected_artifact['release'])
+        script = script.replace('1.10.2', version)
+        download = 'curl -fsSL "https://github.com/prometheus/node_exporter/releases/download/v' + version + '/node_exporter-' + version + '.linux-$ARCH.tar.gz" -o "$STAGE/release.tar.gz"'
+        script = script.replace(download, 'curl -fsSL ' + shlex.quote(selected_artifact['url']) + ' -o "$STAGE/release.tar.gz"\n'
+                                + 'actual_archive_sha=$(sha256sum "$STAGE/release.tar.gz")\n[ "${actual_archive_sha%% *}" = ' + shlex.quote(selected_artifact['sha256']) + ' ]')
+        script = script.replace('echo NODE_EXPORTER_INSTALL_SUCCESS', 'echo NODE_EXPORTER_ARTIFACT_SHA256=' + shlex.quote(selected_artifact['sha256']) + '\necho NODE_EXPORTER_INSTALL_SUCCESS')
+    return script
+
+
+def validate_selected_worker_artifact(name, target):
+    from .release_catalog import Manifest
+    if target.get('owner') != 'dc-worker' or target.get('kind') != 'binary':
+        raise ValueError('selected worker artifact has an unsupported owner/kind')
+    artifact = {key:target[key] for key in ('kind', 'url', 'sha256')}
+    Manifest.from_bytes(json.dumps({'schema_version':1, 'selection_contract':1, 'baseline_id':'worker-delivery',
+                                   'components':{name:{'release':target['release'], 'owner':target['owner'],
+                                                       'artifacts':{target['platform']:artifact}}}}).encode())
 
 
 DC_EXPORTER_RS_URL = get_dc_exporter_download_url()
@@ -217,6 +329,7 @@ def build_dc_exporter_install_script(
     proc_root: str = "/proc",
     metrics_url: str = "http://127.0.0.1:9835/metrics",
     verification_attempts: int = 3,
+    selected_artifact: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Build the single safe installer used by local and remote deployments.
 
@@ -226,8 +339,12 @@ def build_dc_exporter_install_script(
     binary's own version, and only then mutates the live installation.  Any
     failure after mutation restores both the previous binary and service state.
     """
-    release_version = _normalise_dc_exporter_version(version)
-    if release_version != DC_EXPORTER_RS_VERSION:
+    if selected_artifact is not None:
+        validate_selected_worker_artifact('dc-exporter', selected_artifact)
+        if selected_artifact['platform'] != 'linux/amd64':
+            raise ValueError('dc-exporter Linux arm64 delivery is not supported by this installer')
+    release_version = _normalise_dc_exporter_version(selected_artifact['release'] if selected_artifact else version)
+    if selected_artifact is None and release_version != DC_EXPORTER_RS_VERSION:
         raise ValueError(
             "dc-exporter production delivery is pinned to "
             f"{DC_EXPORTER_RS_VERSION}, not {release_version}"
@@ -240,8 +357,9 @@ def build_dc_exporter_install_script(
     replacements = {
         "__MODE__": shlex.quote(mode),
         "__VERSION__": shlex.quote(release_version),
-        "__BINARY_URL__": shlex.quote(get_dc_exporter_download_url(release_version)),
-        "__CHECKSUM_URL__": shlex.quote(get_dc_exporter_checksum_url(release_version)),
+        "__BINARY_URL__": shlex.quote(selected_artifact['url'] if selected_artifact else get_dc_exporter_download_url(release_version)),
+        "__CHECKSUM_URL__": shlex.quote('' if selected_artifact else get_dc_exporter_checksum_url(release_version)),
+        "__SELECTED_SHA256__": shlex.quote(selected_artifact['sha256'] if selected_artifact else ''),
         "__TARGET__": shlex.quote(binary_path),
         "__UNIT_PATH__": shlex.quote(service_path),
         "__BACKUP_DIR__": shlex.quote(backup_dir),
@@ -258,6 +376,7 @@ MODE=__MODE__
 VERSION=__VERSION__
 BINARY_URL=__BINARY_URL__
 CHECKSUM_URL=__CHECKSUM_URL__
+SELECTED_SHA256=__SELECTED_SHA256__
 TARGET=__TARGET__
 UNIT_PATH=__UNIT_PATH__
 BACKUP_DIR=__BACKUP_DIR__
@@ -427,7 +546,11 @@ flock --exclusive --wait 5 9
 
 # Complete every candidate validation before touching the live installation.
 curl --fail --show-error --silent --location --connect-timeout 10 --max-time 60 --output "$candidate" "$BINARY_URL"
-curl --fail --show-error --silent --location --connect-timeout 10 --max-time 15 --output "$manifest" "$CHECKSUM_URL"
+if [ -n "$SELECTED_SHA256" ]; then
+    printf '%s  dc-exporter-rs\n' "$SELECTED_SHA256" > "$manifest"
+else
+    curl --fail --show-error --silent --location --connect-timeout 10 --max-time 15 --output "$manifest" "$CHECKSUM_URL"
+fi
 
 # shellcheck disable=SC2016 # $2 belongs to awk, not Bash.
 manifest_matches="$(timeout "${VERIFY_COMMAND_TIMEOUT}s" awk '$2 == "dc-exporter-rs" || $2 == "*dc-exporter-rs" { count++ } END { print count + 0 }' "$manifest")"

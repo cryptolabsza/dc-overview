@@ -1642,8 +1642,8 @@
             });
             
             const result = await response.json();
-            handleOpComplete(id, serverName, 'node_exporter', 'installing', !result.node_exporter?.includes?.('fail'), result.node_exporter || '');
-            handleOpComplete(id, serverName, 'dc_exporter', 'installing', !result.dc_exporter?.includes?.('fail'), result.dc_exporter || '');
+            handleOpComplete(id, serverName, 'node_exporter', 'installing', result.node_exporter === 'installed', result.errors?.node_exporter || result.node_exporter || 'Installation could not be verified');
+            handleOpComplete(id, serverName, 'dc_exporter', 'installing', result.dc_exporter === 'installed', result.errors?.dc_exporter || result.dc_exporter || 'Installation could not be verified');
         } catch (e) {
             exporterKeys.forEach(k => {
                 handleOpComplete(id, serverName, k, 'installing', false, 'Network error: ' + e.message);
@@ -1680,7 +1680,7 @@
                 });
                 
                 const result = await response.json();
-                handleOpComplete(serverId, serverName, exporter, 'installing', !result[exporter]?.includes?.('fail'), result[exporter] || '');
+                handleOpComplete(serverId, serverName, exporter, 'installing', result[exporter] === 'installed', result.errors?.[exporter] || result[exporter] || 'Installation could not be verified');
             } catch (e) {
                 handleOpComplete(serverId, serverName, exporter, 'installing', false, 'Network error: ' + e.message);
             }

@@ -16,9 +16,10 @@ import subprocess
 from .exporters import (
     DC_EXPORTER_CALLER_TIMEOUT_SECONDS,
     build_dc_exporter_install_script,
+    build_node_exporter_install_script,
     dc_exporter_remote_bash_command,
 )
-from .ssh_helpers import build_ssh_cmd
+from .ssh_helpers import build_ssh_cmd, privileged_remote_command, remote_failure_message
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ def _run_dc_exporter_remote(server, script):
         batch_mode=False,
         extra_opts=['-o', 'ServerAliveInterval=10'],
     )
-    cmd.append(dc_exporter_remote_bash_command())
+    cmd.append(privileged_remote_command(server, dc_exporter_remote_bash_command()))
     run_env = {**os.environ, **env} if env else None
     return subprocess.run(
         cmd,
@@ -60,6 +61,10 @@ def _run_dc_exporter_remote(server, script):
         timeout=DC_EXPORTER_CALLER_TIMEOUT_SECONDS,
         env=run_env,
     )
+
+
+class ServiceCheckUnavailable(RuntimeError):
+    """Discovery did not produce a complete trustworthy observation."""
 
 
 def check_services_installed(server):
@@ -77,27 +82,36 @@ def check_services_installed(server):
         'dcgm_exporter': {'installed': False, 'active': False},
     }
 
-    script = (
-        "for svc in node_exporter dc-exporter; do "
-        "  state=$(systemctl is-active $svc 2>/dev/null || echo missing); "
-        "  enabled=$(systemctl is-enabled $svc 2>/dev/null || echo missing); "
-        "  echo \"$svc:$state:$enabled\"; "
-        "done; "
-        "docker_state=$(docker inspect -f '{{.State.Status}}' dcgm-exporter 2>/dev/null || echo missing); "
-        "echo \"dcgm-exporter:$docker_state:docker\""
-    )
+    script = '''
+set -e
+for svc in node_exporter dc-exporter; do
+    load=$(systemctl show "$svc" --property=LoadState --value)
+    state=$(systemctl show "$svc" --property=ActiveState --value)
+    printf '%s:%s:%s\\n' "$svc" "$state" "$load"
+done
+if ! command -v docker >/dev/null 2>&1; then
+    docker_state=missing
+elif docker_state=$(docker inspect -f '{{.State.Status}}' dcgm-exporter 2>&1); then
+    :
+else
+    case "$docker_state" in
+        *"No such object"*|*"No such container"*) docker_state=missing ;;
+        *) exit 1 ;;
+    esac
+fi
+printf 'dcgm-exporter:%s:docker\\n' "$docker_state"
+'''
 
     try:
         cmd, env = build_ssh_cmd(server, timeout=10)
-        cmd.append(script)
+        import shlex
+        cmd.append(privileged_remote_command(server, 'bash -c ' + shlex.quote(script)))
 
         run_env = {**os.environ, **env} if env else None
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=20, env=run_env)
 
         if proc.returncode != 0:
-            logger.warning("check_services_installed SSH failed for %s: %s",
-                           server.name, (proc.stderr or '').strip()[:200])
-            return result
+            raise ServiceCheckUnavailable(remote_failure_message(proc))
 
         svc_to_key = {
             'node_exporter': 'node_exporter',
@@ -105,87 +119,75 @@ def check_services_installed(server):
             'dcgm-exporter': 'dcgm_exporter',
         }
 
+        observed = set()
         for line in proc.stdout.strip().splitlines():
             parts = line.strip().split(':')
-            if len(parts) < 3:
-                continue
+            if len(parts) != 3:
+                raise ServiceCheckUnavailable('Incomplete service discovery response.')
             svc_name, state, enabled = parts[0], parts[1], parts[2]
             exp_key = svc_to_key.get(svc_name)
-            if not exp_key:
-                continue
+            if not exp_key or exp_key in observed:
+                raise ServiceCheckUnavailable('Invalid service discovery response.')
+            observed.add(exp_key)
 
             if exp_key == 'dcgm_exporter':
+                if enabled != 'docker' or state not in ('missing', 'running', 'created', 'restarting', 'paused', 'exited', 'dead', 'removing'):
+                    raise ServiceCheckUnavailable('Unknown container state.')
                 result[exp_key]['installed'] = state != 'missing'
                 result[exp_key]['active'] = state == 'running'
             else:
-                is_known = state != 'missing' or enabled != 'missing'
+                if enabled not in ('loaded', 'not-found', 'masked', 'error', 'bad-setting', 'merged', 'stub') or state not in ('active', 'inactive', 'failed', 'activating', 'deactivating', 'reloading', 'maintenance', 'refreshing'):
+                    raise ServiceCheckUnavailable('Unknown systemd state.')
+                is_known = enabled != 'not-found'
                 result[exp_key]['installed'] = is_known
                 result[exp_key]['active'] = state == 'active'
 
+        if observed != set(result):
+            raise ServiceCheckUnavailable('Incomplete service discovery response.')
     except subprocess.TimeoutExpired:
-        logger.warning("check_services_installed timed out for %s", server.name)
-    except Exception as e:
-        logger.warning("check_services_installed error for %s: %s", server.name, e)
+        raise ServiceCheckUnavailable(remote_failure_message(timed_out=True)) from None
+    except ServiceCheckUnavailable:
+        raise
+    except Exception:
+        raise ServiceCheckUnavailable('Service discovery unavailable.') from None
 
     return result
 
 
-def install_exporter_remote(server, exporter_name):
+def install_exporter_remote(server, exporter_name, *, return_error=False):
     """Install an exporter on a remote server via SSH.
 
     Always performs a fresh download regardless of existing files.
     Cleans up temporary files after installation.
     """
+    from .worker_lifecycle import selected_worker_mutation_refusal
+    refusal = selected_worker_mutation_refusal()
+    if refusal:
+        return (False, refusal) if return_error else False
     try:
         if exporter_name == 'dc_exporter':
             script = build_dc_exporter_install_script(mode='install')
             result = _run_dc_exporter_remote(server, script)
-            return (
+            success = (
                 result.returncode == 0
                 and 'DC_EXPORTER_INSTALL_SUCCESS' in result.stdout
             )
+            error = None if success else remote_failure_message(result)
+            return (success, error) if return_error else success
 
         if exporter_name == 'node_exporter':
-            script = """
-set -e
-systemctl stop node_exporter 2>/dev/null || true
-cd /tmp
-rm -rf node_exporter-*
-curl -sLO https://github.com/prometheus/node_exporter/releases/download/v1.10.2/node_exporter-1.10.2.linux-amd64.tar.gz
-tar xzf node_exporter-1.10.2.linux-amd64.tar.gz
-cp node_exporter-1.10.2.linux-amd64/node_exporter /usr/local/bin/
-chmod +x /usr/local/bin/node_exporter
-rm -rf node_exporter-*
-useradd -r -s /bin/false node_exporter 2>/dev/null || true
-cat > /etc/systemd/system/node_exporter.service << 'EOF'
-[Unit]
-Description=Node Exporter
-After=network.target
-
-[Service]
-Type=simple
-User=node_exporter
-ExecStart=/usr/local/bin/node_exporter
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl daemon-reload
-systemctl enable node_exporter
-systemctl start node_exporter
-            """
+            script = build_node_exporter_install_script()
         else:
-            return False
+            return (False, 'Unsupported exporter.') if return_error else False
         
-        cmd, env = build_ssh_cmd(server, timeout=10, batch_mode=False)
-        cmd.append(script)
-        
-        run_env = {**os.environ, **env} if env else None
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=240, env=run_env)
-        return result.returncode == 0
+        result = _run_dc_exporter_remote(server, script)
+        success = result.returncode == 0 and 'NODE_EXPORTER_INSTALL_SUCCESS' in result.stdout
+        error = None if success else remote_failure_message(result)
+    except subprocess.TimeoutExpired:
+        success, error = False, remote_failure_message(timed_out=True)
     except Exception:
-        return False
+        success, error = False, 'Exporter installation could not be verified.'
+    return (success, error) if return_error else success
 
 
 def remove_exporter_remote(server, exporter_name):
@@ -193,6 +195,7 @@ def remove_exporter_remote(server, exporter_name):
     try:
         if exporter_name == 'node_exporter':
             script = """
+            set -e
             systemctl stop node_exporter 2>/dev/null || true
             systemctl disable node_exporter 2>/dev/null || true
             rm -f /etc/systemd/system/node_exporter.service
@@ -202,6 +205,7 @@ def remove_exporter_remote(server, exporter_name):
             """
         elif exporter_name == 'dc_exporter':
             script = """
+            set -e
             systemctl stop dc-exporter 2>/dev/null || true
             systemctl disable dc-exporter 2>/dev/null || true
             rm -f /etc/systemd/system/dc-exporter.service
@@ -213,6 +217,7 @@ def remove_exporter_remote(server, exporter_name):
             """
         elif exporter_name == 'dcgm_exporter':
             script = """
+            set -e
             systemctl stop dcgm-exporter 2>/dev/null || true
             systemctl disable dcgm-exporter 2>/dev/null || true
             rm -f /etc/systemd/system/dcgm-exporter.service
@@ -224,7 +229,8 @@ def remove_exporter_remote(server, exporter_name):
             return False
         
         cmd, env = build_ssh_cmd(server, timeout=10, batch_mode=False)
-        cmd.append(f'bash -c "{script}"')
+        import shlex
+        cmd.append(privileged_remote_command(server, 'bash -c ' + shlex.quote(script)))
         
         run_env = {**os.environ, **env} if env else None
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=run_env)
@@ -253,18 +259,18 @@ def toggle_exporter_service(server, exporter: str, enabled: bool) -> tuple:
         
         if exporter == 'dcgm_exporter':
             if enabled:
-                ssh_cmd.append(f"docker start {service} 2>&1 || echo 'not found'")
+                ssh_cmd.append(privileged_remote_command(server, f"docker start {service}"))
             else:
-                ssh_cmd.append(f"docker stop {service} 2>&1 || echo 'not found'")
+                ssh_cmd.append(privileged_remote_command(server, f"docker stop {service}"))
         else:
             action = 'start' if enabled else 'stop'
-            ssh_cmd.append(f"systemctl {action} {service} 2>&1")
+            ssh_cmd.append(privileged_remote_command(server, f"systemctl {action} {service}"))
         
         run_env = {**os.environ, **env} if env else None
         result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=30, env=run_env)
         
         if result.returncode != 0:
-            error_msg = (result.stderr or result.stdout or '').strip()
+            error_msg = remote_failure_message(result)
             logger.warning(f"Failed to {('start' if enabled else 'stop')} {service} on {server.name}: {error_msg}")
             return False, error_msg or f'SSH command exited with code {result.returncode}'
         
@@ -273,8 +279,8 @@ def toggle_exporter_service(server, exporter: str, enabled: bool) -> tuple:
     except subprocess.TimeoutExpired:
         return False, 'SSH command timed out'
     except Exception as e:
-        logger.error(f"Exception toggling {service} on {server.name}: {e}")
-        return False, str(e)
+        logger.error("Exception toggling %s on %s", service, server.name)
+        return False, 'Remote service operation unavailable.'
 
 
 def update_exporter_remote(server, exporter: str, version: str, branch: str = 'main') -> tuple:
@@ -283,6 +289,10 @@ def update_exporter_remote(server, exporter: str, version: str, branch: str = 'm
     Returns:
         tuple: (success: bool, error_message: str or None)
     """
+    from .worker_lifecycle import selected_worker_mutation_refusal
+    refusal = selected_worker_mutation_refusal()
+    if refusal:
+        return False, refusal
     from .exporters import get_exporter_download_url
 
     if exporter == 'dc_exporter':
@@ -318,7 +328,8 @@ systemctl start node_exporter
 rm -rf node_exporter*
 echo "UPDATE_SUCCESS"
 '''
-            ssh_cmd.append(update_script)
+            import shlex
+            ssh_cmd.append(privileged_remote_command(server, 'bash -c ' + shlex.quote(update_script)))
 
         elif exporter == 'dcgm_exporter':
             update_script = f'''
@@ -329,7 +340,8 @@ docker pull {download_url}
 docker run -d --name dcgm-exporter --gpus all -p 9400:9400 --restart unless-stopped {download_url}
 echo "UPDATE_SUCCESS"
 '''
-            ssh_cmd.append(update_script)
+            import shlex
+            ssh_cmd.append(privileged_remote_command(server, 'bash -c ' + shlex.quote(update_script)))
         else:
             if exporter != 'dc_exporter':
                 return False, f"Unknown exporter type: {exporter}"
@@ -346,7 +358,7 @@ echo "UPDATE_SUCCESS"
             )
         
         if result.returncode != 0:
-            error_msg = result.stderr.strip() or result.stdout.strip() or f"SSH command failed with code {result.returncode}"
+            error_msg = remote_failure_message(result)
             logger.error(f"[Exporter Update] Failed for {server.server_ip}: {error_msg[:200]}")
             return False, error_msg[:200]
         
@@ -359,10 +371,10 @@ echo "UPDATE_SUCCESS"
             logger.info(f"[Exporter Update] Successfully updated {exporter} on {server.server_ip}")
             return True, None
         else:
-            return False, f"Update script did not complete successfully: {result.stdout[:200]}"
+            return False, 'Update could not be verified.'
         
     except subprocess.TimeoutExpired:
         return False, f"SSH connection timed out ({DC_EXPORTER_CALLER_TIMEOUT_SECONDS}s)"
     except Exception as e:
-        logger.exception(f"[Exporter Update] Exception updating {exporter} on {server.server_ip}")
-        return False, str(e)[:200]
+        logger.error('[Exporter Update] Operation unavailable for %s', server.server_ip)
+        return False, 'Exporter update unavailable.'

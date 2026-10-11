@@ -1367,6 +1367,10 @@ def api_check_server(server_id):
 
 def check_and_apply_auto_updates(server):
     """Check and apply auto-updates for exporters that have auto-update enabled."""
+    from .worker_lifecycle import selected_worker_mutation_refusal
+    refusal = selected_worker_mutation_refusal()
+    if refusal:
+        return [{'status':'blocked', 'error':refusal}]
     from .exporters import check_for_updates
     
     update_results = []
@@ -1491,9 +1495,13 @@ def api_install_exporters(server_id):
     }
     
     results = {}
+    errors = {}
     for exporter in exporters:
-        success = install_exporter_remote(server, exporter)
+        outcome = install_exporter_remote(server, exporter, return_error=True)
+        success, error = outcome if isinstance(outcome, tuple) else (bool(outcome), None)
         results[exporter] = 'installed' if success else 'failed'
+        if not success:
+            errors[exporter] = error or 'Exporter installation could not be verified.'
         if success:
             setattr(server, f'{exporter}_installed', True)
             setattr(server, f'{exporter}_enabled', True)
@@ -1508,7 +1516,7 @@ def api_install_exporters(server_id):
             ts_setting.value = ''
         db.session.commit()
     
-    return jsonify(results)
+    return jsonify({**results, 'errors': errors})
 
 @app.route('/api/servers/<int:server_id>/remove-exporters', methods=['POST'])
 @csrf.exempt  # Session-authenticated internal API
@@ -1561,21 +1569,11 @@ def _build_exporter_response(server, versions=None, updates=None, source='cached
         if server.dcgm_exporter_enabled and server.dcgm_exporter_version:
             versions['dcgm_exporter'] = server.dcgm_exporter_version
     
-    # For cached responses, only claim "installed" if also "enabled" (was running
-    # at last check). This avoids showing stale "Stopped" for exporters that are
-    # actually not installed. The background live check will correct the state.
-    if source == 'cached':
-        installed = {
-            'node_exporter': server.node_exporter_enabled,
-            'dc_exporter': server.dc_exporter_enabled,
-            'dcgm_exporter': server.dcgm_exporter_enabled,
-        }
-    else:
-        installed = {
-            'node_exporter': server.node_exporter_installed,
-            'dc_exporter': server.dc_exporter_installed,
-            'dcgm_exporter': server.dcgm_exporter_installed,
-        }
+    installed = {
+        'node_exporter': server.node_exporter_installed,
+        'dc_exporter': server.dc_exporter_installed,
+        'dcgm_exporter': server.dcgm_exporter_installed,
+    }
     
     return {
         'server_id': server.id,
@@ -1625,7 +1623,12 @@ def _do_live_exporter_check(server_id):
         ssh_password = server.ssh_password
         
         # 1. Check which services are actually registered on the device
-        svc_status = check_services_installed(server)
+        from .web_exporters import ServiceCheckUnavailable
+        try:
+            svc_status = check_services_installed(server)
+        except ServiceCheckUnavailable as exc:
+            app.logger.warning('Exporter discovery unavailable for server %s: %s', server_id, exc)
+            return
         
         # 2. Port checks confirm whether the service is actively listening
         port_checks = {
@@ -1863,6 +1866,10 @@ def api_toggle_exporter(server_id, exporter):
 @write_required
 def api_update_exporter(server_id, exporter):
     """Update an exporter to the latest version."""
+    from .worker_lifecycle import selected_worker_mutation_refusal
+    refusal = selected_worker_mutation_refusal()
+    if refusal:
+        return jsonify({'success':False, 'error':refusal}), 409
     from .exporters import get_latest_exporter_version, get_exporter_download_url
     
     server = Server.query.get_or_404(server_id)
@@ -2089,6 +2096,10 @@ def api_install_watchdog_agent(server_id):
 @write_required
 def api_reinstall_watchdog_agent(server_id):
     """Reinstall DC Watchdog agent on a server."""
+    from .worker_lifecycle import selected_worker_mutation_refusal
+    refusal = selected_worker_mutation_refusal()
+    if refusal:
+        return jsonify({'success':False, 'error':refusal}), 409
     server = Server.query.get_or_404(server_id)
     
     # First remove, then install

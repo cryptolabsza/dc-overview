@@ -13,6 +13,26 @@ import subprocess
 logger = logging.getLogger(__name__)
 
 
+def privileged_remote_command(server, command):
+    """Select direct root execution or fail-fast noninteractive sudo."""
+    return command if (server.ssh_user or 'root') == 'root' else f'sudo -n -- {command}'
+
+
+def remote_failure_message(result=None, *, timed_out=False):
+    """Return an operator diagnostic without echoing remote output or credentials."""
+    if timed_out:
+        return 'Remote operation timed out; verify service state before retrying.'
+    output = ((getattr(result, 'stderr', '') or '') + (getattr(result, 'stdout', '') or '')).lower()
+    if 'sudo' in output or 'permission denied' in output:
+        return 'Remote permission denied; root or passwordless sudo is required.'
+    if 'rollback incomplete' in output:
+        return 'Installation failed; automatic recovery was incomplete. Check the remote service.'
+    if 'rollback' in output or 'previous installation restored' in output:
+        return 'Installation failed; the previous installation was restored.'
+    code = getattr(result, 'returncode', None)
+    return f'Remote operation failed (exit {code}).' if isinstance(code, int) and code else 'Remote operation could not be verified.'
+
+
 def resolve_ssh_key_path(server):
     """Resolve the SSH key path for a server, with fallback to default fleet key.
     

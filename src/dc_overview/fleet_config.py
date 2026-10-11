@@ -6,6 +6,7 @@ Ask once, use everywhere.
 
 import os
 import tempfile
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -168,11 +169,21 @@ class VastPriceManagerConfig:
     master_key_file: str = "/etc/dc-overview/secrets/vpm-master.key"
     expected_account_id: Optional[str] = None
     writes_enabled: bool = False
+    data_source: str = "vast-price-manager-data"
+    data_kind: str = "volume"
+    credential_mode: str = "file"
+    credential_reference: Optional[str] = None
+    database_relative_path: str = "vpm.sqlite3"
+    layout: Optional[Dict[str, Any]] = None
 
     def validate(self) -> None:
         """Reject YAML strings and integers for the write capability."""
         if type(self.writes_enabled) is not bool:
             raise ValueError("vast_price_manager.writes_enabled must be a boolean")
+        if self.data_kind not in ('volume', 'bind') or self.credential_mode not in ('file', 'systemd-encrypted'):
+            raise ValueError('Unsupported VPM data/custody mode')
+        if self.layout is not None and not isinstance(self.layout, dict):
+            raise ValueError('VPM layout must be declared configuration')
 
 
 @dataclass
@@ -211,6 +222,9 @@ class GrafanaConfig:
     home_dashboard: Optional[str] = "dc-overview-main"
     # Optional contact-point name used by file-provisioned fleet alerts.
     alert_receiver: Optional[str] = None
+    customer_dashboard_dir: Optional[str] = None
+    prometheus_datasource_uid: Optional[str] = None
+    overwrite_product_dashboards: bool = False
 
 
 @dataclass
@@ -218,6 +232,10 @@ class PrometheusConfig:
     """Prometheus configuration."""
     port: int = 9090
     retention_days: int = 30
+    extra_scrape_configs: List[Dict[str, Any]] = field(default_factory=list)
+    rule_files: List[str] = field(default_factory=list)
+    customer_config_dir: Optional[str] = None
+    legacy_managed_jobs: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -269,6 +287,15 @@ class SecurityConfig:
 
 
 @dataclass
+class ReleaseSelectionConfig:
+    """Public approved selection references, independent of observed runtime state."""
+    selection_id: Optional[str] = None
+    selection_sha256: Optional[str] = None
+    release_selection_dir: Optional[str] = None
+    components: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class FleetConfig:
     """
     Master configuration object that holds EVERYTHING.
@@ -317,6 +344,7 @@ class FleetConfig:
     
     # Docker image tag: 'latest' (stable) or 'dev' (requires --dev flag)
     image_tag: str = "latest"
+    release_selection: ReleaseSelectionConfig = field(default_factory=ReleaseSelectionConfig)
     
     # Internal state
     master_ip: Optional[str] = None
@@ -386,6 +414,68 @@ class FleetConfig:
             # May fail if not running as root - that's OK, container will still work
             pass
         
+        return path
+
+    @contextmanager
+    def lifecycle_lock(self):
+        """Serialize selection storage and its public reference as one operation."""
+        import fcntl
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        path = self.config_dir / '.lifecycle-config.lock'
+        if path.is_symlink():
+            raise ValueError('lifecycle lock cannot be a symlink')
+        with open(path, 'a+b') as lock:
+            os.chmod(path, 0o600)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
+    def persist_lifecycle(self, *, expected_public: bytes, _locked=False) -> Path:
+        """Persist lifecycle references only, preserving separately managed secrets."""
+        import fcntl
+        import hashlib
+        import tempfile
+        path = self.config_dir / 'fleet-config.yaml'
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        with nullcontext() if _locked else self.lifecycle_lock():
+            original = path.read_bytes() if path.exists() else b''
+            if original != expected_public:
+                raise RuntimeError('public configuration changed during lifecycle operation; reconcile before retrying')
+            metadata = path.stat() if path.exists() else None
+            values = yaml.safe_load(original) or {}
+            if not isinstance(values, dict):
+                raise ValueError('public configuration must be a mapping')
+            changed = self._to_dict(include_secrets=False)
+            for name in ('release_selection', 'vast_price_manager'):
+                values[name] = {**values.get(name, {}), **changed[name]}
+            if original:
+                backup = self.config_dir / ('fleet-config.lifecycle-' + hashlib.sha256(original).hexdigest() + '.bak')
+                try:
+                    with open(backup, 'xb') as saved:
+                        os.chmod(backup, 0o600)
+                        saved.write(original)
+                        saved.flush()
+                        os.fsync(saved.fileno())
+                except FileExistsError:
+                    if backup.read_bytes() != original:
+                        raise RuntimeError('public configuration snapshot differs')
+            descriptor, temporary = tempfile.mkstemp(prefix='.fleet-lifecycle-', dir=self.config_dir)
+            try:
+                with os.fdopen(descriptor, 'wb') as candidate:
+                    os.fchmod(candidate.fileno(), metadata.st_mode & 0o777 if metadata else 0o600)
+                    if metadata:
+                        os.fchown(candidate.fileno(), metadata.st_uid, metadata.st_gid)
+                    candidate.write(yaml.safe_dump(values, sort_keys=False).encode())
+                    candidate.flush()
+                    os.fsync(candidate.fileno())
+                if (path.read_bytes() if path.exists() else b'') != original:
+                    raise RuntimeError('public configuration changed during lifecycle operation')
+                os.replace(temporary, path)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
         return path
 
     def persist_alert_receiver(self, receiver: Optional[str]) -> Path:
@@ -495,6 +585,12 @@ class FleetConfig:
         self.vast_price_manager.validate()
         data = {
             "site_name": self.site_name,
+            "release_selection": {
+                "selection_id": self.release_selection.selection_id,
+                "selection_sha256": self.release_selection.selection_sha256,
+                "release_selection_dir": self.release_selection.release_selection_dir,
+                "components": self.release_selection.components,
+            },
             "master_ip": self.master_ip,
             "components": {
                 "dc_overview": self.components.dc_overview,
@@ -524,10 +620,17 @@ class FleetConfig:
             "grafana": {
                 "port": self.grafana.port,
                 "alert_receiver": self.grafana.alert_receiver,
+                "customer_dashboard_dir": self.grafana.customer_dashboard_dir,
+                "prometheus_datasource_uid": self.grafana.prometheus_datasource_uid,
+                "overwrite_product_dashboards": self.grafana.overwrite_product_dashboards,
             },
             "prometheus": {
                 "port": self.prometheus.port,
                 "retention_days": self.prometheus.retention_days,
+                "extra_scrape_configs": self.prometheus.extra_scrape_configs,
+                "rule_files": self.prometheus.rule_files,
+                "customer_config_dir": self.prometheus.customer_config_dir,
+                "legacy_managed_jobs": self.prometheus.legacy_managed_jobs,
             },
             "ipmi_monitor": {
                 "enabled": self.ipmi_monitor.enabled,
@@ -544,6 +647,12 @@ class FleetConfig:
                 "master_key_file": self.vast_price_manager.master_key_file,
                 "expected_account_id": self.vast_price_manager.expected_account_id,
                 "writes_enabled": self.vast_price_manager.writes_enabled,
+                "data_source": self.vast_price_manager.data_source,
+                "data_kind": self.vast_price_manager.data_kind,
+                "credential_mode": self.vast_price_manager.credential_mode,
+                "credential_reference": self.vast_price_manager.credential_reference,
+                "database_relative_path": self.vast_price_manager.database_relative_path,
+                "layout": self.vast_price_manager.layout,
             },
             "runpod": {
                 "enabled": self.runpod.enabled,
@@ -674,6 +783,7 @@ class FleetConfig:
             
             config.site_name = data.get("site_name", "DC Overview")
             config.master_ip = data.get("master_ip")
+            config.release_selection = ReleaseSelectionConfig(**(data.get('release_selection') or {}))
             
             # Components
             # Note: use `or {}` because YAML sections with only comments parse as None
@@ -710,10 +820,16 @@ class FleetConfig:
             grafana = data.get("grafana") or {}
             config.grafana.port = grafana.get("port", 3000)
             config.grafana.alert_receiver = grafana.get("alert_receiver")
+            for name in ('customer_dashboard_dir', 'prometheus_datasource_uid', 'overwrite_product_dashboards'):
+                if name in grafana:
+                    setattr(config.grafana, name, grafana[name])
             
             prometheus = data.get("prometheus") or {}
             config.prometheus.port = prometheus.get("port", 9090)
             config.prometheus.retention_days = prometheus.get("retention_days", 30)
+            for name in ('extra_scrape_configs', 'rule_files', 'customer_config_dir', 'legacy_managed_jobs'):
+                if name in prometheus:
+                    setattr(config.prometheus, name, prometheus[name])
             
             ipmi = data.get("ipmi_monitor") or {}
             config.ipmi_monitor.enabled = ipmi.get("enabled", False)
@@ -732,6 +848,9 @@ class FleetConfig:
             )
             config.vast_price_manager.expected_account_id = vpm.get("expected_account_id")
             config.vast_price_manager.writes_enabled = vpm.get("writes_enabled", False)
+            for name in ('data_source', 'data_kind', 'credential_mode', 'credential_reference', 'database_relative_path', 'layout'):
+                if name in vpm:
+                    setattr(config.vast_price_manager, name, vpm[name])
             config.vast_price_manager.validate()
             
             # RunPod (supports multiple API keys)

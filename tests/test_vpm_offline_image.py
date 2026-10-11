@@ -23,6 +23,11 @@ class Result:
 def _manager(tmp_path: Path, calls, image_result: Result) -> VPMServiceManager:
     def runner(command, **_kwargs):
         calls.append(command)
+        if command[:2] == ['systemctl','show'] or command[:2] == ['busctl', '--json=short']:
+            from test_vpm_lifecycle_adoption import Host
+            host = Host()
+            host.unit_dir = tmp_path / 'units'
+            return host(command)
         if command == ["docker", "image", "inspect", "--format", "{{.Id}}", LOCAL_ID]:
             return image_result
         if command[:3] == ["systemctl", "is-active", "--quiet"]:
@@ -37,6 +42,17 @@ def _manager(tmp_path: Path, calls, image_result: Result) -> VPMServiceManager:
 
     manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "units", runner=runner)
     manager._validate_master_key = lambda _spec: None
+    # This fixture tests image resolution; real state/custody probes are covered
+    # in test_vpm_lifecycle_adoption.py rather than these command-only runners.
+    manager._assert_data_binding = lambda _spec: None
+    manager._data_recovery = lambda *_args: None
+    manager._verify_auth_boundary = lambda: True
+    manager._continuity = lambda *_args: {
+        "ok": True, "schema": "a" * 64, "controls": "a" * 64,
+        "key": "a" * 64, "ciphertexts": "a" * 64, "expected_account": "a" * 64,
+        "account_authority": "a" * 64,
+        "writes_enabled": False, "automation_paused": False,
+    }
     manager.vast_exporter_prerequisite = lambda: {
         "configured": True,
         "reason": "ready",
