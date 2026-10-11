@@ -27,6 +27,11 @@ class Result:
 def _manager(tmp_path: Path, calls: list, running: Result, probe: Result) -> VPMServiceManager:
     def runner(command, **_kwargs):
         calls.append(command)
+        if command[:2] == ['systemctl','show'] or command[:2] == ['busctl', '--json=short']:
+            from test_vpm_lifecycle_adoption import Host
+            host = Host()
+            host.unit_dir = tmp_path / 'units'
+            return host(command)
         if command == ["docker", "inspect", "-f", "{{.State.Running}}", "vastai-exporter"]:
             return running
         if command[:3] == ["docker", "exec", "vastai-exporter"]:
@@ -43,6 +48,17 @@ def _manager(tmp_path: Path, calls: list, running: Result, probe: Result) -> VPM
 
     manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "units", runner=runner, sleeper=lambda _seconds: None)
     manager._validate_master_key = lambda _spec: None
+    # Keep these command-only fixtures focused on exporter gating. The new
+    # lifecycle suite exercises default continuity/recovery against real state.
+    manager._assert_data_binding = lambda _spec: None
+    manager._data_recovery = lambda *_args: None
+    manager._verify_auth_boundary = lambda: True
+    manager._continuity = lambda *_args: {
+        "ok": True, "schema": "a" * 64, "controls": "a" * 64,
+        "key": "a" * 64, "ciphertexts": "a" * 64, "expected_account": "a" * 64,
+        "account_authority": "a" * 64,
+        "writes_enabled": False, "automation_paused": False,
+    }
     return manager
 
 

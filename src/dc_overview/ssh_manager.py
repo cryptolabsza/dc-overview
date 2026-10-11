@@ -20,10 +20,11 @@ console = Console()
 
 @dataclass
 class SSHResult:
-    """Result of an SSH operation."""
+    """SSH result: clean successful stdout, combined failed diagnostics."""
     success: bool
     output: str
     exit_code: int = 0
+    stderr: str = ''
 
 
 class SSHManager:
@@ -352,6 +353,7 @@ FLEET_KEY_EOF
         timeout: int = 300,
         sudo: bool = False,
         key_path: str = None,
+        password: Optional[str] = None,
     ) -> SSHResult:
         """
         Run a command on a remote host via SSH.
@@ -364,22 +366,42 @@ FLEET_KEY_EOF
             timeout: Command timeout in seconds
             sudo: Whether to prefix with sudo
             key_path: Optional custom key path (uses fleet key if not provided)
+            password: Explicit current password transport, before fleet key provisioning
         
         Returns:
             SSHResult with success status and output
         """
+        if password is not None and not shutil.which('sshpass'):
+            # Fresh pip/pipx installs already ship Paramiko; the normal system
+            # prerequisite step installs sshpass only after readonly proof.
+            # Reuse QuickStart's bounded transport without provisioning keys.
+            import paramiko
+            from .quickstart import _run_paramiko_command
+            client = paramiko.SSHClient()
+            try:
+                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                client.connect(hostname=host, username=username, password=password, port=port,
+                               timeout=10, auth_timeout=10, banner_timeout=10,
+                               allow_agent=False, look_for_keys=False)
+                if sudo and username != 'root':
+                    command = f'sudo {command}'
+                code, output, error = _run_paramiko_command(client, command, timeout)
+                return SSHResult(success=code == 0, output=output if code == 0 else output+error,
+                                 exit_code=code, stderr=error)
+            except Exception:
+                return SSHResult(success=False, output='SSH transport failed', exit_code=-1)
+            finally:
+                client.close()
         # Use provided key or fall back to fleet key
         ssh_key = key_path or str(self.key_path)
         
-        if not Path(ssh_key).exists():
+        if password is None and not Path(ssh_key).exists():
             return SSHResult(success=False, output=f"SSH key not found: {ssh_key}", exit_code=-1)
         
         if sudo and username != "root":
             command = f"sudo {command}"
         
-        cmd = [
-            "ssh",
-            "-i", ssh_key,
+        cmd = (["sshpass", "-e", "ssh"] if password is not None else ["ssh", "-i", ssh_key]) + [
             "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "ConnectTimeout=10",
@@ -393,19 +415,21 @@ FLEET_KEY_EOF
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=timeout
+                timeout=timeout,
+                env={**os.environ, 'SSHPASS': password} if password is not None else None
             )
             
             return SSHResult(
                 success=result.returncode == 0,
-                output=result.stdout + result.stderr,
-                exit_code=result.returncode
+                output=result.stdout if result.returncode == 0 else result.stdout + result.stderr,
+                exit_code=result.returncode,
+                stderr=result.stderr
             )
             
         except subprocess.TimeoutExpired:
             return SSHResult(success=False, output="Command timed out", exit_code=-1)
         except Exception as e:
-            return SSHResult(success=False, output=str(e), exit_code=-1)
+            return SSHResult(success=False, output="SSH transport failed" if password is not None else str(e), exit_code=-1)
     
     def copy_file(
         self,

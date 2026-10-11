@@ -1734,16 +1734,30 @@ class TestGrafanaAlertConfigurationPaths:
     def test_upgrade_aborts_before_docker_when_required_alert_sync_fails(
         self, mock_subprocess, mock_alert_sync
     ):
-        mock_alert_sync.return_value = MagicMock(
+        ordering = []
+        failure = MagicMock(
             success=False,
             rollback_complete=False,
             failure_reason="restore denied",
         )
+        def alert_sync(*args):
+            ordering.append('alert-sync')
+            return failure
+        mock_alert_sync.side_effect = alert_sync
 
-        result = CliRunner().invoke(main, ["upgrade"])
+        # This scenario starts after the independently tested proxy prerequisites.
+        with patch('dc_overview.fleet_upgrade.preflight_release',
+                   side_effect=lambda *args: ordering.append('safe-preflight')) as preflight, \
+             patch('dc_overview.fleet_upgrade.run_fleet_upgrade') as submit:
+            result = CliRunner().invoke(main, ["upgrade"])
 
         assert result.exit_code != 0
         assert "rollback incomplete" in result.output.lower()
+        assert "restore denied" in result.output
+        assert ordering == ['safe-preflight', 'alert-sync']
+        preflight.assert_called_once()
+        mock_alert_sync.assert_called_once()
+        submit.assert_not_called()
         mock_subprocess.assert_not_called()
 
     @patch("dc_overview.quickstart.install_grafana_alerts")

@@ -105,14 +105,39 @@ INTERNAL_IPMI_INVENTORY_URL = "http://ipmi-monitor:5000"
 
 def inspect_ipmi_monitor() -> Optional[Dict[str, Any]]:
     """Read the running IPMI container configuration without changing it."""
+    prerequisite = ("IPMI Monitor inspection prerequisite: verify Docker Engine is installed, running and accessible, "
+                    "then retry; existing inventory credential custody is unproven.")
     try:
         result = subprocess.run(
-            ["docker", "inspect", "ipmi-monitor"], capture_output=True, text=True
+            ["docker", "inspect", "ipmi-monitor"], capture_output=True, text=True, timeout=15
         )
-        inspected = json.loads(result.stdout) if result.returncode == 0 else []
-        return inspected[0] if isinstance(inspected, list) and inspected else None
-    except (OSError, json.JSONDecodeError):
-        return None
+    except (OSError, subprocess.TimeoutExpired):
+        raise RuntimeError(prerequisite) from None
+    if result.returncode != 0:
+        absent = {prefix + message for prefix in ("", "Error: ", "Error response from daemon: ")
+                  for message in ("No such object: ipmi-monitor", "No such container: ipmi-monitor")}
+        if result.stderr.strip() in absent and result.stdout.strip() in ("", "[]"):
+            return None
+        raise RuntimeError(prerequisite)
+    try:
+        values = json.loads(result.stdout)
+        if not isinstance(values, list) or len(values) != 1 or not isinstance(values[0], dict):
+            raise ValueError()
+        inspected = values[0]
+        if (inspected.get("Name") != "/ipmi-monitor" or not isinstance(inspected.get("Config"), dict)
+                or not isinstance(inspected.get("HostConfig"), dict)
+                or "Env" not in inspected["Config"] or "Binds" not in inspected["HostConfig"]
+                or not isinstance(inspected.get("Mounts"), list)):
+            raise ValueError()
+        for items, kind in ((inspected["Config"].get("Env"), str),
+                            (inspected["HostConfig"].get("Binds"), str),
+                            (inspected["HostConfig"].get("Mounts"), dict), (inspected.get("Mounts"), dict)):
+            if items is not None and (not isinstance(items, list) or not all(isinstance(item, kind) for item in items)):
+                raise ValueError()
+        _ipmi_mount_specs(inspected)
+    except (ValueError, TypeError, AttributeError, RuntimeError):
+        raise RuntimeError(prerequisite + " Docker inspect returned unsupported configuration data.") from None
+    return inspected
 
 
 def _environment_values(inspected: Optional[Dict[str, Any]]) -> Dict[str, str]:
@@ -130,25 +155,26 @@ def _ipmi_mount_specs(inspected: Optional[Dict[str, Any]]) -> List[str]:
     destinations = set()
     for binding in (inspected or {}).get("HostConfig", {}).get("Binds", []) or []:
         parts = binding.split(":")
-        if len(parts) < 2:
+        if len(parts) < 2 or not parts[0].strip() or not parts[1].strip():
             raise RuntimeError(f"Unsupported existing IPMI mount: {binding}")
         specs.append(binding)
         destinations.add(parts[1])
 
     mount_groups = [
-        (inspected or {}).get("HostConfig", {}).get("Mounts", []) or [],
-        (inspected or {}).get("Mounts", []) or [],
+        (True, (inspected or {}).get("HostConfig", {}).get("Mounts", []) or []),
+        (False, (inspected or {}).get("Mounts", []) or []),
     ]
-    for mounts in mount_groups:
+    for requested, mounts in mount_groups:
         for mount in mounts:
             mount_type = mount.get("Type")
-            destination = mount.get("Destination") or mount.get("Target")
+            destination = mount.get("Target") if requested else mount.get("Destination")
             source = (
                 mount.get("Name")
-                if mount_type == "volume"
+                if mount_type == "volume" and not requested
                 else mount.get("Source")
             )
-            if mount_type not in {"bind", "volume"} or not destination or not source:
+            if (mount_type not in {"bind", "volume"} or not isinstance(destination, str) or not destination.strip()
+                    or not isinstance(source, str) or not source.strip()):
                 raise RuntimeError(
                     f"Unsupported existing IPMI mount type: {mount_type or 'unknown'}"
                 )
@@ -176,22 +202,31 @@ def prepare_inventory_credential_transport(
     config_dir: Path,
     *,
     existing_ipmi: Optional[Dict[str, Any]] = None,
+    render_only: bool = False,
 ) -> tuple[Path, str]:
     """Create the shared transport secret once and select local or vault mode."""
     secrets_dir = config_dir / "secrets"
     secret_path = secrets_dir / INVENTORY_SECRET_FILENAME
+    existing_environment = _environment_values(existing_ipmi)
+    explicit_authority = existing_environment.get("FLEET_CREDENTIAL_AUTHORITY", "").strip()
+    if explicit_authority and explicit_authority not in {"local", "vault"}:
+        raise RuntimeError("FLEET_CREDENTIAL_AUTHORITY must be local or vault")
+    mounted_secret = False
     for binding in _ipmi_mount_specs(existing_ipmi):
         source, separator, remainder = binding.partition(":")
         if separator and remainder.split(":", 1)[0] == INVENTORY_SECRET_CONTAINER_PATH:
             secret_path = Path(source)
+            mounted_secret = True
             break
+    if mounted_secret and not secret_path.exists():
+        raise RuntimeError(f"Existing IPMI inventory secret mount is unavailable: {secret_path}")
     if secret_path.exists():
         if not secret_path.is_file():
             raise RuntimeError(f"Inventory credential secret is invalid: {secret_path}")
         secret = secret_path.read_text(encoding="utf-8").strip()
         if len(secret) < 32 or any(character.isspace() for character in secret):
             raise RuntimeError(f"Inventory credential secret is invalid: {secret_path}")
-    else:
+    elif not render_only:
         if secret_path.parent != secrets_dir:
             raise RuntimeError(
                 f"Existing IPMI inventory secret mount is unavailable: {secret_path}"
@@ -207,7 +242,9 @@ def prepare_inventory_credential_transport(
             )
         with os.fdopen(descriptor, "w", encoding="utf-8") as secret_file:
             secret_file.write(secrets.token_urlsafe(32))
-    if secret_path.parent == secrets_dir:
+    if render_only:
+        pass
+    elif secret_path.parent == secrets_dir:
         os.chmod(secret_path, 0o600)
         if os.geteuid() == 0:
             os.chown(secret_path, 1000, -1)
@@ -220,11 +257,7 @@ def prepare_inventory_credential_transport(
                 "use a UID 1000 owner-readable, non-group/world-readable file"
             )
 
-    existing_environment = _environment_values(existing_ipmi)
-    explicit_authority = existing_environment.get("FLEET_CREDENTIAL_AUTHORITY", "").strip()
     if explicit_authority:
-        if explicit_authority not in {"local", "vault"}:
-            raise RuntimeError("FLEET_CREDENTIAL_AUTHORITY must be local or vault")
         return secret_path, explicit_authority
     if (secrets_dir / "credential-sources.json").exists() or existing_environment.get(
         "IPMI_BMC_CREDENTIALS_FILE", ""
@@ -333,6 +366,26 @@ class FleetManager:
         self.ssh = SSHManager(config.config_dir)
         self.prerequisites = PrerequisitesInstaller()
         self.deployment_errors = []  # Track non-fatal errors
+        self.release_plan = None
+
+    def _selected_image(self, name, fallback):
+        if getattr(self, 'release_plan', None):
+            target = self.release_plan.targets.get(name)
+            if not target or target['kind'] != 'oci':
+                raise ValueError('Missing enabled selected container: ' + name)
+            return target['reference']
+        return fallback
+
+    def _watchtower_args(self):
+        if getattr(self, 'release_plan', None):
+            return ['--label', 'com.centurylinklabs.watchtower.enable=false']
+        return ['--label', 'com.centurylinklabs.watchtower.enable=true'] if self.config.enable_watchtower_all else []
+
+    def _proxy_selection_args(self):
+        if self.release_plan or self.config.release_selection.selection_id:
+            from .fleet_upgrade import release_store
+            return {'release_selection_dir': release_store(self.config).root}
+        return {}
 
     def _inspect_ipmi_monitor(self) -> Optional[Dict[str, Any]]:
         return inspect_ipmi_monitor()
@@ -346,6 +399,7 @@ class FleetManager:
         return prepare_inventory_credential_transport(
             self.config.config_dir,
             existing_ipmi=existing_ipmi,
+            render_only=getattr(self, '_render_only', False),
         )
 
     @staticmethod
@@ -397,6 +451,13 @@ class FleetManager:
         self.deployment_errors = []  # Reset for this deploy
         
         try:
+            from .fleet_upgrade import preflight_release, commit_release
+            self.release_plan = preflight_release(self.config, getattr(self.config, '_release_manifest_path', None), fresh_setup=True)
+            if getattr(self, 'release_plan', None):
+                self.monitoring_plan = self._prepare_baseline_monitoring()
+                if self.config.components.dc_overview and not self._validate_baseline_prometheus(self.monitoring_plan['prometheus']):
+                    raise RuntimeError('selected Prometheus validation failed before deployment writes')
+                commit_release(self.config, self.release_plan)
             # Step 1: Prerequisites
             self._install_prerequisites()
             
@@ -544,7 +605,7 @@ class FleetManager:
         if not ghcr_pat:
             # Check if docker is already authenticated
             result = subprocess.run(
-                ["docker", "pull", f"ghcr.io/cryptolabsza/cryptolabs-proxy:{self.config.image_tag}"],
+                ["docker", "pull", self._selected_image('cryptolabs-proxy', f"ghcr.io/cryptolabsza/cryptolabs-proxy:{self.config.image_tag}")],
                 capture_output=True, text=True, timeout=60
             )
             if result.returncode == 0:
@@ -667,6 +728,15 @@ class FleetManager:
         console.print("\n[bold]Step 3: Starting Prometheus & Grafana[/bold]\n")
         
         compose_dir = self.config.config_dir
+        if getattr(self, 'release_plan', None):
+            from .monitoring import validate_product_monitoring_custody
+            validate_product_monitoring_custody(compose_dir / 'prometheus')
+        if self.release_plan and not self._validate_baseline_prometheus(self.monitoring_plan['prometheus']):
+            raise RuntimeError('selected Prometheus validation failed before monitoring file writes')
+        if getattr(self, 'release_plan', None) and 'source_path' in self.monitoring_plan:
+            source = self.monitoring_plan['source_path']
+            if (source.read_bytes() if source.exists() else None) != self.monitoring_plan['source_bytes']:
+                raise RuntimeError('customer Prometheus configuration changed after preflight; reconcile before setup')
         compose_dir.mkdir(parents=True, exist_ok=True)
         
         # Create docker-compose.yml
@@ -674,12 +744,25 @@ class FleetManager:
         (compose_dir / "docker-compose.yml").write_text(compose_content)
         
         # Create prometheus.yml (initial, will be updated later)
-        prometheus_content = self._generate_prometheus_config()
-        (compose_dir / "prometheus.yml").write_text(prometheus_content)
+        if getattr(self, 'release_plan', None):
+            from .monitoring import atomic_write_bytes
+            mapping = self.monitoring_plan['prometheus']
+            product_dir = compose_dir / 'prometheus'
+            if not product_dir.exists():
+                product_dir.mkdir()
+                product_dir.chmod(0o755)
+                os.chown(product_dir, 1000, 1000)
+            atomic_write_bytes(product_dir / 'prometheus.yml', yaml.safe_dump(mapping, sort_keys=False).encode(), new_owner=(1000,1000))
+        else:
+            prometheus_content = self._generate_prometheus_config()
+            (compose_dir / 'prometheus.yml').write_text(prometheus_content)
         
         # Create recording_rules.yml for unified GPU metrics
         recording_rules = self._generate_recording_rules()
-        (compose_dir / "recording_rules.yml").write_text(recording_rules)
+        if self.release_plan:
+            atomic_write_bytes(compose_dir / 'prometheus' / 'recording_rules.yml', recording_rules.encode(), new_owner=(1000,1000))
+        else:
+            (compose_dir / 'recording_rules.yml').write_text(recording_rules)
         
         # Create grafana provisioning directories (only datasources, not dashboards)
         # Dashboards are imported via API to make them fully editable by users
@@ -696,7 +779,10 @@ datasources:
     isDefault: true
     uid: prometheus
 """
-        (grafana_dir / "provisioning" / "datasources" / "prometheus.yml").write_text(datasource_config)
+        if getattr(self, 'release_plan', None):
+            datasource_config = datasource_config.replace('uid: prometheus', 'uid: ' + self.monitoring_plan['grafana']['prometheus_datasource_uid'])
+        if not self.release_plan or self.monitoring_plan['grafana'].get('existing_datasource') is None:
+            (grafana_dir / 'provisioning' / 'datasources' / 'prometheus.yml').write_text(datasource_config)
 
         install_grafana_alerts(
             compose_dir,
@@ -834,6 +920,29 @@ datasources:
             raise RuntimeError("Prometheus and Grafana failed to start. Check docker logs for details.")
     
     def _generate_docker_compose(self) -> str:
+        content = self._generate_base_docker_compose()
+        if not getattr(self, 'release_plan', None):
+            return content
+        value = yaml.safe_load(content)
+        for name, service in value['services'].items():
+            service['image'] = self._selected_image(name, service['image'])
+            service.setdefault('labels', {})['com.centurylinklabs.watchtower.enable'] = 'false'
+            service['labels']['io.cryptolabs.update.origin'] = self.release_plan.targets[name]['origin']
+        prometheus = value['services']['prometheus']
+        prometheus['volumes'] = [mount for mount in prometheus['volumes'] if ': /etc/prometheus/' not in mount and ':/etc/prometheus/' not in mount]
+        prometheus['volumes'].append('./prometheus:/etc/prometheus:ro')
+        if self.config.prometheus.customer_config_dir:
+            prometheus['volumes'].append(self.config.prometheus.customer_config_dir + ':/etc/prometheus/customer:ro')
+        # Fresh setup installs DC through the normal proxy setup owner later.
+        # Existing-proxy setup includes DC in this Compose project.
+        if 'dc-overview' in value['services']:
+            value['services']['dc-overview']['volumes'].append(str(self.config.config_dir) + ':/etc/dc-overview:ro')
+            value['services']['dc-overview']['volumes'].append('./prometheus:/etc/dc-overview/prometheus')
+            value['services']['dc-overview'].setdefault('environment', []).append('PROMETHEUS_CONFIG_PATH=/etc/dc-overview/prometheus/prometheus.yml')
+            value['services']['dc-overview']['environment'].append('DC_RELEASE_SELECTION_REQUIRED=1')
+        return yaml.safe_dump(value, sort_keys=False)
+
+    def _generate_base_docker_compose(self) -> str:
         """Generate docker-compose.yml content."""
         # Check if using existing proxy (cryptolabs network)
         use_existing_proxy = getattr(self.config.ssl, 'use_existing_proxy', False)
@@ -1135,6 +1244,9 @@ scrape_configs:
     
     def _deploy_to_workers(self):
         """Install exporters on all workers."""
+        if getattr(self, 'release_plan', None):
+            self._deploy_selected_workers()
+            return
         console.print("\n[bold]Step 4: Installing Exporters on Workers[/bold]\n")
         
         with Progress(
@@ -1169,6 +1281,19 @@ scrape_configs:
         installed = sum(1 for s in self.config.servers if s.exporters_installed)
         console.print(f"\n[green]✓[/green] Exporters installed on {installed}/{len(self.config.servers)} workers")
     
+    def _deploy_selected_workers(self):
+        from .worker_lifecycle import upgrade_workers
+        outcomes = upgrade_workers(self.config, self.release_plan, mode='install')
+        self.worker_outcomes = outcomes
+        for name, outcome in outcomes.items():
+            if outcome.get('success') is not True:
+                self.deployment_errors.append(f"{name}: selected worker artifact did not verify")
+        for server in self.config.servers:
+            exporter_results = [outcomes.get(name, {}).get('workers', {}).get(server.name, {})
+                                for name in ('dc-exporter', 'node-exporter')]
+            if all(value.get('success') is True for value in exporter_results):
+                server.exporters_installed = True
+
     def _install_exporters_on_server(self, server: Server) -> bool:
         """Install exporters on a single server via SSH."""
         creds = self.config.get_server_ssh_creds(server)
@@ -1269,10 +1394,109 @@ echo "node_exporter installed successfully"
     # ============ Step 5: Prometheus Targets ============
     
     def _configure_prometheus_targets(self):
+        if getattr(self, 'release_plan', None):
+            from .monitoring import apply_prometheus_config
+            prepared = self._prepare_baseline_monitoring()
+            mapping = prepared['prometheus']
+            target = self.config.config_dir / 'prometheus' / 'prometheus.yml'
+            apply_prometheus_config(target, mapping, validate_candidate=lambda path: self._validate_baseline_prometheus(yaml.safe_load(path.read_bytes())),
+                                    reload_config=lambda: self._reload_baseline_prometheus(yaml.safe_load(target.read_bytes()) if target.exists() else {}),
+                                    expected_previous_bytes=prepared['source_bytes'] if prepared['source_path'] == target else None)
+            return
+        prometheus_file = self.config.config_dir / 'prometheus.yml'
+        prometheus_file.write_text(yaml.safe_dump(self._product_prometheus_config()))
+        subprocess.run(['docker', 'exec', 'prometheus', 'kill', '-HUP', '1'], capture_output=True)
+
+    def _grafana_request(self, path, payload=None):
+        auth = base64.b64encode(f'admin:{self.config.grafana.admin_password}'.encode()).decode()
+        headers = {'Authorization':'Basic ' + auth, 'X-WEBAUTH-USER':'admin', 'Content-Type':'application/json'}
+        request = urllib.request.Request('http://127.0.0.1:3000' + path, headers=headers,
+                                         data=json.dumps(payload).encode() if payload is not None else None,
+                                         method='POST' if payload is not None else 'GET')
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return json.load(response)
+
+    def _prepare_baseline_monitoring(self):
+        from .monitoring import (merge_prometheus_config, validate_customer_directory,
+                                  load_customer_dashboards, prepare_grafana_dashboards, select_prometheus_datasource)
+        from .fleet_upgrade import observe_component
+        if not self.config.components.dc_overview:
+            return {}
+        from .monitoring import validate_product_monitoring_custody
+        validate_product_monitoring_custody(self.config.config_dir / 'prometheus')
+        declared = self.config.prometheus
+        if declared.customer_config_dir:
+            validate_customer_directory(declared.customer_config_dir)
+        config_file = self.config.config_dir / 'prometheus' / 'prometheus.yml'
+        if not config_file.exists():
+            config_file = self.config.config_dir / 'prometheus.yml'
+        source_bytes = config_file.read_bytes() if config_file.exists() else None
+        existing = yaml.safe_load(source_bytes) if source_bytes is not None else {}
+        merged = merge_prometheus_config(existing, self._product_prometheus_config(), declared.extra_scrape_configs,
+                                          declared.rule_files, declared.legacy_managed_jobs)
+        customer = load_customer_dashboards(self.config.grafana.customer_dashboard_dir) if self.config.grafana.customer_dashboard_dir else []
+        products = []
+        for item in self._get_dashboard_list():
+            content = self._get_dashboard_json(item)
+            if content is None:
+                raise ValueError('selected CLI packaged dashboard is missing')
+            products.append(self._scale_dashboard_for_servers(json.loads(content), item['name']))
+        # Detect UID collisions locally before reading existing runtime state.
+        prepare_grafana_dashboards(products, customer, [], prometheus_datasource_uid='prometheus',
+                                   overwrite_product_dashboards=self.config.grafana.overwrite_product_dashboards)
+        observed = observe_component('grafana', self.release_plan.targets.get('grafana', {'owner':'proxy-updater','kind':'oci','reference':''}))
+        if observed['state'] == 'running':
+            try:
+                datasources = self._grafana_request('/api/datasources')
+                uid = select_prometheus_datasource(datasources, self.config.grafana.prometheus_datasource_uid)
+                existing_datasource = next(row for row in datasources if row.get('uid') == uid)
+                dashboards = self._grafana_request('/api/search?type=dash-db')
+            except (OSError, ValueError, urllib.error.URLError):
+                raise RuntimeError('existing Grafana datasource/dashboard ownership could not be read; no monitoring changes applied') from None
+        else:
+            uid = self.config.grafana.prometheus_datasource_uid or 'prometheus'
+            dashboards = []
+            existing_datasource = None
+        prepared = prepare_grafana_dashboards(products, customer, dashboards, prometheus_datasource_uid=uid,
+                                              overwrite_product_dashboards=self.config.grafana.overwrite_product_dashboards)
+        prepared['existing_datasource'] = existing_datasource
+        return {'prometheus':merged, 'grafana':prepared, 'source_path':config_file, 'source_bytes':source_bytes}
+
+    def _validate_baseline_prometheus(self, mapping):
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix='dc-prometheus-validation-') as directory:
+            candidate = Path(directory)
+            # Public config contains no inline credentials. The selected image
+            # runs promtool as its own non-root UID, which must traverse/read it.
+            candidate.chmod(0o755)
+            (candidate / 'prometheus.yml').write_text(yaml.safe_dump(mapping, sort_keys=False))
+            (candidate / 'recording_rules.yml').write_text(self._generate_recording_rules())
+            for public_file in candidate.iterdir():
+                public_file.chmod(0o644)
+            command = ['docker','run','--rm','--network','none','--entrypoint','/bin/promtool',
+                       '-v',str(candidate)+':/etc/prometheus:ro']
+            if self.config.prometheus.customer_config_dir:
+                command += ['-v',self.config.prometheus.customer_config_dir+':/etc/prometheus/customer:ro']
+            command += [self._selected_image('prometheus',''), 'check','config','/etc/prometheus/prometheus.yml']
+            result = subprocess.run(command, capture_output=True, text=True, timeout=60)
+            return result.returncode == 0
+
+    def _reload_baseline_prometheus(self, mapping):
+        try:
+            request = urllib.request.Request('http://127.0.0.1:9090/prometheus/-/reload', data=b'', method='POST')
+            with urllib.request.urlopen(request, timeout=15) as response:
+                if response.status != 200:
+                    return False
+            with urllib.request.urlopen('http://127.0.0.1:9090/prometheus/api/v1/status/config', timeout=15) as response:
+                loaded = json.load(response)
+            from .monitoring import declared_configuration_matches
+            return loaded.get('status') == 'success' and declared_configuration_matches(mapping, yaml.safe_load(loaded.get('data', {}).get('yaml', '')))
+        except (OSError, ValueError, urllib.error.URLError):
+            return False
+
+    def _product_prometheus_config(self):
         """Update Prometheus with all scrape targets."""
-        console.print("\n[bold]Step 5: Configuring Prometheus Targets[/bold]\n")
         
-        prometheus_file = self.config.config_dir / "prometheus.yml"
         
         scrape_configs = [
             {"job_name": "prometheus", "metrics_path": "/prometheus/metrics",
@@ -1315,7 +1539,6 @@ echo "node_exporter installed successfully"
                 "metrics_path": "/metrics"
             })
         
-        # Write config
         config = {
             "global": {
                 "scrape_interval": "15s",
@@ -1325,21 +1548,19 @@ echo "node_exporter installed successfully"
             "scrape_configs": scrape_configs
         }
         
-        with open(prometheus_file, "w") as f:
-            yaml.dump(config, f, default_flow_style=False)
-        
-        # Reload Prometheus
-        subprocess.run(
-            ["docker", "exec", "prometheus", "kill", "-HUP", "1"],
-            capture_output=True
-        )
-        
-        console.print(f"[green]✓[/green] Prometheus configured with {len(scrape_configs)} targets")
-    
+        return config
+
     # ============ Step 6: Import Dashboards ============
     
     def _import_dashboards(self):
         """Import Grafana dashboards with correct datasource UID."""
+        if getattr(self, 'release_plan', None):
+            prepared = self._prepare_baseline_monitoring()['grafana']
+            for payload in prepared['payloads']:
+                result = self._grafana_request('/api/dashboards/db', payload)
+                if result.get('status') != 'success':
+                    raise RuntimeError('selected Grafana dashboard import did not verify')
+            return
         console.print("\n[bold]Step 6: Importing Dashboards[/bold]\n")
         
         # Wait for Grafana to be ready
@@ -1871,6 +2092,13 @@ echo "node_exporter installed successfully"
         When DASHBOARD_BRANCH is set (dev mode), fetch from GitHub first
         to ensure you get the latest changes. Otherwise, prefer local files.
         """
+        if getattr(self, 'release_plan', None):
+            from . import __file__ as package_file
+            name = dashboard.get('local_file', '')
+            if not name or Path(name).name != name:
+                return None
+            path = Path(package_file).parent/'dashboards'/name
+            return path.read_text() if path.is_file() else None
         branch = self._get_dashboard_branch()
         fetch_from_github_first = branch != 'main'
         
@@ -1913,7 +2141,7 @@ echo "node_exporter installed successfully"
         
         existing_ipmi = self._inspect_ipmi_monitor()
         secret_path, authority = self._prepare_inventory_credential_transport(existing_ipmi)
-        target_image = f"ghcr.io/cryptolabsza/ipmi-monitor:{self.config.image_tag}"
+        target_image = self._selected_image('ipmi-monitor', f"ghcr.io/cryptolabsza/ipmi-monitor:{self.config.image_tag}")
         if existing_ipmi:
             current_image = existing_ipmi.get("Config", {}).get("Image", "")
             if current_image == target_image and self._ipmi_transport_is_wired(
@@ -1983,7 +2211,7 @@ echo "node_exporter installed successfully"
         # Pull latest image
         console.print("[dim]Pulling ipmi-monitor image...[/dim]")
         subprocess.run(
-            ["docker", "pull", f"ghcr.io/cryptolabsza/ipmi-monitor:{self.config.image_tag}"],
+            ["docker", "pull", self._selected_image('ipmi-monitor', f"ghcr.io/cryptolabsza/ipmi-monitor:{self.config.image_tag}")],
             capture_output=True
         )
         
@@ -2080,9 +2308,9 @@ echo "node_exporter installed successfully"
             "-v", servers_mount,
             "-v", f"{secret_path}:{INVENTORY_SECRET_CONTAINER_PATH}:ro",
         ] + ssh_keys_mount + preserved_mounts + (
-            ["--label", "com.centurylinklabs.watchtower.enable=true"] if getattr(self.config, 'enable_watchtower_all', False) else []
+            self._watchtower_args()
         ) + env_vars + [
-            f"ghcr.io/cryptolabsza/ipmi-monitor:{self.config.image_tag}"
+            self._selected_image('ipmi-monitor', f"ghcr.io/cryptolabsza/ipmi-monitor:{self.config.image_tag}")
         ]
         
         result = subprocess.run(docker_cmd, capture_output=True, text=True)
@@ -2354,6 +2582,13 @@ except Exception as e:
             create_master_key_if_missing,
         )
 
+        if getattr(self, 'release_plan', None):
+            from .fleet_upgrade import dispatch_vpm
+            target = self.release_plan.targets['vast-price-manager']
+            outcome = dispatch_vpm(self.config, target, setup=True)
+            if outcome.get('success') is not True:
+                raise RuntimeError('selected VPM owner did not verify; existing custody preserved')
+            return
         manager = VPMServiceManager(self.config.config_dir)
         with manager.operation_lock():
             vpm_config = self.config.vast_price_manager
@@ -2458,9 +2693,8 @@ except Exception as e:
             keys_csv = ",".join(f"{k.name}:{k.key}" for k in api_keys)
             cmd.extend(["-e", f"VASTAI_API_KEYS={keys_csv}"])
         
-        if getattr(self.config, 'enable_watchtower_all', False):
-            cmd.extend(["--label", "com.centurylinklabs.watchtower.enable=true"])
-        cmd.append("ghcr.io/cryptolabsza/vastai-exporter:latest")
+        cmd.extend(self._watchtower_args())
+        cmd.append(self._selected_image('vastai-exporter', "ghcr.io/cryptolabsza/vastai-exporter:latest"))
         
         result = subprocess.run(cmd, capture_output=True, text=True)
         
@@ -2539,9 +2773,8 @@ except Exception as e:
             keys_csv = ",".join(f"{k.name}:{k.key}" for k in api_keys)
             cmd.extend(["-e", f"RUNPOD_API_KEYS={keys_csv}"])
         
-        if getattr(self.config, 'enable_watchtower_all', False):
-            cmd.extend(["--label", "com.centurylinklabs.watchtower.enable=true"])
-        cmd.append("ghcr.io/cryptolabsza/runpod-exporter:latest")
+        cmd.extend(self._watchtower_args())
+        cmd.append(self._selected_image('runpod-exporter', "ghcr.io/cryptolabsza/runpod-exporter:latest"))
         
         result = subprocess.run(cmd, capture_output=True, text=True)
         
@@ -2568,6 +2801,11 @@ except Exception as e:
         
         Falls back to bash script if Go binary download fails.
         """
+        if getattr(self, 'release_plan', None):
+            # Selected worker coordinator handles the agent alongside other workers.
+            if not hasattr(self, 'worker_outcomes'):
+                self._deploy_selected_workers()
+            return
         if not self.config.components.dc_watchdog or not self.config.watchdog.api_key:
             return
         
@@ -2958,6 +3196,7 @@ echo "[+] Installation complete"
             console.print("[dim]Setting up proxy via cryptolabs-proxy module...[/dim]")
             
             proxy_config = ProxyConfig(
+                **self._proxy_selection_args(),
                 domain=domain,
                 email=self.config.ssl.email or f"admin@{domain}",
                 use_letsencrypt=(self.config.ssl.mode == SSLMode.LETSENCRYPT),
@@ -3060,6 +3299,8 @@ echo "[+] Installation complete"
     
     def _deploy_cryptolabs_proxy_legacy(self, domain: str):
         """Legacy proxy deployment - used when cryptolabs-proxy module not available."""
+        if getattr(self, 'release_plan', None):
+            raise RuntimeError('selected baseline requires the supported proxy setup package')
         import secrets as secrets_module
         
         ssl_dir = Path("/etc/cryptolabs-proxy/ssl")
@@ -3083,7 +3324,7 @@ echo "[+] Installation complete"
         
         # Pull and start proxy
         console.print("[dim]Pulling cryptolabs-proxy image...[/dim]")
-        subprocess.run(["docker", "pull", f"ghcr.io/cryptolabsza/cryptolabs-proxy:{self.config.image_tag}"], 
+        subprocess.run(["docker", "pull", self._selected_image('cryptolabs-proxy', f"ghcr.io/cryptolabsza/cryptolabs-proxy:{self.config.image_tag}")],
                       capture_output=True, timeout=120)
         
         auth_secret = secrets_module.token_hex(32)
@@ -3106,7 +3347,7 @@ echo "[+] Installation complete"
             "--network", DOCKER_NETWORK_NAME,
             "--ip", PROXY_STATIC_IP,
             "--label", "com.centurylinklabs.watchtower.enable=true",
-            f"ghcr.io/cryptolabsza/cryptolabs-proxy:{self.config.image_tag}"
+            self._selected_image('cryptolabs-proxy', f"ghcr.io/cryptolabsza/cryptolabs-proxy:{self.config.image_tag}")
         ]
         
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -3148,7 +3389,7 @@ echo "[+] Installation complete"
         subprocess.run(["docker", "rm", "-f", "dc-overview"], capture_output=True)
         
         # Pull latest image
-        subprocess.run(["docker", "pull", f"ghcr.io/cryptolabsza/dc-overview:{self.config.image_tag}"], 
+        subprocess.run(["docker", "pull", self._selected_image('dc-overview', f"ghcr.io/cryptolabsza/dc-overview:{self.config.image_tag}")],
                       capture_output=True, timeout=120)
         
         # Start dc-overview container with static IP
@@ -3187,7 +3428,11 @@ echo "[+] Installation complete"
             "-v", "dc-overview-data:/data",
             "-v", "fleet-auth-data:/data/auth",  # Shared with proxy for SSO API keys
             "-v", f"{self.config.config_dir}:/etc/dc-overview:ro",
-        ] + inventory_args + [
+        ] + inventory_args + ([
+            '-v', f'{self.config.config_dir}/prometheus:/etc/dc-overview/prometheus',
+            '-e', 'PROMETHEUS_CONFIG_PATH=/etc/dc-overview/prometheus/prometheus.yml',
+            '-e', 'DC_RELEASE_SELECTION_REQUIRED=1',
+        ] if getattr(self, 'release_plan', None) else []) + [
             "--health-cmd", "curl -f http://127.0.0.1:5001/api/health || exit 1",
             "--health-interval", "10s",
             "--health-timeout", "5s",
@@ -3195,8 +3440,8 @@ echo "[+] Installation complete"
             "--health-start-period", "10s",
             "--network", DOCKER_NETWORK_NAME,
             "--ip", STATIC_IPS["dc-overview"],
-        ] + (["--label", "com.centurylinklabs.watchtower.enable=true"] if getattr(self.config, 'enable_watchtower_all', False) else []) + [
-            f"ghcr.io/cryptolabsza/dc-overview:{self.config.image_tag}"
+        ] + (self._watchtower_args()) + [
+            self._selected_image('dc-overview', f"ghcr.io/cryptolabsza/dc-overview:{self.config.image_tag}")
         ]
         
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -3249,8 +3494,13 @@ echo "[+] Installation complete"
                 "ssh_port": self.config.ssh.port,
             }
             # Mark watchdog agent as installed if agents were deployed in Step 8c
-            if watchdog_deployed:
-                server_data["watchdog_agent_installed"] = True
+            if getattr(self, 'release_plan', None):
+                observed = getattr(self, 'worker_outcomes', {}).get('dc-watchdog-agent', {}).get('workers', {}).get(server.name, {})
+                if observed.get('success') is True:
+                    server_data['watchdog_agent_installed'] = True
+                    server_data['watchdog_agent_version'] = observed.get('observed_agent_version')
+            elif watchdog_deployed:
+                server_data['watchdog_agent_installed'] = True
             
             data = json.dumps(server_data)
             
@@ -3519,6 +3769,16 @@ echo "[+] Installation complete"
         
         # Use cryptolabs-proxy API if available
         if HAS_PROXY_MODULE:
+            if self._proxy_selection_args():
+                proxy_config = ProxyConfig(
+                    domain=domain, email=self.config.ssl.email or f'admin@{domain}',
+                    use_letsencrypt=(self.config.ssl.mode == SSLMode.LETSENCRYPT),
+                    fleet_admin_user=self.config.fleet_admin_user, fleet_admin_pass=self.config.fleet_admin_pass,
+                    site_name=self.config.site_name, watchdog_api_key=self.config.watchdog.api_key or '',
+                    watchdog_url=self.config.watchdog.server_url, **self._proxy_selection_args())
+                success, message = proxy_setup(proxy_config)
+                if not success:
+                    raise RuntimeError('Supported proxy release reconciliation failed')
             # Check if proxy needs credential update
             existing_config = get_proxy_config()
             
@@ -3558,6 +3818,7 @@ echo "[+] Installation complete"
                 # Proxy not running, do full setup
                 console.print("[dim]Proxy not running, performing full setup...[/dim]")
                 proxy_config = ProxyConfig(
+                    **self._proxy_selection_args(),
                     domain=domain,
                     email=self.config.ssl.email or f"admin@{domain}",
                     use_letsencrypt=(self.config.ssl.mode == SSLMode.LETSENCRYPT),
@@ -3679,6 +3940,8 @@ echo "[+] Installation complete"
         console.print(f"\n  Login: [cyan]{self.config.fleet_admin_user}[/cyan] / [dim](password you set)[/dim]")
     
     def _integrate_with_proxy_legacy(self, domain: str):
+        if getattr(self, 'release_plan', None):
+            raise RuntimeError('selected baseline requires the supported proxy setup package')
         """Legacy proxy integration - used when cryptolabs-proxy module not available."""
         import secrets as secrets_module
         
@@ -3740,7 +4003,7 @@ echo "[+] Installation complete"
                 "--network", DOCKER_NETWORK_NAME,
                 "--ip", PROXY_STATIC_IP,
                 "--label", "com.centurylinklabs.watchtower.enable=true",
-                f"ghcr.io/cryptolabsza/cryptolabs-proxy:{self.config.image_tag}"
+                self._selected_image('cryptolabs-proxy', f"ghcr.io/cryptolabsza/cryptolabs-proxy:{self.config.image_tag}")
             ]
             
             result = subprocess.run(cmd, capture_output=True, text=True)

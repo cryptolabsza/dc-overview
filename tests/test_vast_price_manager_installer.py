@@ -28,6 +28,36 @@ from dc_overview.vpm_service import (
 PIN = "ghcr.io/cryptolabsza/vast-price-manager@sha256:" + "a" * 64
 
 
+@pytest.fixture(autouse=True)
+def _legacy_command_fixture_state_proofs(monkeypatch):
+    """Keep historical command-only fixtures scoped to their original assertions.
+
+    The dedicated lifecycle/adoption suite executes the production probes against
+    real SQLite/Fernet files; these older runners do not model those databases.
+    """
+    def continuity(manager, *_args):
+        compose = manager.compose_file.read_text() if manager.compose_file.is_file() else ""
+        return {"ok": True, "schema": "a" * 64, "controls": "a" * 64,
+                "key": "a" * 64, "ciphertexts": "a" * 64, "expected_account": "a" * 64,
+                "account_authority": "a" * 64,
+                "writes_enabled": "VPM_WRITES_ENABLED=true" in compose,
+                "automation_paused": True}
+    monkeypatch.setattr(VPMServiceManager, "_continuity", continuity)
+    monkeypatch.setattr(VPMServiceManager, "_assert_data_binding", lambda *_args: None)
+    monkeypatch.setattr(VPMServiceManager, "_data_recovery", lambda *_args: None)
+    monkeypatch.setattr(VPMServiceManager, "_verify_auth_boundary", lambda *_args: True)
+    original_run = VPMServiceManager._run
+    def run_with_effective_metadata(manager, command, **kwargs):
+        result = original_run(manager, command, **kwargs)
+        if command[:2] == ['systemctl','show'] or command[:2] == ['busctl', '--json=short']:
+            from test_vpm_lifecycle_adoption import Host
+            host = Host()
+            host.unit_dir = manager.unit_dir
+            return host(command)
+        return result
+    monkeypatch.setattr(VPMServiceManager, '_run', run_with_effective_metadata)
+
+
 def _concurrent_configure_worker(config_dir: str, expected_account_id: str, hold_seconds: float, fail: bool):
     """Model the CLI configure transaction in a separate process."""
     path = Path(config_dir)
@@ -312,7 +342,7 @@ def test_install_installs_units_quiesces_old_work_and_waits_for_health(tmp_path:
     assert ["systemctl", "disable", "--now", *manager.timer_names] in calls
     assert ["systemctl", "stop", "vast-price-manager-sync.service", "vast-price-manager-cycle.service", "vast-price-manager-horizon.service"] in calls
     assert sum(command[:2] == ["docker", "inspect"] for command in calls) == 2
-    assert ["systemctl", "enable", "--now", *manager.timer_names] in calls
+    assert ["systemctl", "enable", "--now", *manager.timer_names] not in calls
 
 
 def test_install_reuses_the_exact_locally_loaded_digest_without_pulling(tmp_path: Path):
@@ -840,7 +870,7 @@ def test_manager_install_rechecks_persistent_pause_after_stopping_old_container(
             return Result(3)
         if command[:2] == ["docker", "run"]:
             return Result(stdout='{"automation_paused":true}')
-        if command[:2] == ["docker", "inspect"] and "{{range .Config.Env}}{{println .}}{{end}}" in command:
+        if command[:2] == ["docker", "inspect"] and ".Config.Env" in command[3] and "VPM_DATABASE_PATH" in command[3]:
             return Result(stdout="VPM_DATA_DIR=/data\n")
         if command[:2] == ["docker", "inspect"]:
             return Result(stdout="healthy\n")
@@ -1055,10 +1085,13 @@ def test_schema_migration_forward_hold_keeps_failed_candidate_and_stops_vpm_work
     manager = VPMServiceManager(tmp_path, unit_dir=tmp_path / "systemd-system", runner=runner)
     manager.root.mkdir(parents=True)
     manager.compose_file.write_text("old-schema-compose\n")
-    for name in manager.render(VPMServiceSpec(image=PIN, allowed_host="dc.example.com")).units:
+    for name, original_content in manager.render(VPMServiceSpec(image=PIN, allowed_host="dc.example.com")).units.items():
         path = manager.unit_dir / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"old {name}\n")
+        path.write_text(
+            "[Timer]\nOnCalendar=*-*-* 03:12:00\nPersistent=false\nUnit=" + name.replace('.timer','.service') + "\n"
+            if name.endswith(".timer") else original_content
+        )
     manager._validate_master_key = lambda _spec: None
     manager._has_existing_managed_vpm = lambda: True
     rendered = manager.render(VPMServiceSpec(image=PIN, allowed_host="dc.example.com"))
@@ -1070,7 +1103,12 @@ def test_schema_migration_forward_hold_keeps_failed_candidate_and_stops_vpm_work
         )
 
     assert manager.compose_file.read_text() == rendered.compose
-    assert {name: (manager.unit_dir / name).read_text() for name in rendered.units} == rendered.units
+    for name, content in rendered.units.items():
+        if name.endswith(".timer"):
+            assert "OnCalendar=*-*-* 03:12:00" in (manager.unit_dir / name).read_text()
+            assert "Persistent=false" in (manager.unit_dir / name).read_text()
+        else:
+            assert (manager.unit_dir / name).read_text() == content
     assert sum(command[-2:] == ["up", "-d"] for command in calls) == 1
     assert ["systemctl", "disable", "--now", *manager.timer_names] in calls
     assert ["systemctl", "stop", *manager.service_names] in calls
@@ -1095,7 +1133,7 @@ def test_schema_migration_forward_hold_reports_failed_cleanup_without_rollback(t
             return Result(0, "active\n")
         if command[:2] == ["docker", "inspect"]:
             return Result(0, "unhealthy\n")
-        if command[-1:] == ["stop"] and manager.project_name in command:
+        if command[-1:] == ["stop"] and manager.project_name in command and any(call[-2:] == ["up", "-d"] for call in calls):
             return Result(1, stderr="candidate stop unavailable")
         return Result()
 
@@ -1137,7 +1175,7 @@ def test_schema_migration_forward_hold_records_candidate_stop_launch_failure(tmp
             return Result(0, "active\n")
         if command[:2] == ["docker", "inspect"]:
             return Result(0, "unhealthy\n")
-        if command[-1:] == ["stop"] and manager.project_name in command:
+        if command[-1:] == ["stop"] and manager.project_name in command and any(call[-2:] == ["up", "-d"] for call in calls):
             raise OSError(11, "Resource temporarily unavailable")
         return Result()
 
@@ -1198,7 +1236,7 @@ def test_schema_migration_forward_hold_preflight_failure_leaves_existing_runtime
     assert not (manager.root / ".vpm-compose-candidate.yml").exists()
 
 
-def test_schema_migration_forward_hold_success_enables_candidate_timers(tmp_path: Path):
+def test_schema_migration_forward_hold_success_preserves_disabled_candidate_timers(tmp_path: Path):
     calls = []
 
     class Result:
@@ -1229,7 +1267,7 @@ def test_schema_migration_forward_hold_success_enables_candidate_timers(tmp_path
     )
 
     assert manager.compose_file.read_text() == manager.render(VPMServiceSpec(image=PIN, allowed_host="dc.example.com")).compose
-    assert ["systemctl", "enable", "--now", *manager.timer_names] in calls
+    assert ["systemctl", "enable", "--now", *manager.timer_names] not in calls
 
 
 def test_vpm_update_passes_schema_migration_forward_hold_to_manager(monkeypatch, tmp_path: Path):

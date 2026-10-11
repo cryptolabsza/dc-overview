@@ -6,29 +6,70 @@ on:
     tags: [ 'v*' ]
   pull_request:
     branches: [ main, master, develop, dev ]
-  workflow_dispatch:
-    inputs:
-      tag_override:
-        description: 'Override tag (e.g., beta, rc1)'
-        required: false
-        default: ''
+  workflow_dispatch: {}
+
+concurrency:
+  group: image-release-publication-${{ github.repository }}
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  release-preflight:
+    runs-on: [self-hosted, linux]
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      build: ${{ steps.guard.outputs.build }}
+      status: ${{ steps.guard.outputs.status }}
+    steps:
+      - name: Initialize isolated runner path
+        run: |
+          printf 'RELEASE_RECEIPT=%s/image-release-preflight-%s-%s.json\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify product release identities
+        id: guard
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
+          TAG_OVERRIDE: ''
+        run: python scripts/image_promotion.py guard --platform linux/amd64 --receipt "$RELEASE_RECEIPT"
+      - name: Retain release identity receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-release-preflight-receipt
+          path: ${{ env.RELEASE_RECEIPT }}
+          if-no-files-found: warn
+          retention-days: 90
+
   build:
+    needs: release-preflight
     runs-on: [self-hosted, linux]
     permissions:
       contents: read
       packages: write
-    env:
-      DOCKER_CONFIG: /tmp/docker-config-build-${{ github.run_id }}
-
     steps:
+      - name: Initialize isolated runner path
+        run: |
+          printf 'DOCKER_CONFIG=%s/docker-config-build-%s-%s\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Test Vast dashboards
         env:
@@ -58,68 +99,21 @@ jobs:
             tests/test_vastai_exporter_metrics.py
 
       - name: Docker login
-        if: github.event_name != 'pull_request'
-        run: |
-          mkdir -p "$DOCKER_CONFIG"
-          echo "${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}" | docker --config "$DOCKER_CONFIG" login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+        if: github.event_name != 'pull_request' && needs.release-preflight.outputs.build == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
 
-      - name: Determine version info
-        id: version
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VERSION="${{ github.ref_name }}"
-            CHANNEL="stable"
-          elif [[ "${{ github.ref }}" == refs/heads/main ]] || [[ "${{ github.ref }}" == refs/heads/master ]]; then
-            VERSION="latest"
-            CHANNEL="stable"
-          elif [[ "${{ github.ref }}" == refs/heads/develop ]] || [[ "${{ github.ref }}" == refs/heads/dev ]]; then
-            VERSION="dev"
-            CHANNEL="development"
-          else
-            VERSION="${{ github.ref_name }}"
-            CHANNEL="feature"
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "channel=$CHANNEL" >> $GITHUB_OUTPUT
-          echo "Building: $VERSION ($CHANNEL channel)"
-
-      - name: Compute tags
+      - name: Compute safe build tags
         id: tags
-        run: |
-          REPO="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-          REPO=$(echo "$REPO" | tr '[:upper:]' '[:lower:]')
-          SHA_SHORT=$(echo "${{ github.sha }}" | head -c 7)
-          TAGS=""
-
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VER="${{ github.ref_name }}"
-            VER="${VER#v}"
-            MAJOR=$(echo "$VER" | cut -d. -f1)
-            MINOR=$(echo "$VER" | cut -d. -f1-2)
-            TAGS="$REPO:$VER,$REPO:$MINOR,$REPO:latest,$REPO:stable,$REPO:sha-$SHA_SHORT"
-            if [[ "$MAJOR" != "0" ]]; then
-              TAGS="$TAGS,$REPO:$MAJOR"
-            fi
-          elif [[ "${{ github.ref }}" == refs/heads/main ]] || [[ "${{ github.ref }}" == refs/heads/master ]]; then
-            TAGS="$REPO:main,$REPO:sha-$SHA_SHORT"
-          elif [[ "${{ github.ref }}" == refs/heads/develop ]] || [[ "${{ github.ref }}" == refs/heads/dev ]]; then
-            TAGS="$REPO:dev,$REPO:develop,$REPO:sha-$SHA_SHORT"
-          elif [[ "${{ github.ref }}" == refs/heads/* ]]; then
-            BRANCH="${{ github.ref_name }}"
-            TAGS="$REPO:$BRANCH,$REPO:sha-$SHA_SHORT"
-          else
-            TAGS="$REPO:sha-$SHA_SHORT"
-          fi
-
-          if [[ -n "${{ github.event.inputs.tag_override }}" ]]; then
-            TAGS="$TAGS,$REPO:${{ github.event.inputs.tag_override }}"
-          fi
-
-          echo "tags=$TAGS" >> $GITHUB_OUTPUT
-          echo "primary=$(echo $TAGS | cut -d, -f1)" >> $GITHUB_OUTPUT
-          echo "Tags: $TAGS"
+        env:
+          TAG_OVERRIDE: ''
+        run: python scripts/image_promotion.py tags --image ghcr.io/cryptolabsza/dc-overview
 
       - name: Build Docker image
+        if: needs.release-preflight.outputs.build == 'true'
         run: |
           IFS=',' read -ra TAG_ARRAY <<< "${{ steps.tags.outputs.tags }}"
           TAG_ARGS=""
@@ -127,7 +121,9 @@ jobs:
             TAG_ARGS="$TAG_ARGS -t $tag"
           done
 
-          docker build \
+          docker build --platform linux/amd64 \
+            --label org.opencontainers.image.revision="$GITHUB_SHA" \
+            --label org.opencontainers.image.version="${{ steps.tags.outputs.version }}" \
             $TAG_ARGS \
             --build-arg GIT_COMMIT=${{ github.sha }} \
             --build-arg GIT_BRANCH=${{ github.ref_name }} \
@@ -135,7 +131,7 @@ jobs:
             .
 
       - name: Push Docker image
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && needs.release-preflight.outputs.build == 'true'
         run: |
           IFS=',' read -ra TAG_ARRAY <<< "${{ steps.tags.outputs.tags }}"
           for tag in "${TAG_ARRAY[@]}"; do
@@ -151,30 +147,38 @@ jobs:
 
       - name: Summary
         run: |
-          echo "## Docker Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "## Docker image workflow result" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Channel:** ${{ steps.version.outputs.channel }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Channel:** ${{ steps.tags.outputs.channel }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.tags.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Preflight:** ${{ needs.release-preflight.outputs.status }}" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "**Platform:** linux/amd64" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Tags pushed:" >> $GITHUB_STEP_SUMMARY
+          echo "### Requested identity tags:" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.tags.outputs.tags }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
   # Build RunPod Exporter image
   build-runpod-exporter:
+    needs: release-preflight
     runs-on: [self-hosted, linux]
     permissions:
       contents: read
       packages: write
-    env:
-      DOCKER_CONFIG: /tmp/docker-config-runpod-${{ github.run_id }}
-
     steps:
+      - name: Initialize isolated runner path
+        run: |
+          printf 'DOCKER_CONFIG=%s/docker-config-runpod-%s-%s\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Verify RunPod exporter health and alert contract
         run: |
@@ -191,34 +195,21 @@ jobs:
             tests/test_runpod_alerts.py
 
       - name: Docker login
-        if: github.event_name != 'pull_request'
-        run: |
-          mkdir -p "$DOCKER_CONFIG"
-          echo "${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}" | docker --config "$DOCKER_CONFIG" login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+        if: github.event_name != 'pull_request' && needs.release-preflight.outputs.build == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
 
-      - name: Compute tags
+      - name: Compute safe build tags
         id: tags
-        run: |
-          REPO="${{ env.REGISTRY }}/cryptolabsza/runpod-exporter"
-          SHA_SHORT=$(echo "${{ github.sha }}" | head -c 7)
-          TAGS=""
-
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VER="${{ github.ref_name }}"
-            VER="${VER#v}"
-            TAGS="$REPO:$VER,$REPO:latest,$REPO:sha-$SHA_SHORT"
-          elif [[ "${{ github.ref }}" == refs/heads/main ]]; then
-            TAGS="$REPO:main,$REPO:sha-$SHA_SHORT"
-          elif [[ "${{ github.ref }}" == refs/heads/develop ]] || [[ "${{ github.ref }}" == refs/heads/dev ]]; then
-            TAGS="$REPO:dev,$REPO:sha-$SHA_SHORT"
-          else
-            TAGS="$REPO:sha-$SHA_SHORT"
-          fi
-
-          echo "tags=$TAGS" >> $GITHUB_OUTPUT
-          echo "Tags: $TAGS"
+        env:
+          TAG_OVERRIDE: ''
+        run: python scripts/image_promotion.py tags --image ghcr.io/cryptolabsza/runpod-exporter
 
       - name: Build RunPod Exporter
+        if: needs.release-preflight.outputs.build == 'true'
         run: |
           IFS=',' read -ra TAG_ARRAY <<< "${{ steps.tags.outputs.tags }}"
           TAG_ARGS=""
@@ -226,7 +217,9 @@ jobs:
             TAG_ARGS="$TAG_ARGS -t $tag"
           done
 
-          docker build \
+          docker build --platform linux/amd64 \
+            --label org.opencontainers.image.revision="$GITHUB_SHA" \
+            --label org.opencontainers.image.version="${{ steps.tags.outputs.version }}" \
             $TAG_ARGS \
             --build-arg GIT_COMMIT=${{ github.sha }} \
             --build-arg GIT_BRANCH=${{ github.ref_name }} \
@@ -234,6 +227,7 @@ jobs:
             ./runpod-exporter
 
       - name: Verify packaged RunPod health contract
+        if: needs.release-preflight.outputs.build == 'true'
         run: |
           PRIMARY_TAG="${{ steps.tags.outputs.tags }}"
           PRIMARY_TAG="${PRIMARY_TAG%%,*}"
@@ -255,7 +249,7 @@ jobs:
           '
 
       - name: Push RunPod Exporter
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && needs.release-preflight.outputs.build == 'true'
         run: |
           IFS=',' read -ra TAG_ARRAY <<< "${{ steps.tags.outputs.tags }}"
           for tag in "${TAG_ARRAY[@]}"; do
@@ -271,57 +265,52 @@ jobs:
 
       - name: Summary
         run: |
-          echo "## RunPod Exporter Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "## RunPod image workflow result" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Preflight:** ${{ needs.release-preflight.outputs.status }}" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Tags pushed:" >> $GITHUB_STEP_SUMMARY
+          echo "### Requested identity tags:" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.tags.outputs.tags }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
   # Build Vast.ai Exporter image
   build-vastai-exporter:
+    needs: release-preflight
     runs-on: [self-hosted, linux]
     permissions:
       contents: read
       packages: write
-    env:
-      DOCKER_CONFIG: /tmp/docker-config-vastai-${{ github.run_id }}
-
     steps:
+      - name: Initialize isolated runner path
+        run: |
+          printf 'DOCKER_CONFIG=%s/docker-config-vastai-%s-%s\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Docker login
-        if: github.event_name != 'pull_request'
-        run: |
-          mkdir -p "$DOCKER_CONFIG"
-          echo "${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}" | docker --config "$DOCKER_CONFIG" login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+        if: github.event_name != 'pull_request' && needs.release-preflight.outputs.build == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
 
-      - name: Compute tags
+      - name: Compute safe build tags
         id: tags
-        run: |
-          REPO="${{ env.REGISTRY }}/cryptolabsza/vastai-exporter"
-          SHA_SHORT=$(echo "${{ github.sha }}" | head -c 7)
-          TAGS=""
-
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VER="${{ github.ref_name }}"
-            VER="${VER#v}"
-            TAGS="$REPO:$VER,$REPO:latest,$REPO:sha-$SHA_SHORT"
-          elif [[ "${{ github.ref }}" == refs/heads/main ]]; then
-            TAGS="$REPO:main,$REPO:sha-$SHA_SHORT"
-          elif [[ "${{ github.ref }}" == refs/heads/develop ]] || [[ "${{ github.ref }}" == refs/heads/dev ]]; then
-            TAGS="$REPO:dev,$REPO:sha-$SHA_SHORT"
-          else
-            TAGS="$REPO:sha-$SHA_SHORT"
-          fi
-
-          echo "tags=$TAGS" >> $GITHUB_OUTPUT
-          echo "Tags: $TAGS"
+        env:
+          TAG_OVERRIDE: ''
+        run: python scripts/image_promotion.py tags --image ghcr.io/cryptolabsza/vastai-exporter
 
       - name: Build Vast.ai Exporter
+        if: needs.release-preflight.outputs.build == 'true'
         run: |
           IFS=',' read -ra TAG_ARRAY <<< "${{ steps.tags.outputs.tags }}"
           TAG_ARGS=""
@@ -329,7 +318,9 @@ jobs:
             TAG_ARGS="$TAG_ARGS -t $tag"
           done
 
-          docker build \
+          docker build --platform linux/amd64 \
+            --label org.opencontainers.image.revision="$GITHUB_SHA" \
+            --label org.opencontainers.image.version="${{ steps.tags.outputs.version }}" \
             $TAG_ARGS \
             --build-arg GIT_COMMIT=${{ github.sha }} \
             --build-arg GIT_BRANCH=${{ github.ref_name }} \
@@ -337,7 +328,7 @@ jobs:
             ./vastai-exporter
 
       - name: Push Vast.ai Exporter
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && needs.release-preflight.outputs.build == 'true'
         run: |
           IFS=',' read -ra TAG_ARRAY <<< "${{ steps.tags.outputs.tags }}"
           for tag in "${TAG_ARRAY[@]}"; do
@@ -353,11 +344,46 @@ jobs:
 
       - name: Summary
         run: |
-          echo "## Vast.ai Exporter Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "## Vast.ai image workflow result" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Preflight:** ${{ needs.release-preflight.outputs.status }}" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Tags pushed:" >> $GITHUB_STEP_SUMMARY
+          echo "### Requested identity tags:" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.tags.outputs.tags }}" | tr ',' '\n' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+
+  release-readback:
+    needs: [release-preflight, build, build-runpod-exporter, build-vastai-exporter]
+    if: always() && needs.release-preflight.result == 'success'
+    runs-on: [self-hosted, linux]
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Initialize isolated runner path
+        run: |
+          printf 'RELEASE_RECEIPT=%s/image-release-readback-%s-%s.json\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify product release identities
+        id: guard
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
+          TAG_OVERRIDE: ''
+        run: python scripts/image_promotion.py guard --platform linux/amd64 --receipt "$RELEASE_RECEIPT" --require-existing
+      - name: Retain release identity receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-release-readback-receipt
+          path: ${{ env.RELEASE_RECEIPT }}
+          if-no-files-found: warn
+          retention-days: 90

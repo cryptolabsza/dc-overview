@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import subprocess
 import time
 
@@ -17,13 +18,27 @@ import yaml
 import requests as http_requests
 
 from .proxy import get_proxy_config
-from .ssh_helpers import build_ssh_cmd
+from .ssh_helpers import build_ssh_cmd, privileged_remote_command, remote_failure_message
 from .web_exporters import check_exporter
 
 logger = logging.getLogger(__name__)
 
 # DC Watchdog API integration
 WATCHDOG_URL = os.environ.get('WATCHDOG_URL', 'https://watchdog.cryptolabs.co.za')
+
+
+def watchdog_remote_runner(*, sudo=False):
+    """Static component runner shared with its readonly privilege proof."""
+    command = 'timeout --signal=TERM --kill-after=30s 120s bash -s'
+    return 'sudo -n -- ' + command if sudo else command
+
+
+def watchdog_update_prerequisites():
+    """Match the supported local unit layout without changing mask or custody."""
+    return '''[ -s /etc/dc-watchdog/agent.yaml ]
+[ -e /etc/systemd/system/dc-watchdog-agent.service ] || [ -L /etc/systemd/system/dc-watchdog-agent.service ]
+[ -s /usr/local/bin/dc-watchdog-agent ]
+'''
 
 # Cache for watchdog API results (avoid hammering the API)
 _watchdog_api_cache = {'ts': 0, 'data': None}
@@ -234,10 +249,11 @@ def check_watchdog_agent(server):
             'source': 'health_port_tcp'
         }
     
-    # Health port not responding and watchdog API says offline (or no data) —
-    # the agent is not running on this machine. Report as not installed so the
-    # database gets updated and the UI reflects the actual state.
-    return {'running': False, 'installed': False, 'status': 'not_installed', 'version': None, 'source': 'check'}
+    # An unreachable health port cannot establish that the service was removed.
+    return {'running': bool(getattr(server, 'watchdog_agent_enabled', False)),
+            'installed': bool(getattr(server, 'watchdog_agent_installed', False)),
+            'status': 'unknown', 'version': getattr(server, 'watchdog_agent_version', None),
+            'source': 'database'}
 
 
 def toggle_watchdog_service(server, enabled: bool) -> bool:
@@ -246,9 +262,9 @@ def toggle_watchdog_service(server, enabled: bool) -> bool:
         cmd, env = build_ssh_cmd(server, timeout=10)
         
         if enabled:
-            cmd.append('systemctl start dc-watchdog-agent')
+            cmd.append(privileged_remote_command(server, 'systemctl start dc-watchdog-agent'))
         else:
-            cmd.append('systemctl stop dc-watchdog-agent')
+            cmd.append(privileged_remote_command(server, 'systemctl stop dc-watchdog-agent'))
         
         run_env = {**os.environ, **env} if env else None
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=run_env)
@@ -293,52 +309,68 @@ def get_watchdog_latest_release() -> dict:
     return {}
 
 
-def install_watchdog_agent_remote(server, api_key: str) -> tuple:
+def _register_watchdog_worker(req, endpoint, name, api_key):
+    response = req.post(f'{endpoint}/api/worker/register', json={'worker_id':name},
+                        params={'api_key':api_key}, timeout=30)
+    if not response.ok:
+        return None
+    value = response.json()
+    token = value.get('worker_token')
+    return token if value.get('success') and isinstance(token, str) and token.strip() else None
+
+
+def install_watchdog_agent_remote(server, api_key: str, *, selected_artifact=None, watchdog_url=None, mode='install') -> tuple:
     """Install DC Watchdog Go agent on a remote server via SSH.
     
     Downloads the Go binary from the latest GitHub release. No bash fallback -
     the Go binary is required for health endpoint, Prometheus metrics, etc.
     
-    Security: Requests a worker-specific token from dc-watchdog when possible.
+    Security: Requires a worker-specific token before any remote mutation.
     """
     GITHUB_REPO = "cryptolabsza/dc-watchdog"
+    if mode not in ('install', 'update'):
+        return False, 'Invalid Watchdog lifecycle mode.'
+    if selected_artifact is None:
+        from .worker_lifecycle import selected_worker_mutation_refusal
+        refusal = selected_worker_mutation_refusal()
+        if refusal:
+            return False, refusal
     
     try:
+        endpoint = watchdog_url or WATCHDOG_URL
+        if not re.fullmatch(r'https://[A-Za-z0-9.-]+(?::[0-9]+)?', endpoint):
+            raise ValueError('invalid watchdog endpoint')
+        if selected_artifact is not None:
+            from .exporters import validate_selected_worker_artifact
+            validate_selected_worker_artifact('dc-watchdog-agent', selected_artifact)
         # Step 1: Request a worker token from dc-watchdog
         import requests as req
         
         worker_token = None
         try:
-            token_resp = req.post(
-                f'{WATCHDOG_URL}/api/worker/register',
-                json={'worker_id': server.name},
-                params={'api_key': api_key},
-                timeout=30
-            )
-            
-            if token_resp.ok:
-                token_data = token_resp.json()
-                if token_data.get('success'):
-                    worker_token = token_data.get('worker_token')
-                    logger.info(f"Worker token obtained for {server.name}")
-                else:
-                    return False, token_data.get('error', 'Failed to get worker token')
+            if mode == 'update':
+                # Existing agent.yaml owns the worker-specific token. Updating
+                # its binary must not re-register or replace that custody.
+                worker_token = ''
             else:
-                logger.warning(f"Could not get worker token (status {token_resp.status_code}), using API key")
-        except req.RequestException as e:
-            logger.warning(f"Could not reach dc-watchdog for token: {e}, using API key")
+                worker_token = _register_watchdog_worker(req, endpoint, server.name, api_key)
+                if worker_token is None:
+                    return False, 'Worker registration did not return a valid token.'
+        except (req.RequestException, ValueError, TypeError, AttributeError):
+            return False, 'Worker registration unavailable; no remote changes were made.'
         
-        latest = get_watchdog_latest_release()
-        latest_ver = latest.get('version', 'unknown')
+        latest = get_watchdog_latest_release() if selected_artifact is None else {}
+        latest_ver = selected_artifact['release'] if selected_artifact is not None else latest.get('version', 'unknown')
         logger.info(f"Installing watchdog agent on {server.name} (latest release: {latest_ver})")
         
         # Step 2: Build SSH command and deploy the Go agent
         cmd, ssh_env = build_ssh_cmd(server, timeout=60)
         
-        auth_key = worker_token if worker_token else api_key
+        auth_key = worker_token
         
-        install_script = f'''
-set -e
+        install_script = rf'''
+set -Eeuo pipefail
+MODE={shlex.quote(mode)}
 
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/dc-watchdog"
@@ -346,15 +378,57 @@ GITHUB_REPO="{GITHUB_REPO}"
 
 echo "[+] Installing DC-Watchdog Agent (Go binary)..."
 
-# Stop existing agent if running
-systemctl stop dc-watchdog-agent 2>/dev/null || true
-
-# Create directories
-mkdir -p "$CONFIG_DIR"
+# Keep downloads and backups private; do not stop the live agent until validated.
+STAGE=$(mktemp -d)
+changed=0
+was_active=0
+was_enabled=0
+enabled_state=not-found
+finish() {{
+    status=$?
+    trap - EXIT HUP INT TERM
+    if [ "$status" != 0 ] && [ "$changed" = 1 ]; then
+        recovery_failed=0
+        systemctl stop dc-watchdog-agent >/dev/null 2>&1 || true
+        files=("$INSTALL_DIR/dc-watchdog-agent")
+        if [ "$MODE" = install ]; then files+=("$CONFIG_DIR/agent.yaml" /etc/systemd/system/dc-watchdog-agent.service); fi
+        for file in "${{files[@]}}"; do
+            name=$(basename "$file")
+            rm -f "$file" || recovery_failed=1
+            if [ -e "$STAGE/$name.old" ] || [ -L "$STAGE/$name.old" ]; then cp -a "$STAGE/$name.old" "$file" || recovery_failed=1; fi
+        done
+        systemctl daemon-reload || recovery_failed=1
+        if [ "$MODE" = install ]; then
+            case "$enabled_state" in
+                enabled) systemctl enable dc-watchdog-agent || recovery_failed=1;;
+                masked) systemctl mask dc-watchdog-agent || recovery_failed=1;;
+                disabled|not-found) systemctl disable dc-watchdog-agent || recovery_failed=1;;
+            esac
+        fi
+        if [ "$was_active" = 1 ]; then systemctl start dc-watchdog-agent || recovery_failed=1; systemctl is-active --quiet dc-watchdog-agent || recovery_failed=1; fi
+        if [ "$recovery_failed" = 0 ]; then echo 'previous installation restored' >&2; else echo 'rollback incomplete' >&2; fi
+    fi
+    rm -rf "$STAGE"
+    exit "$status"
+}}
+trap finish EXIT
+trap 'exit 1' HUP INT TERM
+state=$(systemctl is-active dc-watchdog-agent) || [ "$state" = inactive ] || [ "$state" = failed ]
+[ "$state" != active ] || was_active=1
+state=$(systemctl is-enabled dc-watchdog-agent) || [ "$state" = disabled ] || [ "$state" = not-found ] || [ "$state" = masked ] || [ "$state" = masked-runtime ]
+enabled_state=$state
+[ "$state" != enabled ] || was_enabled=1
+for file in "$INSTALL_DIR/dc-watchdog-agent" "$CONFIG_DIR/agent.yaml" /etc/systemd/system/dc-watchdog-agent.service; do
+    if [ -e "$file" ] || [ -L "$file" ]; then cp -a "$file" "$STAGE/$(basename "$file").old"; fi
+done
+if [ "$MODE" = update ]; then
+    {watchdog_update_prerequisites()}
+fi
 
 # Install dependencies (mtr for network diagnostics)
 echo "[+] Installing dependencies..."
-if command -v apt-get &> /dev/null; then
+if [ "$MODE" = update ]; then :
+elif command -v apt-get &> /dev/null; then
     apt-get update -qq 2>/dev/null || true
     apt-get install -y -qq mtr-tiny curl 2>/dev/null || true
 elif command -v yum &> /dev/null; then
@@ -379,12 +453,11 @@ echo "[+] Downloading Go agent for $ARCH_SUFFIX..."
 DOWNLOAD_OK=false
 
 # Primary: Download from DC Watchdog server
-AGENT_URL="{WATCHDOG_URL}/agent/dc-watchdog-agent-$ARCH_SUFFIX"
-if curl -fsSL "$AGENT_URL" -o "$INSTALL_DIR/dc-watchdog-agent.tmp" 2>/dev/null; then
-    if [ -s "$INSTALL_DIR/dc-watchdog-agent.tmp" ]; then
-        mv "$INSTALL_DIR/dc-watchdog-agent.tmp" "$INSTALL_DIR/dc-watchdog-agent"
-        chmod +x "$INSTALL_DIR/dc-watchdog-agent"
-        if "$INSTALL_DIR/dc-watchdog-agent" -version 2>/dev/null; then
+AGENT_URL="{endpoint}/agent/dc-watchdog-agent-$ARCH_SUFFIX"
+if curl -fsSL "$AGENT_URL" -o "$STAGE/candidate" 2>/dev/null; then
+    if [ -s "$STAGE/candidate" ]; then
+        chmod +x "$STAGE/candidate"
+        if "$STAGE/candidate" -version 2>/dev/null; then
             DOWNLOAD_OK=true
             echo "[+] Go agent downloaded from watchdog server"
         fi
@@ -395,11 +468,10 @@ fi
 if [ "$DOWNLOAD_OK" = "false" ]; then
     echo "[+] Trying GitHub releases (latest)..."
     RELEASE_URL="https://github.com/$GITHUB_REPO/releases/latest/download/dc-watchdog-agent-$ARCH_SUFFIX"
-    if curl -fsSL "$RELEASE_URL" -o "$INSTALL_DIR/dc-watchdog-agent.tmp" 2>/dev/null; then
-        if [ -s "$INSTALL_DIR/dc-watchdog-agent.tmp" ]; then
-            mv "$INSTALL_DIR/dc-watchdog-agent.tmp" "$INSTALL_DIR/dc-watchdog-agent"
-            chmod +x "$INSTALL_DIR/dc-watchdog-agent"
-            if "$INSTALL_DIR/dc-watchdog-agent" -version 2>/dev/null; then
+    if curl -fsSL "$RELEASE_URL" -o "$STAGE/candidate" 2>/dev/null; then
+        if [ -s "$STAGE/candidate" ]; then
+            chmod +x "$STAGE/candidate"
+            if "$STAGE/candidate" -version 2>/dev/null; then
                 DOWNLOAD_OK=true
                 echo "[+] Go agent downloaded from GitHub releases"
             fi
@@ -407,12 +479,16 @@ if [ "$DOWNLOAD_OK" = "false" ]; then
     fi
 fi
 
-rm -f "$INSTALL_DIR/dc-watchdog-agent.tmp" 2>/dev/null
-
 if [ "$DOWNLOAD_OK" = "false" ]; then
     echo "INSTALL_FAILED: Could not download Go agent binary from watchdog server or GitHub releases"
     exit 1
 fi
+
+changed=1
+if [ "$was_active" = 1 ]; then systemctl stop dc-watchdog-agent; fi
+mkdir -p "$CONFIG_DIR"
+cp "$STAGE/candidate" "$INSTALL_DIR/dc-watchdog-agent"
+chmod 755 "$INSTALL_DIR/dc-watchdog-agent"
 
 # Detect GPU availability
 HAS_GPU=false
@@ -429,10 +505,11 @@ else
 fi
 
 # Create YAML configuration for Go agent
+if [ "$MODE" = install ]; then
 echo "[+] Creating configuration..."
 cat > "$CONFIG_DIR/agent.yaml" << YAMLEOF
 # DC-Watchdog Agent Configuration
-server_url: "{WATCHDOG_URL}"
+server_url: "{endpoint}"
 api_key: "{auth_key}"
 worker_name: "{server.name}"
 heartbeat_interval: 30s
@@ -461,9 +538,6 @@ log_level: info
 YAMLEOF
 chmod 600 "$CONFIG_DIR/agent.yaml"
 
-# Clean up any old bash fallback agent
-rm -f /opt/dc-watchdog/dc-watchdog-agent.sh 2>/dev/null
-
 # Create systemd service
 echo "[+] Creating systemd service..."
 cat > /etc/systemd/system/dc-watchdog-agent.service << 'SVCEOF'
@@ -485,34 +559,62 @@ MemoryLimit=128M
 [Install]
 WantedBy=multi-user.target
 SVCEOF
+fi
 
 systemctl daemon-reload
-systemctl enable dc-watchdog-agent
-systemctl restart dc-watchdog-agent
+if [ "$MODE" = install ]; then
+    systemctl enable dc-watchdog-agent
+    systemctl restart dc-watchdog-agent
+elif [ "$was_active" = 1 ]; then
+    systemctl start dc-watchdog-agent
+fi
 
 # Verify agent starts and stays running
+if [ "$MODE" = install ] || [ "$was_active" = 1 ]; then
 sleep 3
 if ! systemctl is-active --quiet dc-watchdog-agent; then
     echo "INSTALL_FAILED: Agent crashed on startup"
-    journalctl -u dc-watchdog-agent -n 5 --no-pager 2>/dev/null || true
     exit 1
 fi
 
 sleep 3
 if ! systemctl is-active --quiet dc-watchdog-agent; then
     echo "INSTALL_FAILED: Agent crashed after startup"
-    journalctl -u dc-watchdog-agent -n 5 --no-pager 2>/dev/null || true
     exit 1
+fi
 fi
 
 VERSION=$("$INSTALL_DIR/dc-watchdog-agent" -version 2>&1 | head -1 || echo "unknown")
 echo "AGENT_VERSION=$VERSION"
+if [ "$MODE" = install ] || [ "$was_active" = 1 ]; then
+    # Released agent exposes health JSON and this metric with its telemetry
+    # version, which is deliberately distinct from the release tag.
+    telemetry=$(printf '%s' "$VERSION" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    port=$(sed -nE 's/^health_port:[[:space:]]*([0-9]+)[[:space:]]*$/\1/p' "$CONFIG_DIR/agent.yaml")
+    port=${{port:-9878}}
+    [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ]
+    curl -fsS --max-time 5 "http://127.0.0.1:$port/health" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'
+    curl -fsS --max-time 5 "http://127.0.0.1:$port/metrics" | grep -F "dc_watchdog_agent_up{{version=\"$telemetry\"" >/dev/null
+fi
+# Retire old fallback only after the replacement is verified.
+rm -f /opt/dc-watchdog/dc-watchdog-agent.sh 2>/dev/null || true
 echo "INSTALL_SUCCESS"
 '''
-        cmd.append(install_script)
+        if selected_artifact is not None:
+            download_start = install_script.index('# Primary: Download from DC Watchdog server')
+            download_end = install_script.index('changed=1', download_start)
+            platform_arch = {'linux/amd64':'linux-amd64', 'linux/arm64':'linux-arm64'}[selected_artifact['platform']]
+            approved_download = (
+                '[ "$ARCH_SUFFIX" = ' + shlex.quote(platform_arch) + ' ]\n'
+                + 'curl -fsSL ' + shlex.quote(selected_artifact['url']) + ' -o "$STAGE/candidate"\n'
+                + 'candidate_sha=$(sha256sum "$STAGE/candidate")\n[ "${candidate_sha%% *}" = ' + shlex.quote(selected_artifact['sha256']) + ' ]\n'
+                + 'chmod +x "$STAGE/candidate"\n"$STAGE/candidate" -version >/dev/null\n\n'
+            )
+            install_script = install_script[:download_start] + approved_download + install_script[download_end:]
+        cmd.append(watchdog_remote_runner(sudo=(server.ssh_user or 'root') != 'root'))
         
         run_env = {**os.environ, **ssh_env} if ssh_env else None
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env=run_env)
+        result = subprocess.run(cmd, input=install_script, capture_output=True, text=True, timeout=180, env=run_env)
         
         if result.returncode == 0 and 'INSTALL_SUCCESS' in result.stdout:
             for line in result.stdout.splitlines():
@@ -523,13 +625,12 @@ echo "INSTALL_SUCCESS"
                         server.watchdog_agent_version = ver_match.group(1)
             return True, None
         else:
-            error = result.stderr.strip() or result.stdout.strip() or 'Unknown error'
-            return False, error[:300]
+            return False, remote_failure_message(result)
     except subprocess.TimeoutExpired:
         return False, 'SSH connection timed out (180s)'
     except Exception as e:
-        logger.exception(f"Error installing watchdog agent on {server.name}")
-        return False, str(e)[:200]
+        logger.error('Error installing watchdog agent on %s', server.name)
+        return False, 'Watchdog installation unavailable.'
 
 
 def remove_watchdog_agent_remote(server) -> bool:
@@ -538,6 +639,7 @@ def remove_watchdog_agent_remote(server) -> bool:
         cmd, env = build_ssh_cmd(server, timeout=15)
         
         remove_script = '''
+set -e
 systemctl stop dc-watchdog-agent 2>/dev/null || true
 systemctl disable dc-watchdog-agent 2>/dev/null || true
 rm -f /etc/systemd/system/dc-watchdog-agent.service
@@ -547,10 +649,10 @@ rm -rf /opt/dc-watchdog
 systemctl daemon-reload
 echo "REMOVE_SUCCESS"
 '''
-        cmd.append(remove_script)
+        cmd.append(privileged_remote_command(server, 'bash -s'))
         
         run_env = {**os.environ, **env} if env else None
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=run_env)
+        result = subprocess.run(cmd, input=remove_script, capture_output=True, text=True, timeout=30, env=run_env)
         return result.returncode == 0 and 'REMOVE_SUCCESS' in result.stdout
     except Exception as e:
         logger.error(f"Error removing watchdog agent on {server.name}: {e}")
