@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import threading
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -19,21 +20,40 @@ from test_selected_worker_lifecycle import target
 from test_operational_customer_contract import host
 
 
+@pytest.fixture
+def empty_controller_inventory(monkeypatch):
+    """These render-only controls declare a fresh host with all roles absent."""
+    from dc_overview import controller_adoption
+    monkeypatch.setattr(controller_adoption, 'probe_controller_inventory',
+                        lambda: {role: None for role in controller_adoption.ROLES})
+    # Model a newly allocated traversable parent without changing private pytest
+    # ancestors or customer config custody. Native UID acceptance is separate.
+    with tempfile.TemporaryDirectory(prefix='dc-lifecycle-render-', dir='/private/tmp') as scratch:
+        parent = Path(scratch); parent.chmod(0o755)
+        private = parent / 'dc-overview'; private.mkdir(mode=0o700)
+        yield private
+
+
 def images():
     return SimpleNamespace(targets={name:{'kind':'oci','reference':repo+'@sha256:'+'a'*64,'owner':'proxy-updater','origin':'baseline'} for name,repo in {'cryptolabs-proxy':'ghcr.io/cryptolabsza/cryptolabs-proxy','dc-overview':'ghcr.io/cryptolabsza/dc-overview','prometheus':'prom/prometheus','grafana':'grafana/grafana'}.items()})
 
 
 @pytest.mark.parametrize('existing', [False, True])
-def test_ADV01_selected_real_compose_shapes_render(tmp_path, existing):
-    config=FleetConfig(config_dir=tmp_path);config.ssl.use_existing_proxy=existing
+def test_ADV01_selected_real_compose_shapes_render(tmp_path, existing, empty_controller_inventory):
+    config=FleetConfig(config_dir=empty_controller_inventory);config.ssl.use_existing_proxy=existing
     manager=FleetManager(config);manager.release_plan=images()
     services=yaml.safe_load(manager._generate_docker_compose())['services']
     assert {'prometheus','grafana'} <= services.keys()
     for name,service in services.items():
         assert service['image'] == manager.release_plan.targets[name]['reference']
-    assert './prometheus:/etc/prometheus:ro' in services['prometheus']['volumes']
+    product = empty_controller_inventory.with_name(empty_controller_inventory.name + '-monitoring')
+    assert str(product)+':/etc/prometheus:ro' in services['prometheus']['volumes']
+    assert './prometheus:/etc/prometheus:ro' not in services['prometheus']['volumes']
     if existing:
-        assert './prometheus:/etc/dc-overview/prometheus' in services['dc-overview']['volumes']
+        assert str(product)+':/var/lib/dc-monitoring' in services['dc-overview']['volumes']
+        environment = services['dc-overview']['environment']
+        assert 'PROMETHEUS_CONFIG_PATH=/var/lib/dc-monitoring/prometheus.yml' in environment
+        assert 'PROMETHEUS_OWNERSHIP_PATH=/var/lib/dc-monitoring/ownership.json' in environment
 
 
 def test_ADV02_host_reload_accepts_defaults_but_rejects_declared_drift(tmp_path, monkeypatch):
@@ -233,10 +253,17 @@ def test_ADV05_interrupted_publication_with_customer_conflict_retains_all_bytes(
     assert (store.root/'.lifecycle-publication.json').exists()
 
 
-def test_promtool_validation_mount_public_permissions(tmp_path,monkeypatch):
-    manager=FleetManager(FleetConfig(config_dir=tmp_path));manager.release_plan=images()
+def test_promtool_validation_mount_public_permissions(tmp_path,monkeypatch,empty_controller_inventory):
+    manager=FleetManager(FleetConfig(config_dir=empty_controller_inventory));manager.release_plan=images()
     def run(command,**k):
-        mount=Path(command[command.index('-v')+1].split(':')[0])
+        assert command[:8] == ['docker','run','--rm','--network','none','--entrypoint','/bin/promtool','-v']
+        assert command.count('-v') == 1
+        source, target, access = command[8].rsplit(':', 2)
+        assert target == '/etc/prometheus' and access == 'ro'
+        assert command[9:] == [manager.release_plan.targets['prometheus']['reference'],
+                               'check','config','/etc/prometheus/prometheus.yml']
+        mount=Path(source)
+        assert {p.name for p in mount.iterdir()} == {'prometheus.yml','recording_rules.yml'}
         assert mount.stat().st_mode & 0o777 == 0o755
         assert all(p.stat().st_mode & 0o777 == 0o644 for p in mount.iterdir())
         return SimpleNamespace(returncode=0)
@@ -256,19 +283,19 @@ def test_ADV07_api_refuses_before_reinstall_remove_or_latest_discovery(tmp_path,
     remove.assert_not_called();latest.assert_not_called()
 
 
-def test_ADV01_existing_compose_exposes_selected_policy_to_app(tmp_path):
-    config=FleetConfig(config_dir=tmp_path);config.ssl.use_existing_proxy=True
+def test_ADV01_existing_compose_exposes_selected_policy_to_app(tmp_path,empty_controller_inventory):
+    config=FleetConfig(config_dir=empty_controller_inventory);config.ssl.use_existing_proxy=True
     manager=FleetManager(config);manager.release_plan=images()
     service=yaml.safe_load(manager._generate_docker_compose())['services']['dc-overview']
-    assert str(tmp_path)+':/etc/dc-overview:ro' in service['volumes']
+    assert str(empty_controller_inventory)+':/etc/dc-overview:ro' in service['volumes']
 
 
-def test_ADV01_preflight_renderer_cannot_create_inventory_custody(tmp_path,monkeypatch):
-    config=FleetConfig(config_dir=tmp_path);config.ssl.use_existing_proxy=True;config.components.ipmi_monitor=True
+def test_ADV01_preflight_renderer_cannot_create_inventory_custody(tmp_path,monkeypatch,empty_controller_inventory):
+    config=FleetConfig(config_dir=empty_controller_inventory);config.ssl.use_existing_proxy=True;config.components.ipmi_monitor=True
     manager=FleetManager(config);manager.release_plan=images();manager._render_only=True
     monkeypatch.setattr(manager,'_inspect_ipmi_monitor',lambda:None)
     manager._generate_docker_compose()
-    assert not (tmp_path/'secrets').exists()
+    assert not (empty_controller_inventory/'secrets').exists()
 
 
 def test_ADV05_failed_publication_restores_in_memory_reference(tmp_path,monkeypatch):
@@ -308,8 +335,8 @@ def test_ADV07_required_but_missing_selection_never_falls_back_to_latest(tmp_pat
     assert refusal and 'dc-overview upgrade' in refusal
 
 
-def test_ADV07_selected_compose_marks_policy_required_even_if_mount_unavailable(tmp_path):
-    config=FleetConfig(config_dir=tmp_path);config.ssl.use_existing_proxy=True
+def test_ADV07_selected_compose_marks_policy_required_even_if_mount_unavailable(tmp_path,empty_controller_inventory):
+    config=FleetConfig(config_dir=empty_controller_inventory);config.ssl.use_existing_proxy=True
     manager=FleetManager(config);manager.release_plan=images()
     environment=yaml.safe_load(manager._generate_docker_compose())['services']['dc-overview']['environment']
     assert 'DC_RELEASE_SELECTION_REQUIRED=1' in environment

@@ -125,6 +125,7 @@ class ComponentConfig:
     vast_price_manager: bool = False  # Optional, separately managed Vast pricing UI
     runpod_exporter: bool = False  # RunPod earnings/reliability
     dc_watchdog: bool = False  # External uptime monitoring (requires CryptoLabs subscription)
+    worker_exporters: bool = False  # Explicitly prepare the selected role before the first worker
 
 
 @dataclass
@@ -478,6 +479,42 @@ class FleetConfig:
                     os.unlink(temporary)
         return path
 
+    def persist_worker_entry(self, server: Server, *, expected_public: bytes, _locked=False) -> Path:
+        """CAS one worker reference, without serializing or opening secret stores."""
+        path = self.config_dir / 'fleet-config.yaml'
+        with nullcontext() if _locked else self.lifecycle_lock():
+            if path.is_symlink() or not path.is_file():
+                raise ValueError('existing public configuration must be a regular file')
+            original = path.read_bytes()
+            if original != expected_public:
+                raise RuntimeError('public configuration changed during worker enrollment')
+            values = yaml.safe_load(original)
+            if not isinstance(values, dict) or not isinstance(values.get('servers', []), list):
+                raise ValueError('public worker configuration must be a mapping and list')
+            workers = list(values.get('servers', []))
+            values['servers'] = workers
+            matches = [item for item in workers if isinstance(item, dict) and
+                       (item.get('name') == server.name or item.get('server_ip') == server.server_ip)]
+            if any(not isinstance(item, dict) for item in workers) or len(matches) > 1:
+                raise ValueError('worker identity conflict in public configuration')
+            reference = {'name': server.name, 'server_ip': server.server_ip}
+            for name in ('ssh_user', 'ssh_port', 'ssh_key_path'):
+                if getattr(server, name) is not None:
+                    reference[name] = getattr(server, name)
+            if matches:
+                existing = matches[0]
+                if any(existing.get(key) != value for key, value in reference.items()):
+                    raise ValueError('worker identity or SSH reference conflict')
+                return path
+            workers.append({**reference, 'exporters_installed': False})
+            metadata = path.stat()
+            if path.read_bytes() != original:
+                raise RuntimeError('public configuration changed during worker enrollment')
+            _atomic_write_public_config(path, yaml.safe_dump(values, sort_keys=False).encode(),
+                                        mode=metadata.st_mode & 0o777,
+                                        owner=(metadata.st_uid, metadata.st_gid))
+        return path
+
     def persist_alert_receiver(self, receiver: Optional[str]) -> Path:
         """Persist only the public Grafana receiver setting.
 
@@ -599,6 +636,7 @@ class FleetConfig:
                 "vast_price_manager": self.components.vast_price_manager,
                 "runpod_exporter": self.components.runpod_exporter,
                 "dc_watchdog": self.components.dc_watchdog,
+                "worker_exporters": self.components.worker_exporters,
             },
             "ssl": {
                 "mode": self.ssl.mode.value,
@@ -676,6 +714,9 @@ class FleetConfig:
                     "has_gpu": s.has_gpu,
                     "exporters_installed": s.exporters_installed,
                     "ipmi_configured": s.ipmi_configured,
+                    "ssh_user": s.ssh_user,
+                    "ssh_port": s.ssh_port,
+                    "ssh_key_path": s.ssh_key_path,
                 }
                 for s in self.servers
             ],
@@ -794,6 +835,9 @@ class FleetConfig:
             config.components.vast_exporter = comp.get("vast_exporter", False)
             config.components.vast_price_manager = comp.get("vast_price_manager", False)
             config.components.runpod_exporter = comp.get("runpod_exporter", False)
+            if type(comp.get('worker_exporters', False)) is not bool:
+                raise ValueError('components.worker_exporters must be a boolean')
+            config.components.worker_exporters = comp.get('worker_exporters', False)
             config.enable_watchtower_all = data.get("enable_watchtower_all", False)
             
             # SSL
@@ -883,6 +927,9 @@ class FleetConfig:
                     has_gpu=s.get("has_gpu", False),
                     exporters_installed=s.get("exporters_installed", False),
                     ipmi_configured=s.get("ipmi_configured", False),
+                    ssh_user=s.get('ssh_user'),
+                    ssh_port=s.get('ssh_port'),
+                    ssh_key_path=s.get('ssh_key_path'),
                 ))
         
         # Load secrets

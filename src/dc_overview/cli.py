@@ -1606,10 +1606,16 @@ def vpm_logs(ctx: click.Context, lines: int):
 @click.command("add-machine")
 @click.argument("ip")
 @click.option("--name", "-n", help="Friendly name for this machine")
-@click.option("--ssh-user", default="root", help="SSH username")
-@click.option("--ssh-port", default=22, help="SSH port")
+@click.option("--ssh-user", default=None, help="SSH username (selected fleets inherit stored authority)")
+@click.option("--ssh-port", default=None, type=click.IntRange(1, 65535), help="SSH port")
 @click.option("--ssh-pass", help="SSH password (for remote install)")
-def add_machine(ip: str, name: str, ssh_user: str, ssh_port: int, ssh_pass: str):
+@click.option('--ssh-key', type=click.Path(exists=True, dir_okay=False), help='Existing host private-key reference; never copied')
+@click.option('--ssh-key-id', type=click.IntRange(1), help='Existing Fleet inventory key reference')
+@click.option('--fleet-url', help='Current Fleet HTTPS origin (default: configured domain)')
+@click.option('--fleet-user', default='admin', help='Current Fleet administrator username')
+@click.option('--ca-file', type=click.Path(exists=True, dir_okay=False), help='Trusted CA/certificate reference for Fleet HTTPS')
+def add_machine(ip: str, name: str, ssh_user: str, ssh_port: int, ssh_pass: str,
+                ssh_key: str, ssh_key_id: int, fleet_url: str, fleet_user: str, ca_file: str):
     """
     Add a machine to monitor.
     
@@ -1619,9 +1625,45 @@ def add_machine(ip: str, name: str, ssh_user: str, ssh_port: int, ssh_pass: str)
         dc-overview add-machine 192.168.1.101 --name gpu-worker-01
         dc-overview add-machine 192.168.1.101 --ssh-pass mypass  # Also installs exporters
     """
-    from .quickstart import test_machine_connection, setup_remote_machine, update_prometheus_targets
-    
     name = name or f"machine-{ip.split('.')[-1]}"
+    from .worker_lifecycle import selected_worker_mutation_refusal, enroll_selected_worker
+    config = FleetConfig.load(DOCKER_CONFIG_DIR)
+    if (selected_worker_mutation_refusal(DOCKER_CONFIG_DIR) or config.release_selection.selection_id
+            or config.release_selection.selection_sha256):
+        if os.geteuid() != 0:
+            raise click.ClickException('Selected worker enrollment requires the authoritative root host CLI')
+        if ssh_pass:
+            raise click.ClickException('Selected enrollment uses existing SSH key references; no password argument is accepted')
+        from .fleet_config import Server
+        import ipaddress
+        import re
+        try:
+            name = name.strip()
+            ip = str(ipaddress.ip_address(ip.strip()))
+            if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}', name):
+                raise ValueError('invalid worker name')
+            if ssh_user is not None and not re.fullmatch(r'[a-zA-Z_][a-zA-Z0-9_-]{0,31}', ssh_user):
+                raise ValueError('invalid SSH username')
+            if not fleet_url:
+                if not config.ssl.domain:
+                    raise ValueError('supply --fleet-url with the current Fleet HTTPS origin')
+                port = '' if config.ssl.external_port == 443 else ':' + str(config.ssl.external_port)
+                fleet_url = 'https://' + config.ssl.domain + port
+            password = click.prompt('Current Fleet password', hide_input=True)
+            result = enroll_selected_worker(config, Server(name=name, server_ip=ip,
+                    ssh_user=ssh_user, ssh_port=ssh_port, ssh_key_path=ssh_key),
+                    base_url=fleet_url, username=fleet_user, password=password,
+                    ca_file=ca_file, ssh_key_id=ssh_key_id)
+        except (ValueError, RuntimeError, OSError) as error:
+            raise click.ClickException(str(error)) from None
+        if not result['success']:
+            for component, outcome in result.get('components', {}).items():
+                if outcome.get('success') is not True:
+                    console.print(f'[yellow]{component}: selected installation or probe failed; previous observations retained[/yellow]')
+            raise click.ClickException('Worker identity retained; selected delivery is incomplete. Fix the reported prerequisite and rerun add-machine.')
+        console.print(f"[green]✓[/green] Verified selected worker {name} (inventory ID {result['server_id']})")
+        return
+    from .quickstart import test_machine_connection, setup_remote_machine, update_prometheus_targets
     
     # Test connection
     if test_machine_connection(ip):

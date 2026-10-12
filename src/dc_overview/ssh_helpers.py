@@ -14,6 +14,17 @@ from .ssh_trust import openssh_trust_options, validated_extra_ssh_options
 
 logger = logging.getLogger(__name__)
 
+# Selected file-backed authentication must not add config/agent/certificate
+# identities. Explicit endpoint, user, port and verified trust remain argv-owned.
+SELECTED_SSH_IDENTITY_OPTIONS = (
+    '-F', '/dev/null',
+    '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none',
+    '-o', 'IdentityFile=none',
+    '-o', 'CertificateFile=none', '-o', 'BatchMode=yes',
+    '-o', 'PreferredAuthentications=publickey', '-o', 'AddKeysToAgent=no',
+    '-o', 'PKCS11Provider=none', '-o', 'SecurityKeyProvider=none',
+)
+
 
 def privileged_remote_command(server, command):
     """Select direct root execution or fail-fast noninteractive sudo."""
@@ -35,7 +46,7 @@ def remote_failure_message(result=None, *, timed_out=False):
     return f'Remote operation failed (exit {code}).' if isinstance(code, int) and code else 'Remote operation could not be verified.'
 
 
-def resolve_ssh_key_path(server):
+def resolve_ssh_key_path(server, *, strict=False):
     """Resolve the SSH key path for a server, with fallback to default fleet key.
     
     Priority:
@@ -43,8 +54,36 @@ def resolve_ssh_key_path(server):
     2. Default fleet key at /etc/dc-overview/ssh_keys/fleet_key
     3. Default user key at ~/.ssh/id_rsa
     """
+    strict = strict or getattr(server, '_selected_ssh_key_strict', False)
+    def readable_reference(path):
+        import stat
+        try:
+            from pathlib import Path
+            value = os.fspath(path)
+            if (not isinstance(value, str) or not Path(value).is_absolute()
+                    or '%' in value or '$' in value or any(ord(character) < 32 or ord(character) == 127 for character in value)):
+                return False
+            descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK)
+            try:
+                return stat.S_ISREG(os.fstat(descriptor).st_mode)
+            finally:
+                os.close(descriptor)
+        except (OSError, TypeError, ValueError):
+            return False
+    pinned = getattr(server, '_selected_effective_key_path', None) if strict else None
+    if pinned is not None:
+        if (not readable_reference(pinned) or getattr(server, 'ssh_key_id', None)
+                and (not server.ssh_key or server.ssh_key.key_path != pinned)):
+            raise ValueError('Selected SSH key reference changed or is unreadable; no fallback permitted')
+        return pinned
+    if strict and getattr(server, 'ssh_key_id', None) and (not server.ssh_key or not server.ssh_key.key_path):
+        raise ValueError('Explicit registered SSH key is unavailable')
     if server.ssh_key and server.ssh_key.key_path:
         key_path = server.ssh_key.key_path
+        if strict:
+            if not readable_reference(key_path):
+                raise ValueError('Explicit registered SSH key is unreadable; no default fallback is permitted')
+            return key_path
         if os.path.exists(key_path):
             return key_path
         logger.warning(f"SSH key for {server.name} not found at {key_path}, trying defaults")
@@ -52,7 +91,7 @@ def resolve_ssh_key_path(server):
     default_keys = ['/etc/dc-overview/ssh_keys/fleet_key',
                     os.path.expanduser('~/.ssh/id_rsa')]
     for key_path in default_keys:
-        if os.path.exists(key_path):
+        if readable_reference(key_path) if strict else os.path.exists(key_path):
             return key_path
     
     return None
@@ -77,14 +116,18 @@ def build_ssh_cmd(server, timeout=10, batch_mode=True, extra_opts=None):
     
     ssh_key_path = resolve_ssh_key_path(server)
     ssh_password = getattr(server, 'ssh_password', None)
+    selected_identity = getattr(server, '_selected_ssh_key_strict', False)
+    if selected_identity and not ssh_key_path:
+        raise ValueError('Selected SSH key authority is unavailable')
     
     if ssh_key_path:
         cmd = [
             'ssh',
+            *(SELECTED_SSH_IDENTITY_OPTIONS if selected_identity else ()),
             *trust_opts,
             '-o', f'ConnectTimeout={timeout}',
         ]
-        if batch_mode:
+        if batch_mode and not selected_identity:
             cmd.extend(['-o', 'BatchMode=yes'])
         cmd.extend(['-p', str(server.ssh_port or 22)])
         cmd.extend(['-i', ssh_key_path])

@@ -1076,11 +1076,21 @@ def get_version_from_metrics(server_ip: str, exporter: str, timeout: int = 5) ->
 def _build_exporter_ssh_cmd(server_ip: str, ssh_user: str = 'root',
                             ssh_port: int = 22, ssh_key_path: Optional[str] = None,
                             ssh_password: Optional[str] = None,
-                            timeout: int = 5) -> tuple:
+                            timeout: int = 5, *, selected_server=None) -> tuple:
     """Build SSH command for exporter operations, supporting both key and password auth.
     
     Returns (cmd_prefix, env_dict) where env_dict contains SSHPASS if password auth.
     """
+    if selected_server is not None:
+        pinned = getattr(selected_server, '_selected_effective_key_path', None)
+        if (not getattr(selected_server, '_selected_ssh_key_strict', False) or not pinned
+                or server_ip != selected_server.server_ip
+                or (ssh_user or 'root') != (selected_server.ssh_user or 'root')
+                or (ssh_port or 22) != (selected_server.ssh_port or 22)
+                or ssh_key_path != pinned):
+            raise ValueError('Selected exporter SSH identity context changed or is unavailable')
+        from .ssh_helpers import build_ssh_cmd
+        return build_ssh_cmd(selected_server, timeout=timeout)
     from .ssh_trust import openssh_trust_options
     trust_opts = openssh_trust_options()
     env = {}
@@ -1100,7 +1110,7 @@ def _build_exporter_ssh_cmd(server_ip: str, ssh_user: str = 'root',
 def get_version_from_ssh(server_ip: str, exporter: str, ssh_user: str = 'root',
                          ssh_port: int = 22, ssh_key_path: Optional[str] = None,
                          ssh_password: Optional[str] = None,
-                         timeout: int = 10) -> Optional[str]:
+                         timeout: int = 10, *, selected_server=None) -> Optional[str]:
     """
     Get exporter version by running --version on the remote server via SSH.
     
@@ -1125,7 +1135,8 @@ def get_version_from_ssh(server_ip: str, exporter: str, ssh_user: str = 'root',
     binary = binary_paths.get(exporter)
     
     try:
-        ssh_cmd, env = _build_exporter_ssh_cmd(server_ip, ssh_user, ssh_port, ssh_key_path, ssh_password, timeout=5)
+        context = {'selected_server': selected_server} if selected_server is not None else {}
+        ssh_cmd, env = _build_exporter_ssh_cmd(server_ip, ssh_user, ssh_port, ssh_key_path, ssh_password, timeout=5, **context)
         
         if exporter == 'dcgm_exporter':
             # For Docker-based dcgm-exporter, get image tag
@@ -1157,6 +1168,9 @@ def get_version_from_ssh(server_ip: str, exporter: str, ssh_user: str = 'root',
                 if match:
                     return match.group(1)
                     
+    except ValueError:
+        if selected_server is not None:
+            raise
     except Exception:
         pass
     
@@ -1165,7 +1179,7 @@ def get_version_from_ssh(server_ip: str, exporter: str, ssh_user: str = 'root',
 
 def get_exporter_version(server_ip: str, exporter: str, ssh_user: str = 'root',
                         ssh_port: int = 22, ssh_key_path: Optional[str] = None,
-                        ssh_password: Optional[str] = None) -> Optional[str]:
+                        ssh_password: Optional[str] = None, *, selected_server=None) -> Optional[str]:
     """
     Get exporter version, trying metrics endpoint first then SSH fallback.
     
@@ -1186,7 +1200,8 @@ def get_exporter_version(server_ip: str, exporter: str, ssh_user: str = 'root',
         return version
     
     # Fall back to SSH
-    version = get_version_from_ssh(server_ip, exporter, ssh_user, ssh_port, ssh_key_path, ssh_password)
+    context = {'selected_server': selected_server} if selected_server is not None else {}
+    version = get_version_from_ssh(server_ip, exporter, ssh_user, ssh_port, ssh_key_path, ssh_password, **context)
     if version:
         return version
     

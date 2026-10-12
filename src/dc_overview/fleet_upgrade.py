@@ -68,7 +68,7 @@ def required_components(config):
                        ('runpod_exporter','runpod-exporter'), ('vast_price_manager','vast-price-manager')]:
         if getattr(config.components, flag):
             required.add(name)
-    if config.servers:
+    if config.servers or config.components.worker_exporters:
         required.update({'node-exporter', 'dc-exporter'})
     if config.components.dc_watchdog and config.watchdog.install_agent:
         required.add('dc-watchdog-agent')
@@ -364,7 +364,10 @@ def run_selected_upgrade(config, plan, *, timeout=1800):
             external[name] = verify_running_cli(target)
         elif target['owner'] == 'dc-vpm':
             external[name] = dispatch_vpm(config, target) if ready else {'success':False,'state':'blocked','owner':'dc-vpm','reason':'proxy roles did not verify'}
-    if workers:
+    if workers and not config.servers and config.components.worker_exporters:
+        external.update({name:{'success':True, 'state':'not_applicable', 'owner':'dc-worker',
+                               'reason':'worker role explicitly enabled; no workers enrolled'} for name in workers})
+    elif workers:
         from .worker_lifecycle import upgrade_workers
         outcomes = upgrade_workers(config, plan) if ready else {name:{'success':False,'state':'blocked','owner':'dc-worker','reason':'proxy roles did not verify'} for name in workers}
         external.update(outcomes)

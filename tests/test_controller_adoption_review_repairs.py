@@ -305,12 +305,16 @@ def test_terminal_file_custody_drift_is_hold(inputs,tmp_path,drift):
 
 def test_reference_parent_custody_is_frozen_without_copying_secret_bytes(monkeypatch):
     adapter=InstalledEngine(engine=object())
-    adapter.file_state=lambda *a:{'bytes':b'opaque'.hex(),'uid':65534,'gid':65534,'mode':0o600}
+    adapter.file_state=lambda *a:pytest.fail('archive cannot establish running parent custody')
     observed=[]
-    def directory(name,path):observed.append(path);return {'uid':65534,'gid':65534,'mode':0o700}
-    adapter.directory_custody=directory
+    def running(name,path):
+        observed.append((name,path))
+        return {'bytes':b'opaque'.hex(),'uid':65534,'gid':65534,'mode':0o600,
+                'parents':{p:{'uid':65534,'gid':65534,'mode':0o700} for p in ('/etc/prometheus/customer','/etc/prometheus','/etc')}}
+    adapter.running_file_state=running
+    adapter.directory_custody=lambda *a:pytest.fail('archive cannot establish running parent custody')
     result=adapter.reference_state('prometheus','/etc/prometheus/customer/token')
-    assert observed==['/etc/prometheus/customer','/etc/prometheus','/etc']
+    assert observed==[('prometheus','/etc/prometheus/customer/token')]
     assert result['parents']['/etc/prometheus/customer']=={'uid':65534,'gid':65534,'mode':0o700}
 
 

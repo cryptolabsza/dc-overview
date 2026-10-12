@@ -13,6 +13,7 @@ from typing import Tuple, Optional, List
 from dataclasses import dataclass
 
 from .ssh_trust import SSHTrustError, openssh_trust_options, configure_paramiko_host_trust
+from .ssh_helpers import SELECTED_SSH_IDENTITY_OPTIONS, resolve_ssh_key_path
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -369,6 +370,7 @@ FLEET_KEY_EOF
         key_path: str = None,
         password: Optional[str] = None,
         known_hosts_path: Optional[str] = None,
+        selected_identity: bool = False,
     ) -> SSHResult:
         """
         Run a command on a remote host via SSH.
@@ -391,6 +393,8 @@ FLEET_KEY_EOF
             trust_opts = openssh_trust_options(known_hosts_path=trust_path)
         except SSHTrustError as exc:
             return SSHResult(success=False, output=str(exc), exit_code=-1)
+        if selected_identity and password is not None:
+            return SSHResult(success=False, output='Selected key transport cannot use a password fallback', exit_code=-1)
         if password is not None and not shutil.which('sshpass'):
             # Fresh pip/pipx installs already ship Paramiko; the normal system
             # prerequisite step installs sshpass only after readonly proof.
@@ -414,6 +418,14 @@ FLEET_KEY_EOF
                 client.close()
         # Use provided key or fall back to fleet key
         ssh_key = key_path or str(self.key_path)
+        if selected_identity:
+            from types import SimpleNamespace
+            reference = SimpleNamespace(ssh_key_id=None, ssh_key=None,
+                _selected_ssh_key_strict=True, _selected_effective_key_path=str(ssh_key))
+            try:
+                ssh_key = resolve_ssh_key_path(reference, strict=True)
+            except ValueError:
+                return SSHResult(success=False, output='Selected SSH key reference is unavailable; no fallback permitted', exit_code=-1)
         
         if password is None and not Path(ssh_key).exists():
             return SSHResult(success=False, output=f"SSH key not found: {ssh_key}", exit_code=-1)
@@ -421,7 +433,8 @@ FLEET_KEY_EOF
         if sudo and username != "root":
             command = f"sudo {command}"
         
-        cmd = (["sshpass", "-e", "ssh"] if password is not None else ["ssh", "-i", ssh_key]) + [
+        cmd = (["sshpass", "-e", "ssh"] if password is not None else
+               ["ssh", *(SELECTED_SSH_IDENTITY_OPTIONS if selected_identity else ()), "-i", ssh_key]) + [
             *trust_opts,
             "-o", "ConnectTimeout=10",
             "-p", str(port),

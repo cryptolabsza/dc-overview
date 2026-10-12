@@ -449,6 +449,7 @@ class FleetManager:
         console.print()
         
         self.deployment_errors = []  # Reset for this deploy
+        self._fresh_monitoring = None
         
         try:
             from .controller_adoption import ensure_mutation_allowed
@@ -456,6 +457,7 @@ class FleetManager:
             from .fleet_upgrade import preflight_release, commit_release
             self.release_plan = preflight_release(self.config, getattr(self.config, '_release_manifest_path', None), fresh_setup=True)
             if getattr(self, 'release_plan', None):
+                self._begin_fresh_monitoring()
                 self.monitoring_plan = self._prepare_baseline_monitoring()
                 if self.config.components.dc_overview and not self._validate_baseline_prometheus(self.monitoring_plan['prometheus']):
                     raise RuntimeError('selected Prometheus validation failed before deployment writes')
@@ -550,6 +552,10 @@ class FleetManager:
                     console.print(f"[red]✗[/red] Proxy integration failed: {e}")
             
             # Step 10: Security Hardening (firewall setup)
+            if self._fresh_monitoring and not self.deployment_errors:
+                inventory, _ = self._monitoring_runtime()
+                if any(inventory.get(role) is None for role in ('dc-overview','prometheus','grafana','cryptolabs-proxy')):
+                    raise ValueError('fresh controller transaction did not produce complete runtime authority')
             self._setup_security_hardening()
             
             # Done - show completion with warnings if any errors occurred
@@ -572,6 +578,8 @@ class FleetManager:
                     error=str(e)
                 )
             return False
+        finally:
+            self._fresh_monitoring = None
     
     # ============ Step 1: Prerequisites ============
     
@@ -732,7 +740,8 @@ class FleetManager:
         compose_dir = self.config.config_dir
         if getattr(self, 'release_plan', None):
             from .monitoring import validate_product_monitoring_custody
-            validate_product_monitoring_custody(compose_dir / 'prometheus')
+            product_dir = self._monitoring_directory()
+            validate_product_monitoring_custody(product_dir)
         if self.release_plan and not self._validate_baseline_prometheus(self.monitoring_plan['prometheus']):
             raise RuntimeError('selected Prometheus validation failed before monitoring file writes')
         if getattr(self, 'release_plan', None) and 'source_path' in self.monitoring_plan:
@@ -743,18 +752,29 @@ class FleetManager:
         
         # Create docker-compose.yml
         compose_content = self._generate_docker_compose()
+        if getattr(self,'_fresh_monitoring',None):
+            self._fresh_monitoring['services']=yaml.safe_load(compose_content)['services']
         (compose_dir / "docker-compose.yml").write_text(compose_content)
         
         # Create prometheus.yml (initial, will be updated later)
         if getattr(self, 'release_plan', None):
-            from .monitoring import atomic_write_bytes
+            from .monitoring import atomic_write_bytes, monitoring_ownership, _file_lock
             mapping = self.monitoring_plan['prometheus']
-            product_dir = compose_dir / 'prometheus'
             if not product_dir.exists():
                 product_dir.mkdir()
                 product_dir.chmod(0o755)
                 os.chown(product_dir, 1000, 1000)
+            if self.config.prometheus.customer_config_dir:
+                child = product_dir / 'customer'
+                if not child.exists():
+                    child.mkdir(mode=0o755); child.chmod(0o755); os.chown(child, 1000, 1000)
+                if child.is_symlink() or not child.is_dir():
+                    raise ValueError('customer monitoring mountpoint custody invalid')
             atomic_write_bytes(product_dir / 'prometheus.yml', yaml.safe_dump(mapping, sort_keys=False).encode(), new_owner=(1000,1000))
+            atomic_write_bytes(product_dir / 'ownership.json', json.dumps(monitoring_ownership(
+                self.config.prometheus.legacy_managed_jobs,
+                self.monitoring_plan.get('file_references', mapping.get('rule_files', []))), sort_keys=True, separators=(',', ':')).encode(), new_owner=(1000,1000))
+            with _file_lock(product_dir / 'prometheus.yml'): pass
         else:
             prometheus_content = self._generate_prometheus_config()
             (compose_dir / 'prometheus.yml').write_text(prometheus_content)
@@ -762,7 +782,7 @@ class FleetManager:
         # Create recording_rules.yml for unified GPU metrics
         recording_rules = self._generate_recording_rules()
         if self.release_plan:
-            atomic_write_bytes(compose_dir / 'prometheus' / 'recording_rules.yml', recording_rules.encode(), new_owner=(1000,1000))
+            atomic_write_bytes(product_dir / 'recording_rules.yml', recording_rules.encode(), new_owner=(1000,1000))
         else:
             (compose_dir / 'recording_rules.yml').write_text(recording_rules)
         
@@ -789,6 +809,7 @@ datasources:
         install_grafana_alerts(
             compose_dir,
             receiver=self.config.grafana.alert_receiver,
+            datasource_uid=self.monitoring_plan['grafana']['prometheus_datasource_uid'] if getattr(self, 'release_plan', None) else 'prometheus',
         )
         
         # Note: Dashboards are NOT provisioned via files - they are imported via API
@@ -894,6 +915,8 @@ datasources:
         if prometheus_running and grafana_running:
             console.print("[green]✓[/green] Prometheus running on port 9090")
             console.print("[green]✓[/green] Grafana running on port 3000")
+            if getattr(self, '_fresh_monitoring', None):
+                self._capture_fresh_monitoring()
         else:
             # Timeout - show what's happening
             console.print(f"[red]✗[/red] Services failed to start within {MAX_WAIT_SECONDS // 60} minutes")
@@ -932,15 +955,18 @@ datasources:
             service['labels']['io.cryptolabs.update.origin'] = self.release_plan.targets[name]['origin']
         prometheus = value['services']['prometheus']
         prometheus['volumes'] = [mount for mount in prometheus['volumes'] if ': /etc/prometheus/' not in mount and ':/etc/prometheus/' not in mount]
-        prometheus['volumes'].append('./prometheus:/etc/prometheus:ro')
+        from .monitoring import DC_MONITORING_DESTINATION
+        product_dir = self._monitoring_directory()
+        prometheus['volumes'].append(str(product_dir) + ':/etc/prometheus:ro')
         if self.config.prometheus.customer_config_dir:
             prometheus['volumes'].append(self.config.prometheus.customer_config_dir + ':/etc/prometheus/customer:ro')
         # Fresh setup installs DC through the normal proxy setup owner later.
         # Existing-proxy setup includes DC in this Compose project.
         if 'dc-overview' in value['services']:
             value['services']['dc-overview']['volumes'].append(str(self.config.config_dir) + ':/etc/dc-overview:ro')
-            value['services']['dc-overview']['volumes'].append('./prometheus:/etc/dc-overview/prometheus')
-            value['services']['dc-overview'].setdefault('environment', []).append('PROMETHEUS_CONFIG_PATH=/etc/dc-overview/prometheus/prometheus.yml')
+            value['services']['dc-overview']['volumes'].append(str(product_dir) + ':' + DC_MONITORING_DESTINATION)
+            value['services']['dc-overview'].setdefault('environment', []).append('PROMETHEUS_CONFIG_PATH=' + DC_MONITORING_DESTINATION + '/prometheus.yml')
+            value['services']['dc-overview']['environment'].append('PROMETHEUS_OWNERSHIP_PATH=' + DC_MONITORING_DESTINATION + '/ownership.json')
             value['services']['dc-overview']['environment'].append('DC_RELEASE_SELECTION_REQUIRED=1')
         return yaml.safe_dump(value, sort_keys=False)
 
@@ -1400,23 +1426,137 @@ echo "node_exporter installed successfully"
             from .monitoring import apply_prometheus_config
             prepared = self._prepare_baseline_monitoring()
             mapping = prepared['prometheus']
-            target = self.config.config_dir / 'prometheus' / 'prometheus.yml'
+            target = prepared['source_path']
             apply_prometheus_config(target, mapping, validate_candidate=lambda path: self._validate_baseline_prometheus(yaml.safe_load(path.read_bytes())),
                                     reload_config=lambda: self._reload_baseline_prometheus(yaml.safe_load(target.read_bytes()) if target.exists() else {}),
-                                    expected_previous_bytes=prepared['source_bytes'] if prepared['source_path'] == target else None)
+                                    expected_previous_bytes=prepared['source_bytes'])
             return
         prometheus_file = self.config.config_dir / 'prometheus.yml'
         prometheus_file.write_text(yaml.safe_dump(self._product_prometheus_config()))
         subprocess.run(['docker', 'exec', 'prometheus', 'kill', '-HUP', '1'], capture_output=True)
 
-    def _grafana_request(self, path, payload=None):
+    def _grafana_request(self, path, payload=None, *, timeout=15):
         auth = base64.b64encode(f'admin:{self.config.grafana.admin_password}'.encode()).decode()
         headers = {'Authorization':'Basic ' + auth, 'X-WEBAUTH-USER':'admin', 'Content-Type':'application/json'}
         request = urllib.request.Request('http://127.0.0.1:3000' + path, headers=headers,
                                          data=json.dumps(payload).encode() if payload is not None else None,
                                          method='POST' if payload is not None else 'GET')
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.load(response)
+
+    def _monitoring_directory(self):
+        return self._monitoring_runtime()[1]
+
+    def _begin_fresh_monitoring(self):
+        from .controller_adoption import probe_controller_inventory
+        from .monitoring import public_monitoring_directory
+        if any(value is not None for value in probe_controller_inventory().values()):
+            raise ValueError('fresh monitoring transaction requires positively absent controller inventory')
+        self._fresh_monitoring = {'directory':public_monitoring_directory(self.config.config_dir), 'runtime':None}
+
+    def _capture_fresh_monitoring(self):
+        from .controller_adoption import probe_controller_inventory
+        import copy
+        inventory=probe_controller_inventory()
+        authority=self._fresh_monitoring
+        self._verify_fresh_monitoring(inventory, authority)
+        authority['runtime']={role:copy.deepcopy(inventory[role]) for role in ('prometheus','grafana')}
+
+    def _verify_fresh_monitoring(self, inventory, authority):
+        for role in ('prometheus','grafana'):
+            value=inventory.get(role)
+            if not value or not value.get('Id') or value.get('State',{}).get('Running') is not True or value.get('State',{}).get('Paused',False) is not False or value.get('Config',{}).get('Image') != self._selected_image(role,''):
+                raise ValueError('fresh monitoring runtime identity unavailable')
+            if authority['runtime']:
+                original=authority['runtime'][role]
+                if value['Id'] != original['Id'] or value['Mounts'] != original['Mounts'] or value['Config'] != original['Config']:
+                    raise ValueError('fresh monitoring runtime identity/mount drift')
+            service=authority['services'][role]
+            declared=[]
+            for binding in service.get('volumes',[]):
+                source,target,*options=binding.split(':')
+                if source.startswith('./'): source=str(self.config.config_dir/source[2:])
+                if source.startswith('/'): declared.append((source,target,'ro' not in options))
+            observed=[(m.get('Source'),m.get('Destination'),m.get('RW')) for m in value['Mounts'] if m.get('Type')=='bind']
+            if sorted(observed)!=sorted(declared) or ('command' in service and value['Config'].get('Cmd')!=service['command']):
+                raise ValueError('fresh monitoring producer/runtime binding or command differs')
+        expected=((inventory['prometheus'],str(authority['directory']),'/etc/prometheus'),
+                  (inventory['grafana'],str(self.config.config_dir/'grafana'/'provisioning'),'/etc/grafana/provisioning'))
+        for value, source, target in expected:
+            matches=[m for m in value['Mounts'] if m.get('Type')=='bind' and m.get('Source')==source and m.get('Destination')==target and m.get('RW') is False]
+            if len(matches)!=1: raise ValueError('fresh monitoring produced mount identity unavailable')
+        proxy=inventory.get('cryptolabs-proxy')
+        if proxy and proxy.get('Config',{}).get('Image') != self._selected_image('cryptolabs-proxy',''):
+            raise ValueError('fresh proxy runtime identity unavailable')
+        dc=inventory.get('dc-overview')
+        if dc and (dc.get('State',{}).get('Running') is not True or dc.get('State',{}).get('Paused',False) is not False or dc.get('Config',{}).get('Image') != self._selected_image('dc-overview','')):
+            raise ValueError('fresh DC runtime identity/readiness unavailable')
+
+    def _monitoring_runtime(self):
+        from .monitoring import public_monitoring_directory, sanctioned_monitoring_directory
+        from .controller_adoption import probe_controller_inventory
+        inventory=probe_controller_inventory()
+        authority=getattr(self,'_fresh_monitoring',None)
+        if authority:
+            if authority['runtime'] is None:
+                if any(value is not None for value in inventory.values()): raise ValueError('unaccounted partial fresh monitoring runtime')
+                return inventory,authority['directory']
+            self._verify_fresh_monitoring(inventory,authority)
+            if inventory.get('dc-overview') is None:
+                return inventory,authority['directory']
+        directory = sanctioned_monitoring_directory(inventory)
+        return inventory,directory if directory is not None else public_monitoring_directory(self.config.config_dir)
+
+    def _verify_monitoring_references(self, mapping, *, inventory=None):
+        """Prove live mounted bytes/custody; reopening a file bind is not proof."""
+        from .controller_adoption import InstalledEngine, _mounts, _safe_path, _references
+        inventory=inventory if inventory is not None else self._monitoring_runtime()[0]
+        if inventory.get('prometheus') is None: return {}
+        mounts=_mounts(inventory['prometheus']); reader=InstalledEngine()
+        result={}
+        for reference in sorted(_references(mapping)):
+            bindings=[m for m in mounts if reference==m['Target'] or reference.startswith(m['Target']+'/')]
+            if not bindings: raise ValueError('monitoring reference binding unavailable')
+            mount=max(bindings,key=lambda m:len(m['Target']))
+            if mount['Type']!='bind' or not mount['ReadOnly']: raise ValueError('monitoring reference requires read-only bind custody')
+            source=Path(mount['Source'])
+            if reference!=mount['Target']: source=source/Path(reference).relative_to(mount['Target'])
+            source=_safe_path(source); metadata=source.stat()
+            if not source.is_file(): raise ValueError('monitoring reference regular-file custody unavailable')
+            host={'bytes':source.read_bytes().hex(),'uid':metadata.st_uid,'gid':metadata.st_gid,'mode':metadata.st_mode & 0o7777,'inode':metadata.st_ino,'device':metadata.st_dev}
+            actual=reader.running_file_state(inventory['prometheus']['Id'],reference)
+            if host != {key:actual[key] for key in host}:
+                raise ValueError('monitoring reference live bytes/custody or inode differ; unsupported file-bind replacement requires explicit repair')
+            if reference=='/etc/prometheus/recording_rules.yml' and source.read_bytes()!=self._generate_recording_rules().encode():
+                raise ValueError('product recording rule revision differs from live reference; supported rule transition required')
+            result[reference]=host
+        return result
+
+    def _grafana_monitoring_ownership(self, timeout=120):
+        """Wait only for transient cold start; never retry denied authority."""
+        deadline = time.monotonic() + timeout
+        def request(path):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0: raise RuntimeError('Grafana monitoring ownership readiness timed out; no monitoring changes applied')
+            return self._grafana_request(path, timeout=min(15, remaining))
+        while True:
+            try:
+                health = request('/api/health')
+                if not isinstance(health, dict) or health.get('database') != 'ok':
+                    raise ValueError('Grafana health contract unavailable')
+                datasources = request('/api/datasources')
+                dashboards = request('/api/search?type=dash-db')
+                if not isinstance(datasources, list) or not all(isinstance(v, dict) for v in datasources) or not isinstance(dashboards, list) or not all(isinstance(v, dict) for v in dashboards):
+                    raise ValueError('Grafana ownership response malformed')
+                if time.monotonic() > deadline: raise RuntimeError('Grafana monitoring ownership readiness timed out; no monitoring changes applied')
+                return datasources, dashboards
+            except urllib.error.HTTPError as error:
+                if error.code not in (502, 503, 504): raise
+            except (urllib.error.URLError, TimeoutError, ConnectionError):
+                pass
+            remaining = deadline - time.monotonic()
+            if remaining <= 0: raise RuntimeError('Grafana monitoring ownership readiness timed out; no monitoring changes applied')
+            time.sleep(min(2, remaining))
 
     def _prepare_baseline_monitoring(self):
         from .monitoring import (merge_prometheus_config, validate_customer_directory,
@@ -1425,17 +1565,21 @@ echo "node_exporter installed successfully"
         if not self.config.components.dc_overview:
             return {}
         from .monitoring import validate_product_monitoring_custody
-        validate_product_monitoring_custody(self.config.config_dir / 'prometheus')
+        directory = self._monitoring_directory()
+        validate_product_monitoring_custody(directory)
         declared = self.config.prometheus
         if declared.customer_config_dir:
             validate_customer_directory(declared.customer_config_dir)
-        config_file = self.config.config_dir / 'prometheus' / 'prometheus.yml'
-        if not config_file.exists():
-            config_file = self.config.config_dir / 'prometheus.yml'
+        config_file = directory / 'prometheus.yml'
+        ownership_file = directory / 'ownership.json'
+        from .monitoring import read_monitoring_ownership
+        ownership = read_monitoring_ownership(ownership_file) if ownership_file.exists() else None
+        references = tuple(ownership['file_references']) if ownership else ()
         source_bytes = config_file.read_bytes() if config_file.exists() else None
         existing = yaml.safe_load(source_bytes) if source_bytes is not None else {}
         merged = merge_prometheus_config(existing, self._product_prometheus_config(), declared.extra_scrape_configs,
-                                          declared.rule_files, declared.legacy_managed_jobs)
+                                          declared.rule_files, list(dict.fromkeys(declared.legacy_managed_jobs + (ownership['managed_jobs'] if ownership else []))), adopted_file_references=references)
+        self._verify_monitoring_references(merged)
         customer = load_customer_dashboards(self.config.grafana.customer_dashboard_dir) if self.config.grafana.customer_dashboard_dir else []
         products = []
         for item in self._get_dashboard_list():
@@ -1449,10 +1593,9 @@ echo "node_exporter installed successfully"
         observed = observe_component('grafana', self.release_plan.targets.get('grafana', {'owner':'proxy-updater','kind':'oci','reference':''}))
         if observed['state'] == 'running':
             try:
-                datasources = self._grafana_request('/api/datasources')
+                datasources, dashboards = self._grafana_monitoring_ownership()
                 uid = select_prometheus_datasource(datasources, self.config.grafana.prometheus_datasource_uid)
                 existing_datasource = next(row for row in datasources if row.get('uid') == uid)
-                dashboards = self._grafana_request('/api/search?type=dash-db')
             except (OSError, ValueError, urllib.error.URLError):
                 raise RuntimeError('existing Grafana datasource/dashboard ownership could not be read; no monitoring changes applied') from None
         else:
@@ -1462,10 +1605,21 @@ echo "node_exporter installed successfully"
         prepared = prepare_grafana_dashboards(products, customer, dashboards, prometheus_datasource_uid=uid,
                                               overwrite_product_dashboards=self.config.grafana.overwrite_product_dashboards)
         prepared['existing_datasource'] = existing_datasource
-        return {'prometheus':merged, 'grafana':prepared, 'source_path':config_file, 'source_bytes':source_bytes}
+        return {'prometheus':merged, 'grafana':prepared, 'source_path':config_file, 'source_bytes':source_bytes,
+                'file_references': references or tuple(merged.get('rule_files', []))}
 
     def _validate_baseline_prometheus(self, mapping):
         import tempfile
+        from .controller_adoption import _mounts, _safe_path, _references
+        inventory, directory = self._monitoring_runtime()
+        self._verify_monitoring_references(mapping, inventory=inventory)
+        mounts = []
+        if inventory.get('prometheus') is not None:
+            refs = _references(mapping)
+            mounts = [m for m in _mounts(inventory['prometheus']) if m['Target'] != '/etc/prometheus' and
+                any(ref == m['Target'] or ref.startswith(m['Target'] + '/') for ref in refs)]
+            if any(m['Type'] != 'bind' or not m['ReadOnly'] for m in mounts):
+                raise ValueError('monitoring validation reference requires retained read-only bind custody')
         with tempfile.TemporaryDirectory(prefix='dc-prometheus-validation-') as directory:
             candidate = Path(directory)
             # Public config contains no inline credentials. The selected image
@@ -1473,11 +1627,25 @@ echo "node_exporter installed successfully"
             candidate.chmod(0o755)
             (candidate / 'prometheus.yml').write_text(yaml.safe_dump(mapping, sort_keys=False))
             (candidate / 'recording_rules.yml').write_text(self._generate_recording_rules())
+            if self.config.prometheus.customer_config_dir:
+                (candidate / 'customer').mkdir(mode=0o755)
             for public_file in candidate.iterdir():
-                public_file.chmod(0o644)
+                public_file.chmod(0o755 if public_file.is_dir() else 0o644)
             command = ['docker','run','--rm','--network','none','--entrypoint','/bin/promtool',
                        '-v',str(candidate)+':/etc/prometheus:ro']
-            if self.config.prometheus.customer_config_dir:
+            for mount in mounts:
+                source = _safe_path(mount['Source'])
+                target = Path(mount['Target'])
+                if target.is_relative_to('/etc/prometheus'):
+                    placeholder = candidate / target.relative_to('/etc/prometheus')
+                    placeholder.parent.mkdir(parents=True, exist_ok=True)
+                    if source.is_dir(): placeholder.mkdir(exist_ok=True)
+                    elif source.is_file(): placeholder.touch(exist_ok=True)
+                    else: raise ValueError('monitoring validation reference source unavailable')
+                command += ['-v', str(source) + ':' + str(target) + ':ro']
+            for path in candidate.rglob('*'):
+                path.chmod(0o755 if path.is_dir() else 0o644)
+            if self.config.prometheus.customer_config_dir and not any(m['Target']=='/etc/prometheus/customer' for m in mounts):
                 command += ['-v',self.config.prometheus.customer_config_dir+':/etc/prometheus/customer:ro']
             command += [self._selected_image('prometheus',''), 'check','config','/etc/prometheus/prometheus.yml']
             result = subprocess.run(command, capture_output=True, text=True, timeout=60)
@@ -1485,6 +1653,11 @@ echo "node_exporter installed successfully"
 
     def _reload_baseline_prometheus(self, mapping):
         try:
+            references=None
+            if getattr(self,'release_plan',None):
+                inventory=self._monitoring_runtime()[0]
+                if inventory.get('prometheus') is None: return False
+                references=self._verify_monitoring_references(mapping,inventory=inventory)
             request = urllib.request.Request('http://127.0.0.1:9090/prometheus/-/reload', data=b'', method='POST')
             with urllib.request.urlopen(request, timeout=15) as response:
                 if response.status != 200:
@@ -1492,8 +1665,9 @@ echo "node_exporter installed successfully"
             with urllib.request.urlopen('http://127.0.0.1:9090/prometheus/api/v1/status/config', timeout=15) as response:
                 loaded = json.load(response)
             from .monitoring import declared_configuration_matches
+            if references is not None and self._verify_monitoring_references(mapping)!=references: return False
             return loaded.get('status') == 'success' and declared_configuration_matches(mapping, yaml.safe_load(loaded.get('data', {}).get('yaml', '')))
-        except (OSError, ValueError, urllib.error.URLError):
+        except (OSError, ValueError, RuntimeError, urllib.error.URLError):
             return False
 
     def _product_prometheus_config(self):
@@ -3068,6 +3242,7 @@ except Exception as e:
     def _deploy_dc_overview_container(self):
         """Deploy dc-overview container on cryptolabs network."""
         import secrets as secrets_module
+        product_dir=self._monitoring_directory() if getattr(self,'release_plan',None) else None
         
         # Remove existing container if any
         subprocess.run(["docker", "rm", "-f", "dc-overview"], capture_output=True)
@@ -3113,8 +3288,9 @@ except Exception as e:
             "-v", "fleet-auth-data:/data/auth",  # Shared with proxy for SSO API keys
             "-v", f"{self.config.config_dir}:/etc/dc-overview:ro",
         ] + inventory_args + ([
-            '-v', f'{self.config.config_dir}/prometheus:/etc/dc-overview/prometheus',
-            '-e', 'PROMETHEUS_CONFIG_PATH=/etc/dc-overview/prometheus/prometheus.yml',
+            '-v', f'{product_dir}:/var/lib/dc-monitoring',
+            '-e', 'PROMETHEUS_CONFIG_PATH=/var/lib/dc-monitoring/prometheus.yml',
+            '-e', 'PROMETHEUS_OWNERSHIP_PATH=/var/lib/dc-monitoring/ownership.json',
             '-e', 'DC_RELEASE_SELECTION_REQUIRED=1',
         ] if getattr(self, 'release_plan', None) else []) + [
             "--health-cmd", "curl -f http://127.0.0.1:5001/api/health || exit 1",
