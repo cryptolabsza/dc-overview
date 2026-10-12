@@ -505,8 +505,8 @@ def test_unlabeled_existing_immutable_images_default_to_customer_pin(monkeypatch
     from dc_overview.fleet_config import FleetConfig
     desired=manifest_data();manifest=catalog().Manifest.from_bytes(encoded(desired));existing=f'ghcr.io/cryptolabsza/dc-overview@sha256:{OTHER}'
     def inspect(command,**kwargs):
-        name=command[2]
-        return SimpleNamespace(returncode=0,stdout=json.dumps({'Config':{'Image':existing,'Labels':{}},'State':{'Running':True}})) if name == 'dc-overview' else SimpleNamespace(returncode=1,stdout='',stderr='No such object')
+        name=command[3]
+        return SimpleNamespace(returncode=0,stdout=json.dumps({'Config':{'Image':existing,'Labels':{}},'State':{'Running':True}})) if name == 'dc-overview' else SimpleNamespace(returncode=1,stdout='',stderr=f'No such object: {name}')
     monkeypatch.setattr(fleet_upgrade.subprocess,'run',inspect)
     policy=fleet_upgrade.adopt_existing_policies(FleetConfig(config_dir=tmp_path),manifest,{})
     assert policy['dc-overview'] == {'origin':'customer-pin','enabled':True,'pin':existing}

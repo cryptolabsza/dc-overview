@@ -121,7 +121,7 @@ def test_AUTHORITY05_fresh_absent_proxy_uses_real_installed_getter(monkeypatch):
     live=Mock();monkeypatch.setattr(fleet_upgrade,'_updater',live)
     assert fleet_upgrade.proxy_capabilities(fresh_setup=True)==SAFE
     getter.assert_called_once_with();live.assert_not_called()
-    assert run.call_args.args[0][:3]==['docker','inspect','cryptolabs-proxy']
+    assert run.call_args.args[0]==['docker','container','inspect','cryptolabs-proxy','--format','{{json .State}}']
 
 
 def test_AUTHORITY05_old_installed_setup_constant_does_not_fabricate_policy(monkeypatch):
@@ -185,3 +185,80 @@ def test_AUTHORITY08_fresh_existing_selection_or_journal_requires_live_authority
         fleet_upgrade.preflight_release(config,fresh_setup=True)
     probe.assert_called_once_with(fresh_setup=True);load.assert_not_called()
     assert before=={str(p):p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
+
+
+# Actual empty Linux controller observation, 2026-10-12:
+# setup-failure-controls-stdout.log SHA256 e8a479ddef2f293263a153de0b52d9aee07ea6233b5e1c391c8b581dbd3108a7.
+# The captured controls omitted --format; exact formatted Engine measurement is
+# a separate lab gate. These tests exercise the actual nonzero diagnostic shape.
+CAPTURED_ABSENCE = [
+    (1, '[]\n', 'error: no such object: cryptolabs-proxy\n'),
+    (1, '[]\n', 'Error response from daemon: No such container: cryptolabs-proxy\n'),
+]
+
+
+@pytest.mark.parametrize('rc,stdout,stderr', CAPTURED_ABSENCE)
+def test_BOOTSTRAP_captured_empty_controller_uses_host_producer_only_after_absence(monkeypatch, rc, stdout, stderr):
+    getter, _ = installed_proxy(monkeypatch)
+    run = Mock(return_value=SimpleNamespace(returncode=rc, stdout=stdout, stderr=stderr))
+    monkeypatch.setattr(fleet_upgrade.subprocess, 'run', run)
+    live = Mock(side_effect=AssertionError('Empty controller has no live updater'))
+    monkeypatch.setattr(fleet_upgrade, '_updater', live)
+    assert fleet_upgrade.proxy_capabilities(fresh_setup=True) == SAFE
+    getter.assert_called_once_with()
+    live.assert_not_called()
+    assert run.call_args.args[0] == ['docker', 'container', 'inspect', 'cryptolabs-proxy', '--format', '{{json .State}}']
+    assert run.call_args.kwargs['timeout'] == 15
+
+
+UNPROVEN_ABSENCE = [
+    (1, '', 'Cannot connect to Docker daemon'),
+    (1, '', 'permission denied while trying to connect to Docker socket'),
+    (1, '[]\n', 'error: no such object: unrelated\n'),
+    (1, '', 'Error: No such container: cryptolabs-proxy-shadow'),
+    (1, '', 'permission denied: No such object: cryptolabs-proxy'),
+    (1, '', 'Error: No such object: cryptolabs-proxy\npermission denied'),
+    (1, '', 'Error: No such object: cryptolabs-proxy (daemon unavailable)'),
+    (1, '{"Running":false}', 'Error: No such container: cryptolabs-proxy'),
+    (1, 'null', 'Error: No such container: cryptolabs-proxy'),
+    (1, '[{"Id":"existing"}]', 'Error: No such container: cryptolabs-proxy'),
+    (2, '', 'Error: No such container: cryptolabs-proxy'),
+    (125, '', 'Error: No such container: cryptolabs-proxy'),
+]
+
+
+@pytest.mark.parametrize('from_manifest', [False, True])
+@pytest.mark.parametrize('rc,stdout,stderr', UNPROVEN_ABSENCE)
+def test_BOOTSTRAP_ambiguous_absence_holds_before_host_fallback_or_config_preparation(tmp_path, monkeypatch, from_manifest, rc, stdout, stderr):
+    config, plan, store, load, verify, mutation, path = setup_preflight(tmp_path, monkeypatch)
+    getter, _ = installed_proxy(monkeypatch)
+    monkeypatch.setattr(fleet_upgrade.subprocess, 'run', Mock(return_value=SimpleNamespace(returncode=rc, stdout=stdout, stderr=stderr)))
+    live = Mock(side_effect=AssertionError('Unknown runtime must not submit or probe live updater'))
+    monkeypatch.setattr(fleet_upgrade, '_updater', live)
+    before = {str(p): p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
+    with pytest.raises(RuntimeError, match='authority prerequisite'):
+        fleet_upgrade.preflight_release(config, path if from_manifest else None, fresh_setup=True)
+    getter.assert_not_called(); live.assert_not_called()
+    store.prepare.assert_not_called(); load.assert_not_called(); verify.assert_not_called(); mutation.assert_not_called()
+    assert before == {str(p): p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
+    assert not config.config_dir.exists()
+
+
+@pytest.mark.parametrize('failure', [PermissionError('denied'), OSError('unavailable'), fleet_upgrade.subprocess.TimeoutExpired('docker', 15)])
+def test_BOOTSTRAP_inspection_failure_never_uses_host_authority(monkeypatch, failure):
+    getter, _ = installed_proxy(monkeypatch)
+    monkeypatch.setattr(fleet_upgrade.subprocess, 'run', Mock(side_effect=failure))
+    live = Mock(side_effect=AssertionError('Unknown runtime'))
+    monkeypatch.setattr(fleet_upgrade, '_updater', live)
+    assert fleet_upgrade.proxy_capabilities(fresh_setup=True) is None
+    getter.assert_not_called(); live.assert_not_called()
+
+
+@pytest.mark.parametrize('capabilities', UNSAFE)
+def test_BOOTSTRAP_proved_absence_does_not_fabricate_host_capabilities(monkeypatch, capabilities):
+    getter, _ = installed_proxy(monkeypatch, getter=capabilities)
+    rc, stdout, stderr = CAPTURED_ABSENCE[1]
+    monkeypatch.setattr(fleet_upgrade.subprocess, 'run', Mock(return_value=SimpleNamespace(returncode=rc, stdout=stdout, stderr=stderr)))
+    with pytest.raises(RuntimeError, match='authority prerequisite'):
+        fleet_upgrade._require_proxy_update_authority(fleet_upgrade.proxy_capabilities(fresh_setup=True))
+    getter.assert_called_once_with()

@@ -1,0 +1,131 @@
+{
+  "baseline_id": "dc-suite-1.5.1-proxy-1.3.1-20261012",
+  "components": {
+    "cryptolabs-proxy": {
+      "artifacts": {
+        "linux/amd64": {
+          "kind": "oci",
+          "reference": "ghcr.io/cryptolabsza/cryptolabs-proxy@sha256:def6e567fc5eabe7f47009f013dd788135ad27e2383b2c1556fe343f060cd833"
+        }
+      },
+      "owner": "proxy-updater",
+      "release": "1.3.1"
+    },
+    "dc-exporter": {
+      "artifacts": {
+        "linux/amd64": {
+          "kind": "binary",
+          "sha256": "fb5be64b3113a9f7d04a420e4296766b3b493c69e1f4c2b7216e59744387b8ae",
+          "url": "https://github.com/cryptolabsza/dc-exporter-releases/releases/download/v0.2.8/dc-exporter-rs"
+        }
+      },
+      "owner": "dc-worker",
+      "release": "0.2.8"
+    },
+    "dc-overview": {
+      "artifacts": {
+        "linux/amd64": {
+          "kind": "oci",
+          "reference": "ghcr.io/cryptolabsza/dc-overview@sha256:e2553bf07b0771b422f8fca9e5304368fd9c53cc3807c2648b53380922a27526"
+        }
+      },
+      "owner": "proxy-updater",
+      "release": "1.5.1"
+    },
+    "dc-overview-cli": {
+      "artifacts": {
+        "any": {
+          "kind": "wheel",
+          "sha256": "e9e60e4b4cabea352e33ff13641e8a3f7a5793716a6f15adfc23586e6d438449",
+          "url": "https://github.com/cryptolabsza/dc-overview/releases/download/v1.5.1/dc_overview-1.5.1-py3-none-any.whl"
+        }
+      },
+      "owner": "host-cli",
+      "release": "1.5.1"
+    },
+    "dc-watchdog-agent": {
+      "artifacts": {
+        "linux/amd64": {
+          "kind": "binary",
+          "sha256": "1632f7f453b9a5a5fc242707fcd148ba16a8d25d7a9b371e6eb56838bc7cd17c",
+          "url": "https://github.com/cryptolabsza/dc-watchdog/releases/download/v2.0.8/dc-watchdog-agent-linux-amd64"
+        }
+      },
+      "owner": "dc-worker",
+      "release": "2.0.8"
+    },
+    "grafana": {
+      "artifacts": {
+        "linux/amd64": {
+          "kind": "oci",
+          "reference": "grafana/grafana@sha256:b28bae15e219c998fb0e0424ed724930cc61b1f61fb404d47c862f9a23f9e572"
+        }
+      },
+      "owner": "proxy-updater",
+      "release": "13.2.3"
+    },
+    "ipmi-monitor": {
+      "artifacts": {
+        "linux/amd64": {
+          "kind": "oci",
+          "reference": "ghcr.io/cryptolabsza/ipmi-monitor@sha256:14774a0784787d95b32a6c94e28de84accc88f0c28f17e3b30e984f2c2f17fa5"
+        }
+      },
+      "owner": "proxy-updater",
+      "release": "1.2.0"
+    },
+    "node-exporter": {
+      "artifacts": {
+        "linux/amd64": {
+          "kind": "binary",
+          "sha256": "b51d8a76aa2a9156a55d501aca6276fae09e262259a5e4e831d2c2222f084e63",
+          "url": "https://github.com/prometheus/node_exporter/releases/download/v1.12.1/node_exporter-1.12.1.linux-amd64.tar.gz"
+        }
+      },
+      "owner": "dc-worker",
+      "release": "1.12.1"
+    },
+    "prometheus": {
+      "artifacts": {
+        "linux/amd64": {
+          "kind": "oci",
+          "reference": "prom/prometheus@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e"
+        }
+      },
+      "owner": "proxy-updater",
+      "release": "3.15.0"
+    },
+    "runpod-exporter": {
+      "artifacts": {
+        "linux/amd64": {
+          "kind": "oci",
+          "reference": "ghcr.io/cryptolabsza/runpod-exporter@sha256:9c8aaf955d66a6f8e9362c9cb5ea1e61214579db0c0637e902c0bbabd9c96658"
+        }
+      },
+      "owner": "proxy-updater",
+      "release": "1.5.1"
+    },
+    "vast-price-manager": {
+      "artifacts": {
+        "linux/amd64": {
+          "kind": "oci",
+          "reference": "ghcr.io/cryptolabsza/vast-price-manager@sha256:32c5f4ff1ae735a27ceeaf94264ceed4845fcc4810114c083fea4e99e7c2e238"
+        }
+      },
+      "owner": "dc-vpm",
+      "release": "0.5.4"
+    },
+    "vastai-exporter": {
+      "artifacts": {
+        "linux/amd64": {
+          "kind": "oci",
+          "reference": "ghcr.io/cryptolabsza/vastai-exporter@sha256:f57d5e9082bf55e168aa799199fdaadc0a6e7ba5d5f86cb8dcead69f6c469bf6"
+        }
+      },
+      "owner": "proxy-updater",
+      "release": "1.5.1"
+    }
+  },
+  "schema_version": 1,
+  "selection_contract": 1
+}

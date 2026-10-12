@@ -82,10 +82,19 @@ def validate_configured_roles(config, plan):
         raise ValueError('selection enables intentionally disabled configured components: ' + ', '.join(sorted(conflicts)))
 
 
+def _container_absent(inspected, name):
+    """Only a complete named-container diagnostic proves runtime absence."""
+    return (inspected.returncode == 1 and isinstance(inspected.stdout, str)
+            and inspected.stdout.strip() in {'', '[]'}
+            and isinstance(inspected.stderr, str)
+            and re.fullmatch(r'(?:error(?::| response from daemon:)\s*)?no such (?:object|container): '
+                             + re.escape(name), inspected.stderr.strip(), flags=re.IGNORECASE) is not None)
+
+
 def proxy_capabilities(*, fresh_setup=False):
     if fresh_setup:
         try:
-            inspected = subprocess.run(['docker','inspect','cryptolabs-proxy','--format','{{json .State}}'],
+            inspected = subprocess.run(['docker','container','inspect','cryptolabs-proxy','--format','{{json .State}}'],
                                        capture_output=True, text=True, timeout=15)
         except FileNotFoundError:
             raise RuntimeError('Docker prerequisite: install and verify Docker Engine and Compose from official upstream before approved selected setup; proxy runtime absence is unproven.') from None
@@ -95,7 +104,10 @@ def proxy_capabilities(*, fresh_setup=False):
             # Repeat setup must prove the live runtime; a new host wheel cannot
             # retroactively repair its old updater or source-image helper.
             return _updater('capabilities')
-        if not re.search(r'No such (?:object|container): cryptolabs-proxy(?:\s|$)', inspected.stderr):
+        # Docker CLI/daemon absence diagnostics differ in capitalization/prefix.
+        # Only a complete named-container absence can authorize host fallback;
+        # denied/unknown errors and conflicting output cannot prove fresh state.
+        if not _container_absent(inspected, 'cryptolabs-proxy'):
             return None
         try:
             from cryptolabs_proxy.updates import get_capabilities
@@ -147,13 +159,11 @@ def adopt_existing_policies(config, manifest, policies):
         if name in result or component['owner'] != 'proxy-updater':
             continue
         try:
-            inspected = subprocess.run(['docker','inspect',name,'--format','{{json .}}'], capture_output=True, text=True, timeout=15)
-        except FileNotFoundError:
-            continue  # Fresh setup may install Docker after release prerequisites.
+            inspected = subprocess.run(['docker','container','inspect',name,'--format','{{json .}}'], capture_output=True, text=True, timeout=15)
         except (OSError, subprocess.TimeoutExpired):
             raise RuntimeError('existing component ownership inventory is unavailable') from None
         if inspected.returncode != 0:
-            if 'No such object' in inspected.stderr or 'No such container' in inspected.stderr:
+            if _container_absent(inspected, name):
                 continue
             raise RuntimeError('existing component ownership inventory is unavailable')
         try:

@@ -33,6 +33,64 @@ _DNS_HOST = re.compile(
 )
 _ACCOUNT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _OWNER_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
+# VPM images declare VOLUME /keys, but canonical custody lives under /run/secrets.
+# Cover the unused parent explicitly so Docker cannot create persistent storage
+# outside the declared data/key contract. Never infer anonymity from a volume name.
+_KEYS_TMPFS_OPTIONS = "ro,nosuid,nodev,noexec,size=1048576"
+
+
+def _reconcile_tmpfs_mounts(mounts: list, tmpfs: Optional[dict]) -> list:
+    """Include HostConfig-only mounts and reject conflicting inspect metadata."""
+    if not isinstance(mounts, list) or not all(isinstance(mount, dict) for mount in mounts):
+        raise ValueError("malformed mounts")
+    if tmpfs is None:
+        tmpfs = {}
+    if not isinstance(tmpfs, dict):
+        raise ValueError("malformed tmpfs mounts")
+    result = list(mounts)
+    for target, options in tmpfs.items():
+        _absolute_reference(target)
+        if not isinstance(options, str) or not options:
+            raise ValueError("malformed tmpfs options")
+        parts = options.split(",")
+        if len(set(parts)) != len(parts) or {"ro", "rw"} <= set(parts) or any(
+            re.fullmatch(r"[a-zA-Z0-9_-]+(?:=[a-zA-Z0-9._/-]+)?", part) is None for part in parts
+        ):
+            raise ValueError("malformed tmpfs options")
+        writable = "ro" not in parts
+        existing = [mount for mount in result if mount["Destination"] == target]
+        if len(existing) > 1:
+            raise ValueError("duplicate tmpfs binding")
+        if existing:
+            mount = existing[0]
+            if mount["Type"] != "tmpfs" or mount.get("Source") != "" or mount.get("Name") is not None or mount["RW"] is not writable:
+                raise ValueError("conflicting tmpfs binding")
+        else:
+            result.append({"Type": "tmpfs", "Source": "", "Destination": target, "RW": writable})
+    return result
+
+
+def _canonical_persistent_mounts(mounts: list, tmpfs: Optional[dict]) -> list:
+    """Validate the rendered /keys mask in both Docker inspection fields."""
+    mounts = _reconcile_tmpfs_mounts(mounts, tmpfs)
+    if tmpfs is None:
+        tmpfs = {}
+    if not isinstance(tmpfs, dict) or set(tmpfs) - {"/keys"}:
+        raise ValueError("unknown tmpfs mount")
+    if tmpfs:
+        options = tmpfs["/keys"]
+        if not isinstance(options, str) or sorted(options.split(",")) != sorted(_KEYS_TMPFS_OPTIONS.split(",")):
+            raise ValueError("different tmpfs options")
+    masks = [mount for mount in mounts if mount["Destination"] == "/keys"]
+    # Engine versions may expose tmpfs via HostConfig.Tmpfs alone, or also Mounts.
+    # HostConfig is required in either case; a destination alone is never trusted.
+    if masks:
+        if not tmpfs or len(masks) != 1:
+            raise ValueError("ambiguous keys mask")
+        mask = masks[0]
+        if mask["Type"] != "tmpfs" or mask["RW"] is not False or mask.get("Source") != "" or mask.get("Name") is not None:
+            raise ValueError("different keys mask")
+    return [mount for mount in mounts if mount not in masks]
 
 
 def _absolute_reference(value: str) -> None:
@@ -513,6 +571,8 @@ class VPMServiceManager:
 {expected_account}    volumes:
       - {data_source}:/data
       - {key_source}:/run/secrets/vpm-master.key:ro
+    tmpfs:
+      - /keys:{_KEYS_TMPFS_OPTIONS}
     networks:
       - cryptolabs
 networks:
@@ -1139,7 +1199,7 @@ WantedBy=timers.target
         return {name for name in (layout.owner_unit, layout.obsolete_auth_unit, *layout.timer_names,
             *(timer.removesuffix(".timer") + ".service" for timer in layout.timer_names)) if name}
 
-    def _inspect_layout(self, layout: VPMLayout, *, retired_units=()) -> dict:
+    def _inspect_layout(self, layout: VPMLayout, *, retired_units=(), canonical_mounts=False) -> dict:
         if not Path(layout.compose_file).is_file():
             raise RuntimeError("declared VPM Compose owner file is missing")
         inventory = self._run([
@@ -1153,7 +1213,7 @@ WantedBy=timers.target
             "docker", "inspect", "-f",
             '{"name":{{json .Name}},"project":{{json (index .Config.Labels "com.docker.compose.project")}},'
             '"service":{{json (index .Config.Labels "com.docker.compose.service")}},'
-            '"image":{{json .Config.Image}},"mounts":{{json .Mounts}}}',
+            '"image":{{json .Config.Image}},"mounts":{{json .Mounts}},"tmpfs":{{json .HostConfig.Tmpfs}}}',
             layout.container_name,
         ])
         try:
@@ -1164,10 +1224,16 @@ WantedBy=timers.target
             if not (_PINNED_IMAGE.fullmatch(image) or _LOCAL_IMAGE_ID.fullmatch(image)):
                 raise ValueError("mutable image")
             mounts = info["mounts"]
+            if canonical_mounts:
+                mounts = _canonical_persistent_mounts(mounts, info["tmpfs"])
+            else:
+                mounts = _reconcile_tmpfs_mounts(mounts, info["tmpfs"])
             data = [mount for mount in mounts if mount["Destination"] == layout.data_target]
             keys = [mount for mount in mounts if mount["Source"] == layout.master_key_file]
             if len(data) != 1 or len(keys) != 1 or keys[0]["RW"] is not False:
                 raise ValueError("ambiguous binding")
+            if canonical_mounts and (keys[0]["Type"] != "bind" or keys[0]["Destination"] != "/run/secrets/vpm-master.key"):
+                raise ValueError("canonical key binding")
             source = data[0].get("Name") if layout.data_kind == "volume" else data[0]["Source"]
             if data[0]["Type"] != layout.data_kind or source != layout.data_source or data[0]["RW"] is not True:
                 raise ValueError("data binding")
@@ -1259,9 +1325,11 @@ WantedBy=timers.target
 
     def _assert_data_binding(self, spec: VPMServiceSpec) -> None:
         """Reject stale config that would replace an existing data/key binding."""
-        result = self._run(["docker", "inspect", "-f", "{{json .Mounts}}", self.container_name])
+        result = self._run(["docker", "inspect", "-f",
+            '{"mounts":{{json .Mounts}},"tmpfs":{{json .HostConfig.Tmpfs}}}', self.container_name])
         try:
-            mounts = json.loads(result.stdout)
+            info = json.loads(result.stdout)
+            mounts = _canonical_persistent_mounts(info["mounts"], info["tmpfs"])
             data = [mount for mount in mounts if mount["Destination"] == "/data"]
             keys = [mount for mount in mounts if mount["Destination"] == "/run/secrets/vpm-master.key"]
             expected_key = (
@@ -1271,7 +1339,7 @@ WantedBy=timers.target
             if len(data) != 1 or len(keys) != 1 or len(mounts) != 2:
                 raise ValueError("ambiguous binding")
             source = data[0].get("Name") if spec.data_kind == "volume" else data[0]["Source"]
-            if data[0]["Type"] != spec.data_kind or source != spec.data_source or keys[0]["Source"] != expected_key or keys[0]["RW"] is not False:
+            if data[0]["Type"] != spec.data_kind or source != spec.data_source or data[0]["RW"] is not True or keys[0]["Type"] != "bind" or keys[0]["Source"] != expected_key or keys[0]["RW"] is not False:
                 raise ValueError("different binding")
         except (KeyError, TypeError, ValueError):
             raise RuntimeError("existing VPM data/key binding differs from declared config; use adoption") from None
@@ -1363,7 +1431,7 @@ WantedBy=timers.target
             owner_unit=("vast-price-manager-container.service" if layout.credential_mode == "systemd-encrypted" else None),
             timer_names=self.timer_names, obsolete_auth_unit=None, retired_mount_targets=(),
         )
-        inventory = self._inspect_layout(canonical, retired_units=self._layout_units(layout) - self._layout_units(canonical))
+        inventory = self._inspect_layout(canonical, retired_units=self._layout_units(layout) - self._layout_units(canonical), canonical_mounts=True)
         if inventory["image"] != image:
             raise RuntimeError("adopted VPM immutable image differs from recorded identity")
         target = VPMServiceSpec(image=image, allowed_host="vpm.example.com",
