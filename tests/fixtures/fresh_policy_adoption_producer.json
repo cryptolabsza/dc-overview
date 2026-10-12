@@ -1,0 +1,8 @@
+{
+  "wheel_url": "https://github.com/cryptolabsza/cryptolabs-proxy/releases/download/v1.3.1/cryptolabs_proxy-1.3.1-py3-none-any.whl",
+  "wheel_sha256": "f3a37ce47ec847f865462f7bc4c933d52bd05dfb8a01efb7cf8dc1e91fe5cd9a",
+  "updates_sha256": "a373466a5850f35d156a8683454b57181d162cc5354b2f985163b7c833becb74",
+  "selection_contract": 1,
+  "proxy_replacement_policy": "host-adoption-required-v1",
+  "function_source": "def get_capabilities():\n    \"\"\"Additive caller contract; proxy replacement requires host authority.\"\"\"\n    return {'selection_contract': selection.SELECTION_CONTRACT,\n            'proxy_replacement_policy': PROXY_REPLACEMENT_POLICY}"
+}

@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from dc_overview.vpm_service import VPMServiceManager, VPMServiceSpec
 
@@ -213,8 +214,10 @@ def adoption_host(tmp_path, layout, data, master, expected_account_id='customer-
                 mounts[1]['Source'] = '/run/credentials/vast-price-manager-container.service/vpm-master.key'
             if command[3] == '{{json .Mounts}}':
                 return SimpleNamespace(returncode=0, stdout=json.dumps(mounts), stderr='')
+            if '"name"' not in command[3]:
+                return SimpleNamespace(returncode=0, stdout=json.dumps({'mounts': mounts, 'tmpfs': {}}), stderr='')
             return SimpleNamespace(returncode=0, stdout=json.dumps({'name': '/' + (service.container_name if canonical else layout.container_name), 'project': service.project_name if canonical else layout.project_name,
-                'service': 'vast-price-manager' if canonical else layout.service_name, 'image': PIN, 'mounts': mounts}), stderr='')
+                'service': 'vast-price-manager' if canonical else layout.service_name, 'image': PIN, 'mounts': mounts, 'tmpfs': {}}), stderr='')
         if command[-1] == _VPM_CONTINUITY_PROBE:
             import os
             env = dict(os.environ, VPM_TEST_DATA=str(data), VPM_TEST_KEY=str(master))
@@ -1031,3 +1034,181 @@ def test_effective_owner_generated_verification_rejects_omitted_container(tmp_pa
     (service.unit_dir / 'vast-price-manager-container.service').write_text('[Service]\nExecStart=/synthetic/private serve\n')
     with pytest.raises(RuntimeError, match='undeclared|ownership'):
         service._verify_loaded_product_units(rendered)
+
+
+# Producer evidence: VPM0.5.4 OCI config SHA256 618e50a9cfd783f7660a3babdd936c6e972fc79835f614294a9a057238df7252
+# declares VOLUME /data,/keys. Docker observed this parent alongside the legacy
+# /keys/master.key bind. A hex Name does not prove it was created anonymously.
+OBSERVED_IMAGE_KEYS_VOLUME = {
+    'Type': 'volume', 'Destination': '/keys', 'RW': True,
+    'Name': '525b1db2b86edd019bfdcdc1629c3fd1a91520749ac8d5185ba69e843749dcda',
+    'Source': '/var/lib/docker/volumes/525b1db2b86edd019bfdcdc1629c3fd1a91520749ac8d5185ba69e843749dcda/_data',
+}
+KEYS_TMPFS_OPTIONS = 'ro,nosuid,nodev,noexec,size=1048576'
+KEYS_TMPFS_MOUNT = {'Type': 'tmpfs', 'Source': '', 'Destination': '/keys', 'RW': False}
+
+
+def _keys_mount_metadata(service, extra=(), tmpfs=None, mutate=None):
+    """Controlled Docker metadata boundary; does not claim Engine realization."""
+    original = service.runner
+    def run(command, **kwargs):
+        result = original(command, **kwargs)
+        if command[:3] == ['docker', 'inspect', '-f'] and '{{json .Mounts}}' in command[3]:
+            payload = json.loads(result.stdout)
+            mounts = payload if isinstance(payload, list) else payload['mounts']
+            mounts.extend(dict(mount) for mount in extra)
+            if mutate:
+                mutate(mounts)
+            if isinstance(payload, dict):
+                payload['tmpfs'] = tmpfs
+            result.stdout = json.dumps(payload)
+        return result
+    service.runner = run
+
+
+@pytest.mark.parametrize('encrypted', [False, True])
+def test_image_keys_contract_renderer_covers_declared_volume_and_preserves_key(encrypted):
+    spec = VPMServiceSpec(PIN, 'dc.example.com', credential_mode='systemd-encrypted' if encrypted else 'file',
+                          credential_reference='/etc/credstore.encrypted/vpm.key' if encrypted else None)
+    rendered = yaml.safe_load(VPMServiceManager.render(spec).compose)['services']['vast-price-manager']
+    assert rendered['tmpfs'] == ['/keys:' + KEYS_TMPFS_OPTIONS]
+    assert rendered['volumes'][1] == (
+        '/run/credentials/vast-price-manager-container.service/vpm-master.key'
+        if encrypted else spec.master_key_file
+    ) + ':/run/secrets/vpm-master.key:ro'
+    assert 'VPM_CREDENTIAL_MASTER_KEY_FILE=/run/secrets/vpm-master.key' in rendered['environment']
+
+
+@pytest.mark.parametrize('api', ['is_adopted', 'repeat', 'binding'])
+@pytest.mark.parametrize('mounts_in_inspect', [False, True])
+@pytest.mark.parametrize('encrypted', [False, True])
+def test_image_keys_contract_read_only_tmpfs_allows_canonical_rechecks(tmp_path, api, mounts_in_inspect, encrypted):
+    layout, data, master = layout_fixture(tmp_path, encrypted=encrypted)
+    service, host = adoption_host(tmp_path, layout, data, master)
+    spec = VPMServiceSpec(PIN, 'dc.example.com', writes_enabled=True, expected_account_id='customer-account')
+    assert service.adopt(spec, layout)['status'] == 'adopted'
+    _keys_mount_metadata(service, [KEYS_TMPFS_MOUNT] if mounts_in_inspect else [], {'/keys': KEYS_TMPFS_OPTIONS})
+    host.calls.clear()
+    if api == 'is_adopted':
+        assert service.is_adopted(layout) is True
+    elif api == 'repeat':
+        assert service.adopt(spec, layout)['status'] == 'already-adopted'
+    else:
+        service._assert_data_binding(service.adopted_spec(spec, layout))
+    assert not any(call[:2] in (['systemctl', 'disable'], ['systemctl', 'restart'], ['systemctl', 'stop']) for call in host.calls)
+
+
+@pytest.mark.parametrize('api', ['is_adopted', 'binding'])
+@pytest.mark.parametrize('extra,tmpfs', [
+    ([OBSERVED_IMAGE_KEYS_VOLUME], {}),
+    ([dict(OBSERVED_IMAGE_KEYS_VOLUME, Name='customer-keys')], {}),
+    ([{'Type': 'bind', 'Source': '/unknown/keys', 'Destination': '/keys', 'RW': False}], {'/keys': KEYS_TMPFS_OPTIONS}),
+    ([dict(KEYS_TMPFS_MOUNT, RW=True)], {'/keys': KEYS_TMPFS_OPTIONS}),
+    ([dict(KEYS_TMPFS_MOUNT, Source='/unknown')], {'/keys': KEYS_TMPFS_OPTIONS}),
+    ([dict(KEYS_TMPFS_MOUNT, Name='customer-keys')], {'/keys': KEYS_TMPFS_OPTIONS}),
+    ([KEYS_TMPFS_MOUNT, KEYS_TMPFS_MOUNT], {'/keys': KEYS_TMPFS_OPTIONS}),
+    ([KEYS_TMPFS_MOUNT], {}),
+    ([], {'/keys': 'rw,nosuid,nodev,noexec,size=1048576'}),
+    ([], {'/keys': 'ro,nosuid,nodev,size=1048576'}),
+    ([], {'/keys': 'ro,nosuid,nodev,noexec,size=1048576,exec'}),
+    ([], {'/keys': KEYS_TMPFS_OPTIONS, '/unknown': KEYS_TMPFS_OPTIONS}),
+    ([dict(KEYS_TMPFS_MOUNT, Destination='/unknown')], {'/keys': KEYS_TMPFS_OPTIONS}),
+])
+def test_image_keys_contract_unknown_or_ambiguous_mounts_hold(tmp_path, api, extra, tmpfs):
+    layout, data, master = layout_fixture(tmp_path)
+    service, host = adoption_host(tmp_path, layout, data, master)
+    spec = VPMServiceSpec(PIN, 'dc.example.com', writes_enabled=True, expected_account_id='customer-account')
+    service.adopt(spec, layout)
+    _keys_mount_metadata(service, extra, tmpfs)
+    with pytest.raises(RuntimeError, match='binding|declaration'):
+        service.is_adopted(layout) if api == 'is_adopted' else service._assert_data_binding(service.adopted_spec(spec, layout))
+
+
+@pytest.mark.parametrize('api', ['is_adopted', 'binding'])
+@pytest.mark.parametrize('index,field,value', [
+    (0, 'Source', '/different-data'), (0, 'RW', False), (0, 'Type', 'volume'),
+    (1, 'Source', '/different-key'), (1, 'RW', True), (1, 'Type', 'volume'),
+    (1, 'Destination', '/keys/master.key'),
+])
+def test_image_keys_contract_mask_does_not_relax_protected_bindings(tmp_path, api, index, field, value):
+    layout, data, master = layout_fixture(tmp_path)
+    service, host = adoption_host(tmp_path, layout, data, master)
+    spec = VPMServiceSpec(PIN, 'dc.example.com', writes_enabled=True, expected_account_id='customer-account')
+    service.adopt(spec, layout)
+    _keys_mount_metadata(service, [KEYS_TMPFS_MOUNT], {'/keys': KEYS_TMPFS_OPTIONS},
+                         mutate=lambda mounts: mounts[index].update({field: value}))
+    with pytest.raises(RuntimeError, match='binding|declaration'):
+        service.is_adopted(layout) if api == 'is_adopted' else service._assert_data_binding(service.adopted_spec(spec, layout))
+
+
+def test_image_keys_contract_observed_parent_still_requires_explicit_retirement(tmp_path):
+    from dataclasses import replace
+    layout, data, master = layout_fixture(tmp_path)
+    service, host = adoption_host(tmp_path, layout, data, master)
+    _keys_mount_metadata(service, [OBSERVED_IMAGE_KEYS_VOLUME], {})
+    with pytest.raises(RuntimeError, match='declaration'):
+        service.inspect_layout(layout)
+    declared = replace(layout, retired_mount_targets=('/keys',))
+    assert service.inspect_layout(declared)['retired_mount_targets'] == ['/keys']
+
+
+@pytest.mark.parametrize('api', ['inspect', 'plan', 'adopt'])
+@pytest.mark.parametrize('tmpfs', [
+    {'/scratch': 'rw'}, {'/keys': 'rw'}, {'/keys': KEYS_TMPFS_OPTIONS},
+    {'/scratch': ''}, {'/keys': None}, ['/scratch'], 'malformed',
+])
+def test_image_keys_contract_legacy_tmpfs_holds_before_any_owner_mutation(tmp_path, api, tmpfs):
+    layout, data, master = layout_fixture(tmp_path)
+    service, host = adoption_host(tmp_path, layout, data, master)
+    spec = VPMServiceSpec(PIN, 'dc.example.com', writes_enabled=True, expected_account_id='customer-account')
+    before_compose = Path(layout.compose_file).read_bytes()
+    before_units = {path.name: path.read_bytes() for path in service.unit_dir.iterdir()}
+    _keys_mount_metadata(service, [], tmpfs)
+    with pytest.raises(RuntimeError, match='binding|declaration'):
+        if api == 'inspect':
+            service.inspect_layout(layout)
+        elif api == 'plan':
+            service.plan_adoption(spec, layout)
+        else:
+            service.adopt(spec, layout)
+    assert not any(call[:2] in (['systemctl', 'stop'], ['systemctl', 'disable']) or
+                   (call[:2] == ['docker', 'compose'] and ('stop' in call or 'rm' in call)) for call in host.calls)
+    assert Path(layout.compose_file).read_bytes() == before_compose
+    assert {path.name: path.read_bytes() for path in service.unit_dir.iterdir()} == before_units
+    assert not service.compose_file.exists()
+    assert not (service.root / 'adoption.json').exists()
+
+
+@pytest.mark.parametrize('extra,tmpfs,target', [
+    ([], {'/scratch': 'rw'}, '/scratch'),
+    ([], {'/keys': KEYS_TMPFS_OPTIONS}, '/keys'),
+    ([KEYS_TMPFS_MOUNT], {'/keys': KEYS_TMPFS_OPTIONS}, '/keys'),
+])
+def test_image_keys_contract_legacy_tmpfs_retirement_requires_exact_declaration(tmp_path, extra, tmpfs, target):
+    from dataclasses import replace
+    layout, data, master = layout_fixture(tmp_path)
+    layout = replace(layout, retired_mount_targets=(target,))
+    service, host = adoption_host(tmp_path, layout, data, master)
+    _keys_mount_metadata(service, extra, tmpfs)
+    spec = VPMServiceSpec(PIN, 'dc.example.com', writes_enabled=True, expected_account_id='customer-account')
+    assert service.inspect_layout(layout)['retired_mount_targets'] == [target]
+    assert service.plan_adoption(spec, layout)['activate_automation'] is False
+    assert service.adopt(spec, layout)['status'] == 'adopted'
+
+
+@pytest.mark.parametrize('extra,tmpfs', [
+    ([OBSERVED_IMAGE_KEYS_VOLUME], {'/keys': 'rw'}),
+    ([dict(KEYS_TMPFS_MOUNT, Type='bind', Source='/unknown')], {'/keys': 'ro'}),
+    ([KEYS_TMPFS_MOUNT], {'/keys': 'rw'}),
+    ([KEYS_TMPFS_MOUNT, KEYS_TMPFS_MOUNT], {'/keys': KEYS_TMPFS_OPTIONS}),
+    ([], {'/keys': 'ro,rw'}), ([], {'/keys': 'ro,ro'}),
+    ([], {'/keys': []}), ([], {'/keys': None}),
+])
+def test_image_keys_contract_legacy_tmpfs_conflicts_hold_even_with_retirement(tmp_path, extra, tmpfs):
+    from dataclasses import replace
+    layout, data, master = layout_fixture(tmp_path)
+    layout = replace(layout, retired_mount_targets=('/keys',))
+    service, host = adoption_host(tmp_path, layout, data, master)
+    _keys_mount_metadata(service, extra, tmpfs)
+    with pytest.raises(RuntimeError, match='binding|declaration'):
+        service.inspect_layout(layout)
