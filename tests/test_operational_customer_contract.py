@@ -53,7 +53,7 @@ def test_discovery_failure_preserves_database_and_freshness(app, sample_server, 
 
 
 @pytest.mark.parametrize('registration', ['http', 'network', 'missing', 'denied', 'json'])
-def test_watchdog_registration_failure_never_reaches_ssh(registration, monkeypatch):
+def test_watchdog_registration_failure_never_reaches_remote_mutation(registration, monkeypatch):
     response = Mock(ok=registration != 'http', status_code=403)
     response.json.return_value = {'success':registration != 'denied'}
     if registration == 'denied':
@@ -67,10 +67,15 @@ def test_watchdog_registration_failure_never_reaches_ssh(registration, monkeypat
     ssh = Mock(return_value=(['ssh'], {}))
     monkeypatch.setattr(web_watchdog, 'build_ssh_cmd', ssh)
     monkeypatch.setattr(web_watchdog, 'get_watchdog_latest_release', lambda: {'version':'1.0.0'})
-    monkeypatch.setattr(web_watchdog.subprocess, 'run', Mock(return_value=subprocess.CompletedProcess([], 0, 'INSTALL_SUCCESS', '')))
+    run = Mock(return_value=subprocess.CompletedProcess([], 0, 'WATCHDOG_PREFLIGHT=verified\n', ''))
+    monkeypatch.setattr(web_watchdog.subprocess, 'run', run)
     success, error = web_watchdog.install_watchdog_agent_remote(host(), 'synthetic-account-key')
     assert success is False
-    ssh.assert_not_called()
+    ssh.assert_called_once()
+    assert run.call_count == 1
+    assert 'systemctl stop' not in run.call_args.kwargs['input']
+    assert 'synthetic-account-key' not in run.call_args.kwargs['input']
+    post.assert_called_once()
     assert 'synthetic-account-key' not in error
 
 
@@ -176,7 +181,7 @@ def test_watchdog_delivery_uses_stdin_and_privilege(user, prefix, monkeypatch):
     monkeypatch.setattr(requests, 'post', lambda *a, **k: SimpleNamespace(ok=True, json=lambda: {'success':True,'worker_token':'synthetic-worker-token'}))
     monkeypatch.setattr(web_watchdog, 'build_ssh_cmd', lambda *a, **k: (['ssh'], {}))
     monkeypatch.setattr(web_watchdog, 'get_watchdog_latest_release', lambda: {'version':'1.0.0'})
-    run = Mock(return_value=subprocess.CompletedProcess([], 0, 'INSTALL_SUCCESS', ''))
+    run = Mock(return_value=subprocess.CompletedProcess([], 0, 'WATCHDOG_PREFLIGHT=verified\nINSTALL_SUCCESS', ''))
     monkeypatch.setattr(web_watchdog.subprocess, 'run', run)
     assert web_watchdog.install_watchdog_agent_remote(host(user), 'synthetic-account-key') == (True,None)
     assert run.call_args.args[0][-1] == prefix + 'timeout --signal=TERM --kill-after=30s 120s bash -s'
@@ -324,6 +329,8 @@ esac''',
     monkeypatch.setattr(web_watchdog, 'build_ssh_cmd', lambda *a, **k: (['ssh'], {}))
     real_run = subprocess.run
     def remote(cmd, **kwargs):
+        if 'echo WATCHDOG_PREFLIGHT=verified' in kwargs['input']:
+            return subprocess.CompletedProcess(cmd, 0, 'WATCHDOG_PREFLIGHT=verified\n', '')
         script = kwargs['input'].replace('/usr/local/bin',str(target)).replace('/etc/dc-watchdog',str(config)).replace('/etc/systemd/system',str(units)).replace('/opt/dc-watchdog',str(tmp_path/'obsolete'))
         return real_run(['bash','-s'], input=script, capture_output=True, text=True,
                         env={**os.environ,'PATH':f'{fake_bin}:'+os.environ['PATH'],'STATE':str(state),'FAILURE':failure})
@@ -398,7 +405,7 @@ def test_delivery_bounds_remote_execution_and_leaves_recovery_grace(component, m
     monkeypatch.setattr(web_watchdog, 'build_ssh_cmd', lambda *a, **k: (['ssh'], {}))
     monkeypatch.setattr(requests, 'post', lambda *a, **k: SimpleNamespace(ok=True, json=lambda: {'success':True,'worker_token':'synthetic-worker-token'}))
     monkeypatch.setattr(web_watchdog, 'get_watchdog_latest_release', lambda: {'version':'1.0.0'})
-    run = Mock(return_value=subprocess.CompletedProcess([], 0, 'NODE_EXPORTER_INSTALL_SUCCESS INSTALL_SUCCESS', ''))
+    run = Mock(return_value=subprocess.CompletedProcess([], 0, 'WATCHDOG_PREFLIGHT=verified\nNODE_EXPORTER_INSTALL_SUCCESS INSTALL_SUCCESS', ''))
     monkeypatch.setattr(subprocess, 'run', run)
     if component == 'watchdog':
         web_watchdog.install_watchdog_agent_remote(host(), 'synthetic-account-key')

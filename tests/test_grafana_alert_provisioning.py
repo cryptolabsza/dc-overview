@@ -1732,8 +1732,9 @@ class TestGrafanaAlertConfigurationPaths:
     @patch("dc_overview.cli._sync_alerts_for_upgrade")
     @patch("dc_overview.cli.subprocess.run")
     def test_upgrade_aborts_before_docker_when_required_alert_sync_fails(
-        self, mock_subprocess, mock_alert_sync
+        self, mock_subprocess, mock_alert_sync, monkeypatch, tmp_path
     ):
+        monkeypatch.setattr("dc_overview.cli.DOCKER_CONFIG_DIR", tmp_path)
         ordering = []
         failure = MagicMock(
             success=False,
@@ -1746,7 +1747,9 @@ class TestGrafanaAlertConfigurationPaths:
         mock_alert_sync.side_effect = alert_sync
 
         # This scenario starts after the independently tested proxy prerequisites.
-        with patch('dc_overview.fleet_upgrade.preflight_release',
+        with patch('dc_overview.controller_adoption.upgrade_requires_adoption',
+                   return_value=False), \
+             patch('dc_overview.fleet_upgrade.preflight_release',
                    side_effect=lambda *args: ordering.append('safe-preflight')) as preflight, \
              patch('dc_overview.fleet_upgrade.run_fleet_upgrade') as submit:
             result = CliRunner().invoke(main, ["upgrade"])

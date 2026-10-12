@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Tuple, Optional, List
 from dataclasses import dataclass
 
+from .ssh_trust import SSHTrustError, openssh_trust_options, configure_paramiko_host_trust
+
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
@@ -196,6 +198,11 @@ class SSHManager:
         Deploy SSH key to a remote host using password authentication.
         Uses sshpass for automated password entry.
         """
+        try:
+            trust_opts = openssh_trust_options(known_hosts_path=self.known_hosts_path)
+        except SSHTrustError as exc:
+            console.print(str(exc))
+            return False
         if not shutil.which("sshpass"):
             console.print("[red]Error:[/red] sshpass not installed")
             return False
@@ -219,10 +226,9 @@ FLEET_KEY_EOF
         '''
         
         cmd = [
-            "sshpass", "-p", password,
+            "sshpass", "-e",
             "ssh",
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
+            *trust_opts,
             "-o", "ConnectTimeout=10",
             "-p", str(port),
             f"{shlex.quote(username)}@{shlex.quote(host)}",
@@ -234,21 +240,22 @@ FLEET_KEY_EOF
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=30,
+                env={**os.environ, "SSHPASS": password}
             )
             
             if result.returncode == 0:
                 console.print(f"[green]✓[/green] SSH key deployed to {host}")
                 return True
             else:
-                console.print(f"[red]✗[/red] Failed to deploy key to {host}: {result.stderr[:100]}")
+                console.print(f"[red]✗[/red] Failed to deploy key to {host}; verify host trust and authentication.")
                 return False
                 
         except subprocess.TimeoutExpired:
             console.print(f"[red]✗[/red] Timeout connecting to {host}")
             return False
         except Exception as e:
-            console.print(f"[red]✗[/red] Error deploying key to {host}: {e}")
+            console.print(f"[red]✗[/red] Error deploying key to {host}; verify host trust and authentication.")
             return False
     
     def deploy_key_with_existing_key(
@@ -261,6 +268,11 @@ FLEET_KEY_EOF
         """
         Deploy our fleet key to a remote host using an existing SSH key.
         """
+        try:
+            trust_opts = openssh_trust_options(known_hosts_path=self.known_hosts_path)
+        except SSHTrustError as exc:
+            console.print(str(exc))
+            return False
         if not self.key_exists():
             self.generate_key()
         
@@ -281,8 +293,7 @@ FLEET_KEY_EOF
         cmd = [
             "ssh",
             "-i", existing_key_path,
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
+            *trust_opts,
             "-o", "ConnectTimeout=10",
             "-p", str(port),
             f"{shlex.quote(username)}@{shlex.quote(host)}",
@@ -320,6 +331,10 @@ FLEET_KEY_EOF
             port: SSH port
             key_path: Optional custom key path (uses fleet key if not provided)
         """
+        try:
+            trust_opts = openssh_trust_options(known_hosts_path=self.known_hosts_path)
+        except SSHTrustError:
+            return False
         # Use provided key or fall back to fleet key
         ssh_key = key_path or str(self.key_path)
         
@@ -329,8 +344,7 @@ FLEET_KEY_EOF
         cmd = [
             "ssh",
             "-i", ssh_key,
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
+            *trust_opts,
             "-o", "ConnectTimeout=5",
             "-o", "BatchMode=yes",
             "-p", str(port),
@@ -354,6 +368,7 @@ FLEET_KEY_EOF
         sudo: bool = False,
         key_path: str = None,
         password: Optional[str] = None,
+        known_hosts_path: Optional[str] = None,
     ) -> SSHResult:
         """
         Run a command on a remote host via SSH.
@@ -371,6 +386,11 @@ FLEET_KEY_EOF
         Returns:
             SSHResult with success status and output
         """
+        trust_path = known_hosts_path if known_hosts_path is not None else self.known_hosts_path
+        try:
+            trust_opts = openssh_trust_options(known_hosts_path=trust_path)
+        except SSHTrustError as exc:
+            return SSHResult(success=False, output=str(exc), exit_code=-1)
         if password is not None and not shutil.which('sshpass'):
             # Fresh pip/pipx installs already ship Paramiko; the normal system
             # prerequisite step installs sshpass only after readonly proof.
@@ -379,7 +399,7 @@ FLEET_KEY_EOF
             from .quickstart import _run_paramiko_command
             client = paramiko.SSHClient()
             try:
-                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                configure_paramiko_host_trust(client, known_hosts_path=trust_path)
                 client.connect(hostname=host, username=username, password=password, port=port,
                                timeout=10, auth_timeout=10, banner_timeout=10,
                                allow_agent=False, look_for_keys=False)
@@ -402,8 +422,7 @@ FLEET_KEY_EOF
             command = f"sudo {command}"
         
         cmd = (["sshpass", "-e", "ssh"] if password is not None else ["ssh", "-i", ssh_key]) + [
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
+            *trust_opts,
             "-o", "ConnectTimeout=10",
             "-p", str(port),
             f"{username}@{host}",
@@ -440,14 +459,18 @@ FLEET_KEY_EOF
         port: int = 22,
     ) -> bool:
         """Copy a file to a remote host via SCP."""
+        try:
+            trust_opts = openssh_trust_options(known_hosts_path=self.known_hosts_path)
+        except SSHTrustError:
+            return False
         if not self.key_exists():
             return False
         
         cmd = [
             "scp",
             "-i", str(self.key_path),
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
+            *trust_opts,
+            "-o", "ConnectTimeout=10",
             "-P", str(port),
             local_path,
             f"{username}@{host}:{remote_path}"

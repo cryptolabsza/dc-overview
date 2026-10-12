@@ -31,7 +31,9 @@ Credential, TLS and file-discovery references must stay in that namespace; crede
 must use files, including custom HTTP headers. Inline passwords, bearer tokens,
 OAuth secrets, header values and credentials embedded in URLs fail preflight. Older
 external file references require exact, explicit adoption by the installer; adoption
-preserves the reference and does not read or copy its credential contents.
+preserves references and consumer custody. The private adoption plan snapshots
+effective referenced bytes for drift checks; no credential contents are published
+or copied into the public monitoring subtree.
 
 Duplicate job names, reserved product job names and known duplicate static endpoint
 scrapes fail before writes. Unknown jobs remain intact. Relabeling and dynamic
@@ -103,3 +105,165 @@ a missing file). A changed source holds replacement for a new merge; an edit mad
 during validation also remains intact. The real Linux install/upgrade,
 selected-artifact validation, mounted credentials and Grafana acceptance remain
 separate deployment checks.
+
+## Preserve an existing controller topology
+
+`setup` is a fresh-controller operation. It refuses an existing DC, Prometheus,
+Grafana or proxy container before loading configuration, selecting a release,
+installing prerequisites or rendering replacement resources. A failed, denied or
+partial Docker inspection cannot establish absence. Existing customers use the
+host `configuration` commands after installing the matching public DC and proxy
+packages. The running proxy must also advertise the marker-aware controller guard;
+installing a new host package alone does not repair an older serving updater.
+
+The first adoption contract supports the existing `/etc/prometheus/prometheus.yml`
+**file bind**, exact separately mounted rule/discovery/credential references, and
+an already-adopted product directory. Existing different directory mounts, glob
+references, inherited `VolumesFrom`, automatic container removal, unsupported
+runtime fields, SELinux bind relabel options and executable source overrides hold
+with a named unsupported condition. These shapes require an explicit supported
+mapping or upstream repair; they are never silently converted. Runtime differences
+that Docker generates, such as endpoint IDs, are excluded from create declarations.
+Exact data/auth/TSDB volume names, anonymous volume IDs, customer binds, static
+network settings, ports, UID, commands, capabilities, resources and customer labels
+come from inspection. Only DC and Prometheus may change. Grafana, its dashboards,
+datasource/provisioning identities, the proxy/auth store and VPM remain untouched.
+
+DC and Prometheus must already be running and unpaused. Paused dependencies hold;
+adoption never starts a stopped service to manufacture a readiness result. The
+public configuration schema supports explicit HTTP/TLS/authentication file
+references, static/file/HTTP/DNS discovery and known public scrape fields. Inline
+credentials, cloud discovery/signing, proxy-connect headers, credential-bearing
+URLs, arbitrary header values and unknown nested contexts hold before staging.
+Use the named unsupported diagnostic to obtain an upstream supported mapping.
+
+Write a public declaration, using customer paths and exact inventory-owned job
+names. `managed_jobs` permits the inventory writer to retire only those named jobs;
+do not put unrelated product/customer jobs in that list. Adoption itself copies the
+effective configuration unchanged and never generates a baseline over it.
+
+```json
+{
+  "schema_version": 1,
+  "product_directory": "/srv/dc-monitoring",
+  "dc_destination": "/var/lib/dc-monitoring",
+  "managed_jobs": ["dc-managed", "confirmed-old-inventory-job"],
+  "session_routes": ["proxy-sso"],
+  "maintenance_owners": ["customer-compose-owner", "external-watchtower-owner"],
+  "public_inputs": ["/etc/dc-overview/fleet-config.yaml", "/etc/dc-overview/releases/selection.json"]
+}
+```
+
+`public_inputs` freezes the public configuration and actual selection/pin files
+used by this customer. Include every participating public writer/authority input.
+Never put credentials into this declaration. Inspected Env and referenced file
+bytes remain in an explicit private plan and recovery record. Public command output
+contains image/container identities and bounded conditions, without Env or
+secret-derived fingerprints.
+
+```sh
+sudo install -d -m 0700 /root/controller-adoption
+sudo dc-overview configuration inspect --declaration controller.json
+sudo dc-overview configuration plan --declaration controller.json --output /root/controller-adoption/plan.json
+```
+
+Planning reads the installed Engine. When changed compiled caches need proof, it
+creates only a disposable isolated compiler helper at the exact retained image ID;
+customer service/runtime/configuration writes remain zero. Source changes,
+executable binds or unknown source evidence block same-image adoption. Normal changed CPython caches are verified using that immutable image's
+interpreter, independently of the host Python version. The helper has no customer
+Env, mounts, network or Docker socket; its root is readonly, UID65534, capabilities
+are dropped, privilege escalation disabled, memory128MiB/CPU0.25/PIDs16 bounded, and
+its private result tmpfs is1MiB. Cache inputs are at most256KiB each/8MiB total,
+image source files at most1MiB, with a30s deadline. Cache code is decoded only in
+that isolated helper and never executed. Different compiler code or amended
+source requires a reviewed compatible public release update first. An updater no-op on the same image does not normalize amended source.
+
+Startup/import declarations are compared with the pinned image defaults, including
+root entrypoint scripts and startup environment overrides. Unverified shell or
+mutable-data import locations hold. Compiler proof uses helper argv bounded to512KiB
+in total, including fixed interpreter/script/output arguments and terminating NULs,
+with individual arguments at most48KiB. Directory-only metadata and every cache
+batch share this bound; oversized metadata holds before any helper creation.
+It does not depend on Linux accepting
+one oversized argument. Changed cache-parent mode/UID/GID must match bounded trusted
+image metadata. Archive metadata is streamed before reading contents; malformed,
+linked or unsupported extended metadata holds.
+
+Give `/srv` (or another selected parent) independently traversable public custody.
+The new product directory alone is created with UID/GID1000 and mode0755; its public
+configuration/ownership files use0644, and its lock uses0600. An existing directory
+must already have compatible custody and matching bytes. No parent or customer
+mount is chmod'ed or chown'ed. In particular, `/etc/dc-overview` may stay0700. DC uses
+its existing `PROMETHEUS_CONFIG_PATH` plus the nonsecret schema1
+`PROMETHEUS_OWNERSHIP_PATH` reader; Prometheus sees the same host directory readonly
+at `/etc/prometheus`. Customer references retain their original mounts and custody.
+The ownership reader carries the exact inventory job names and file references,
+so sanctioned monitoring updates do not need to expose private fleet configuration.
+Creation modes are explicit even under a restrictive host umask. Reference files
+retain exact bytes, mode, UID/GID and parent-directory custody; declared public
+inputs retain the corresponding host custody.
+
+Before applying, exclude the declared external lifecycle owners for the affected
+services, retain owner-controlled disaster recovery material and its restore drill,
+and prove the supported same-image persistence and declared session routes in the
+maintenance rehearsal. Record those positive gates in a public proof with the
+`operation_id` emitted by `plan`:
+
+```json
+{
+  "schema_version": 1,
+  "operation_id": "operation-id-from-plan",
+  "owners_excluded": ["customer-compose-owner", "external-watchtower-owner"],
+  "backup_restore_drill": true,
+  "same_image_state_compatible": true,
+  "session_routes_verified": ["proxy-sso"]
+}
+```
+
+```sh
+sudo dc-overview configuration adopt --plan /root/controller-adoption/plan.json --maintenance-proof maintenance.json
+sudo dc-overview configuration recover
+```
+
+These proof fields record the operator's exercised checks; asserting `true` does
+not perform a backup, prove a browser session or establish Linux acceptance. A local
+cookie route requires an existing nonempty `SECRET_KEY` retained verbatim. Missing
+DC `SECRET_KEY` alone does not block proxy SSO; its existing proxy session and roles
+require their own authenticated continuity test. No keys or accounts are generated.
+
+Apply takes the actual lifecycle lock, then the proxy's actual shared-auth dispatch
+and operation exclusion, then the affected monitoring lock inodes, with bounded
+acquisition. It stages and runs the exact retained-image promtool before an outage,
+reinspects all frozen inputs, stops DC, and replaces only required topology roles.
+Prometheus starts first on the same TSDB, then DC on the same data/auth mounts.
+The actual predecessors remain retained and stopped. A health-checked transition
+also verifies expected runtime and Prometheus's process-loaded configuration via
+its existing published9090/tcp port. Shapes without one accessible published port
+cannot satisfy this initial functional probe.
+
+On failure, all candidates require positive stopped proofs before originals can
+restart. Compensation restores runtime/config mappings and retains evolving
+compatible data and samples. It does not rewind databases/outbox/TSDB, undo delivered
+work, stop Grafana/proxy/VPM, restore shared auth or claim a cross-service transaction.
+Unknown stop/restore or runtime drift leaves `forward-repair-required` and keeps
+recovery exclusion. The private journal lives at
+`<config_dir>/controller-recovery/operation.json` with0700/0600 custody. The durable
+proxy marker survives host/helper failure; guard checks refresh its300s lease.
+Every single step is bounded below that lease. A terminal receipt alone does not
+release normal host lifecycle operations: explicit guard completion and durable
+host publication must both finish. Recover the exact operation before retrying.
+
+Recovery revalidates both terminal outcomes against current container identities,
+runtime and intended running/paused state, readonly functional health, effective
+monitoring configuration, reference/public bytes and custody, and stopped competing
+writers. A saved terminal receipt alone cannot release exclusion. Any uncertainty
+keeps the recovery hold and durable marker.
+
+`already-adopted` is a pure topology no-op. Subsequent drift requires a new plan.
+`adopted` verifies this bounded transition, not complete customer acceptance. Prove
+Linux UID1000 traversal, atomic-replace inode visibility, ordinary monitoring
+write/reload and continued scraping, retained historical samples, DC inventory and
+outbox/roles, declared session continuity, unchanged Grafana queries/UIDs and the
+next normal selected upgrade before accepting the deployment. Predecessor cleanup
+and release/alias promotion remain separate operator work.

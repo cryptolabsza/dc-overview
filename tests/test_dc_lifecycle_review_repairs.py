@@ -76,6 +76,8 @@ def test_ADV04_watchdog_update_retains_held_customer_state(tmp_path,monkeypatch)
     monkeypatch.setattr(web_watchdog,'build_ssh_cmd',lambda *a,**k:(['ssh'],{}))
     original_run=subprocess.run
     def run(cmd,**kwargs):
+        if 'echo WATCHDOG_PREFLIGHT=verified' in kwargs['input']:
+            return subprocess.CompletedProcess(cmd, 0, 'WATCHDOG_PREFLIGHT=verified\n', '')
         script=kwargs['input'].replace('/usr/local/bin',str(installed)).replace('/etc/dc-watchdog',str(config)).replace('/etc/systemd/system',str(units))
         return original_run(['bash','-s'],input=script,capture_output=True,text=True,env={**os.environ,'PATH':str(fake)+':'+os.environ['PATH'],'CANDIDATE':str(candidate),'CALLS':str(calls)})
     monkeypatch.setattr(web_watchdog.subprocess,'run',run)
@@ -194,6 +196,8 @@ esac'''}
         p=fake/name;p.write_text('#!/bin/sh\n'+body+'\n');p.chmod(0o755)
     monkeypatch.setattr(web_watchdog,'build_ssh_cmd',lambda *a,**k:(['ssh'],{}));original_run=subprocess.run
     def run(cmd,**kwargs):
+        if 'echo WATCHDOG_PREFLIGHT=verified' in kwargs['input']:
+            return subprocess.CompletedProcess(cmd, 0, 'WATCHDOG_PREFLIGHT=verified\n', '')
         script=kwargs['input'].replace('/usr/local/bin',str(installed)).replace('/etc/dc-watchdog',str(config)).replace('/etc/systemd/system',str(units))
         return original_run(['bash','-s'],input=script,capture_output=True,text=True,env={**os.environ,'PATH':str(fake)+':'+os.environ['PATH'],'CANDIDATE':str(candidate),'CALLS':str(calls),'ACTIVE':str(active),'ENABLED':enabled,'METRIC_VERSION':metric_version})
     monkeypatch.setattr(web_watchdog.subprocess,'run',run)

@@ -186,12 +186,22 @@ def upgrade_workers(config, plan, *, mode='update'):
                     elif name == 'node-exporter':
                         script = build_node_exporter_install_script(selected_artifact=target, mode=mode)
                     elif name == 'dc-watchdog-agent':
-                        from .web_watchdog import install_watchdog_agent_remote
+                        from .web_watchdog import get_site_id, install_watchdog_agent_remote
                         host = SimpleNamespace(name=server.name, server_ip=server.server_ip, ssh_user=credentials.username,
                                                ssh_port=credentials.port, ssh_password=credentials.password,
+                                               ssh_known_hosts_path=str(ssh.known_hosts_path),
                                                ssh_key=SimpleNamespace(key_path=str(credentials.key_path or config.ssh.key_path or ssh.key_path)))
+                        settings = {}
+                        if mode == 'install':
+                            settings = {
+                                'site_id': get_site_id({'ssl': {'domain': config.ssl.domain},
+                                                        'master_ip': config.master_ip or 'default'}),
+                                'heartbeat_interval': config.watchdog.ping_interval,
+                                'use_mtr': config.watchdog.agent_use_mtr,
+                            }
                         success, error = install_watchdog_agent_remote(host, config.watchdog.api_key or '',
-                                                                       selected_artifact=target, watchdog_url=config.watchdog.server_url, mode=mode)
+                                                                       selected_artifact=target, watchdog_url=config.watchdog.server_url,
+                                                                       mode=mode, **settings)
                         if not success:
                             raise RuntimeError('worker agent installation failed')
                         script = None

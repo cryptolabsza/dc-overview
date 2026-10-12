@@ -451,6 +451,8 @@ class FleetManager:
         self.deployment_errors = []  # Reset for this deploy
         
         try:
+            from .controller_adoption import ensure_mutation_allowed
+            ensure_mutation_allowed(self.config.config_dir, setup=True)
             from .fleet_upgrade import preflight_release, commit_release
             self.release_plan = preflight_release(self.config, getattr(self.config, '_release_manifest_path', None), fresh_setup=True)
             if getattr(self, 'release_plan', None):
@@ -2791,359 +2793,41 @@ except Exception as e:
     # ============ Step 8c: DC Watchdog ============
     
     def _deploy_watchdog_agents(self):
-        """Deploy DC Watchdog Go agents to all workers for external uptime monitoring.
-        
-        The Go agent provides:
-        - GPU monitoring via NVML (count, state, driver health, VM passthrough detection)
-        - Service monitoring (Vast.ai, RunPod, Docker)
-        - MTR network diagnostics  
-        - Lightweight ~5MB binary with minimal resource usage
-        
-        Falls back to bash script if Go binary download fails.
-        """
+        """Deliver Watchdog through the shared privilege and worker-token guard."""
         if getattr(self, 'release_plan', None):
-            # Selected worker coordinator handles the agent alongside other workers.
             if not hasattr(self, 'worker_outcomes'):
                 self._deploy_selected_workers()
             return
         if not self.config.components.dc_watchdog or not self.config.watchdog.api_key:
             return
-        
+        from types import SimpleNamespace
+        from .web_watchdog import get_site_id, install_watchdog_agent_remote
+
         console.print("\n[bold]Step 8c: Installing DC Watchdog Agents[/bold]\n")
-        console.print("  DC Watchdog provides external uptime monitoring from watchdog.cryptolabs.co.za")
-        console.print("  Go agents send GPU/service telemetry; alerts sent when servers go offline.\n")
-        
-        if not self.config.servers:
-            console.print("[yellow]  No servers configured, skipping watchdog agent deployment[/yellow]")
-            return
-        
-        # Check subscription server limit
         max_servers = self.config.watchdog.max_servers or 50
+        servers = self.config.servers[:max_servers]
         if len(self.config.servers) > max_servers:
-            console.print(f"[yellow]⚠ Your subscription allows {max_servers} servers, but {len(self.config.servers)} are configured.[/yellow]")
-            console.print(f"[yellow]  DC Watchdog will be installed on the first {max_servers} servers only.[/yellow]")
-            console.print(f"[dim]  Upgrade your plan at https://www.cryptolabs.co.za/account/ to monitor more servers.[/dim]")
-            servers_to_install = self.config.servers[:max_servers]
-        else:
-            servers_to_install = self.config.servers
-        
-        # Base installation script template - worker token will be injected per server
-        base_watchdog_url = self.config.watchdog.server_url
-        ping_interval = self.config.watchdog.ping_interval
-        use_mtr = 'true' if self.config.watchdog.agent_use_mtr else 'false'
-        api_key = self.config.watchdog.api_key
-        # Site ID for multi-site support - use domain or master IP as site identifier
-        site_id = self.config.ssl.domain or self.config.master_ip or 'default'
-        
+            console.print(f"[yellow]Subscription allows {max_servers} servers; installing on the first {max_servers}.[/yellow]")
+        site_id = get_site_id({'ssl': {'domain': self.config.ssl.domain}, 'master_ip': self.config.master_ip or 'default'})
         success_count = 0
-        fail_count = 0
-        
-        for server in servers_to_install:
+        for server in servers:
             creds = self.config.get_server_ssh_creds(server)
-            ssh_key = creds.key_path or self.config.ssh.key_path
-            
-            try:
-                # Step 1: Request a worker token for this server (secure - doesn't expose API key)
-                worker_token = None
-                token_error = None
-                try:
-                    import requests
-                    token_resp = requests.post(
-                        f'{base_watchdog_url}/api/worker/register',
-                        json={'worker_id': server.name},
-                        params={'api_key': api_key},
-                        timeout=30
-                    )
-                    if token_resp.ok:
-                        token_data = token_resp.json()
-                        if token_data.get('success'):
-                            worker_token = token_data.get('worker_token')
-                        else:
-                            token_error = token_data.get('error', 'Unknown error from server')
-                    else:
-                        token_error = f"HTTP {token_resp.status_code}: {token_resp.text[:100]}"
-                except Exception as e:
-                    token_error = str(e)
-                
-                # Step 2: Validate we have credentials to install
-                if not worker_token and not api_key:
-                    console.print(f"[red]✗[/red] {server.name}: No token or API key available")
-                    fail_count += 1
-                    continue
-                
-                if token_error:
-                    console.print(f"[dim]  {server.name}: Could not get worker token ({token_error}), using API key[/dim]")
-                
-                # Step 3: Generate install script - downloads Go agent, falls back to bash
-                # Note: api_key field is used for both worker tokens (wt_...) and API keys (sk-ipmi-...)
-                # The Go agent detects the type from the value prefix
-                auth_key = worker_token if worker_token else api_key
-                
-                install_script = f'''#!/bin/bash
-set -e
+            host = SimpleNamespace(name=server.name, server_ip=server.server_ip,
+                                   ssh_user=creds.username, ssh_port=creds.port,
+                                   ssh_password=creds.password,
+                                   ssh_known_hosts_path=str(self.ssh.known_hosts_path),
+                                   ssh_key=SimpleNamespace(key_path=creds.key_path or self.config.ssh.key_path or str(self.ssh.key_path)))
+            success, error = install_watchdog_agent_remote(
+                host, self.config.watchdog.api_key, watchdog_url=self.config.watchdog.server_url,
+                site_id=site_id, heartbeat_interval=self.config.watchdog.ping_interval,
+                use_mtr=self.config.watchdog.agent_use_mtr)
+            if success:
+                success_count += 1
+                console.print(f"[green]✓[/green] {server.name}: agent installed (worker token)")
+            else:
+                console.print(f"[red]✗[/red] {server.name}: {error}")
+        console.print(f"\n  DC Watchdog agents: {success_count} installed, {len(servers) - success_count} failed")
 
-INSTALL_DIR="/usr/local/bin"
-CONFIG_DIR="/etc/dc-watchdog"
-FALLBACK_DIR="/opt/dc-watchdog"
-GITHUB_REPO="cryptolabsza/dc-watchdog"
-
-echo "[+] Installing DC-Watchdog Agent..."
-
-# Create directories
-mkdir -p "$CONFIG_DIR"
-mkdir -p "$FALLBACK_DIR"
-
-# Install dependencies (mtr for network diagnostics)
-echo "[+] Installing dependencies..."
-if command -v apt-get &> /dev/null; then
-    apt-get update -qq 2>/dev/null || true
-    apt-get install -y -qq mtr-tiny curl 2>/dev/null || true
-elif command -v yum &> /dev/null; then
-    yum install -y -q mtr curl 2>/dev/null || true
-elif command -v dnf &> /dev/null; then
-    dnf install -y -q mtr curl 2>/dev/null || true
-fi
-
-# Detect architecture
-ARCH=$(uname -m)
-case $ARCH in
-    x86_64)  ARCH_SUFFIX="linux-amd64" ;;
-    aarch64) ARCH_SUFFIX="linux-arm64" ;;
-    *)       ARCH_SUFFIX="" ;;
-esac
-
-# Try to download Go agent binary from the DC Watchdog server
-GO_AGENT_OK=false
-if [ -n "$ARCH_SUFFIX" ]; then
-    echo "[+] Downloading Go agent for $ARCH_SUFFIX..."
-    
-    # Primary: Download from DC Watchdog server (includes binary)
-    AGENT_URL="{base_watchdog_url}/agent/dc-watchdog-agent-$ARCH_SUFFIX"
-    if curl -fsSL "$AGENT_URL" -o "$INSTALL_DIR/dc-watchdog-agent.tmp" 2>/dev/null; then
-        if [ -s "$INSTALL_DIR/dc-watchdog-agent.tmp" ]; then
-            mv "$INSTALL_DIR/dc-watchdog-agent.tmp" "$INSTALL_DIR/dc-watchdog-agent"
-            chmod +x "$INSTALL_DIR/dc-watchdog-agent"
-            if "$INSTALL_DIR/dc-watchdog-agent" -version 2>/dev/null; then
-                GO_AGENT_OK=true
-                echo "[+] Go agent downloaded from watchdog server"
-            fi
-        fi
-    fi
-    
-    # Fallback: Try GitHub releases (works if repo is public or gh is authenticated)
-    if [ "$GO_AGENT_OK" = "false" ]; then
-        RELEASE_URL="https://github.com/$GITHUB_REPO/releases/latest/download/dc-watchdog-agent-$ARCH_SUFFIX"
-        if curl -fsSL "$RELEASE_URL" -o "$INSTALL_DIR/dc-watchdog-agent.tmp" 2>/dev/null; then
-            if [ -s "$INSTALL_DIR/dc-watchdog-agent.tmp" ]; then
-                mv "$INSTALL_DIR/dc-watchdog-agent.tmp" "$INSTALL_DIR/dc-watchdog-agent"
-                chmod +x "$INSTALL_DIR/dc-watchdog-agent"
-                if "$INSTALL_DIR/dc-watchdog-agent" -version 2>/dev/null; then
-                    GO_AGENT_OK=true
-                    echo "[+] Go agent downloaded from GitHub"
-                fi
-            fi
-        fi
-    fi
-    
-    rm -f "$INSTALL_DIR/dc-watchdog-agent.tmp" 2>/dev/null
-fi
-
-# Detect if this server has GPUs (nvidia-smi responds quickly)
-echo "[+] Detecting GPU availability..."
-HAS_GPU=false
-if command -v nvidia-smi &> /dev/null; then
-    # nvidia-smi can hang on some systems, so timeout after 5 seconds
-    if timeout 5 nvidia-smi -L &> /dev/null; then
-        HAS_GPU=true
-        echo "[+] GPUs detected - using standard monitoring level"
-    else
-        echo "[!] nvidia-smi present but not responding - using basic level"
-    fi
-else
-    echo "[+] No GPUs detected - using basic monitoring level"
-fi
-
-# Set monitoring level based on GPU availability
-if [ "$HAS_GPU" = "true" ]; then
-    MONITOR_LEVEL="standard"
-else
-    MONITOR_LEVEL="basic"
-fi
-
-# Create configuration for Go agent
-echo "[+] Creating configuration..."
-cat > "$CONFIG_DIR/agent.yaml" << YAMLEOF
-# DC-Watchdog Agent Configuration
-server_url: "{base_watchdog_url}"
-api_key: "{auth_key}"
-worker_name: "{server.name}"
-site_id: "{site_id}"
-heartbeat_interval: 30s
-level: "$MONITOR_LEVEL"
-
-gpu:
-  enabled: $HAS_GPU
-  check_driver_health: true
-  detect_vm_passthrough: true
-  timeout_seconds: 5
-
-services:
-  vastai:
-    enabled: {str(getattr(server, 'has_vast', False)).lower()}
-  runpod:
-    enabled: false
-  docker:
-    enabled: false
-
-network:
-  mtr:
-    enabled: {use_mtr}
-    interval: 10
-    hops: 15
-
-# RAID monitoring (auto-detects mdadm arrays)
-raid:
-  enabled: true
-  interval: 1
-  alert_on_degraded: true
-  alert_on_rebuild: true
-  track_progress: true
-
-log_level: info
-YAMLEOF
-chmod 600 "$CONFIG_DIR/agent.yaml"
-
-# Create bash fallback agent script
-cat > "$FALLBACK_DIR/dc-watchdog-agent.sh" << 'BASHAGENT'
-#!/bin/bash
-# Fallback bash agent - used if Go binary unavailable
-CONFIG_DIR="/etc/dc-watchdog"
-source <(grep -E '^(server_url|api_key|worker_name):' "$CONFIG_DIR/agent.yaml" | sed 's/: /=/' | tr -d ' ')
-
-while true; do
-    PUBLIC_IP=$(curl -sf --max-time 5 https://ifconfig.me 2>/dev/null || echo "")
-    DATA="{{\\"public_ip\\":\\"$PUBLIC_IP\\",\\"agent_version\\":\\"bash-1.0\\"}}"
-    SERVER_HOST=$(echo "$server_url" | sed 's|https://||')
-    # api_key can be either an API key (sk-ipmi-...) or worker token (wt_...)
-    curl -sf --max-time 10 -X POST -H "Content-Type: application/json" \\
-        -d "$DATA" \\
-        "${{server_url}}/ping/${{worker_name}}?api_key=${{api_key}}" 2>/dev/null || true
-    sleep 30
-done
-BASHAGENT
-chmod +x "$FALLBACK_DIR/dc-watchdog-agent.sh"
-
-# Create systemd service
-echo "[+] Creating systemd service..."
-if [ "$GO_AGENT_OK" = "true" ]; then
-    cat > /etc/systemd/system/dc-watchdog-agent.service << 'GOSERVICE'
-[Unit]
-Description=DC-Watchdog Agent
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=root
-ExecStart=/usr/local/bin/dc-watchdog-agent -config /etc/dc-watchdog/agent.yaml
-Restart=always
-RestartSec=30
-StandardOutput=journal
-StandardError=journal
-MemoryLimit=128M
-
-[Install]
-WantedBy=multi-user.target
-GOSERVICE
-else
-    echo "[!] Go agent not available, using bash fallback"
-    cat > /etc/systemd/system/dc-watchdog-agent.service << 'BASHSERVICE'
-[Unit]
-Description=DC-Watchdog Agent (Bash Fallback)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/opt/dc-watchdog/dc-watchdog-agent.sh
-Restart=always
-RestartSec=30
-
-[Install]
-WantedBy=multi-user.target
-BASHSERVICE
-fi
-
-# Enable and start
-systemctl daemon-reload
-systemctl enable dc-watchdog-agent
-systemctl restart dc-watchdog-agent
-
-# Verify agent actually stays running (not just starts and immediately crashes)
-echo "[+] Verifying agent startup..."
-sleep 3
-
-# Check if still running after 3 seconds
-if ! systemctl is-active --quiet dc-watchdog-agent; then
-    echo "[!] ERROR: Agent failed to start or crashed immediately"
-    echo "[!] Recent logs:"
-    journalctl -u dc-watchdog-agent -n 10 --no-pager 2>/dev/null || true
-    exit 1
-fi
-
-# Wait a bit more and check again to catch delayed crashes
-sleep 5
-if ! systemctl is-active --quiet dc-watchdog-agent; then
-    echo "[!] ERROR: Agent crashed after startup"
-    echo "[!] Recent logs:"
-    journalctl -u dc-watchdog-agent -n 10 --no-pager 2>/dev/null || true
-    exit 1
-fi
-
-# Success - agent is running
-if [ "$GO_AGENT_OK" = "true" ]; then
-    VERSION=$("$INSTALL_DIR/dc-watchdog-agent" -version 2>&1 | head -1 || echo "unknown")
-    echo "[+] DC Watchdog Go agent running ($VERSION)"
-else
-    echo "[+] DC Watchdog bash agent running"
-fi
-
-echo "[+] Installation complete"
-'''
-                
-                # Step 3: Run installation script via SSH
-                result = self.ssh.run_command(
-                    host=server.server_ip,
-                    username=creds.username,
-                    port=creds.port,
-                    key_path=ssh_key,
-                    command=install_script
-                )
-                
-                if result.success or result.exit_code == 0:
-                    token_note = " (token)" if worker_token else " (api-key)"
-                    console.print(f"[green]✓[/green] {server.name} ({server.server_ip}): agent installed{token_note}")
-                    success_count += 1
-                else:
-                    # Extract error details from output
-                    output_lines = (result.output or "").strip().split('\n')
-                    # Look for ERROR lines in output
-                    error_lines = [l for l in output_lines if 'ERROR' in l or 'crashed' in l.lower()]
-                    if error_lines:
-                        error_msg = error_lines[-1][:80]
-                    else:
-                        error_msg = output_lines[-1][:80] if output_lines else "Unknown error"
-                    console.print(f"[red]✗[/red] {server.name}: {error_msg}")
-                    fail_count += 1
-                    
-            except Exception as e:
-                console.print(f"[red]✗[/red] {server.name}: {str(e)[:80]}")
-                fail_count += 1
-        
-        console.print(f"\n  DC Watchdog agents: {success_count} installed, {fail_count} failed")
-        if success_count > 0:
-            console.print(f"  Dashboard: {self.config.watchdog.server_url}/dashboard")
-    
     # ============ Step 9: Reverse Proxy ============
     
     def _setup_reverse_proxy(self):

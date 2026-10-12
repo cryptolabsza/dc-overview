@@ -13,6 +13,7 @@ import re
 import shlex
 import subprocess
 import time
+from collections.abc import Mapping
 
 import yaml
 import requests as http_requests
@@ -108,24 +109,31 @@ def get_watchdog_api_key() -> str:
     return ''
 
 
-def get_site_id() -> str:
+def get_site_id(config=None) -> str:
     """Get the site_id for this deployment (multi-site support).
     
     Derives site_id from fleet config domain or master_ip.
     Consistent with what's written to agent.yaml during deployment.
     """
+    explicit = os.environ.get('WATCHDOG_SITE_ID', '').strip()
+    if explicit:
+        return explicit
+    def configured_site(cfg):
+        ssl = cfg.get('ssl') or {}
+        return ssl.get('domain') or cfg.get('domain') or cfg.get('master_ip')
+    if config is not None:
+        site = configured_site(config)
+        if site:
+            return site
     config_paths = ['/etc/dc-overview/fleet-config.yaml', '/etc/dc-overview/config.yaml']
     for config_path in config_paths:
         if os.path.exists(config_path):
             try:
                 with open(config_path) as f:
                     cfg = yaml.safe_load(f) or {}
-                    domain = cfg.get('domain', '')
-                    if domain:
-                        return domain
-                    master_ip = cfg.get('master_ip', '')
-                    if master_ip:
-                        return master_ip
+                    site = configured_site(cfg)
+                    if site:
+                        return site
             except Exception:
                 pass
     
@@ -167,7 +175,7 @@ def get_watchdog_agents_from_api() -> dict:
             _watchdog_api_cache['data'] = agents_map
             return agents_map
     except Exception as e:
-        logger.debug(f"Could not fetch watchdog agent status: {e}")
+        logger.debug('Could not fetch watchdog agent status (%s)', type(e).__name__)
     
     return _watchdog_api_cache.get('data') or {}
 
@@ -315,11 +323,15 @@ def _register_watchdog_worker(req, endpoint, name, api_key):
     if not response.ok:
         return None
     value = response.json()
+    if not isinstance(value, Mapping) or value.get('success') is not True:
+        return None
     token = value.get('worker_token')
-    return token if value.get('success') and isinstance(token, str) and token.strip() else None
+    return token if (isinstance(token, str) and token.strip()
+                     and token.strip() != api_key.strip()) else None
 
 
-def install_watchdog_agent_remote(server, api_key: str, *, selected_artifact=None, watchdog_url=None, mode='install') -> tuple:
+def install_watchdog_agent_remote(server, api_key: str, *, selected_artifact=None, watchdog_url=None, mode='install',
+                                  site_id=None, heartbeat_interval=30, use_mtr=True) -> tuple:
     """Install DC Watchdog Go agent on a remote server via SSH.
     
     Downloads the Go binary from the latest GitHub release. No bash fallback -
@@ -343,6 +355,27 @@ def install_watchdog_agent_remote(server, api_key: str, *, selected_artifact=Non
         if selected_artifact is not None:
             from .exporters import validate_selected_worker_artifact
             validate_selected_worker_artifact('dc-watchdog-agent', selected_artifact)
+        if (type(heartbeat_interval) is not int or heartbeat_interval <= 0
+                or type(use_mtr) is not bool or (site_id is not None and (not isinstance(site_id, str) or not site_id.strip()))):
+            raise ValueError('invalid watchdog configuration')
+        # Prove the actual noninteractive component runner before registration.
+        # The readonly payload contains no account or worker credential.
+        cmd, ssh_env = build_ssh_cmd(server, timeout=30)
+        runner = watchdog_remote_runner(sudo=(server.ssh_user or 'root') != 'root')
+        run_env = {**os.environ, **ssh_env} if ssh_env else None
+        proof = 'set -e\n[ "$(id -u)" = 0 ]\n'
+        proof += 'for tool in bash timeout curl sha256sum systemctl mktemp cp mv chmod grep sed; do command -v "$tool" >/dev/null; done\n'
+        proof += '[ -d /run/systemd/system ]\n'
+        # Query the live manager over its bus, not just the systemctl binary.
+        # A degraded manager still serves normal installed/held unit state.
+        proof += 'manager=$(timeout --signal=TERM --kill-after=2s 10s systemctl show --property=SystemState --value)\n'
+        proof += 'case "$manager" in running|degraded) ;; *) exit 1;; esac\n'
+        if mode == 'update':
+            proof += watchdog_update_prerequisites()
+        proof += 'echo WATCHDOG_PREFLIGHT=verified\n'
+        checked = subprocess.run(cmd + [runner], input=proof, capture_output=True, text=True, timeout=45, env=run_env)
+        if checked.returncode != 0 or 'WATCHDOG_PREFLIGHT=verified' not in checked.stdout.splitlines():
+            return False, 'Watchdog noninteractive privilege/prerequisite preflight failed; no registration or remote changes were made.'
         # Step 1: Request a worker token from dc-watchdog
         import requests as req
         
@@ -367,6 +400,13 @@ def install_watchdog_agent_remote(server, api_key: str, *, selected_artifact=Non
         cmd, ssh_env = build_ssh_cmd(server, timeout=60)
         
         auth_key = worker_token
+        settings = {'server_url': endpoint, 'api_key': auth_key, 'worker_name': server.name,
+                    'heartbeat_interval': f'{heartbeat_interval}s'}
+        if site_id is not None:
+            settings['site_id'] = site_id
+        # Shell quoting also protects new site/settings inputs and arbitrary
+        # supported token strings from expansion in the remote Bash payload.
+        serialized_settings = shlex.quote(yaml.safe_dump(settings, sort_keys=False))
         
         install_script = rf'''
 set -Eeuo pipefail
@@ -507,12 +547,9 @@ fi
 # Create YAML configuration for Go agent
 if [ "$MODE" = install ]; then
 echo "[+] Creating configuration..."
-cat > "$CONFIG_DIR/agent.yaml" << YAMLEOF
+printf '%s' {serialized_settings} > "$CONFIG_DIR/agent.yaml"
+cat >> "$CONFIG_DIR/agent.yaml" << YAMLEOF
 # DC-Watchdog Agent Configuration
-server_url: "{endpoint}"
-api_key: "{auth_key}"
-worker_name: "{server.name}"
-heartbeat_interval: 30s
 level: $MONITOR_LEVEL
 
 health_port: 9878
@@ -525,7 +562,7 @@ gpu:
 
 network:
   mtr:
-    enabled: true
+    enabled: {str(use_mtr).lower()}
     interval: 10
     hops: 15
 

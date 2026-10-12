@@ -1615,11 +1615,13 @@ class FleetWizard:
     def _get_remote_hostname(self, server_ip: str) -> Optional[str]:
         """Get hostname from remote server via SSH."""
         import subprocess
+        from .ssh_trust import openssh_trust_options
         
         try:
             # Build SSH command
             cmd = [
-                'ssh', '-o', 'ConnectTimeout=5', '-o', 'StrictHostKeyChecking=no',
+                'ssh', *openssh_trust_options(known_hosts_path=self.config_dir / 'known_hosts'),
+                '-o', 'ConnectTimeout=5',
                 '-o', 'BatchMode=yes',
                 '-p', str(self.config.ssh.port)
             ]

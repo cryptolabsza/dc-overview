@@ -341,3 +341,39 @@ A successful local test receipt is not deployment acceptance. Published
 manifest facts, actual Linux ownership/mounts, exact installed packages,
 convergence of every owner, and positive authenticated VPM acceptance must be
 verified on the intended customer deployment before promotion.
+
+## Existing controller ordering
+
+Fresh `setup` refuses installed controller identities before configuration or
+release writes. Use `dc-overview configuration inspect`, `plan`, `adopt` and
+`recover` for the bounded monitoring topology described in
+[customer monitoring](customer-monitoring.md#preserve-an-existing-controller-topology).
+The host and serving proxy must both provide the durable controller guard contract;
+a frozen older proxy artifact does not gain that capability from a host import.
+
+An existing controller without the sanctioned writer mount may use the ordinary
+**selected** image updater first to normalize reviewed effective-source amendments.
+Its selected component ownership and customer pins remain enforced. DC defers
+alert/dashboard/monitoring rendering and synchronization while this preservation
+hold is present; it does not select an unapproved floating image as a fallback.
+This ordering is supported only after the changed release has passed startup on
+the old mounts, retained original-container compensation, runtime/default-diff
+review, backward-compatible persistence and idempotent inventory/outbox checks.
+The same-image topology planner holds amended or unprovable executable source.
+Do not fabricate a snapshot image, reapply a private overlay or call a same-image
+updater no-op source normalization.
+
+An incomplete controller record or an uncompleted exclusion release blocks normal
+host lifecycle publication and the marker-aware proxy's updater submission/run.
+Recovery keeps evolved same-format data; an image rollback never implies database
+rewind or retraction of external effects. No release number is advanced by topology
+adoption. Source tests, a declared maintenance proof and a healthy container do not
+replace published-artifact Linux/customer acceptance.
+
+Terminal recovery independently checks current service state, functional health,
+effective monitoring and preserved public/reference custody before exclusion can
+be released. Unsupported inline monitoring credential contexts or unverified
+startup/import overrides remain preservation holds. Normal compiler-cache proof
+uses the pinned image compiler with bounded argument chunks and archive metadata;
+host Python version equality is not required. See the monitoring contract for the
+explicit supported schema and runtime limits.

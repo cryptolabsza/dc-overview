@@ -18,6 +18,17 @@ from dc_overview.fleet_manager import FleetManager
 from test_selected_worker_lifecycle import target
 
 
+@pytest.fixture
+def synthetic_ssh_trust(tmp_path_factory, monkeypatch):
+    """Pre-enrolled public host keys for declared fake transport tests only."""
+    import paramiko
+    key = paramiko.RSAKey.generate(1024)
+    path = tmp_path_factory.mktemp('runtime-enrolled-trust')/'known_hosts'
+    path.write_text(','.join(f'192.0.2.{n}' for n in range(55, 68)) + f' {key.get_name()} {key.get_base64()}\n')
+    monkeypatch.setenv('DC_OVERVIEW_SSH_KNOWN_HOSTS', str(path))
+    return path
+
+
 def host(user='root'):
     return SimpleNamespace(name='synthetic-worker',server_ip='192.0.2.10',ssh_user=user,ssh_port=22,ssh_key=None,ssh_password='synthetic-password')
 
@@ -31,7 +42,7 @@ def images():
     return SimpleNamespace(targets={name:{'kind':'oci','reference':repo+'@sha256:'+'a'*64,'owner':'proxy-updater','origin':'baseline'} for name,repo in {'cryptolabs-proxy':'ghcr.io/cryptolabsza/cryptolabs-proxy','dc-overview':'ghcr.io/cryptolabsza/dc-overview','prometheus':'prom/prometheus','grafana':'grafana/grafana'}.items()})
 
 
-def test_RUNTIME01_fresh_password_preflight_uses_current_auth_without_key_provisioning(tmp_path, monkeypatch):
+def test_RUNTIME01_fresh_password_preflight_uses_current_auth_without_key_provisioning(tmp_path, monkeypatch, synthetic_ssh_trust):
     monkeypatch.setattr('dc_overview.ssh_manager.shutil.which',lambda name:'/synthetic/sshpass')
     config = FleetConfig(config_dir=tmp_path)
     config.ssh.username = 'operator'
@@ -50,7 +61,8 @@ def test_RUNTIME01_fresh_password_preflight_uses_current_auth_without_key_provis
         assert argv[:3] == ['sshpass', '-e', 'ssh']
         assert config.ssh.password not in json.dumps(argv)
         assert kwargs['env']['SSHPASS'] == config.ssh.password
-        assert 'StrictHostKeyChecking=no' in argv and 'UserKnownHostsFile=/dev/null' in argv
+        assert 'StrictHostKeyChecking=yes' in argv
+        assert f'UserKnownHostsFile="{synthetic_ssh_trust}"' in argv
     assert 'sudo -n --' in calls[-1][0][-1]
 
 
@@ -94,7 +106,7 @@ def test_RUNTIME03_watchdog_preflight_proves_its_actual_component_runner(tmp_pat
     worker_lifecycle._preflight_worker_privilege(ssh, {'host':'192.0.2.57','username':'operator','port':22,'key_path':'synthetic-key','sudo':False}, ['dc-watchdog-agent'])
     command = ssh.run_command.call_args.kwargs['command']
     monkeypatch.setattr(web_watchdog,'build_ssh_cmd',lambda *a,**k:(['ssh'],{}))
-    installed = Mock(return_value=subprocess.CompletedProcess([],0,'INSTALL_SUCCESS\nAGENT_VERSION=1.0.7',''))
+    installed = Mock(return_value=subprocess.CompletedProcess([],0,'WATCHDOG_PREFLIGHT=verified\nINSTALL_SUCCESS\nAGENT_VERSION=1.0.7',''))
     monkeypatch.setattr(web_watchdog.subprocess,'run',installed)
     assert web_watchdog.install_watchdog_agent_remote(host('operator'),'',selected_artifact=target('dc-watchdog-agent',version='2.0.8'),mode='update')[0]
     actual = installed.call_args.args[0][-1]
@@ -139,7 +151,7 @@ def test_RUNTIME05_host_reload_accepts_only_schema_duration_equivalence(tmp_path
 
 
 @pytest.mark.parametrize('mode,auth', [('install',AuthMethod.KEY), ('update',AuthMethod.PASSWORD)])
-def test_RUNTIME01_existing_key_transport_is_preserved(tmp_path, monkeypatch, mode, auth):
+def test_RUNTIME01_existing_key_transport_is_preserved(tmp_path, monkeypatch, mode, auth, synthetic_ssh_trust):
     config = FleetConfig(config_dir=tmp_path); config.ssh.auth_method = auth
     config.ssh.password = 'synthetic-unused-password'
     key = tmp_path/'fleet_key'; key.write_text('synthetic key'); key.chmod(0o600)
@@ -156,7 +168,7 @@ def test_RUNTIME01_existing_key_transport_is_preserved(tmp_path, monkeypatch, mo
     assert key.stat().st_mode & 0o777 == 0o600
 
 
-def test_RUNTIME01_password_does_not_bypass_denied_privilege_or_leak_exception(tmp_path,monkeypatch):
+def test_RUNTIME01_password_does_not_bypass_denied_privilege_or_leak_exception(tmp_path,monkeypatch, synthetic_ssh_trust):
     monkeypatch.setattr('dc_overview.ssh_manager.shutil.which',lambda name:'/synthetic/sshpass')
     from dc_overview.ssh_manager import SSHManager
     config = FleetConfig(config_dir=tmp_path); config.ssh.username = 'operator'; config.ssh.password = 'synthetic-password'
@@ -246,7 +258,7 @@ def test_RUNTIME05_unsupported_duration_strings_cannot_claim_equivalence(unsuppo
     assert not monitoring.declared_configuration_matches({'global':{'evaluation_interval':unsupported}}, {'global':{'evaluation_interval':'90s'}})
 
 
-def test_RUNTIME01_fresh_controller_without_sshpass_uses_shipped_password_transport(tmp_path,monkeypatch):
+def test_RUNTIME01_fresh_controller_without_sshpass_uses_shipped_password_transport(tmp_path,monkeypatch, synthetic_ssh_trust):
     import paramiko
     config = FleetConfig(config_dir=tmp_path); config.ssh.username = 'operator'; config.ssh.password = 'synthetic-password'
     config.servers = [Server(name='fresh-worker',server_ip='192.0.2.61')]
@@ -262,7 +274,7 @@ def test_RUNTIME01_fresh_controller_without_sshpass_uses_shipped_password_transp
     for invocation in client.connect.call_args_list:
         assert invocation.kwargs['password'] == config.ssh.password
         assert invocation.kwargs['look_for_keys'] is False and invocation.kwargs['allow_agent'] is False
-    assert isinstance(client.set_missing_host_key_policy.call_args.args[0],paramiko.AutoAddPolicy)
+    assert isinstance(client.set_missing_host_key_policy.call_args.args[0],paramiko.RejectPolicy)
     assert not list(tmp_path.iterdir())
 
 
@@ -304,10 +316,11 @@ def test_FINAL01_whole_watchdog_update_keeps_exact_component_runner(tmp_path,mon
     plan.manifest.data['components']={'dc-watchdog-agent':{'owner':'dc-worker','release':'2.0.8','artifacts':{'linux/amd64':{k:v for k,v in selected.items() if k in ('kind','url','sha256')}}}}
     plan.selection['components']={'dc-watchdog-agent':{'origin':'baseline','enabled':True}}
     active=tmp_path/'active'; active.write_text('active\n'); calls=tmp_path/'calls'
-    programs={'uname':'echo x86_64','sleep':'exit 0','curl':'''if [ "$1" = -fsSL ]; then cp "$CANDIDATE" "$4"
+    programs={'timeout':'shift 3\nexec "$@"','uname':'echo x86_64','sleep':'exit 0','curl':'''if [ "$1" = -fsSL ]; then cp "$CANDIDATE" "$4"
 elif echo "$*" | /usr/bin/grep -q /health; then echo '{"status":"ok","version":"1.0.7"}'
 else echo 'dc_watchdog_agent_up{version="1.0.7",worker="synthetic"} 1'; fi''','systemctl':'''echo "$*" >> "$CALLS"
 case "$*" in
+"show --property=SystemState --value") echo running;;
 *LoadState*) echo loaded;;
 "is-active dc-watchdog-agent") cat "$ACTIVE"; [ "$(cat "$ACTIVE")" = active ] || exit 3;;
 "is-active --quiet dc-watchdog-agent") [ "$(cat "$ACTIVE")" = active ];;
@@ -344,6 +357,8 @@ esac'''}
     monkeypatch.setattr(web_watchdog,'build_ssh_cmd',lambda *a,**k:(['ssh'],{}))
     def installer(argv,**kwargs):
         assert argv==['ssh',expected_runner]
+        if 'echo WATCHDOG_PREFLIGHT=verified' in kwargs['input']:
+            return execute(kwargs['input'])
         assert 'INSTALL_SUCCESS' in kwargs['input'] and selected['url'] in kwargs['input']
         return execute(kwargs['input'])
     monkeypatch.setattr(web_watchdog.subprocess,'run',installer)
@@ -361,13 +376,13 @@ esac'''}
 
 
 @pytest.mark.parametrize('transport',['key','sshpass','paramiko'])
-def test_FINAL02_successful_warning_output_is_clean_for_actual_preflight(tmp_path,monkeypatch,transport):
+def test_FINAL02_successful_warning_output_is_clean_for_actual_preflight(tmp_path,monkeypatch,transport, synthetic_ssh_trust):
     from dc_overview.ssh_manager import SSHManager
     config=FleetConfig(config_dir=tmp_path); config.ssh.auth_method=AuthMethod.KEY if transport=='key' else AuthMethod.PASSWORD
     config.ssh.password=None if transport=='key' else 'synthetic-password'
     config.servers=[Server(name='warn-worker',server_ip='192.0.2.63')]
     if transport=='key':(tmp_path/'fleet_key').write_text('synthetic key')
-    warning="Warning: Permanently added '192.0.2.63' (ED25519) to the list of known hosts.\n"
+    warning="Warning: synthetic operational SSH diagnostic.\n"
     def run(argv,**kwargs):return subprocess.CompletedProcess(argv,0,'Linux x86_64\n' if argv[-1]=='uname -s -m' else 'WORKER_PREFLIGHT=verified\n',warning)
     monkeypatch.setattr('dc_overview.ssh_manager.shutil.which',lambda name:None if transport=='paramiko' else '/synthetic/sshpass')
     monkeypatch.setattr('dc_overview.ssh_manager.subprocess.run',run)
@@ -382,7 +397,7 @@ def test_FINAL02_successful_warning_output_is_clean_for_actual_preflight(tmp_pat
 
 
 @pytest.mark.parametrize('transport',['key','sshpass','paramiko'])
-def test_FINAL02_failed_transport_retains_stdout_and_stderr_diagnostics(tmp_path,monkeypatch,transport):
+def test_FINAL02_failed_transport_retains_stdout_and_stderr_diagnostics(tmp_path,monkeypatch,transport, synthetic_ssh_trust):
     from dc_overview.ssh_manager import SSHManager,SSHResult
     password=None if transport=='key' else 'synthetic-password'
     (tmp_path/'fleet_key').write_text('synthetic key')
@@ -400,7 +415,7 @@ def test_FINAL02_failed_transport_retains_stdout_and_stderr_diagnostics(tmp_path
 
 
 @pytest.mark.parametrize('stdout,stderr',[('Linux x86_64\nforged stdout\n',''),('','Linux x86_64\n'),('Darwin arm64\n','Linux x86_64\n')])
-def test_FINAL02_platform_parser_still_requires_exact_supported_stdout(tmp_path,monkeypatch,stdout,stderr):
+def test_FINAL02_platform_parser_still_requires_exact_supported_stdout(tmp_path,monkeypatch,stdout,stderr, synthetic_ssh_trust):
     config=FleetConfig(config_dir=tmp_path);config.ssh.auth_method=AuthMethod.KEY
     config.servers=[Server(name='unproved-worker',server_ip='192.0.2.65')]
     (tmp_path/'fleet_key').write_text('synthetic key')
@@ -411,7 +426,7 @@ def test_FINAL02_platform_parser_still_requires_exact_supported_stdout(tmp_path,
     assert run.call_count==1
 
 
-def test_FINAL02_proof_on_stderr_cannot_authorize_worker_mutation(tmp_path,monkeypatch):
+def test_FINAL02_proof_on_stderr_cannot_authorize_worker_mutation(tmp_path,monkeypatch, synthetic_ssh_trust):
     config=FleetConfig(config_dir=tmp_path);config.ssh.auth_method=AuthMethod.KEY
     config.servers=[Server(name='unproved-worker',server_ip='192.0.2.66')]
     (tmp_path/'fleet_key').write_text('synthetic key')
@@ -421,7 +436,7 @@ def test_FINAL02_proof_on_stderr_cannot_authorize_worker_mutation(tmp_path,monke
 
 
 @pytest.mark.parametrize('phase',['connect','execute'])
-def test_FINAL02_paramiko_exception_keeps_secret_sanitized_and_closes_transport(tmp_path,monkeypatch,phase):
+def test_FINAL02_paramiko_exception_keeps_secret_sanitized_and_closes_transport(tmp_path,monkeypatch,phase, synthetic_ssh_trust):
     import paramiko
     from dc_overview.ssh_manager import SSHManager
     client=Mock()
