@@ -328,7 +328,7 @@ def build_dc_exporter_install_script(
     lock_path: str = "/run/lock/dc-exporter-install.lock",
     proc_root: str = "/proc",
     metrics_url: str = "http://127.0.0.1:9835/metrics",
-    verification_attempts: int = 3,
+    verification_attempts: int = 30,
     selected_artifact: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Build the single safe installer used by local and remote deployments.
@@ -338,6 +338,8 @@ def build_dc_exporter_install_script(
     directory, verifies the exact ``dc-exporter-rs`` manifest entry and the
     binary's own version, and only then mutates the live installation.  Any
     failure after mutation restores both the previous binary and service state.
+    Cold metrics collection may use thirty samples within the existing bounded
+    remote execution deadline; an unverified sample never establishes success.
     """
     if selected_artifact is not None:
         validate_selected_worker_artifact('dc-exporter', selected_artifact)
@@ -427,9 +429,15 @@ probe_service_state() {
         enabled_rc=$?
     fi
 
+    # Newer systemd can use exit 4 for an absent unit. Accept only the
+    # correlated pair; neither a lone exit 4 nor a mixed legacy/new pair proves
+    # absence. The unit path and LoadState must still independently agree below.
+    if [ "$active_rc" -eq 4 ] || [ "$enabled_rc" -eq 4 ]; then
+        [ "$active_state:$active_rc:$enabled_state:$enabled_rc" = inactive:4:not-found:4 ] || return 1
+    fi
     case "$active_state:$active_rc" in
         active:0) probed_active=1 ;;
-        inactive:3) probed_active=0 ;;
+        inactive:3|inactive:4) probed_active=0 ;;
         *) return 1 ;;
     esac
     case "$enabled_state:$enabled_rc" in
@@ -441,7 +449,7 @@ probe_service_state() {
             probed_enabled=0
             probed_present=1
             ;;
-        not-found:1|:1)
+        not-found:1|:1|not-found:4)
             # A non-zero is-enabled result is not by itself proof that a unit
             # is absent: timeouts and D-Bus failures also return non-zero.
             # Require an inactive service, no live unit at the intended path,
@@ -1073,35 +1081,18 @@ def _build_exporter_ssh_cmd(server_ip: str, ssh_user: str = 'root',
     
     Returns (cmd_prefix, env_dict) where env_dict contains SSHPASS if password auth.
     """
+    from .ssh_trust import openssh_trust_options
+    trust_opts = openssh_trust_options()
     env = {}
-    
+    ssh_cmd = ['sshpass', '-e', 'ssh'] if ssh_password and not ssh_key_path else ['ssh']
+    ssh_cmd.extend(trust_opts)
+    ssh_cmd.extend(['-o', f'ConnectTimeout={timeout}', '-p', str(ssh_port)])
     if ssh_key_path:
-        ssh_cmd = [
-            'ssh',
-            '-o', f'ConnectTimeout={timeout}',
-            '-o', 'StrictHostKeyChecking=no',
-            '-o', 'BatchMode=yes',
-            '-p', str(ssh_port)
-        ]
-        ssh_cmd.extend(['-i', ssh_key_path])
+        ssh_cmd.extend(['-i', ssh_key_path, '-o', 'BatchMode=yes'])
     elif ssh_password:
-        ssh_cmd = [
-            'sshpass', '-e',
-            'ssh',
-            '-o', f'ConnectTimeout={timeout}',
-            '-o', 'StrictHostKeyChecking=no',
-            '-p', str(ssh_port)
-        ]
         env['SSHPASS'] = ssh_password
     else:
-        ssh_cmd = [
-            'ssh',
-            '-o', f'ConnectTimeout={timeout}',
-            '-o', 'StrictHostKeyChecking=no',
-            '-o', 'BatchMode=yes',
-            '-p', str(ssh_port)
-        ]
-    
+        ssh_cmd.extend(['-o', 'BatchMode=yes'])
     ssh_cmd.append(f'{ssh_user}@{server_ip}')
     return ssh_cmd, env
 

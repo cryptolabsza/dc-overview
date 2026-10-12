@@ -20,8 +20,8 @@ def _require_proxy_update_authority(capabilities):
                            'no update was submitted or release changes applied.')
 
 
-def _updater(*arguments):
-    command = ['docker', 'exec', 'cryptolabs-proxy', 'env', 'PYTHONPATH=/app/src',
+def _updater(*arguments, container='cryptolabs-proxy'):
+    command = ['docker', 'exec', container, 'env', 'PYTHONPATH=/app/src',
                'python3', '-m', 'cryptolabs_proxy.updates', *arguments]
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=30)
@@ -91,7 +91,11 @@ def _container_absent(inspected, name):
                              + re.escape(name), inspected.stderr.strip(), flags=re.IGNORECASE) is not None)
 
 
-def proxy_capabilities(*, fresh_setup=False):
+def proxy_capabilities(*, fresh_setup=False, container_id=None):
+    if container_id is not None:
+        if not isinstance(container_id, str) or not re.fullmatch(r'[0-9a-f]{64}', container_id):
+            raise RuntimeError('live proxy container identity unavailable')
+        return _updater('capabilities', container=container_id)
     if fresh_setup:
         try:
             inspected = subprocess.run(['docker','container','inspect','cryptolabs-proxy','--format','{{json .State}}'],
@@ -188,6 +192,8 @@ def adopt_existing_policies(config, manifest, policies):
 
 def preflight_release(config, manifest_path=None, *, platform=None, fresh_setup=False):
     """Read/validate policy and consumer prerequisites before the first write."""
+    from .controller_adoption import ensure_mutation_allowed
+    ensure_mutation_allowed(config.config_dir, setup=fresh_setup)
     store = release_store(config)
     public_path = config.config_dir / 'fleet-config.yaml'
     config._lifecycle_public_snapshot = public_path.read_bytes() if public_path.exists() else b''
@@ -237,7 +243,7 @@ def preflight_release(config, manifest_path=None, *, platform=None, fresh_setup=
         if config.vast_price_manager.layout:
             from .vpm_service import VPMLayout
             VPMLayout(**config.vast_price_manager.layout)
-    if config.components.dc_overview:
+    if config.components.dc_overview and not getattr(config, '_controller_preservation_hold', False):
         from .fleet_manager import FleetManager
         manager = FleetManager(config)
         manager.release_plan = plan
@@ -255,6 +261,8 @@ def preflight_release(config, manifest_path=None, *, platform=None, fresh_setup=
 
 
 def commit_release(config, plan):
+    from .controller_adoption import ensure_mutation_allowed
+    ensure_mutation_allowed(config.config_dir)
     public_path = config.config_dir / 'fleet-config.yaml'
     previous = getattr(config, '_lifecycle_public_snapshot', public_path.read_bytes() if public_path.exists() else b'')
     with config.lifecycle_lock():
@@ -339,6 +347,8 @@ def dispatch_vpm(config, target, *, setup=False):
 
 
 def run_selected_upgrade(config, plan, *, timeout=1800):
+    from .controller_adoption import ensure_mutation_allowed
+    ensure_mutation_allowed(config.config_dir)
     from .worker_lifecycle import preflight_workers
     preflight_workers(config, plan)
     job = run_fleet_upgrade('main', timeout=timeout, selection_id=plan.selection['selection_id'], selection_sha256=plan.selection_sha256)

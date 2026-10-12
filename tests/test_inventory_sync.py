@@ -12,6 +12,8 @@ import sys
 import threading
 
 import requests
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 
 def _configure_inventory(monkeypatch, tmp_path):
@@ -19,6 +21,18 @@ def _configure_inventory(monkeypatch, tmp_path):
     secret_file.write_text("test-inventory-secret\n")
     monkeypatch.setenv("DC_IPMI_INVENTORY_SECRET_FILE", str(secret_file))
     monkeypatch.setenv("IPMI_INVENTORY_URL", "http://ipmi-monitor:5000")
+    # Local inventory snapshots include SSH custody; never discover a host key.
+    key_path = tmp_path / "synthetic-fleet-key"
+    key_path.write_bytes(Ed25519PrivateKey.generate().private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.OpenSSH,
+        serialization.NoEncryption(),
+    ))
+    key_path.chmod(0o600)
+    monkeypatch.setattr(
+        "dc_overview.app.resolve_ssh_key_path",
+        lambda server: server.ssh_key.key_path if server.ssh_key else str(key_path),
+    )
 
 
 def _acknowledgment(payload):

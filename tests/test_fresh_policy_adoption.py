@@ -15,7 +15,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from dc_overview import fleet_upgrade
+from dc_overview import controller_adoption, fleet_upgrade
 from dc_overview.fleet_config import FleetConfig
 from dc_overview.release_catalog import Manifest
 
@@ -69,14 +69,25 @@ def fresh_preflight(tmp_path, monkeypatch):
     return config, path, getter, prepare, verify, mutation
 
 
-def docker_inventory(monkeypatch, *, first_inventory=None, installed=None):
+def docker_inventory(monkeypatch, *, first_inventory=None, installed=None,
+                     controller_inventory=None, fresh_setup=True, release_root=None):
+    """Model the controller guard separately from later role/policy inventory."""
     calls = []
     def run(command, **kwargs):
         calls.append(command)
         assert kwargs == {'capture_output': True, 'text': True, 'timeout': 15}
-        # Accept old argv too during RED, so the real regression fails on the
-        # captured diagnostic, not merely on a command-shape assertion.
-        assert command[0] == 'docker' and 'inspect' in command
+        if fresh_setup and len(calls) <= len(controller_adoption.ROLES):
+            role = controller_adoption.ROLES[len(calls)-1]
+            assert command == ['docker', 'container', 'inspect', role, '--format', '{{json .}}']
+            value = (controller_inventory or {}).get(role, (1, '\n', f'error: no such object: {role}\n'))
+            if isinstance(value, Exception):
+                raise value
+            return outcome(*value)
+        if command[-1] == '{{json .Mounts}}':
+            assert command == ['docker', 'inspect', 'cryptolabs-proxy', '--format', '{{json .Mounts}}']
+            assert release_root is not None
+            return outcome(0, json.dumps([{'Source': str(release_root), 'Destination': '/etc/cryptolabs/releases', 'RW': False}]), '')
+        assert command[:3] == ['docker', 'container', 'inspect']
         target = command[command.index('inspect') + 1]
         if command[-1] == '{{json .State}}':
             return outcome(*CAPTURED_FORMATTED_ABSENCE)
@@ -93,6 +104,12 @@ def docker_inventory(monkeypatch, *, first_inventory=None, installed=None):
     return calls
 
 
+def assert_fresh_controller_inventory(calls):
+    assert calls[:len(controller_adoption.ROLES)] == [
+        ['docker', 'container', 'inspect', role, '--format', '{{json .}}']
+        for role in controller_adoption.ROLES]
+
+
 @pytest.mark.parametrize('diagnostic', SUPPORTED_ABSENCE)
 def test_fresh_manifest_real_preflight_adoption_and_prepare_accept_exact_absence(fresh_preflight, monkeypatch, diagnostic):
     config, path, getter, prepare, verify, mutation = fresh_preflight
@@ -101,11 +118,13 @@ def test_fresh_manifest_real_preflight_adoption_and_prepare_accept_exact_absence
     manifest = Manifest.from_bytes(path.read_bytes())
     config.release_selection.components = {name: {'origin': 'baseline', 'enabled': False}
         for name in manifest.data['components'] if name not in {'cryptolabs-proxy', 'dc-overview-cli'}}
-    calls = docker_inventory(monkeypatch, first_inventory=diagnostic)
+    calls = docker_inventory(monkeypatch, first_inventory=diagnostic,
+        controller_inventory={'cryptolabs-proxy': diagnostic})
     plan = fleet_upgrade.preflight_release(config, path, fresh_setup=True, platform='linux/amd64')
     assert set(plan.targets) == {'cryptolabs-proxy', 'dc-overview-cli'}
     assert plan.selection['components']['cryptolabs-proxy'] == {'origin': 'baseline', 'enabled': True}
-    assert calls[1] == ['docker', 'container', 'inspect', 'cryptolabs-proxy', '--format', '{{json .}}']
+    assert_fresh_controller_inventory(calls)
+    assert calls[len(controller_adoption.ROLES)+1] == ['docker', 'container', 'inspect', 'cryptolabs-proxy', '--format', '{{json .}}']
     assert getter.call_count == 2
     prepare.assert_called_once()
     verify.assert_called_once_with(plan.targets['dc-overview-cli'])
@@ -134,14 +153,59 @@ UNPROVEN_INVENTORY = [
 ]
 
 
+@pytest.mark.parametrize('inventory', UNPROVEN_INVENTORY + [
+    (0, '{}', ''), (0, 'null', ''), (0, '[]', ''), (0, 'malformed', ''), (0, '{"Id":""}', '')])
+def test_unknown_controller_holds_before_capability_or_role_policy_inventory(fresh_preflight, monkeypatch, inventory):
+    config, path, getter, prepare, verify, mutation = fresh_preflight
+    calls = docker_inventory(monkeypatch, controller_inventory={'cryptolabs-proxy': inventory})
+    before = {str(p): p.read_bytes() for p in path.parent.rglob('*') if p.is_file()}
+    with pytest.raises(controller_adoption.AdoptionError, match='controller inventory.*no writes allowed'):
+        fleet_upgrade.preflight_release(config, path, fresh_setup=True, platform='linux/amd64')
+    assert_fresh_controller_inventory(calls)
+    assert len(calls) == len(controller_adoption.ROLES)
+    getter.assert_not_called(); prepare.assert_not_called(); verify.assert_not_called(); mutation.assert_not_called()
+    assert before == {str(p): p.read_bytes() for p in path.parent.rglob('*') if p.is_file()}
+    assert not config.config_dir.exists()
+
+
+@pytest.mark.parametrize('role', controller_adoption.ROLES)
+def test_existing_controller_holds_fresh_setup_before_capability_or_preparation(fresh_preflight, monkeypatch, role):
+    config, path, getter, prepare, verify, mutation = fresh_preflight
+    calls = docker_inventory(monkeypatch, controller_inventory={role: (0, json.dumps({'Id': 'a'*64}), '')})
+    with pytest.raises(controller_adoption.AdoptionError, match='existing controller.*setup cannot replace'):
+        fleet_upgrade.preflight_release(config, path, fresh_setup=True, platform='linux/amd64')
+    assert_fresh_controller_inventory(calls)
+    assert len(calls) == len(controller_adoption.ROLES)
+    getter.assert_not_called(); prepare.assert_not_called(); verify.assert_not_called(); mutation.assert_not_called()
+    assert not config.config_dir.exists()
+
+
+@pytest.mark.parametrize('state,released', [('prepared', True), ('adopted', False)])
+def test_unreleased_controller_recovery_holds_upgrade_before_policy_inputs(fresh_preflight, monkeypatch, state, released):
+    config, path, getter, prepare, verify, mutation = fresh_preflight
+    recovery = config.config_dir / 'controller-recovery'
+    recovery.mkdir(parents=True, mode=0o700)
+    record = recovery / 'operation.json'
+    record.write_text(json.dumps({'state': state, 'exclusion_released': released}))
+    record.chmod(0o600)
+    calls = docker_inventory(monkeypatch, fresh_setup=False)
+    before = {str(p): p.read_bytes() for p in path.parent.rglob('*') if p.is_file()}
+    with pytest.raises(controller_adoption.AdoptionError, match='controller recovery required'):
+        fleet_upgrade.preflight_release(config, path, platform='linux/amd64')
+    assert calls == []
+    getter.assert_not_called(); prepare.assert_not_called(); verify.assert_not_called(); mutation.assert_not_called()
+    assert before == {str(p): p.read_bytes() for p in path.parent.rglob('*') if p.is_file()}
+
+
 @pytest.mark.parametrize('inventory', UNPROVEN_INVENTORY)
 def test_inventory_uncertainty_holds_after_capability_proof_before_prepare_or_mutation(fresh_preflight, monkeypatch, inventory):
     config, path, getter, prepare, verify, mutation = fresh_preflight
-    docker_inventory(monkeypatch, first_inventory=inventory)
+    calls = docker_inventory(monkeypatch, first_inventory=inventory)
     before = {str(p): p.read_bytes() for p in path.parent.rglob('*') if p.is_file()}
     with pytest.raises(RuntimeError, match='ownership inventory is unavailable'):
         fleet_upgrade.preflight_release(config, path, fresh_setup=True, platform='linux/amd64')
     getter.assert_called_once_with()
+    assert_fresh_controller_inventory(calls)
     prepare.assert_not_called()
     verify.assert_not_called()
     mutation.assert_not_called()
@@ -154,14 +218,15 @@ def test_empty_policies_adopt_every_absent_public_component_without_writes(fresh
     calls = docker_inventory(monkeypatch)
     plan = fleet_upgrade.preflight_release(config, path, fresh_setup=True, platform='linux/amd64')
     expected = {name for name, value in plan.manifest.data['components'].items() if value['owner'] == 'proxy-updater'}
-    assert {call[3] for call in calls if call[-1] == '{{json .}}'} == expected
+    assert_fresh_controller_inventory(calls)
+    assert {call[3] for call in calls[len(controller_adoption.ROLES):] if call[-1] == '{{json .}}'} == expected
     assert config.release_selection.components == {}
     assert set(plan.targets) == {'cryptolabs-proxy', 'dc-overview-cli'}
     prepare.assert_called_once(); mutation.assert_not_called()
     assert not config.config_dir.exists()
 
 
-def test_explicit_customer_policy_is_preserved_without_inventory(fresh_preflight, monkeypatch):
+def test_explicit_customer_policy_is_preserved_without_role_policy_inventory(fresh_preflight, monkeypatch):
     config, path, getter, prepare, verify, mutation = fresh_preflight
     manifest = Manifest.from_bytes(path.read_bytes())
     reference = manifest.data['components']['cryptolabs-proxy']['artifacts']['linux/amd64']['reference']
@@ -171,7 +236,8 @@ def test_explicit_customer_policy_is_preserved_without_inventory(fresh_preflight
     plan = fleet_upgrade.preflight_release(config, path, fresh_setup=True, platform='linux/amd64')
     assert plan.selection['components']['cryptolabs-proxy'] == policy
     assert config.release_selection.components['cryptolabs-proxy'] == policy
-    assert all(call[-1] != '{{json .}}' or call[3] != 'cryptolabs-proxy' for call in calls)
+    assert_fresh_controller_inventory(calls)
+    assert all(call[-1] != '{{json .}}' or call[3] != 'cryptolabs-proxy' for call in calls[len(controller_adoption.ROLES):])
     mutation.assert_not_called()
 
 
@@ -181,13 +247,28 @@ def test_installed_immutable_image_stays_customer_pin_and_conflict_holds(fresh_p
     manifest = Manifest.from_bytes(path.read_bytes())
     reference = manifest.data['components']['cryptolabs-proxy']['artifacts']['linux/amd64']['reference']
     installed = reference.split('@')[0] + '@sha256:' + 'c' * 64 if conflict else reference
-    docker_inventory(monkeypatch, installed=installed)
+    # Existing controllers use the ordinary lifecycle after supported adoption,
+    # not fresh setup. Preserve the real guard and prove its released journal.
+    recovery = config.config_dir / 'controller-recovery'
+    recovery.mkdir(parents=True, mode=0o700)
+    record = recovery / 'operation.json'
+    record.write_text(json.dumps({'state': 'adopted', 'exclusion_released': True}))
+    record.chmod(0o600)
+    before = {str(p): p.read_bytes() for p in path.parent.rglob('*') if p.is_file()}
+    live = Mock(return_value={'selection_contract': 1, 'proxy_replacement_policy': 'host-adoption-required-v1'})
+    monkeypatch.setattr(fleet_upgrade, '_updater', live)
+    calls = docker_inventory(monkeypatch, installed=installed, fresh_setup=False,
+        release_root=config.config_dir / 'releases')
     if conflict:
         with pytest.raises(ValueError, match='pin_conflict'):
-            fleet_upgrade.preflight_release(config, path, fresh_setup=True, platform='linux/amd64')
+            fleet_upgrade.preflight_release(config, path, platform='linux/amd64')
         verify.assert_not_called()
     else:
-        plan = fleet_upgrade.preflight_release(config, path, fresh_setup=True, platform='linux/amd64')
+        plan = fleet_upgrade.preflight_release(config, path, platform='linux/amd64')
         assert plan.selection['components']['cryptolabs-proxy'] == {'origin': 'customer-pin', 'enabled': True, 'pin': installed}
+        assert calls[-1][-1] == '{{json .Mounts}}'
+        assert live.call_args_list == [(('capabilities',), {}), (('capabilities',), {})]
+    assert calls[0][3] == 'cryptolabs-proxy'
+    getter.assert_not_called()
     mutation.assert_not_called()
-    assert not config.config_dir.exists()
+    assert before == {str(p): p.read_bytes() for p in path.parent.rglob('*') if p.is_file()}

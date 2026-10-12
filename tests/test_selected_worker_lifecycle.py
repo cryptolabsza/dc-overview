@@ -96,7 +96,7 @@ def test_selected_watchdog_validates_artifact_before_registration_and_never_disc
     latest=Mock(side_effect=AssertionError('selected delivery must not discover latest'))
     monkeypatch.setattr(web_watchdog,'get_watchdog_latest_release',latest)
     monkeypatch.setattr(web_watchdog,'build_ssh_cmd',lambda *a,**k:(['ssh'],{}))
-    run=Mock(return_value=subprocess.CompletedProcess([],0,'INSTALL_SUCCESS\nAGENT_VERSION=1.0.7',''))
+    run=Mock(return_value=subprocess.CompletedProcess([],0,'WATCHDOG_PREFLIGHT=verified\nINSTALL_SUCCESS\nAGENT_VERSION=1.0.7',''))
     monkeypatch.setattr(web_watchdog.subprocess,'run',run)
     selected=target('dc-watchdog-agent',version='2.0.8')
     server=host()
@@ -143,6 +143,8 @@ def test_selected_watchdog_checksum_failure_never_stops_existing_agent(tmp_path,
     binary_dir=tmp_path/'installed';binary_dir.mkdir();binary=binary_dir/'dc-watchdog-agent';binary.write_text('old agent')
     config=tmp_path/'config';config.mkdir();units=tmp_path/'units';units.mkdir()
     def remote(cmd,**kwargs):
+        if 'echo WATCHDOG_PREFLIGHT=verified' in kwargs['input']:
+            return subprocess.CompletedProcess(cmd, 0, 'WATCHDOG_PREFLIGHT=verified\n', '')
         script=kwargs['input'].replace('/usr/local/bin',str(binary_dir)).replace('/etc/dc-watchdog',str(config)).replace('/etc/systemd/system',str(units))
         return original_run(['bash','-s'],input=script,capture_output=True,text=True,env={**os.environ,'PATH':str(fake_bin)+':'+os.environ['PATH'],'CANDIDATE':str(candidate),'CALLS':str(log)})
     monkeypatch.setattr(web_watchdog.subprocess,'run',remote)

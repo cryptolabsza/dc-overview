@@ -45,7 +45,26 @@ def _configuration_path():
     return canonical if canonical.is_file() else Path('/etc/dc-overview/prometheus.yml')
 
 
+def _adopted_ownership():
+    explicit = os.environ.get('PROMETHEUS_OWNERSHIP_PATH')
+    if not explicit:
+        return None
+    path = Path(explicit)
+    if not path.is_absolute() or '..' in path.parts or path.is_symlink():
+        raise ValueError('monitoring ownership requires a safe absolute file')
+    data = json.loads(path.read_text())
+    if not isinstance(data, dict) or set(data) != {'schema_version', 'managed_jobs', 'file_references'} or data['schema_version'] != 1:
+        raise ValueError('monitoring ownership schema_version 1 required')
+    for key in ('managed_jobs', 'file_references'):
+        if not isinstance(data[key], list) or any(not isinstance(v, str) for v in data[key]):
+            raise ValueError('monitoring ownership lists required')
+    return data
+
+
 def _declared_legacy_jobs():
+    adopted = _adopted_ownership()
+    if adopted is not None:
+        return adopted['managed_jobs']
     path = Path('/etc/dc-overview/fleet-config.yaml')
     if not path.is_file():
         return []
@@ -95,7 +114,8 @@ def update_prometheus_yml_targets(servers, *, config_path=None, legacy_managed_j
         legacy = _declared_legacy_jobs() if legacy_managed_jobs is None else legacy_managed_jobs
         # recording_rules.yml is the shipped product rule reference, not an
         # implicit grant to arbitrary historical external credential files.
-        adopted = tuple(adopted_file_references) + ('/etc/prometheus/recording_rules.yml',)
+        ownership = _adopted_ownership()
+        adopted = tuple(adopted_file_references) + tuple(ownership['file_references'] if ownership else []) + ('/etc/prometheus/recording_rules.yml',)
         candidate = merge_prometheus_config(previous, generated, legacy_managed_jobs=legacy,
                                              adopted_file_references=adopted)
         validate_known_discovery_targets(candidate, build_discovery_targets(servers))

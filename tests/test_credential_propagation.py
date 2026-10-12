@@ -18,6 +18,14 @@ def _configure_inventory(monkeypatch, tmp_path):
     monkeypatch.setenv("DC_IPMI_INVENTORY_SECRET_FILE", str(secret_file))
     monkeypatch.setenv("IPMI_INVENTORY_URL", "http://ipmi-monitor:5000")
     monkeypatch.setenv("FLEET_CREDENTIAL_AUTHORITY", "local")
+    # Credential snapshots need an explicit test key rather than host defaults.
+    key_path = tmp_path / "synthetic-fleet-key"
+    _private_key(key_path)
+    key_path.chmod(0o600)
+    monkeypatch.setattr(
+        "dc_overview.app.resolve_ssh_key_path",
+        lambda server: server.ssh_key.key_path if server.ssh_key else str(key_path),
+    )
     return "test-inventory-secret"
 
 

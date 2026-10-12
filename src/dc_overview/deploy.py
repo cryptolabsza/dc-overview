@@ -26,6 +26,8 @@ import questionary
 from questionary import Style
 import yaml
 
+from .ssh_trust import SSHTrustError, openssh_trust_options
+
 console = Console()
 
 custom_style = Style([
@@ -203,6 +205,11 @@ class DeployManager:
     
     def deploy_ssh_key_to_worker(self, worker: Worker, password: str) -> bool:
         """Deploy SSH key to a worker using password auth."""
+        try:
+            trust_opts = openssh_trust_options(worker)
+        except SSHTrustError as exc:
+            console.print(str(exc))
+            return False
         _, pub_key = self.generate_ssh_key()
         
         console.print(f"[cyan]Deploying SSH key to {worker.name} ({worker.ip})...[/cyan]")
@@ -211,37 +218,37 @@ class DeployManager:
             import shlex
             # Use sshpass to deploy key — avoid shell=True to prevent injection
             cmd = [
-                'sshpass', '-p', password,
+                'sshpass', '-e',
                 'ssh-copy-id', '-i', f'{self.ssh_key_path}.pub',
-                '-o', 'StrictHostKeyChecking=no',
-                '-o', 'UserKnownHostsFile=/dev/null',
+                *trust_opts,
+                '-o', 'ConnectTimeout=10',
                 '-p', str(worker.ssh_port),
                 f'{shlex.quote(worker.ssh_user)}@{shlex.quote(worker.ip)}'
             ]
             
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env={**os.environ, "SSHPASS": password})
             
             if result.returncode == 0:
                 console.print(f"[green]✓[/green] SSH key deployed to {worker.name}")
                 return True
             else:
-                console.print(f"[red]✗[/red] Failed: {result.stderr[:100]}")
+                console.print("[red]✗[/red] Key deployment failed; verify host trust and authentication.")
                 return False
                 
         except subprocess.TimeoutExpired:
             console.print(f"[red]✗[/red] Timeout connecting to {worker.name}")
             return False
         except Exception as e:
-            console.print(f"[red]✗[/red] Error: {e}")
+            console.print("[red]✗[/red] Key deployment failed; verify host trust and authentication.")
             return False
     
     def test_ssh_connection(self, worker: Worker) -> bool:
         """Test SSH connection to worker."""
         try:
+            trust_opts = openssh_trust_options(worker)
             cmd = [
                 "ssh", "-i", str(self.ssh_key_path),
-                "-o", "StrictHostKeyChecking=no",
-                "-o", "UserKnownHostsFile=/dev/null",
+                *trust_opts,
                 "-o", "ConnectTimeout=5",
                 "-p", str(worker.ssh_port),
                 f"{worker.ssh_user}@{worker.ip}",
@@ -385,13 +392,16 @@ class DeployManager:
     
     def run_remote_command(self, worker: Worker, command: str, sudo: bool = False) -> Tuple[bool, str]:
         """Run a command on a remote worker."""
+        try:
+            trust_opts = openssh_trust_options(worker)
+        except SSHTrustError as exc:
+            return False, str(exc)
         if sudo and worker.ssh_user != "root":
             command = f"sudo {command}"
         
         cmd = [
             "ssh", "-i", str(self.ssh_key_path),
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
+            *trust_opts,
             "-o", "ConnectTimeout=10",
             "-p", str(worker.ssh_port),
             f"{worker.ssh_user}@{worker.ip}",

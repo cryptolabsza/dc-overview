@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from dc_overview import fleet_upgrade
+from dc_overview import controller_adoption, fleet_upgrade
 from dc_overview.fleet_config import FleetConfig
 from test_release_selection_contract import manifest_data
 
@@ -21,14 +21,22 @@ UNSAFE=[None,{}, {'selection_contract':1}, {'selection_contract':1,'proxy_replac
         ['selection_contract',1]]
 
 
+def absent_controller(monkeypatch):
+    """Authority cases start after a proved empty controller inventory."""
+    probe = Mock(return_value={role: None for role in controller_adoption.ROLES})
+    monkeypatch.setattr(controller_adoption, 'probe_controller_inventory', probe)
+    return probe
+
+
 def setup_preflight(tmp_path,monkeypatch):
+    controller_probe = absent_controller(monkeypatch)
     config=FleetConfig(config_dir=tmp_path/'config')
     config.release_selection.selection_id='synthetic'
     config.release_selection.selection_sha256='a'*64
     for name in ('dc_overview','ipmi_monitor','vast_exporter','runpod_exporter','vast_price_manager','dc_watchdog'):
         setattr(config.components,name,False)
     plan=SimpleNamespace(targets={'cryptolabs-proxy':{'owner':'proxy-updater'},'dc-overview-cli':{'owner':'host-cli'}})
-    store=SimpleNamespace(root=config.config_dir/'releases',prepare=Mock(return_value=plan))
+    store=SimpleNamespace(root=config.config_dir/'releases',prepare=Mock(return_value=plan),controller_probe=controller_probe)
     monkeypatch.setattr(fleet_upgrade,'release_store',lambda config:store)
     load=Mock(return_value=plan);monkeypatch.setattr(fleet_upgrade,'load_release',load)
     verify=Mock();monkeypatch.setattr(fleet_upgrade,'verify_running_cli',verify)
@@ -64,6 +72,7 @@ def test_AUTHORITY02_preparation_refuses_before_load_recovery_or_prepare(tmp_pat
     with pytest.raises(RuntimeError,match='configuration plan.*configuration adopt'):
         fleet_upgrade.preflight_release(config,path if from_manifest else None,fresh_setup=True)
     store.prepare.assert_not_called();load.assert_not_called();verify.assert_not_called();mutation.assert_not_called()
+    store.controller_probe.assert_called_once_with()
     assert not config.config_dir.exists()
 
 
@@ -74,6 +83,7 @@ def test_AUTHORITY03_second_capability_check_cannot_consume_stale_first_proof(tm
     with pytest.raises(RuntimeError,match='configuration plan.*configuration adopt'):
         fleet_upgrade.preflight_release(config,path if from_manifest else None,fresh_setup=True)
     assert probe.call_count==2
+    store.controller_probe.assert_called_once_with()
     verify.assert_not_called();mutation.assert_not_called()
     assert not config.config_dir.exists()
 
@@ -100,6 +110,7 @@ def test_AUTHORITY04_exact_policy_passes_both_preparation_checks(tmp_path,monkey
     probe=Mock(return_value=SAFE);monkeypatch.setattr(fleet_upgrade,'proxy_capabilities',probe)
     assert fleet_upgrade.preflight_release(config,path if from_manifest else None,fresh_setup=True) is plan
     assert probe.call_count==2 and verify.call_count==1
+    store.controller_probe.assert_called_once_with()
     mutation.assert_not_called()
 
 
@@ -161,18 +172,21 @@ def test_AUTHORITY07_missing_docker_has_actionable_selected_setup_prerequisite(m
 
 def test_AUTHORITY08_unselected_fresh_setup_retains_readonly_automatic_prerequisite_path(tmp_path,monkeypatch):
     config=FleetConfig(config_dir=tmp_path/'config')
-    probe=Mock(side_effect=AssertionError('Unselected fresh setup must not require Docker before its installer'))
+    controller_probe = absent_controller(monkeypatch)
+    probe=Mock(side_effect=AssertionError('Unselected fresh setup must not probe proxy capabilities before its installer'))
     monkeypatch.setattr(fleet_upgrade,'proxy_capabilities',probe)
     load=Mock(side_effect=AssertionError('No selection or recovery to load'))
     monkeypatch.setattr(fleet_upgrade,'load_release',load)
     assert fleet_upgrade.preflight_release(config,fresh_setup=True) is None
     probe.assert_not_called();load.assert_not_called()
+    controller_probe.assert_called_once_with()
     assert not config.config_dir.exists()
 
 
 @pytest.mark.parametrize('existing',['id','hash','selection','journal'])
 def test_AUTHORITY08_fresh_existing_selection_or_journal_requires_live_authority(tmp_path,monkeypatch,existing):
     config=FleetConfig(config_dir=tmp_path/'config')
+    controller_probe = absent_controller(monkeypatch)
     if existing=='id':config.release_selection.selection_id='synthetic'
     elif existing=='hash':config.release_selection.selection_sha256='a'*64
     else:
@@ -184,6 +198,7 @@ def test_AUTHORITY08_fresh_existing_selection_or_journal_requires_live_authority
     with pytest.raises(RuntimeError,match='configuration plan.*configuration adopt'):
         fleet_upgrade.preflight_release(config,fresh_setup=True)
     probe.assert_called_once_with(fresh_setup=True);load.assert_not_called()
+    controller_probe.assert_called_once_with()
     assert before=={str(p):p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
 
 
@@ -239,6 +254,7 @@ def test_BOOTSTRAP_ambiguous_absence_holds_before_host_fallback_or_config_prepar
     with pytest.raises(RuntimeError, match='authority prerequisite'):
         fleet_upgrade.preflight_release(config, path if from_manifest else None, fresh_setup=True)
     getter.assert_not_called(); live.assert_not_called()
+    store.controller_probe.assert_called_once_with()
     store.prepare.assert_not_called(); load.assert_not_called(); verify.assert_not_called(); mutation.assert_not_called()
     assert before == {str(p): p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
     assert not config.config_dir.exists()

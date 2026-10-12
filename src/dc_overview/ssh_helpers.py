@@ -10,6 +10,8 @@ import os
 import shlex
 import subprocess
 
+from .ssh_trust import openssh_trust_options, validated_extra_ssh_options
+
 logger = logging.getLogger(__name__)
 
 
@@ -68,6 +70,8 @@ def build_ssh_cmd(server, timeout=10, batch_mode=True, extra_opts=None):
         cmd.append('echo ok')
         result = subprocess.run(cmd, capture_output=True, text=True, env={**os.environ, **env})
     """
+    trust_opts = openssh_trust_options(server)
+    extra_opts = validated_extra_ssh_options(extra_opts)
     env = {}
     cmd = []
     
@@ -77,8 +81,8 @@ def build_ssh_cmd(server, timeout=10, batch_mode=True, extra_opts=None):
     if ssh_key_path:
         cmd = [
             'ssh',
+            *trust_opts,
             '-o', f'ConnectTimeout={timeout}',
-            '-o', 'StrictHostKeyChecking=no',
         ]
         if batch_mode:
             cmd.extend(['-o', 'BatchMode=yes'])
@@ -88,16 +92,16 @@ def build_ssh_cmd(server, timeout=10, batch_mode=True, extra_opts=None):
         cmd = [
             'sshpass', '-e',
             'ssh',
+            *trust_opts,
             '-o', f'ConnectTimeout={timeout}',
-            '-o', 'StrictHostKeyChecking=no',
             '-p', str(server.ssh_port or 22),
         ]
         env['SSHPASS'] = ssh_password
     else:
         cmd = [
             'ssh',
+            *trust_opts,
             '-o', f'ConnectTimeout={timeout}',
-            '-o', 'StrictHostKeyChecking=no',
         ]
         if batch_mode:
             cmd.extend(['-o', 'BatchMode=yes'])

@@ -385,8 +385,15 @@ def upgrade(dev: bool, stable: bool, release_manifest: Optional[Path] = None):
     if dev and stable:
         console.print("[red]Error:[/red] Cannot use --dev and --stable together")
         sys.exit(1)
+    from .controller_adoption import ensure_mutation_allowed, upgrade_requires_adoption
+    try:
+        ensure_mutation_allowed(DOCKER_CONFIG_DIR)
+        preserving = upgrade_requires_adoption()
+    except RuntimeError as error:
+        raise click.ClickException(str(error)) from None
     from .fleet_upgrade import preflight_release, commit_release, run_selected_upgrade, load_release
     config = FleetConfig.load(DOCKER_CONFIG_DIR)
+    config._controller_preservation_hold = preserving
     try:
         if dev and (release_manifest or config.release_selection.selection_id or (DOCKER_CONFIG_DIR/'releases/selection.json').exists()):
             raise ValueError('Explicit dev channel conflicts with the installed release selection')
@@ -414,8 +421,10 @@ def upgrade(dev: bool, stable: bool, release_manifest: Optional[Path] = None):
 
     if plan and release_manifest:
         commit_release(config, plan)
-    alert_sync = _sync_alerts_for_upgrade(DOCKER_CONFIG_DIR)
-    if not alert_sync.success:
+    if preserving and plan is None:
+        raise click.ClickException('Existing controller requires an explicit selected compatible release before image update; monitoring adoption remains pending')
+    alert_sync = None if preserving else _sync_alerts_for_upgrade(DOCKER_CONFIG_DIR)
+    if alert_sync is not None and not alert_sync.success:
         recovery = (
             "rollback incomplete; manual recovery required"
             if not alert_sync.rollback_complete
@@ -896,6 +905,11 @@ def setup(legacy: bool, config_file: str, yes: bool, dev: bool, release_manifest
         sudo dc-overview setup -c config.yaml     # Automated from config file
         sudo dc-overview setup -c config.yaml -y  # Skip confirmations
     """
+    from .controller_adoption import ensure_mutation_allowed
+    try:
+        ensure_mutation_allowed(DOCKER_CONFIG_DIR, setup=True)
+    except RuntimeError as error:
+        raise click.ClickException(str(error)) from None
     if legacy:
         if release_manifest:
             raise click.ClickException('Release manifests require supported fleet setup')
@@ -906,6 +920,8 @@ def setup(legacy: bool, config_file: str, yes: bool, dev: bool, release_manifest
 
 def run_fleet_quickstart(config_file: str = None, auto_confirm: bool = False, dev: bool = False, release_manifest: Optional[Path] = None):
     """Run the fleet setup (collects config then deploys everything)."""
+    from .controller_adoption import ensure_mutation_allowed
+    ensure_mutation_allowed(DOCKER_CONFIG_DIR, setup=True)
     if os.geteuid() != 0:
         console.print("[red]Error:[/red] This command requires root privileges.")
         console.print("Run with: [cyan]sudo dc-overview setup[/cyan]")
@@ -1855,8 +1871,13 @@ def _remove_exporter_from_worker(worker: str, ssh_key: str, default_port: int):
     
     console.print(f"  → {user}@{host}:{port}", end=" ")
     
-    ssh_opts = [
-        "-o", "StrictHostKeyChecking=no",
+    from .ssh_trust import openssh_trust_options, SSHTrustError
+    try:
+        trust_options = openssh_trust_options()
+    except SSHTrustError:
+        console.print("[red]verified SSH host trust unavailable; worker unchanged[/red]")
+        return
+    ssh_opts = trust_options + [
         "-o", "ConnectTimeout=10",
         "-o", "BatchMode=yes",
     ]
@@ -2044,6 +2065,69 @@ def refresh_dashboards(branch: str):
 
 
 # Register commands
+@click.group("configuration")
+def configuration():
+    """Inspect and preserve an existing controller monitoring topology."""
+
+
+def _controller_report(action):
+    import json
+    from .controller_adoption import AdoptionError
+    try:
+        result = action()
+    except AdoptionError as error:
+        raise click.ClickException(str(error)) from None
+    except (RuntimeError, ValueError, OSError, TypeError, KeyError):
+        # Engine/inspect exception text may contain customer Env or paths.
+        raise click.ClickException('Controller precondition or recovery hold; use the private recovery record and documented capability/custody checks') from None
+    click.echo(json.dumps(result, sort_keys=True))
+
+
+@configuration.command('inspect')
+@click.option('--declaration', required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path))
+def configuration_inspect(declaration):
+    """Read actual runtime; emit identities without inspected Env."""
+    import json
+    from .controller_adoption import InstalledEngine
+    def action():
+        inventory, _, _, evidence = InstalledEngine().collect(json.loads(declaration.read_bytes()))
+        return {'schema_version': 1, 'services': {role: {'container_id': value['Id'], 'image_id': value['Image']} for role, value in inventory.items()},
+                'effective_source': evidence['effective_source']}
+    _controller_report(action)
+
+
+@configuration.command('plan')
+@click.option('--declaration', required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option('--output', required=True, type=click.Path(dir_okay=False, path_type=Path))
+def configuration_plan(declaration, output):
+    """Write an explicit private mode0600 plan; mutate no services."""
+    import json
+    from .controller_adoption import InstalledEngine, build_plan, save_private_plan
+    def action():
+        plan = build_plan(*InstalledEngine().collect(json.loads(declaration.read_bytes())))
+        save_private_plan(output, plan)
+        return plan.public()
+    _controller_report(action)
+
+
+@configuration.command('adopt')
+@click.option('--plan', 'plan_path', required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option('--maintenance-proof', required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path))
+def configuration_adopt(plan_path, maintenance_proof):
+    """Apply the inspected same-image topology with durable recovery exclusion."""
+    from .controller_adoption import host_adopt
+    _controller_report(lambda: host_adopt(DOCKER_CONFIG_DIR, plan_path, maintenance_proof))
+
+
+@configuration.command('recover')
+def configuration_recover():
+    """Recover the exact interrupted operation, retaining evolved state."""
+    from .controller_adoption import host_recover
+    _controller_report(lambda: host_recover(DOCKER_CONFIG_DIR))
+
+
+main.add_command(configuration)
+
 main.add_command(setup)
 main.add_command(add_machine)
 main.add_command(install_exporters)

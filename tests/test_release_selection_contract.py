@@ -596,8 +596,9 @@ def test_disabled_customer_pin_conflicts_still_fail_before_consumption():
 
 
 def test_missing_host_wheel_has_explicit_cli_upgrade_prerequisite(tmp_path,monkeypatch):
-    from dc_overview import fleet_upgrade
+    from dc_overview import fleet_upgrade, controller_adoption
     from dc_overview.fleet_config import FleetConfig
+    monkeypatch.setattr(controller_adoption, 'probe_controller_inventory', lambda: {role: None for role in controller_adoption.ROLES})
     source=tmp_path/'manifest.json';source.write_bytes(encoded(manifest_data()))
     monkeypatch.setattr(fleet_upgrade,'proxy_capabilities',lambda **k:{'selection_contract':1,'proxy_replacement_policy':'host-adoption-required-v1'})
     with pytest.raises(RuntimeError,match='requires_cli_upgrade'):

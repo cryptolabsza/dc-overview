@@ -1863,14 +1863,16 @@ def install_exporters_remote(ip: str, user: str, password: str = None, key_path:
         import paramiko
         
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        from .ssh_trust import configure_paramiko_host_trust
+        configure_paramiko_host_trust(client)
         
         # Connect
         if password:
-            client.connect(ip, port=port, username=user, password=password, timeout=10)
+            client.connect(ip, port=port, username=user, password=password, timeout=10,
+                           auth_timeout=10, banner_timeout=10, allow_agent=False, look_for_keys=False)
         elif key_path:
-            key = paramiko.RSAKey.from_private_key_file(key_path)
-            client.connect(ip, port=port, username=user, pkey=key, timeout=10)
+            client.connect(ip, port=port, username=user, key_filename=key_path, timeout=10,
+                           auth_timeout=10, banner_timeout=10, allow_agent=False, look_for_keys=False)
         else:
             return False  # No credentials available
 

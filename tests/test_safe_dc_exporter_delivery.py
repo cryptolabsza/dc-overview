@@ -103,7 +103,18 @@ done
 case "$url" in
   *SHA256SUMS) cp "$FAKE_MANIFEST" "$output" ;;
   *dc-exporter-rs) cp "$FAKE_RELEASE_BINARY" "$output" ;;
-  */metrics) printf 'dc_exporter_build_info{version="%s"} 1\n' "$FAKE_METRICS_VERSION" ;;
+  */metrics)
+    count=0
+    if [ -f "$FAKE_METRICS_CALLS" ]; then count=$(cat "$FAKE_METRICS_CALLS"); fi
+    count=$((count + 1))
+    printf '%s' "$count" > "$FAKE_METRICS_CALLS"
+    if [ "${FAKE_METRICS_TIMEOUT:-0}" = 1 ]; then exit 28; fi
+    if [ "$count" -lt "${FAKE_METRICS_READY_AT:-1}" ]; then
+      printf '# No metrics collected yet\n'
+    else
+      printf 'dc_exporter_build_info{version="%s"} 1\n' "$FAKE_METRICS_VERSION"
+    fi
+    ;;
   *) exit 22 ;;
 esac
 """,
@@ -120,9 +131,9 @@ case "${1:-}" in
       unknown) printf 'activating\n'; exit 3 ;;
       dbus) printf 'Failed to connect to bus\n' >&2; exit 1 ;;
     esac
-    if [ ! -e "$FAKE_SERVICE_PATH" ] && [ ! -L "$FAKE_SERVICE_PATH" ]; then
+    if [ "${FAKE_ASSUME_UNIT_MISSING:-0}" = 1 ] || { [ ! -e "$FAKE_SERVICE_PATH" ] && [ ! -L "$FAKE_SERVICE_PATH" ]; }; then
       printf 'inactive\n'
-      exit 3
+      exit "${FAKE_MISSING_ACTIVE_RC:-3}"
     fi
     state=$(cat "$FAKE_ACTIVE_STATE")
     printf '%s\n' "$state"
@@ -135,11 +146,11 @@ case "${1:-}" in
       unknown) printf 'garbled-state\n'; exit 1 ;;
       dbus) printf 'Failed to connect to bus\n' >&2; exit 1 ;;
     esac
-    if [ ! -e "$FAKE_SERVICE_PATH" ] && [ ! -L "$FAKE_SERVICE_PATH" ]; then
+    if [ "${FAKE_ASSUME_UNIT_MISSING:-0}" = 1 ] || { [ ! -e "$FAKE_SERVICE_PATH" ] && [ ! -L "$FAKE_SERVICE_PATH" ]; }; then
       if [ "${FAKE_MISSING_ENABLED_OUTPUT:-not-found}" = not-found ]; then
         printf 'not-found\n'
       fi
-      exit 1
+      exit "${FAKE_MISSING_ENABLED_RC:-1}"
     fi
     state=$(cat "$FAKE_ENABLED_STATE")
     printf '%s\n' "$state"
@@ -156,8 +167,9 @@ case "${1:-}" in
         if [ -e "$FAKE_SERVICE_PATH" ] || [ -L "$FAKE_SERVICE_PATH" ]; then
           printf 'loaded\n'
         else
-          printf 'not-found\n'
+          printf '%s\n' "${FAKE_MISSING_LOAD_STATE:-not-found}"
         fi
+        exit "${FAKE_LOAD_STATE_RC:-0}"
         ;;
       *) printf '4242\n' ;;
     esac
@@ -195,18 +207,22 @@ exit 0
         "FAKE_SERVICE_PATH": str(service_path),
         "FAKE_METRICS_VERSION": metrics_version,
         "FAKE_PROC_EXE": str(proc_exe),
+        "FAKE_METRICS_CALLS": str(tmp_path / "metrics-calls"),
     }
     return env, systemctl_log, active_state, enabled_state
 
 
 def _test_script(
-    tmp_path: Path, *, mode: str = "install"
+    tmp_path: Path, *, mode: str = "install", verification_attempts=1
 ) -> tuple[str, Path, Path, Path]:
     target = tmp_path / "usr-local-bin" / "dc-exporter-rs"
     target.parent.mkdir()
     service_path = tmp_path / "etc-systemd" / "dc-exporter.service"
     service_path.parent.mkdir()
     backup_dir = tmp_path / "backups"
+    readiness = {} if verification_attempts is None else {
+        "verification_attempts": verification_attempts
+    }
     script = build_dc_exporter_install_script(
         mode=mode,
         binary_path=str(target),
@@ -215,7 +231,7 @@ def _test_script(
         temp_parent=str(tmp_path),
         lock_path=str(tmp_path / "dc-exporter-install.lock"),
         proc_root=str(tmp_path / "proc"),
-        verification_attempts=1,
+        **readiness,
     )
     return script, target, service_path, backup_dir
 
@@ -273,6 +289,135 @@ def test_clean_host_with_empty_is_enabled_output_is_verified_as_absent(tmp_path)
     assert target.is_file()
     assert service_path.is_file()
     assert "show --property LoadState --value dc-exporter" in systemctl_log.read_text()
+
+
+def test_default_readiness_accepts_valid_fourth_metrics_sample(tmp_path):
+    env, _, active_state, enabled_state = _fake_delivery_environment(tmp_path)
+    env["FAKE_METRICS_READY_AT"] = "4"
+    # Skip only this fixture's polling delays; execute the complete generated
+    # delivery/identity/state/rollback script, with no real system manager.
+    _write_executable(tmp_path / "fake-bin" / "sleep", "#!/bin/sh\nexit 0\n")
+    script, target, service_path, _ = _test_script(
+        tmp_path, verification_attempts=None
+    )
+
+    result = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, env=env, timeout=10
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert Path(env["FAKE_METRICS_CALLS"]).read_text() == "4"
+    assert target.read_bytes() == Path(env["FAKE_RELEASE_BINARY"]).read_bytes()
+    assert service_path.is_file()
+    assert active_state.read_text() == "active"
+    assert enabled_state.read_text() == "enabled"
+    assert "DC_EXPORTER_INSTALL_SUCCESS" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "readiness_failure", ["never-ready", "wrong-version", "wrong-process", "timeout"]
+)
+def test_default_readiness_is_bounded_and_restores_original_on_invalid_proof(
+    tmp_path, readiness_failure
+):
+    env, _, active_state, enabled_state = _fake_delivery_environment(
+        tmp_path, initially_active=True, initially_enabled=True
+    )
+    _write_executable(tmp_path / "fake-bin" / "sleep", "#!/bin/sh\nexit 0\n")
+    if readiness_failure == "never-ready":
+        env["FAKE_METRICS_READY_AT"] = "31"
+    elif readiness_failure == "wrong-version":
+        env["FAKE_METRICS_VERSION"] = "0.2.7"
+    elif readiness_failure == "wrong-process":
+        Path(env["FAKE_PROC_EXE"]).write_text("different-running-binary")
+    else:
+        env["FAKE_METRICS_TIMEOUT"] = "1"
+    script, target, service_path, _ = _test_script(
+        tmp_path, mode="update", verification_attempts=None
+    )
+    target.write_text("known-good-binary")
+    service_path.write_text("known-good-service")
+
+    result = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, env=env, timeout=10
+    )
+
+    assert result.returncode != 0
+    assert Path(env["FAKE_METRICS_CALLS"]).read_text() == "30"
+    assert target.read_text() == "known-good-binary"
+    assert service_path.read_text() == "known-good-service"
+    assert active_state.read_text() == "active"
+    assert enabled_state.read_text() == "enabled"
+    assert "previous binary and service state restored" in result.stderr
+    assert "DC_EXPORTER_INSTALL_SUCCESS" not in result.stdout
+
+
+def test_correlated_exit_four_absence_allows_fresh_install(tmp_path):
+    env, systemctl_log, _, _ = _fake_delivery_environment(tmp_path)
+    env["FAKE_MISSING_ACTIVE_RC"] = "4"
+    env["FAKE_MISSING_ENABLED_RC"] = "4"
+    script, target, service_path, _ = _test_script(tmp_path)
+
+    result = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, env=env
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert target.is_file()
+    assert service_path.is_file()
+    assert "show --property LoadState --value dc-exporter" in systemctl_log.read_text()
+
+
+@pytest.mark.parametrize(
+    ("active_rc", "enabled_rc", "load_state", "load_rc", "unit_kind"),
+    [
+        (4, 1, "not-found", 0, "missing"),
+        (3, 4, "not-found", 0, "missing"),
+        (4, 4, "loaded", 0, "missing"),
+        (4, 4, "error", 0, "missing"),
+        (4, 4, "not-found", 1, "missing"),
+        (4, 4, "not-found", 124, "missing"),
+        (4, 4, "not-found", 0, "file"),
+        (4, 4, "not-found", 0, "dangling-symlink"),
+        (124, 4, "not-found", 0, "missing"),
+        (4, 124, "not-found", 0, "missing"),
+    ],
+)
+def test_exit_four_absence_requires_independent_consistent_unit_proof(
+    tmp_path, active_rc, enabled_rc, load_state, load_rc, unit_kind
+):
+    env, systemctl_log, _, _ = _fake_delivery_environment(tmp_path)
+    env.update({
+        "FAKE_MISSING_ACTIVE_RC": str(active_rc),
+        "FAKE_MISSING_ENABLED_RC": str(enabled_rc),
+        "FAKE_MISSING_LOAD_STATE": load_state,
+        "FAKE_LOAD_STATE_RC": str(load_rc),
+        "FAKE_ASSUME_UNIT_MISSING": "1",
+    })
+    script, target, service_path, _ = _test_script(tmp_path)
+    target.write_text("untouched-existing-binary")
+    if unit_kind == "file":
+        service_path.write_text("untouched-existing-unit")
+    elif unit_kind == "dangling-symlink":
+        service_path.symlink_to(tmp_path / "absent-unit-target")
+
+    result = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, env=env
+    )
+
+    assert result.returncode != 0
+    assert "could not determine original dc-exporter service state" in result.stderr
+    assert target.read_text() == "untouched-existing-binary"
+    if unit_kind == "file":
+        assert service_path.read_text() == "untouched-existing-unit"
+    elif unit_kind == "dangling-symlink":
+        assert service_path.is_symlink()
+    else:
+        assert not service_path.exists()
+    assert not any(
+        line.split()[0] in {"daemon-reload", "stop", "start", "restart", "enable", "disable"}
+        for line in systemctl_log.read_text().splitlines()
+    )
 
 
 @pytest.mark.parametrize("load_state_mode", ["timeout", "unknown", "dbus"])
@@ -755,6 +900,9 @@ class _FakeParamikoClient:
     def set_missing_host_key_policy(self, _policy):
         pass
 
+    def load_host_keys(self, path):
+        assert Path(path).is_file()
+
     def connect(self, *args, **kwargs):
         pass
 
@@ -776,12 +924,17 @@ class _FakeParamikoClient:
         self.closed = True
 
 
-def _install_with_fake_paramiko(monkeypatch, *, dc_output):
+def _install_with_fake_paramiko(monkeypatch, tmp_path, *, dc_output):
+    import paramiko as native_paramiko
+    key = native_paramiko.RSAKey.generate(1024)
+    trust = tmp_path/'known_hosts'
+    trust.write_text(f'10.0.0.10 {key.get_name()} {key.get_base64()}\n')
+    monkeypatch.setenv('DC_OVERVIEW_SSH_KNOWN_HOSTS', str(trust))
     quickstart = importlib.import_module("dc_overview.quickstart")
     client = _FakeParamikoClient(dc_output)
     paramiko = SimpleNamespace(
         SSHClient=Mock(return_value=client),
-        AutoAddPolicy=Mock(return_value=object()),
+        RejectPolicy=Mock(return_value=object()),
     )
     monkeypatch.setitem(sys.modules, "paramiko", paramiko)
     build_script = Mock(return_value="SAFE_INSTALL_SCRIPT")
@@ -799,9 +952,9 @@ def _install_with_fake_paramiko(monkeypatch, *, dc_output):
     return result, client, build_script, build_command
 
 
-def test_paramiko_install_requires_verified_dc_exporter_success_marker(monkeypatch):
+def test_paramiko_install_requires_verified_dc_exporter_success_marker(monkeypatch, tmp_path):
     result, client, build_script, build_command = _install_with_fake_paramiko(
-        monkeypatch, dc_output=""
+        monkeypatch, tmp_path, dc_output=""
     )
 
     assert result is False
@@ -812,9 +965,10 @@ def test_paramiko_install_requires_verified_dc_exporter_success_marker(monkeypat
     assert all("dc-overview install-exporters" not in command for command, _ in client.commands)
 
 
-def test_paramiko_install_accepts_only_verified_safe_delivery(monkeypatch):
+def test_paramiko_install_accepts_only_verified_safe_delivery(monkeypatch, tmp_path):
     result, client, _, _ = _install_with_fake_paramiko(
         monkeypatch,
+        tmp_path,
         dc_output=f"DC_EXPORTER_INSTALL_SUCCESS version={DC_EXPORTER_RS_VERSION}\n",
     )
 
