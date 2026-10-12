@@ -185,9 +185,9 @@ def update_prometheus_targets():
     """Thin wrapper: queries the DB and delegates to web_prometheus module."""
     try:
         servers = Server.query.all()
-        _update_prometheus_targets(servers, DATA_DIR)
+        return _update_prometheus_targets(servers, DATA_DIR)
     except Exception:
-        pass  # Non-critical
+        return False  # Existing callers keep their best-effort contract.
 
 
 db = SQLAlchemy(app)
@@ -1267,13 +1267,88 @@ def api_inventory_outbox():
         })
     return jsonify(response)
 
+def _selected_enrollment_identity(server, *, require_expected=False):
+    """Validate a bounded public identity snapshot before selected remote work."""
+    if get_user_role() != 'admin':
+        return None, (jsonify({'error': 'Admin access required for selected enrollment'}), 403)
+    db.session.refresh(server)
+    if not isinstance(server.inventory_server_id, str) or not server.inventory_server_id:
+        return None, (jsonify({'error': 'Immutable worker identity is unavailable; retained current inventory'}), 409)
+    if server.ssh_key is not None:
+        db.session.refresh(server.ssh_key)
+    try:
+        key_path = resolve_ssh_key_path(server, strict=True)
+    except ValueError:
+        return None, (jsonify({'error': 'Explicit registered SSH key is unavailable; no fallback permitted'}), 409)
+    if not key_path:
+        return None, (jsonify({'error': 'Container SSH key authority is unavailable'}), 409)
+    identity = {'server_id':server.id, 'name':server.name, 'server_ip':server.server_ip,
+                'inventory_server_id':server.inventory_server_id, 'ssh_user':server.ssh_user or 'root',
+                'ssh_port':server.ssh_port or 22, 'ssh_key_id':server.ssh_key_id,
+                'effective_key_path':str(key_path), 'has_password':bool(server.ssh_password)}
+    raw = request.args.get('expected_identity')
+    if raw is None and require_expected:
+        return None, (jsonify({'error': 'Expected worker identity is required'}), 400)
+    if raw is not None:
+        try:
+            expected = json.loads(raw) if len(raw) <= 4096 else None
+        except ValueError:
+            expected = None
+        if (not isinstance(expected, dict) or set(expected) != set(identity)
+                or any(not isinstance(expected[key], str) for key in
+                       ('name', 'server_ip', 'inventory_server_id', 'ssh_user', 'effective_key_path'))
+                or type(expected['server_id']) is not int or type(expected['ssh_port']) is not int
+                or type(expected['has_password']) is not bool
+                or expected['ssh_key_id'] is not None and type(expected['ssh_key_id']) is not int):
+            return None, (jsonify({'error': 'Invalid expected worker identity'}), 400)
+        if expected != identity:
+            return None, (jsonify({'error': 'Worker identity or SSH authority changed; retained current inventory'}), 409)
+    return identity, None
+
+
 @app.route('/api/servers/<int:server_id>/check')
 @login_required
 def api_check_server(server_id):
+    """Keep ordinary observations; selected completion requires admin and expected identity."""
+    selected = request.args.get('selected_enrollment')
+    if selected is not None and selected != '1':
+        return jsonify({'error': 'selected_enrollment must be 1'}), 400
+    if selected == '1':
+        if get_user_role() != 'admin':
+            return jsonify({'error': 'Admin access required for selected enrollment'}), 403
+        try:
+            return inventory_mutation_serialized(_check_server_observations)(server_id)
+        except ValueError:
+            return jsonify({'error': 'Selected worker SSH authority is unconfirmed; prior inventory retained'}), 503
+        finally:
+            row = db.session.get(Server, server_id)
+            if row is not None:
+                row._selected_ssh_key_strict = False
+                row._selected_effective_key_path = None
+    return _check_server_observations(server_id)
+
+
+def _check_server_observations(server_id):
     """Check server connectivity and exporter status."""
     from .exporters import get_exporter_version, check_for_updates, get_latest_exporter_version
     
     server = Server.query.get_or_404(server_id)
+    selected_enrollment = request.args.get('selected_enrollment')
+    if selected_enrollment is not None and selected_enrollment != '1':
+        return jsonify({'error': 'selected_enrollment must be 1'}), 400
+    service_observations = None
+    enrollment_identity = None
+    if selected_enrollment == '1':
+        enrollment_identity, error = _selected_enrollment_identity(server, require_expected=True)
+        if error:
+            return error
+        server._selected_ssh_key_strict = True
+        server._selected_effective_key_path = enrollment_identity['effective_key_path']
+        from .web_exporters import ServiceCheckUnavailable
+        try:
+            service_observations = check_services_installed(server, include_watchdog=True)
+        except ServiceCheckUnavailable:
+            return jsonify({'error': 'Selected worker service discovery is unconfirmed; prior inventory retained'}), 503
     
     results = {
         'server_ip': server.server_ip,
@@ -1288,7 +1363,13 @@ def api_check_server(server_id):
     
     # Sync installed/enabled state with actual port checks
     for exp_key in ['node_exporter', 'dc_exporter', 'dcgm_exporter']:
+        if service_observations is not None:
+            setattr(server, f'{exp_key}_installed', service_observations[exp_key]['installed'])
         is_running = results[exp_key].get('running', False)
+        if service_observations is not None:
+            is_running = bool(is_running and service_observations[exp_key]['installed'] and service_observations[exp_key]['active'])
+            results[exp_key]['running'] = is_running
+            results[exp_key]['installed'] = service_observations[exp_key]['installed']
         if is_running:
             setattr(server, f'{exp_key}_installed', True)
             setattr(server, f'{exp_key}_enabled', True)
@@ -1298,7 +1379,16 @@ def api_check_server(server_id):
     
     # Update watchdog DB state from the check result
     wd_result = results['watchdog_agent']
-    if wd_result.get('source') != 'database':  # Don't re-save cached data as new data
+    if service_observations is not None:
+        installed = service_observations['watchdog_agent']['installed']
+        running = installed and service_observations['watchdog_agent']['active'] and wd_result.get('running') is True
+        server.watchdog_agent_installed = installed
+        server.watchdog_agent_enabled = running
+        wd_result['installed'] = installed
+        wd_result['running'] = running
+        if wd_result.get('version'):
+            server.watchdog_agent_version = wd_result['version']
+    elif wd_result.get('source') != 'database':  # Don't re-save cached data as new data
         server.watchdog_agent_installed = wd_result.get('installed', False)
         server.watchdog_agent_enabled = wd_result.get('running', False)
         if wd_result.get('version'):
@@ -1329,21 +1419,22 @@ def api_check_server(server_id):
     # Detect exporter versions
     ssh_key_path = resolve_ssh_key_path(server)
     ssh_password = server.ssh_password
+    version_context = {'selected_server': server} if enrollment_identity is not None else {}
     
     if server.node_exporter_installed:
-        version = get_exporter_version(server.server_ip, 'node_exporter', server.ssh_user, server.ssh_port, ssh_key_path, ssh_password)
+        version = get_exporter_version(server.server_ip, 'node_exporter', server.ssh_user, server.ssh_port, ssh_key_path, ssh_password, **version_context)
         if version:
             server.node_exporter_version = version
             results['node_exporter']['version'] = version
     
     if server.dc_exporter_installed:
-        version = get_exporter_version(server.server_ip, 'dc_exporter', server.ssh_user, server.ssh_port, ssh_key_path, ssh_password)
+        version = get_exporter_version(server.server_ip, 'dc_exporter', server.ssh_user, server.ssh_port, ssh_key_path, ssh_password, **version_context)
         if version:
             server.dc_exporter_version = version
             results['dc_exporter']['version'] = version
     
     if server.dcgm_exporter_installed:
-        version = get_exporter_version(server.server_ip, 'dcgm_exporter', server.ssh_user, server.ssh_port, ssh_key_path, ssh_password)
+        version = get_exporter_version(server.server_ip, 'dcgm_exporter', server.ssh_user, server.ssh_port, ssh_key_path, ssh_password, **version_context)
         if version:
             server.dcgm_exporter_version = version
             results['dcgm_exporter']['version'] = version
@@ -1358,9 +1449,13 @@ def api_check_server(server_id):
         db.session.add(AppSettings(key=ts_key, value=ts_val))
     
     db.session.commit()
+    if service_observations is not None and update_prometheus_targets() is not True:
+        return jsonify({'error': 'Worker observations committed; discovery reconciliation is unconfirmed. Retry enrollment.'}), 503
     
     # Check for auto-updates (async, non-blocking)
-    results['auto_updates'] = check_and_apply_auto_updates(server)
+    results['auto_updates'] = [] if enrollment_identity is not None else check_and_apply_auto_updates(server)
+    if enrollment_identity is not None:
+        results['enrollment_identity'] = enrollment_identity
     
     return jsonify(results)
 
@@ -2734,9 +2829,15 @@ def api_set_server_ssh_key(server_id):
 def api_get_server_ssh_config(server_id):
     """Get SSH configuration for a server."""
     server = Server.query.get_or_404(server_id)
+    enrollment_identity = None
+    if request.args.get('selected_enrollment') == '1':
+        enrollment_identity, error = _selected_enrollment_identity(server)
+        if error:
+            return error
     ssh_keys = SSHKey.query.all()
     
     return jsonify({
+        **({'enrollment_identity': enrollment_identity} if enrollment_identity is not None else {}),
         'server_id': server.id,
         'server_name': server.name,
         'ssh_user': server.ssh_user or 'root',
@@ -2850,9 +2951,30 @@ def api_update_server_ssh_config(server_id):
 @csrf.exempt
 @login_required
 def api_test_server_ssh(server_id):
-    """Test SSH connection to a server and return detailed results."""
+    """Test SSH connection; selected probes retain their exact inventory identity."""
+    if request.args.get('selected_enrollment') == '1':
+        if get_user_role() != 'admin':
+            return jsonify({'error':'Admin access required for selected enrollment'}), 403
+        try:
+            return inventory_mutation_serialized(_test_server_ssh)(server_id)
+        finally:
+            row = db.session.get(Server, server_id)
+            if row is not None:
+                row._selected_ssh_key_strict = False
+                row._selected_effective_key_path = None
+    return _test_server_ssh(server_id)
+
+
+def _test_server_ssh(server_id):
     server = Server.query.get_or_404(server_id)
-    
+    enrollment_identity = None
+    if request.args.get('selected_enrollment') == '1':
+        enrollment_identity, error = _selected_enrollment_identity(server, require_expected=True)
+        if error:
+            return error
+    if enrollment_identity is not None:
+        server._selected_ssh_key_strict = True
+        server._selected_effective_key_path = enrollment_identity['effective_key_path']
     result = check_ssh_connection(server)
     
     # Add auth method info
@@ -2868,6 +2990,8 @@ def api_test_server_ssh(server_id):
     result['ssh_user'] = server.ssh_user or 'root'
     result['ssh_port'] = server.ssh_port or 22
     result['server_ip'] = server.server_ip
+    if enrollment_identity is not None:
+        result['enrollment_identity'] = enrollment_identity
     
     return jsonify(result)
 

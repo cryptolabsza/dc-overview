@@ -43,12 +43,26 @@ product owners. That declaration retires those jobs; it is not a wildcard or hos
 heuristic. Customer extra jobs can be reapplied unchanged, but conflicting existing
 jobs require explicit adoption.
 
-The product Prometheus configuration resides in the dedicated
-`<config_dir>/prometheus` directory mounted at `/etc/prometheus`. Directory mounting
+Fresh selected setup places product Prometheus configuration in the public sibling
+`<config_dir>-monitoring` (normally `/etc/dc-overview-monitoring`), mounted read-only
+at `/etc/prometheus` and writable in DC at `/var/lib/dc-monitoring`. The private
+configuration root retains its original custody. Directory mounting
 is required for atomic replacement: an individual-file bind mount can keep the old
 inode visible after replacement. Preserve the original legacy configuration during
-migration. DC uses `PROMETHEUS_CONFIG_PATH`, otherwise it prefers
-`/etc/dc-overview/prometheus/prometheus.yml` and falls back to the legacy path.
+migration. Both fresh launch paths set `PROMETHEUS_CONFIG_PATH` and
+`PROMETHEUS_OWNERSHIP_PATH`. The schema-1 `ownership.json` declares only
+`dc-managed`, explicitly retired inventory job names, and exact permitted file
+references. Inventory reconciliation retains other product service jobs.
+Selected host configuration resolves those environment paths against inspected
+shared mounts; it never falls back to an obsolete private configuration file.
+Missing or inconsistent runtime authority holds before writes.
+During a positively absent fresh `setup` transaction, the manager retains its
+chosen public path and verifies the exact Prometheus/Grafana identities and mounts
+it just created. This permits the installer’s monitoring-only intermediate stage
+before DC starts. That authority exists only in that transaction, expires on every
+exit, and requires a complete running DC topology before completion. An unrelated
+or resumed partial installation does not gain this exception. Standalone DC launch
+resolves the path before removing a container.
 The DC writer needs this product directory mounted writable; the customer directory
 stays read-only. No Docker socket is required for web validation.
 
@@ -66,13 +80,30 @@ operation reports a conflict requiring forward reconciliation; it never claims
 success or overwrites that edit. Recovery checks the restored file's mapping.
 Unverified recovery remains an error. File discovery documents are replaced
 atomically and retain their existing permissions and ownership.
+Selected host preparation, validation and reload also read each referenced file
+through a bounded read-only exec in the exact running Prometheus task’s existing
+mount namespace and compare its bytes, UID/GID, mode, inode and device to the exact
+host source. The fixed BusyBox timeout/sh/stat/od reader inherits the container
+user, checks PID/start/image/user identity before and after, rejects symlink or
+special-file paths, caps each file at2MiB, and bounds execution/output. Missing
+tools, denied reads, malformed output or identity drift hold without a fallback.
+Reload repeats that proof;
+matching `status/config` YAML alone cannot establish loaded reference continuity.
+The known product `recording_rules.yml` must match the proposed product rule bytes.
+A changed rule-generator revision requires a supported explicit rule transition
+and holds before configuration writes; this helper does not publish a multi-file
+rule/configuration transition. Customer rule references receive custody/byte
+verification and are not compared with product-generated defaults.
 
 Temporary promtool validation mounts contain public config/rules with directory
 mode 0755 and file mode 0644 so the selected image's non-root UID can read them.
 New public Prometheus config and recording-rule files use 0644. A newly created
 product directory uses 0755 with UID/GID 1000, matching DC's mounted atomic writer;
 the public files also use UID/GID 1000. Prometheus's non-root image can read them.
-Host-created coordination locks inherit the configuration's owner and group.
+Fresh coordination locks use 0600 with UID/GID1000. Host-created locks for existing
+configuration inherit its owner and group and retain the same inode.
+Every public ancestor must already be traversable by DC UID1000; setup never
+changes a private parent or creates a fallback directory.
 Existing product directories and files must already provide this writer custody
 and public read/traversal access. Preflight refuses incompatible ownership, modes
 or symlinks before controller replacement; it never changes an existing customer's
@@ -96,6 +127,12 @@ JSON must have unique stable UIDs and cannot claim a packaged product UID. Custo
 imports keep their datasource references. Product placeholders use the selected
 stable Prometheus UID; custom product mappings remain intact. Custom alert resources,
 receivers and datasource provisioning are outside the dashboard import helper.
+Fresh product alerts use that selected datasource UID. Ordinary alert synchronization
+checks the canonical configured UID against the authenticated datasource API before
+writing and preserves it on repeats. Only owned Prometheus queries are remapped;
+expression IDs and customer dashboards remain unchanged. Initial ownership inspection
+waits up to120seconds for Grafana health and ownership APIs during cold start.
+Denied, malformed or permanently unavailable ownership fails before changes.
 
 The shared helpers in `dc_overview.monitoring` prepare all merges and imports before
 mutation. `apply_prometheus_config` requires validation and reload callbacks that
@@ -116,9 +153,15 @@ host `configuration` commands after installing the matching public DC and proxy
 packages. The running proxy must also advertise the marker-aware controller guard;
 installing a new host package alone does not repair an older serving updater.
 
-The first adoption contract supports the existing `/etc/prometheus/prometheus.yml`
-**file bind**, exact separately mounted rule/discovery/credential references, and
-an already-adopted product directory. Existing different directory mounts, glob
+Adoption supports the existing `/etc/prometheus/prometheus.yml` **file bind**,
+exact separately mounted rule/discovery/credential references, an already-adopted
+product directory, and the ordinary installer directory pair: a read-only
+`<config_dir>/prometheus` mount at `/etc/prometheus`, the same writable source at
+DC's `/etc/dc-overview/prometheus`, and its original private parent mount.
+That predecessor must contain exactly `prometheus.yml`, referenced static
+`recording_rules.yml`, and an optional empty0600 `prometheus.yml.lock`, with complete
+regular-file byte/custody accounting. Unknown members, symlinks, special files,
+credential files inside that directory, subdirectories, overlapping mounts, glob
 references, inherited `VolumesFrom`, automatic container removal, unsupported
 runtime fields, SELinux bind relabel options and executable source overrides hold
 with a named unsupported condition. These shapes require an explicit supported
@@ -128,6 +171,29 @@ Exact data/auth/TSDB volume names, anonymous volume IDs, customer binds, static
 network settings, ports, UID, commands, capabilities, resources and customer labels
 come from inspection. Only DC and Prometheus may change. Grafana, its dashboards,
 datasource/provisioning identities, the proxy/auth store and VPM remain untouched.
+The directory transition stages a new public subtree, removes only the exact old
+DC writer bind, and retains the original static rule file at its exact Prometheus
+reference. Empty public mountpoints permit these read-only child mounts without
+copying credential bytes. Existing source directories and their private ancestors
+are never re-owned or amended with an ownership marker. File-bind references retain
+their inode: replacing such a static source file atomically needs an explicit
+supported parent-directory mapping; adoption does not claim that unsupported case.
+If the current host path and mounted file diverge in bytes, custody or inode, normal
+preparation/reload holds explicitly rather than validating a newly reopened inode
+and claiming success for the retained binding. Docker’s GET archive can remount
+current host paths in a temporary view; it is not running-inode evidence. Archive
+reads remain useful as qualified historical/current-host snapshots for source
+helpers and stopped recovery guards. Running configuration/reference snapshots,
+readiness and terminal custody use the namespace reader; stopped or paused live
+proof is unsupported. Actual Linux running-file-bind/exec acceptance remains a
+separate customer gate.
+The distinction follows the pinned upstream implementations: [Moby exec uses
+the existing running task](https://github.com/moby/moby/blob/v27.5.1/daemon/exec.go#L255),
+while [archive creates a temporary filesystem view](https://github.com/moby/moby/blob/v27.5.1/daemon/containerfs_linux.go#L68).
+This source reference does not attest a customer’s deployed Engine version.
+Apply and recovery acquire the actual source `prometheus.yml.lock` before staging
+or stopping writers and verify its inode/custody through the transaction. Complete
+source membership and custody drift after validation hold before service mutation.
 
 DC and Prometheus must already be running and unpaused. Paused dependencies hold;
 adoption never starts a stopped service to manufacture a readiness result. The

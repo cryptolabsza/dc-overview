@@ -67,7 +67,7 @@ class ServiceCheckUnavailable(RuntimeError):
     """Discovery did not produce a complete trustworthy observation."""
 
 
-def check_services_installed(server):
+def check_services_installed(server, *, include_watchdog=False):
     """Check which exporter services actually exist on a remote host via SSH.
 
     Runs a single SSH command that queries systemctl for each service unit file
@@ -101,6 +101,43 @@ else
 fi
 printf 'dcgm-exporter:%s:docker\\n' "$docker_state"
 '''
+    if include_watchdog:
+        result['watchdog_agent'] = {'installed': False, 'active': False}
+        # Selected enrollment needs positive units/binaries even while held.
+        # Use the same strict SSH authority, fixed paths and bounded caller.
+        script = script.replace('    printf \'%s:%s:%s', '''    case "$load" in
+        loaded|masked)
+            case "$svc" in node_exporter) binary=/usr/local/bin/node_exporter;; dc-exporter) binary=/usr/local/bin/dc-exporter-rs;; esac
+            [ -f "$binary" ] && [ -x "$binary" ] && [ ! -L "$binary" ] || exit 1 ;;
+        not-found)
+            case "$svc" in node_exporter) binary=/usr/local/bin/node_exporter;; dc-exporter) binary=/usr/local/bin/dc-exporter-rs;; esac
+            [ ! -e "$binary" ] && [ ! -L "$binary" ] || exit 1 ;;
+        *) exit 1 ;;
+    esac
+    printf '%s:%s:%s''')
+        script += '''
+load=$(systemctl show dc-watchdog-agent --property=LoadState --value)
+state=$(systemctl show dc-watchdog-agent --property=ActiveState --value)
+case "$load" in
+    loaded|masked)
+        [ -f /usr/local/bin/dc-watchdog-agent ] && [ -x /usr/local/bin/dc-watchdog-agent ] && [ ! -L /usr/local/bin/dc-watchdog-agent ] || exit 1
+        [ -f /etc/dc-watchdog/agent.yaml ] && [ -s /etc/dc-watchdog/agent.yaml ] && [ ! -L /etc/dc-watchdog/agent.yaml ] || exit 1
+        for key in api_key server_url worker_name health_port; do
+            [ "$(grep -c "^$key:" /etc/dc-watchdog/agent.yaml)" = 1 ]
+        done
+        grep -Eq '^api_key:[[:space:]]*[^[:space:]]+' /etc/dc-watchdog/agent.yaml
+        value=$(sed -nE 's/^api_key:[[:space:]]*(.*)$/\\1/p' /etc/dc-watchdog/agent.yaml)
+        [ "$value" != "''" ] && [ "$value" != '""' ] && [ -n "$value" ] || exit 1
+        grep -Eq '^server_url:[[:space:]]*[^[:space:]]+' /etc/dc-watchdog/agent.yaml
+        port=$(sed -nE 's/^health_port:[[:space:]]*([0-9]+)[[:space:]]*$/\\1/p' /etc/dc-watchdog/agent.yaml)
+        [[ "$port" =~ ^[0-9]{1,5}$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || exit 1 ;;
+    not-found)
+        [ ! -e /usr/local/bin/dc-watchdog-agent ] && [ ! -L /usr/local/bin/dc-watchdog-agent ] || exit 1
+        [ ! -e /etc/dc-watchdog/agent.yaml ] && [ ! -L /etc/dc-watchdog/agent.yaml ] || exit 1 ;;
+    *) exit 1 ;;
+esac
+printf 'dc-watchdog-agent:%s:%s\\n' "$state" "$load"
+'''
 
     try:
         cmd, env = build_ssh_cmd(server, timeout=10)
@@ -118,6 +155,8 @@ printf 'dcgm-exporter:%s:docker\\n' "$docker_state"
             'dc-exporter': 'dc_exporter',
             'dcgm-exporter': 'dcgm_exporter',
         }
+        if include_watchdog:
+            svc_to_key['dc-watchdog-agent'] = 'watchdog_agent'
 
         observed = set()
         for line in proc.stdout.strip().splitlines():
@@ -138,6 +177,10 @@ printf 'dcgm-exporter:%s:docker\\n' "$docker_state"
             else:
                 if enabled not in ('loaded', 'not-found', 'masked', 'error', 'bad-setting', 'merged', 'stub') or state not in ('active', 'inactive', 'failed', 'activating', 'deactivating', 'reloading', 'maintenance', 'refreshing'):
                     raise ServiceCheckUnavailable('Unknown systemd state.')
+                if include_watchdog and (enabled not in ('loaded', 'masked', 'not-found')
+                        or state not in ('active', 'inactive', 'failed')
+                        or enabled == 'not-found' and state == 'active'):
+                    raise ServiceCheckUnavailable('Selected service presence is unconfirmed.')
                 is_known = enabled != 'not-found'
                 result[exp_key]['installed'] = is_known
                 result[exp_key]['active'] = state == 'active'

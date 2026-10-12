@@ -23,6 +23,83 @@ _FILE_REFERENCES = frozenset({'password_file', 'bearer_token_file', 'credentials
     'client_secret_file', 'ca_file', 'cert_file', 'key_file'})
 _UNSPECIFIED_PREVIOUS = object()
 
+DC_MONITORING_DESTINATION = '/var/lib/dc-monitoring'
+
+
+def public_monitoring_directory(config_dir):
+    """Fresh default: a public sibling, never beneath the private config root."""
+    directory = Path(config_dir).with_name(Path(config_dir).name + '-monitoring')
+    validate_public_monitoring_parent(directory)
+    return directory
+
+
+def validate_public_monitoring_parent(directory):
+    directory = Path(directory)
+    if not directory.is_absolute() or '..' in directory.parts or any(p.is_symlink() for p in (directory, *directory.parents)):
+        raise ValueError('public monitoring directory requires a safe absolute nonsymlink path')
+    for parent in directory.parents:
+        metadata = parent.stat()
+        mode = metadata.st_mode
+        if not (mode & stat.S_IXOTH or metadata.st_uid == 1000 and mode & stat.S_IXUSR or metadata.st_gid == 1000 and mode & stat.S_IXGRP):
+            raise ValueError('public monitoring parent must be traversable by DC UID1000; private parents unchanged')
+
+
+def monitoring_ownership(managed_jobs=(), file_references=()):
+    jobs = list(dict.fromkeys(['dc-managed', *managed_jobs]))
+    if any(not isinstance(v, str) or not v.strip() for v in jobs):
+        raise ValueError('monitoring ownership requires exact inventory job names')
+    refs = sorted(set(file_references))
+    for ref in refs: _reference(ref, refs)
+    return {'schema_version': 1, 'managed_jobs': jobs, 'file_references': refs}
+
+
+def read_monitoring_ownership(path):
+    path = Path(path)
+    if path.is_symlink() or not path.is_file(): raise ValueError('monitoring ownership file custody unavailable')
+    data = json.loads(path.read_bytes())
+    if not isinstance(data, dict) or set(data) != {'schema_version','managed_jobs','file_references'} or type(data['schema_version']) is not int or data['schema_version'] != 1:
+        raise ValueError('monitoring ownership schema_version 1 required')
+    for key in ('managed_jobs', 'file_references'):
+        values = data[key]
+        if not isinstance(values, list) or any(not isinstance(v, str) or not v.strip() for v in values) or len(values) != len(set(values)):
+            raise ValueError('monitoring ownership requires unique exact names/references')
+    for reference in data['file_references']: _reference(reference, data['file_references'])
+    return data
+
+
+def sanctioned_monitoring_directory(inventory):
+    """Resolve only the inspected env/shared mount authority; unknown state holds."""
+    if not any(value is not None for value in inventory.values()): return None
+    dc = inventory.get('dc-overview'); prom = inventory.get('prometheus')
+    if not dc or not prom: raise ValueError('monitoring runtime inventory incomplete')
+    env = dc.get('Config', {}).get('Env', [])
+    def setting(name):
+        values = [v.partition('=')[2] for v in env if v.startswith(name + '=')]
+        if len(values) != 1: raise ValueError('monitoring runtime path authority unavailable')
+        return values[0]
+    config = setting('PROMETHEUS_CONFIG_PATH'); ownership = setting('PROMETHEUS_OWNERSHIP_PATH')
+    if Path(config).name != 'prometheus.yml' or Path(ownership).name != 'ownership.json' or Path(config).parent != Path(ownership).parent:
+        raise ValueError('monitoring runtime path authority inconsistent')
+    target = str(Path(config).parent)
+    writers = [m for m in dc.get('Mounts', []) if m.get('Type') == 'bind' and m.get('Destination') == target and m.get('RW') is True]
+    if len(writers) != 1: raise ValueError('monitoring sanctioned writer mount unavailable')
+    source = writers[0]['Source']
+    readers = [m for m in prom.get('Mounts', []) if m.get('Type') == 'bind' and m.get('Destination') == '/etc/prometheus' and m.get('Source') == source and m.get('RW') is False]
+    if len(readers) != 1: raise ValueError('monitoring shared read-only mount unavailable')
+    for role, mount_target in ((dc, target), (prom, '/etc/prometheus')):
+        if any(m.get('Destination') != mount_target and mount_target.startswith(m.get('Destination', '') + '/') for m in role.get('Mounts', [])):
+            raise ValueError('monitoring runtime mount authority overlaps')
+        for mount in role.get('Mounts', []):
+            destination = mount.get('Destination', '')
+            if role is dc and destination.startswith(mount_target + '/') or role is prom and any(destination == '/etc/prometheus/' + name or destination.startswith('/etc/prometheus/' + name + '/') for name in ('prometheus.yml','ownership.json','prometheus.yml.lock')):
+                raise ValueError('monitoring runtime config/ownership shadow mount unsupported')
+    directory = Path(source)
+    validate_public_monitoring_parent(directory)
+    validate_product_monitoring_custody(directory)
+    if not (directory / 'prometheus.yml').is_file(): raise ValueError('monitoring runtime configuration custody unavailable')
+    read_monitoring_ownership(directory / 'ownership.json')
+    return directory
+
 
 def validate_product_monitoring_custody(directory):
     """Refuse incompatible existing product custody without adopting customer files."""
@@ -35,7 +112,7 @@ def validate_product_monitoring_custody(directory):
     mode = stat.S_IMODE(metadata.st_mode)
     if not directory.is_dir() or metadata.st_uid != 1000 or mode & 0o705 != 0o705:
         raise ValueError('existing product monitoring directory requires DC UID 1000 write custody and public traversal; no ownership changes applied')
-    for name in ('prometheus.yml', 'recording_rules.yml', 'prometheus.yml.lock'):
+    for name in ('prometheus.yml', 'recording_rules.yml', 'ownership.json', 'prometheus.yml.lock'):
         path = directory / name
         if path.is_symlink():
             raise ValueError('product monitoring file cannot be a symlink')

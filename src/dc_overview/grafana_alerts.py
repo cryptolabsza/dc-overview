@@ -267,11 +267,15 @@ def render_grafana_alerts(
     *,
     instance_matcher: str = ".+",
     receiver: Optional[str] = None,
+    datasource_uid: str = 'prometheus',
     _notification_settings: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> str:
     """Render reusable GPU-health alerts for one DC Overview installation."""
     if not instance_matcher:
         raise ValueError("instance_matcher must not be empty")
+    import re
+    if not isinstance(datasource_uid, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,40}', datasource_uid) or datasource_uid in {'__expr__', '-100'}:
+        raise ValueError('Prometheus datasource UID must be a valid Grafana UID')
 
     document = _template_document()
     expressions = {
@@ -291,6 +295,9 @@ def render_grafana_alerts(
     for group in document["groups"]:
         for rule in group["rules"]:
             for query in rule["data"]:
+                if query.get('datasourceUid') == 'prometheus' and datasource_uid != 'prometheus':
+                    query['datasourceUid'] = datasource_uid
+                    query.setdefault('model', {})['datasource'] = {'type': 'prometheus', 'uid': datasource_uid}
                 expression = query.get("model", {}).get("expr")
                 if expression in expressions:
                     query["model"]["expr"] = expressions[expression]
@@ -310,9 +317,12 @@ def install_grafana_alerts(
     *,
     instance_matcher: str = ".+",
     receiver: Optional[str] = None,
+    datasource_uid: str = 'prometheus',
     _notification_settings: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Path:
     """Atomically install canonical alert and notification-template files."""
+    rendered = render_grafana_alerts(instance_matcher=instance_matcher, receiver=receiver,
+        datasource_uid=datasource_uid, _notification_settings=_notification_settings)
     alerting_dir = Path(config_dir) / "grafana" / "provisioning" / "alerting"
     alerting_dir.mkdir(parents=True, exist_ok=True)
     target = alerting_dir / ALERT_RULES_FILENAME
@@ -323,12 +333,6 @@ def install_grafana_alerts(
     )
     if duplicates:
         raise DuplicateManagedAlertError(duplicates)
-    rendered = render_grafana_alerts(
-        instance_matcher=instance_matcher,
-        receiver=receiver,
-        _notification_settings=_notification_settings,
-    )
-
     _atomic_write(
         template_target,
         _notification_template_content(),
@@ -854,6 +858,7 @@ def sync_grafana_alerts(
     grafana_url: str,
     admin_password: str,
     admin_user: str = "admin",
+    datasource_uid: Optional[str] = None,
     instance_matcher: str = ".+",
     receiver: Any = _RECEIVER_UNSET,
     clear_receiver: bool = False,
@@ -870,7 +875,6 @@ def sync_grafana_alerts(
 
     config_dir = Path(config_dir)
     alerting_dir = config_dir / "grafana" / "provisioning" / "alerting"
-    alerting_dir.mkdir(parents=True, exist_ok=True)
     canonical_path = alerting_dir / ALERT_RULES_FILENAME
     notification_template_path = alerting_dir / NOTIFICATION_TEMPLATE_FILENAME
     duplicates = find_duplicate_managed_uids(
@@ -879,6 +883,35 @@ def sync_grafana_alerts(
     )
     if duplicates and not migrate_duplicates:
         raise DuplicateManagedAlertError(duplicates)
+
+    # The public configuration remains the authority. A verified explicit
+    # caller UID is supported; never infer ownership from an arbitrary API row
+    # or a stale provisioning file.
+    if datasource_uid is None:
+        from .fleet_config import FleetConfig
+        datasource_uid = FleetConfig.load(config_dir).grafana.prometheus_datasource_uid or 'prometheus'
+    render_grafana_alerts(datasource_uid=datasource_uid)
+    try:
+        response = requests.get(grafana_url.rstrip('/') + '/api/datasources',
+            auth=(admin_user, admin_password), timeout=timeout)
+        response.raise_for_status()
+        datasources = response.json()
+        if not isinstance(datasources, list) or not all(isinstance(row, dict) for row in datasources):
+            raise ValueError('malformed datasource inventory')
+        from .monitoring import select_prometheus_datasource
+        select_prometheus_datasource(datasources, datasource_uid)
+    except (requests.RequestException, ValueError, TypeError):
+        raise RuntimeError('Grafana declared Prometheus datasource ownership unavailable; alert files unchanged') from None
+    if canonical_path.exists():
+        document = yaml.safe_load(canonical_path.read_bytes())
+        for group in (document or {}).get('groups', []):
+            for rule in group.get('rules', []):
+                if rule.get('uid') not in MANAGED_ALERT_UIDS: continue
+                for query in rule.get('data', []):
+                    uid = query.get('datasourceUid')
+                    if uid not in ('prometheus', datasource_uid, '__expr__', '-100'):
+                        raise ValueError('managed alert datasource authority mixed or unknown; files unchanged')
+    alerting_dir.mkdir(parents=True, exist_ok=True)
 
     existing_settings: Dict[str, Dict[str, Any]] = {}
     effective_receiver: Optional[str] = None
@@ -934,6 +967,7 @@ def sync_grafana_alerts(
         install_grafana_alerts(
             config_dir,
             instance_matcher=instance_matcher,
+            datasource_uid=datasource_uid,
             receiver=(
                 effective_receiver if receiver is not _RECEIVER_UNSET else None
             ),

@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import io
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call
@@ -115,6 +116,8 @@ def test_RUNTIME03_watchdog_preflight_proves_its_actual_component_runner(tmp_pat
 
 
 def test_RUNTIME04_new_monitoring_product_mount_has_dc_writer_custody(tmp_path, monkeypatch):
+    tmp_path = Path(tempfile.mkdtemp(prefix='runtime-public-contract-', dir='/private/tmp'))
+    monkeypatch.setattr('dc_overview.controller_adoption.probe_controller_inventory', lambda: {r: None for r in ('dc-overview','prometheus','grafana','cryptolabs-proxy')})
     config = FleetConfig(config_dir=tmp_path); config.components.ipmi_monitor = False
     manager = FleetManager(config); manager.release_plan = images()
     manager.monitoring_plan = {'prometheus':manager._product_prometheus_config(), 'grafana':{'prometheus_datasource_uid':'prometheus','existing_datasource':None}}
@@ -124,7 +127,7 @@ def test_RUNTIME04_new_monitoring_product_mount_has_dc_writer_custody(tmp_path, 
     class Produced(Exception): pass
     monkeypatch.setattr(fleet_manager,'_ensure_docker_network',Mock(side_effect=Produced))
     with pytest.raises(Produced): manager._deploy_prometheus_grafana()
-    directory = tmp_path/'prometheus'
+    directory = tmp_path.with_name(tmp_path.name + '-monitoring')
     assert call(directory,1000,1000) in chown.call_args_list
     assert (directory.stat().st_mode & 0o777) == 0o755
     assert len([c for c in chown.call_args_list if c.args[1:] == (1000,1000)]) >= 3
@@ -163,7 +166,16 @@ def test_RUNTIME01_existing_key_transport_is_preserved(tmp_path, monkeypatch, mo
     monkeypatch.setattr('dc_overview.ssh_manager.subprocess.run',run)
     assert worker_lifecycle.preflight_workers(config,worker_plan(),mode=mode)
     for argv, kwargs in calls:
-        assert argv[:3] == ['ssh','-i',str(key)]
+        assert argv[0] == 'ssh'
+        assert argv[argv.index('-i') + 1] == str(key)
+        assert argv[argv.index('-F') + 1] == '/dev/null'
+        options = {argv[i + 1] for i, arg in enumerate(argv[:-1]) if arg == '-o'}
+        assert {
+            'IdentitiesOnly=yes', 'IdentityAgent=none', 'IdentityFile=none',
+            'BatchMode=yes', 'CertificateFile=none', 'PKCS11Provider=none',
+            'SecurityKeyProvider=none', 'PreferredAuthentications=publickey',
+            'AddKeysToAgent=no',
+        } <= options
         assert kwargs['env'] is None
     assert key.stat().st_mode & 0o777 == 0o600
 
@@ -195,7 +207,14 @@ def test_RUNTIME03_permission_for_exporter_runner_cannot_authorize_watchdog_runn
 
 @pytest.mark.parametrize('problem', ['owner','directory-mode','config-owner','config-gid','config-mode','lock-owner','symlink'])
 def test_RUNTIME04_existing_incompatible_custody_refuses_before_writes(tmp_path,monkeypatch,problem):
-    directory = tmp_path/'prometheus'; directory.mkdir()
+    from test_controller_adoption import bind, container
+    tmp_path = Path(tempfile.mkdtemp(prefix='runtime-public-custody-', dir='/private/tmp'))
+    directory = tmp_path.with_name(tmp_path.name + '-monitoring'); directory.mkdir()
+    inventory = {r: container(r) for r in ('dc-overview','prometheus','grafana','cryptolabs-proxy')}
+    inventory['dc-overview']['Config']['Env'] = ['PROMETHEUS_CONFIG_PATH=/var/lib/dc-monitoring/prometheus.yml','PROMETHEUS_OWNERSHIP_PATH=/var/lib/dc-monitoring/ownership.json']
+    inventory['dc-overview']['Mounts'] = [bind(directory, '/var/lib/dc-monitoring', True)]
+    inventory['prometheus']['Mounts'] = [bind(directory, '/etc/prometheus')]
+    monkeypatch.setattr('dc_overview.controller_adoption.probe_controller_inventory', lambda: inventory)
     config_file = directory/'prometheus.yml'; config_file.write_bytes(b'# customer config\nscrape_configs: []\n')
     rules = directory/'recording_rules.yml'; rules.write_bytes(b'# existing rules\n')
     unknown = directory/'customer.txt'; unknown.write_bytes(b'customer bytes\n')

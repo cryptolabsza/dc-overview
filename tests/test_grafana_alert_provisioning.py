@@ -3,6 +3,7 @@
 import shutil
 import stat
 import subprocess
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -477,6 +478,11 @@ class TestGrafanaAlertReload:
 
 
 class TestGrafanaAlertSync:
+    @pytest.fixture(autouse=True)
+    def declared_default_datasource_api(self, monkeypatch):
+        """These transaction fixtures use a typed, positively owned default UID."""
+        monkeypatch.setattr('dc_overview.grafana_alerts.requests.get', lambda *a, **k:
+            SimpleNamespace(raise_for_status=lambda: None, json=lambda: [{'type':'prometheus', 'uid':'prometheus'}]))
     @patch("dc_overview.grafana_alerts.reload_grafana_alerts")
     def test_sync_refuses_duplicates_without_explicit_migration(self, mock_reload, tmp_path):
         legacy = (
@@ -1683,6 +1689,7 @@ class TestGrafanaAlertConfigurationPaths:
         mock_install.assert_called_once_with(
             tmp_path,
             receiver="Site Telegram",
+            datasource_uid='prometheus',
         )
         mock_subprocess.assert_not_called()
 

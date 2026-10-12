@@ -2,6 +2,7 @@
 import hashlib
 import importlib
 import json
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -10,6 +11,13 @@ import pytest
 
 DIGEST = 'a' * 64
 OTHER = 'b' * 64
+
+
+def monitoring_fresh_directory(monkeypatch):
+    """Explicit absent Engine adapter; public Unix parent, private config root."""
+    from dc_overview import controller_adoption
+    monkeypatch.setattr(controller_adoption, 'probe_controller_inventory', lambda: {r: None for r in controller_adoption.ROLES})
+    return Path(tempfile.mkdtemp(prefix='selected-monitoring-contract-', dir='/private/tmp'))
 
 
 def catalog():
@@ -234,7 +242,7 @@ def test_selected_proxy_job_identity_is_carried_through_submit(monkeypatch):
 def test_selected_rendering_uses_manifest_digests_and_defers_watchtower(monkeypatch):
     from dc_overview.fleet_config import FleetConfig
     from dc_overview.fleet_manager import FleetManager
-    config=FleetConfig()
+    config=FleetConfig(config_dir=monitoring_fresh_directory(monkeypatch))
     config.enable_watchtower_all=True
     config.ssl.use_existing_proxy=True
     manager=FleetManager(config)
@@ -454,23 +462,25 @@ def test_monitoring_collision_blocks_setup_before_any_mutation(tmp_path,monkeypa
     mutation.assert_not_called();commit.assert_not_called()
 
 
-def test_baseline_compose_mounts_product_directory_and_customer_refs_readonly(tmp_path):
+def test_baseline_compose_mounts_product_directory_and_customer_refs_readonly(tmp_path, monkeypatch):
     from dc_overview.fleet_config import FleetConfig
     from dc_overview.fleet_manager import FleetManager
     import yaml
+    tmp_path = monitoring_fresh_directory(monkeypatch)
     config=FleetConfig(config_dir=tmp_path);config.prometheus.customer_config_dir=str(tmp_path/'customer')
     config.ssl.use_existing_proxy=True
     manager=FleetManager(config);data=manifest_data();manager.release_plan=SimpleNamespace(targets=catalog().resolve(catalog().Manifest.from_bytes(encoded(data)),selection(data),'linux/amd64'))
     value=yaml.safe_load(manager._generate_docker_compose())
-    assert './prometheus:/etc/prometheus:ro' in value['services']['prometheus']['volumes']
+    assert str(tmp_path.with_name(tmp_path.name + '-monitoring')) + ':/etc/prometheus:ro' in value['services']['prometheus']['volumes']
     assert str(tmp_path/'customer')+':/etc/prometheus/customer:ro' in value['services']['prometheus']['volumes']
-    assert './prometheus:/etc/dc-overview/prometheus' in value['services']['dc-overview']['volumes']
+    assert str(tmp_path.with_name(tmp_path.name + '-monitoring')) + ':/var/lib/dc-monitoring' in value['services']['dc-overview']['volumes']
     assert not any('/prometheus.yml:/etc/prometheus/' in mount for mount in value['services']['prometheus']['volumes'])
 
 
 def test_selected_prometheus_validation_precedes_every_monitoring_file_write(tmp_path,monkeypatch):
     from dc_overview.fleet_config import FleetConfig
     from dc_overview.fleet_manager import FleetManager
+    tmp_path = monitoring_fresh_directory(monkeypatch)
     config=FleetConfig(config_dir=tmp_path);manager=FleetManager(config)
     manager.release_plan=SimpleNamespace(targets={});manager.monitoring_plan={'prometheus':{'scrape_configs':[]},'grafana':{'prometheus_datasource_uid':'existing-uid'}}
     old=tmp_path/'docker-compose.yml';old.write_text('existing compose')
@@ -486,12 +496,15 @@ def test_selected_monitoring_preserves_customer_job_and_datasource_uid(tmp_path,
     from dc_overview.fleet_config import FleetConfig
     from dc_overview.fleet_manager import FleetManager
     from dc_overview import fleet_upgrade
+    tmp_path = monitoring_fresh_directory(monkeypatch)
     config=FleetConfig(config_dir=tmp_path);config.components.vast_exporter=False
-    (tmp_path/'prometheus.yml').write_text('global:\n  scrape_interval: 37s\nscrape_configs:\n- job_name: customer\n  static_configs:\n  - targets: [192.0.2.70:9000]\n')
+    public = tmp_path.with_name(tmp_path.name + '-monitoring'); public.mkdir()
+    monkeypatch.setattr('dc_overview.monitoring.validate_product_monitoring_custody', lambda *a: None)  # UID adapter only; guarded path is real.
+    (public/'prometheus.yml').write_text('global:\n  scrape_interval: 37s\nscrape_configs:\n- job_name: customer\n  static_configs:\n  - targets: [192.0.2.70:9000]\n')
     manager=FleetManager(config);manager.release_plan=SimpleNamespace(targets={})
     monkeypatch.setattr(fleet_upgrade,'observe_component',lambda *a:{'state':'running'})
     source={'type':'prometheus','uid':'customer-stable','isDefault':True,'url':'http://customer-prometheus:9090'}
-    monkeypatch.setattr(manager,'_grafana_request',lambda path: [source] if path == '/api/datasources' else [{'uid':'dc-overview-main'}])
+    monkeypatch.setattr(manager,'_grafana_request',lambda path, **kwargs: {'database':'ok'} if path == '/api/health' else [source] if path == '/api/datasources' else [{'uid':'dc-overview-main'}])
     prepared=manager._prepare_baseline_monitoring()
     assert prepared['prometheus']['global']['scrape_interval'] == '37s'
     assert prepared['prometheus']['scrape_configs'][0]['job_name'] == 'customer'
@@ -533,6 +546,7 @@ def test_selected_direct_dc_container_has_product_config_directory_mount(tmp_pat
     from dc_overview.fleet_config import FleetConfig
     from dc_overview.fleet_manager import FleetManager
     from dc_overview import fleet_manager
+    tmp_path = monitoring_fresh_directory(monkeypatch)
     config=FleetConfig(config_dir=tmp_path);config.components.ipmi_monitor=False
     manager=FleetManager(config);manager.release_plan=SimpleNamespace(targets={'dc-overview':{'kind':'oci','reference':f'ghcr.io/cryptolabsza/dc-overview@sha256:{DIGEST}'}})
     run=Mock(return_value=SimpleNamespace(returncode=0,stdout='',stderr=''))
@@ -542,8 +556,9 @@ def test_selected_direct_dc_container_has_product_config_directory_mount(tmp_pat
     monkeypatch.setattr(fleet_manager.time,'sleep',lambda *a:None)
     manager._deploy_dc_overview_container()
     command=next(call.args[0] for call in run.call_args_list if call.args[0][:2] == ['docker','run'])
-    assert str(tmp_path/'prometheus')+':/etc/dc-overview/prometheus' in command
-    assert 'PROMETHEUS_CONFIG_PATH=/etc/dc-overview/prometheus/prometheus.yml' in command
+    assert str(tmp_path.with_name(tmp_path.name + '-monitoring'))+':/var/lib/dc-monitoring' in command
+    assert 'PROMETHEUS_CONFIG_PATH=/var/lib/dc-monitoring/prometheus.yml' in command
+    assert 'PROMETHEUS_OWNERSHIP_PATH=/var/lib/dc-monitoring/ownership.json' in command
     assert 'com.centurylinklabs.watchtower.enable=false' in command
 
 
@@ -609,7 +624,10 @@ def test_monitoring_preparation_retains_exact_source_snapshot(tmp_path,monkeypat
     from dc_overview.fleet_config import FleetConfig
     from dc_overview.fleet_manager import FleetManager
     from dc_overview import fleet_upgrade
-    source=tmp_path/'prometheus.yml';raw=b'global: {scrape_interval: 37s}\nscrape_configs: []\n';source.write_bytes(raw)
+    tmp_path = monitoring_fresh_directory(monkeypatch)
+    public = tmp_path.with_name(tmp_path.name + '-monitoring'); public.mkdir()
+    monkeypatch.setattr('dc_overview.monitoring.validate_product_monitoring_custody', lambda *a: None)  # UID adapter only.
+    source=public/'prometheus.yml';raw=b'global: {scrape_interval: 37s}\nscrape_configs: []\n';source.write_bytes(raw)
     manager=FleetManager(FleetConfig(config_dir=tmp_path));manager.release_plan=SimpleNamespace(targets={})
     monkeypatch.setattr(fleet_upgrade,'observe_component',lambda *a:{'state':'unknown'})
     plan=manager._prepare_baseline_monitoring()

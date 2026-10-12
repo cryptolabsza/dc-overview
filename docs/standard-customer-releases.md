@@ -329,6 +329,21 @@ so atomic replacement does not leave Prometheus reading an old inode. The
 selected Prometheus tool validates candidate config/rules; reload must report
 that the effective loaded config matches the candidate, with checked recovery
 on failure.
+Fresh selected setup uses `/etc/dc-overview-monitoring`, independently of the
+private `/etc/dc-overview` root, and supplies the same public schema-1 ownership
+file to both launch paths. Later host monitoring operations follow the inspected
+DC environment/shared mount authority, including after adoption; obsolete private
+files are not a fallback. The ordinary earlier directory pair can be adopted only
+through its bounded complete member/custody mapping into a new public subtree.
+The initial installer keeps a temporary authority for its own verified
+Prometheus/Grafana stage until DC is launched; this does not authorize an unknown
+partial existing controller. Normal selected preparation compares referenced
+host files with bytes/custody/inode read through bounded read-only exec in the
+running Prometheus mount namespace, with exact container identity checks.
+GET archive is not a running-file proof. Missing reader support holds explicitly.
+Retained-file replacement
+or a product rule revision mismatch holds before configuration writes; matching
+configuration YAML alone does not prove rule continuity.
 
 Grafana supports `customer_dashboard_dir`, `prometheus_datasource_uid`, and
 `overwrite_product_dashboards` (default false). Existing datasource UIDs and
@@ -336,6 +351,9 @@ mappings are reused. Existing edited/customer dashboard UIDs are preserved by
 default. Customer JSON that collides with a packaged product UID blocks before
 writes. Only dashboards packaged in the selected CLI wheel are product inputs;
 there is no moving GitHub branch fallback in baseline mode.
+Product alerts use the verified selected/configured Prometheus datasource UID on
+fresh setup and normal synchronization. Grafana cold start has a bounded120second
+ownership-readiness wait; denied or malformed ownership remains a hold.
 
 A successful local test receipt is not deployment acceptance. Published
 manifest facts, actual Linux ownership/mounts, exact installed packages,

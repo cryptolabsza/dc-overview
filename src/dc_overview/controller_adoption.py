@@ -71,6 +71,37 @@ class AdoptionError(RuntimeError):
     """A bounded precondition or recovery hold; never contains inspected Env."""
 
 
+RUNNING_FILE_PROOF_SCRIPT = r'''
+set -eu
+[ "$#" -eq 2 ]
+limit="$1"; file="$2"; parent="$file"
+while [ "$parent" != / ]; do
+  [ ! -L "$parent" ] || exit 1
+  parent="${parent%/*}"; [ -n "$parent" ] || parent=/
+done
+[ -f "$file" ]
+snapshot() {
+  /bin/busybox stat -c '%u %g %a %s %i %d' "$file"
+  parent="$file"
+  while :; do
+    parent="${parent%/*}"; [ -n "$parent" ] || parent=/
+    [ "$parent" != / ] || break
+    [ -d "$parent" ]
+    /bin/busybox stat -c '%u %g %a %i %d' "$parent"
+  done
+}
+metadata=$(/bin/busybox stat -c '%s' "$file")
+[ "$metadata" -le "$limit" ]
+before=$(snapshot)
+printf '%s\nDATA\n' "$before"
+/bin/busybox od -An -v -tx1 "$file"
+printf '\nEND\n'
+after=$(snapshot)
+[ "$before" = "$after" ]
+printf '%s\n' "$after"
+'''
+
+
 def _encoded(value): return json.dumps(value, sort_keys=True, separators=(',', ':')).encode()
 
 def _cache_proof_command(payload):
@@ -272,6 +303,62 @@ def _references(config):
     return result
 
 
+def _ordinary_directory_source(inventory, product):
+    """Only the published installer's exact directory pair may be retired."""
+    roots = [m for m in _mounts(inventory['prometheus']) if m['Target'] == '/etc/prometheus']
+    if not roots or roots[0]['Source'] == product: return None
+    root = roots[0]
+    if root['Type'] != 'bind' or root['ReadOnly'] is not True or set(root) - {'Type','Source','Target','ReadOnly','BindOptions'} or root.get('BindOptions', {}) != {'Propagation':'rprivate'}:
+        raise AdoptionError('unsupported predecessor directory mount custody')
+    source = _safe_path(root['Source'])
+    if not source.is_dir() or source.name != 'prometheus':
+        raise AdoptionError('unsupported predecessor directory source')
+    dc = _mounts(inventory['dc-overview'])
+    writer = {'Type':'bind','Source':str(source),'Target':'/etc/dc-overview/prometheus','ReadOnly':False,'BindOptions':{'Propagation':'rprivate'}}
+    if writer not in dc or not any(m['Type']=='bind' and m['Source']==str(source.parent) and m['Target']=='/etc/dc-overview' and m['ReadOnly'] for m in dc):
+        raise AdoptionError('ordinary predecessor directory pair/private parent custody required')
+    for role, target in (('dc-overview','/etc/dc-overview/prometheus'),('prometheus','/etc/prometheus')):
+        for mount in _mounts(inventory[role]):
+            if mount['Target'].startswith(target + '/') and not (role=='prometheus' and mount['ReadOnly'] and (mount['Target']=='/etc/prometheus/customer' or mount['Target'].startswith('/etc/prometheus/customer/'))):
+                raise AdoptionError('predecessor directory overlap unsupported')
+    new = _safe_path(product)
+    if new == source or source in new.parents or new in source.parents:
+        raise AdoptionError('new product directory overlaps predecessor custody')
+    return source
+
+
+def _directory_state(source):
+    """Complete flat member accounting; no credential/subtree inference."""
+    metadata = source.stat()
+    result = {'source':str(source),'uid':metadata.st_uid,'gid':metadata.st_gid,'mode':stat.S_IMODE(metadata.st_mode),
+        'parents':{str(p):{'uid':p.stat().st_uid,'gid':p.stat().st_gid,'mode':stat.S_IMODE(p.stat().st_mode)} for p in source.parents},'members':{}}
+    members = list(source.iterdir())
+    if len(members)>3: raise AdoptionError('unsupported predecessor directory member inventory')
+    for path in members:
+        info = path.lstat()
+        if path.name not in {'prometheus.yml','recording_rules.yml','prometheus.yml.lock'} or not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size>2*1024*1024:
+            raise AdoptionError('unsupported predecessor directory member custody')
+        if path.name.endswith('.lock'):
+            if info.st_size or stat.S_IMODE(info.st_mode) != 0o600:
+                raise AdoptionError('unsupported predecessor directory coordination custody')
+            # Optional coordination inode is acquired separately; creation of an
+            # absent lock by the writer is not customer configuration drift.
+            continue
+        result['members'][path.name]={'bytes':path.read_bytes().hex(),'uid':info.st_uid,'gid':info.st_gid,
+            'mode':stat.S_IMODE(info.st_mode),'inode':info.st_ino,'device':info.st_dev}
+    if set(result['members']) != {'prometheus.yml','recording_rules.yml'}:
+        raise AdoptionError('ordinary predecessor directory members incomplete')
+    return result
+
+
+def _source_config_path(inventory):
+    mounts = _mounts(inventory['prometheus'])
+    file = next((m for m in mounts if m['Type']=='bind' and m['Target']=='/etc/prometheus/prometheus.yml'),None)
+    if file: return _safe_path(file['Source'])
+    root = next((m for m in mounts if m['Type']=='bind' and m['Target']=='/etc/prometheus'),None)
+    return _safe_path(Path(root['Source'])/'prometheus.yml') if root else None
+
+
 def _snapshot(inventory, config_bytes, evidence):
     # These bytes are private. Do not put their low-entropy Env hashes in public output.
     return _encoded({'runtime':{r:_request(v) | {'Id':v['Id'],'Running':v.get('State',{}).get('Running'),'Paused':v.get('State',{}).get('Paused',False)} for r,v in inventory.items()},
@@ -344,10 +431,25 @@ def build_plan(inventory,declaration,config_bytes,evidence):
     if not any(v in ('--config.file=/etc/prometheus/prometheus.yml','/etc/prometheus/prometheus.yml') for v in commands):
         raise AdoptionError('unsupported Prometheus --config.file; exact existing standard path required')
     product=declaration['product_directory']; destination=declaration['dc_destination']
+    predecessor = _ordinary_directory_source(sources, product)
+    if predecessor:
+        state = evidence.get('source_directory')
+        if state != _directory_state(predecessor) or state['members']['prometheus.yml']['bytes'] != config_bytes.hex():
+            raise AdoptionError('predecessor directory member/config custody unverified')
+        if any(state['members']['prometheus.yml'][key] != evidence.get('config_custody', {}).get(key) for key in ('uid','gid','mode')):
+            raise AdoptionError('predecessor directory/archive config custody differs')
+        if '/etc/prometheus/recording_rules.yml' not in config.get('rule_files', []) or refs.intersection({'/etc/prometheus/prometheus.yml','/etc/prometheus/prometheus.yml.lock','/etc/prometheus/ownership.json'}):
+            raise AdoptionError('ordinary predecessor directory references unaccounted')
+        if state['members']['recording_rules.yml']['bytes'] != evidence['reference_files'].get('/etc/prometheus/recording_rules.yml',b'').hex():
+            raise AdoptionError('predecessor directory reference bytes drift')
+        if any(state['members']['recording_rules.yml'][key] != evidence.get('reference_custody', {}).get('/etc/prometheus/recording_rules.yml', {}).get(key) for key in ('uid','gid','mode')):
+            raise AdoptionError('predecessor directory/archive rule custody differs')
     candidate=requests['dc-overview']
     candidate['Config']['Env']=[v for v in env if not v.startswith(('PROMETHEUS_CONFIG_PATH=','PROMETHEUS_OWNERSHIP_PATH='))]+[
         'PROMETHEUS_CONFIG_PATH='+destination+'/prometheus.yml','PROMETHEUS_OWNERSHIP_PATH='+destination+'/ownership.json']
     mounts=candidate['HostConfig']['Mounts']
+    if predecessor:
+        mounts[:] = [m for m in mounts if m['Target'] != '/etc/dc-overview/prometheus']
     target=next((m for m in mounts if m['Target']==destination),None)
     desired={'Type':'bind','Source':product,'Target':destination,'ReadOnly':False,'BindOptions':{'Propagation':'rprivate'}}
     if target and target!=desired: raise AdoptionError('DC writer destination collision')
@@ -357,16 +459,18 @@ def build_plan(inventory,declaration,config_bytes,evidence):
     candidate=requests['prometheus']; mounts=candidate['HostConfig']['Mounts']
     root=next((m for m in mounts if m['Target']=='/etc/prometheus'),None)
     desired={'Type':'bind','Source':product,'Target':'/etc/prometheus','ReadOnly':True,'BindOptions':{'Propagation':'rprivate'}}
-    if root and root!=desired:
+    if root and root!=desired and not predecessor:
         # Directory adoption requires reading every potentially visible member;
         # this first contract supports the config-file-mounted predecessor.
         raise AdoptionError('unsupported existing Prometheus directory mount; explicit file custody mapping required')
-    retained=[m for m in mounts if m['Target']!='/etc/prometheus/prometheus.yml']
+    retained=[m for m in mounts if m['Target']!='/etc/prometheus/prometheus.yml' and not (predecessor and m['Target']=='/etc/prometheus')]
+    if predecessor:
+        retained.append({'Type':'bind','Source':str(predecessor/'recording_rules.yml'),'Target':'/etc/prometheus/recording_rules.yml','ReadOnly':True,'BindOptions':{'Propagation':'rprivate'}})
     if any(m['Target']=='/etc/prometheus/ownership.json' for m in retained): raise AdoptionError('monitoring ownership path collision')
     for ref in refs:
         if not any(ref==m['Target'] or ref.startswith(m['Target']+'/') for m in retained):
             raise AdoptionError('external reference mount custody unavailable')
-    if not root: retained.append(desired)
+    if not root or predecessor: retained.append(desired)
     candidate['HostConfig']['Mounts']=retained
     mutations=tuple(r for r in MUTABLE if _request(sources[r])!=requests[r])
     snapshot=_snapshot(sources,config_bytes,evidence)
@@ -381,13 +485,22 @@ def bounded_lock(path,*,timeout=5):
     path=_safe_path(path)
     descriptor=os.open(path,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
     with os.fdopen(descriptor,'a+b') as handle:
+        identity=os.fstat(handle.fileno())
+        if not stat.S_ISREG(identity.st_mode) or identity.st_nlink!=1:
+            raise AdoptionError('monitoring/lifecycle lock regular inode required')
+        def verify():
+            try: current=path.lstat()
+            except OSError: raise AdoptionError('monitoring/lifecycle lock inode drift') from None
+            if (current.st_dev,current.st_ino,current.st_uid,current.st_gid,stat.S_IMODE(current.st_mode)) != (identity.st_dev,identity.st_ino,identity.st_uid,identity.st_gid,stat.S_IMODE(identity.st_mode)):
+                raise AdoptionError('monitoring/lifecycle lock inode or custody drift')
         deadline=time.monotonic()+timeout
         while True:
             try: fcntl.flock(handle,fcntl.LOCK_EX|fcntl.LOCK_NB); break
             except BlockingIOError:
                 if time.monotonic()>=deadline: raise AdoptionError('lifecycle/monitoring lock busy') from None
                 time.sleep(min(.05,max(0,deadline-time.monotonic())))
-        try: yield
+        try:
+            verify(); yield verify
         finally: fcntl.flock(handle,fcntl.LOCK_UN)
 
 
@@ -524,9 +637,9 @@ class InstalledEngine:
         try:
             connection.request('GET',prefix.rstrip('/')+'/api/v1/status/config')
             response=connection.getresponse(); value=json.loads(response.read())
-            expected=yaml.safe_load(self.read_file(source['Id'],'/etc/prometheus/prometheus.yml'))
+            expected=yaml.safe_load(bytes.fromhex(self.running_file_state(source['Id'],'/etc/prometheus/prometheus.yml')['bytes']))
             return response.status==200 and value.get('status')=='success' and declared_configuration_matches(expected,yaml.safe_load(value['data']['yaml']))
-        except (OSError,ValueError,KeyError,TypeError): return False
+        except (OSError,ValueError,KeyError,TypeError,AdoptionError): return False
         finally: connection.close()
 
     def _remove_owned_helper(self,name):
@@ -762,7 +875,10 @@ class InstalledEngine:
             check(); self._remove_owned_helper(name); check()
 
     def file_state(self,name,path,*,max_bytes=2*1024*1024):
-        """Bounded streaming archive read, including regular-file custody."""
+        """Bounded archive snapshot; Docker may reopen host binds in a fresh view.
+
+        This is not evidence of the running container's mounted inode.
+        """
         from cryptolabs_proxy.migration import _UnixHTTPConnection
         import io,tarfile
         if not path.startswith('/') or '..' in PurePosixPath(path).parts or any(c in path for c in '\0\r\n'):
@@ -785,10 +901,71 @@ class InstalledEngine:
             raise AdoptionError('monitoring reference bounded archive unverified') from None
         finally: connection.close()
 
+    def running_file_state(self,name,path,*,max_bytes=2*1024*1024):
+        """Read only through the exact running task's existing mount namespace."""
+        if not isinstance(path,str): raise AdoptionError('unsupported running reference path/bound')
+        target=PurePosixPath(path)
+        if not target.is_absolute() or '..' in target.parts or any(c in path for c in '\0\r\n') or len(path.encode())>4096 or len(target.parts)>64 or type(max_bytes) is not int or not 0<max_bytes<=2*1024*1024:
+            raise AdoptionError('unsupported running reference path/bound')
+        def identity(value):
+            state=value.get('State',{}); config=value.get('Config',{})
+            if not isinstance(value.get('Image'),str) or not re.fullmatch(r'sha256:[0-9a-f]{64}',value['Image']) or not isinstance(config.get('User'),str) or not re.fullmatch(r'[0-9a-f]{64}',value.get('Id','')) or state.get('Running') is not True or state.get('Paused',False) is not False or state.get('Restarting',False) is not False or type(state.get('Pid')) is not int or state['Pid']<=0 or not isinstance(state.get('StartedAt'),str) or not state['StartedAt']:
+                raise AdoptionError('running reference container identity unavailable')
+            return (value['Id'],value.get('Image'),config.get('User'),state['Pid'],state['StartedAt'])
+        before=self.engine.inspect(name); expected=identity(before); container_id=expected[0]
+        if re.fullmatch(r'[0-9a-f]{64}',name) and name!=container_id:
+            raise AdoptionError('running reference container ID differs')
+        connection=None
+        try:
+            from cryptolabs_proxy.migration import _UnixHTTPConnection
+            created=json.loads(self.engine._request('POST','/containers/'+container_id+'/exec',{
+                'AttachStdin':False,'AttachStdout':True,'AttachStderr':True,'Tty':False,'Privileged':False,'WorkingDir':'/',
+                'Env':['ENV=','BASH_ENV=','LD_PRELOAD=','LD_LIBRARY_PATH='],
+                'Cmd':['/bin/busybox','timeout','10','/bin/busybox','sh','-c',RUNNING_FILE_PROOF_SCRIPT,'dc-reference-proof',str(max_bytes),path]}))
+            exec_id=created.get('Id')
+            if not isinstance(exec_id,str) or not re.fullmatch(r'[0-9a-f]{64}',exec_id): raise AdoptionError('running reference exec identity unavailable')
+            connection=_UnixHTTPConnection(self.engine.socket_path,min(self.engine.timeout,15))
+            connection.request('POST','/exec/'+exec_id+'/start',body=b'{"Detach":false,"Tty":false}',headers={'Content-Type':'application/json'})
+            # od emits three characters per byte plus each 16-byte row's newline.
+            # Reserve additional bounded headroom for metadata and multiplex frames;
+            # the decoded payload below still cannot exceed max_bytes.
+            response=connection.getresponse(); limit=max_bytes*4+65536
+            if response.status!=200: raise AdoptionError('running reference exec start failed')
+            raw=response.read(limit+1)
+            if len(raw)>limit: raise AdoptionError('running reference output bound exceeded')
+            output=bytearray(); offset=0
+            while offset<len(raw):
+                header=raw[offset:offset+8]
+                if len(header)!=8 or header[0]!=1 or header[1:4]!=b'\0\0\0': raise AdoptionError('running reference stream unsupported')
+                size=int.from_bytes(header[4:8],'big'); offset+=8
+                if size>len(raw)-offset: raise AdoptionError('running reference stream truncated')
+                output.extend(raw[offset:offset+size]); offset+=size
+            result=json.loads(self.engine._request('GET','/exec/'+exec_id+'/json'))
+            if result.get('ContainerID')!=container_id or result.get('Running') is not False or type(result.get('ExitCode')) is not int or result['ExitCode']!=0:
+                raise AdoptionError('running reference read did not complete; required BusyBox interface unavailable or read denied')
+            if identity(self.engine.inspect(container_id))!=expected: raise AdoptionError('running reference container identity drift')
+            lines=bytes(output).decode('ascii').splitlines(); parents=[p for p in target.parents if str(p)!='/']; count=1+len(parents)
+            if lines[count]!='DATA': raise ValueError('shape')
+            end=lines.index('END',count+1)
+            if lines[:count]!=lines[end+1:] or len(lines[end+1:])!=count: raise ValueError('custody drift')
+            metadata=lines[0].split()
+            if len(metadata)!=6 or any(not re.fullmatch(r'[0-9]+',v) for v in metadata): raise ValueError('metadata')
+            uid,gid,mode,size,inode,device=int(metadata[0]),int(metadata[1]),int(metadata[2],8),int(metadata[3]),int(metadata[4]),int(metadata[5])
+            encoded=''.join(''.join(line.split()) for line in lines[count+1:end])
+            if mode>0o7777 or size>max_bytes or len(encoded)!=size*2 or not re.fullmatch(r'[0-9a-f]*',encoded): raise ValueError('payload')
+            custody={}
+            for parent,line in zip(parents,lines[1:count]):
+                values=line.split()
+                if len(values)!=5 or any(not re.fullmatch(r'[0-9]+',v) for v in values) or int(values[2],8)>0o7777: raise ValueError('parent')
+                custody[str(parent)]={'uid':int(values[0]),'gid':int(values[1]),'mode':int(values[2],8)}
+            return {'bytes':encoded,'uid':uid,'gid':gid,'mode':mode,'inode':inode,'device':device,'parents':custody}
+        except AdoptionError: raise
+        except Exception: raise AdoptionError('running reference namespace proof unavailable; no archive fallback') from None
+        finally:
+            if connection is not None: connection.close()
+
     def reference_state(self,name,path):
-        state=self.file_state(name,path)
-        state['parents']={str(parent):self.directory_custody(name,str(parent)) for parent in PurePosixPath(path).parents if str(parent)!='/'}
-        return state
+        return self.running_file_state(name,path)
 
     def public_input_state(self,declaration):
         result={}
@@ -801,12 +978,13 @@ class InstalledEngine:
 
     def monitoring_snapshot(self,plan):
         """Current bytes and custody, independent of terminal journal claims."""
-        config=self.file_state('prometheus','/etc/prometheus/prometheus.yml')
+        prom=self.inspect('prometheus')
+        config=self.running_file_state(prom['Id'],'/etc/prometheus/prometheus.yml')
         mapping=_public_monitoring_config(bytes.fromhex(config['bytes']))
         if _references(mapping)!=set(plan.evidence['reference_files']):
             raise AdoptionError('terminal monitoring reference declaration drift')
-        references={r:self.reference_state('prometheus',r) for r in plan.evidence['reference_files']}
-        prom=self.inspect('prometheus')
+        references={r:self.reference_state(prom['Id'],r) for r in plan.evidence['reference_files']}
+        if self.inspect('prometheus')['Id']!=prom['Id']: raise AdoptionError('terminal monitoring role identity drift')
         if any(m.get('Source')==plan.declaration['product_directory'] and m.get('Destination')=='/etc/prometheus' for m in prom['Mounts']):
             from .monitoring import validate_product_monitoring_custody
             validate_product_monitoring_custody(plan.declaration['product_directory'])
@@ -830,7 +1008,7 @@ class InstalledEngine:
             image=self.engine.image(inventory[role]['Image'])
             if image.get('Id')!=inventory[role]['Image'] or image.get('Os')!='linux' or not image.get('Architecture') or not image.get('RepoDigests'):
                 raise AdoptionError('retained image/platform identity unavailable')
-        config_state=self.file_state('prometheus','/etc/prometheus/prometheus.yml')
+        config_state=self.running_file_state(inventory['prometheus']['Id'],'/etc/prometheus/prometheus.yml')
         config=bytes.fromhex(config_state['bytes'])
         evidence['config_custody']={k:config_state[k] for k in ('uid','gid','mode')}
         evidence['reference_custody']={}
@@ -838,10 +1016,12 @@ class InstalledEngine:
         except Exception: raise AdoptionError('monitoring config inventory unavailable') from None
         for ref in refs:
             if not isinstance(ref,str) or any(c in ref for c in '*?['): raise AdoptionError('unsupported glob monitoring reference')
-            state=self.reference_state('prometheus',ref)
+            state=self.reference_state(inventory['prometheus']['Id'],ref)
             evidence['reference_files'][ref]=bytes.fromhex(state['bytes'])
             evidence['reference_custody'][ref]={k:state[k] for k in ('uid','gid','mode','parents')}
         evidence['public_inputs']=self.public_input_state(declaration)
+        predecessor = _ordinary_directory_source(inventory, declaration['product_directory'])
+        if predecessor: evidence['source_directory'] = _directory_state(predecessor)
         return inventory,declaration,config,evidence
 
 
@@ -932,6 +1112,9 @@ class ControllerAdoption:
                     held=role+'-controller-failed-'+plan.operation_id
                     if _maybe(self.engine,held): raise AdoptionError('failed candidate name collision')
                     self._action(record,role,'retain-candidate',guard,lambda r=role,h=held:self.engine.rename(r,h))
+            # Historical/current-host source guard only. Archive may reopen
+            # binds; running namespace continuity is proved after restoration
+            # by readiness and verify_terminal, never by this stopped read.
             if hasattr(self.engine,'read_file') and self.engine.read_file(plan.sources['prometheus']['Id'],'/etc/prometheus/prometheus.yml')!=plan.prometheus_bytes:
                 raise AdoptionError('original configuration changed; forward repair required')
             for role in reversed(plan.mutations):
@@ -1062,6 +1245,20 @@ def stage_product_directory(plan):
             raise AdoptionError('product parent not traversable by DC UID1000; private parents unchanged')
     _public_monitoring_config(plan.prometheus_bytes)
     required={'prometheus.yml':plan.prometheus_bytes,'ownership.json':_public_ownership(plan)}
+    directories=set()
+    # Mountpoints must exist before mounting the new root read-only. Retained
+    # references still resolve to their original stores, never copied secrets.
+    request=plan.requests.get('prometheus',_request(plan.sources['prometheus']))
+    for mount in request['HostConfig']['Mounts']:
+        if not mount['Target'].startswith('/etc/prometheus/'): continue
+        relative=PurePosixPath(mount['Target']).relative_to('/etc/prometheus')
+        if '..' in relative.parts or mount['Type']!='bind' or not mount['ReadOnly']:
+            raise AdoptionError('unsupported public reference mountpoint')
+        source=_safe_path(mount['Source'])
+        if source.is_dir(): directories.add(relative)
+        elif source.is_file(): required[str(relative)]=b''
+        else: raise AdoptionError('reference mountpoint source custody unavailable')
+        directories.update(p for p in relative.parents if str(p)!='.')
     if directory.exists():
         validate_product_monitoring_custody(directory)
         ownership=directory/'ownership.json'
@@ -1071,6 +1268,8 @@ def stage_product_directory(plan):
                 raise AdoptionError('existing ownership declaration requires public DC custody')
         if any(not (directory/name).is_file() or (directory/name).is_symlink() or (directory/name).read_bytes()!=payload for name,payload in required.items()):
             raise AdoptionError('existing product directory differs; no files overwritten')
+        if any(not (directory/name).is_dir() or (directory/name).is_symlink() for name in directories):
+            raise AdoptionError('existing product directory mountpoints differ')
         return
     import shutil
     if shutil.disk_usage(directory.parent).free < len(plan.snapshot)*3 + len(plan.prometheus_bytes)*3 + 16*1024*1024:
@@ -1079,6 +1278,8 @@ def stage_product_directory(plan):
     try:
         os.chown(directory,1000,1000)
         os.chmod(directory,0o755)
+        for name in sorted(directories,key=lambda p:len(p.parts)):
+            child=directory/name; child.mkdir(mode=0o755); os.chown(child,1000,1000); os.chmod(child,0o755)
         for name,payload in required.items():
             descriptor=os.open(directory/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o644)
             with os.fdopen(descriptor,'wb') as stream:
@@ -1153,18 +1354,22 @@ def host_adopt(config_dir,plan_path,maintenance_proof,*,adapter=None):
             guard()
             with ExitStack() as locks:
                 # Use the source writer's actual file lock inode. Do not copy it.
-                source=next((m['Source'] for m in current[0]['prometheus']['Mounts'] if m.get('Type')=='bind' and m.get('Destination')=='/etc/prometheus/prometheus.yml'),None)
-                if source: locks.enter_context(bounded_lock(Path(source).with_name(Path(source).name+'.lock')))
-                guard(); stage_product_directory(plan)
-                locks.enter_context(bounded_lock(Path(plan.declaration['product_directory'])/'prometheus.yml.lock'))
-                guard(); adapter.validate_staged(plan,guard); guard()
+                source=_source_config_path(current[0])
+                source_guard=locks.enter_context(bounded_lock(Path(source).with_name(Path(source).name+'.lock'))) if source else lambda:None
+                product_guard=lambda:None
+                def locked_guard(): guard(); source_guard(); product_guard()
+                adapter._controller_guard_check=locked_guard
+                locked_guard(); stage_product_directory(plan)
+                product=Path(plan.declaration['product_directory'])
+                product_guard=source_guard if source and Path(source).parent==product else locks.enter_context(bounded_lock(product/'prometheus.yml.lock'))
+                locked_guard(); adapter.validate_staged(plan,locked_guard); locked_guard()
                 # Validation/operator delay invalidates an earlier snapshot.
                 current=adapter.collect(plan.declaration)
                 if not plan.matches(current[0],current[2],current[3]): raise AdoptionError('controller plan drift after validation')
-                result=ControllerAdoption(adapter,journal).apply(plan,current=lambda:adapter.collect(plan.declaration),guard=guard)
+                result=ControllerAdoption(adapter,journal).apply(plan,current=lambda:adapter.collect(plan.declaration),guard=locked_guard)
                 if result['state'] in ('adopted','restored'):
-                    guard(); record=journal.read(); record['maintenance_proof']=proof; journal.write(record)
-                    ControllerAdoption(adapter,journal).verify_terminal(record,guard)
+                    locked_guard(); record=journal.read(); record['maintenance_proof']=proof; journal.write(record)
+                    ControllerAdoption(adapter,journal).verify_terminal(record,locked_guard)
                     guard.complete()
                     record=journal.read(); record['exclusion_released']=True; journal.write(record)
                 return result
@@ -1184,14 +1389,17 @@ def host_recover(config_dir,*,adapter=None):
         with adapter.controller_guard(proxy,proxy['Image'],plan.operation_id,recover=True) as guard:
             adapter._controller_guard_check=guard
             with ExitStack() as locks:
-                original=next((m['Source'] for m in plan.sources['prometheus']['Mounts'] if m.get('Type')=='bind' and m.get('Destination')=='/etc/prometheus/prometheus.yml'),None)
-                if original: locks.enter_context(bounded_lock(Path(original).with_name(Path(original).name+'.lock')))
+                original=_source_config_path(plan.sources)
+                source_guard=locks.enter_context(bounded_lock(Path(original).with_name(Path(original).name+'.lock'))) if original else lambda:None
+                product_guard=lambda:None
                 product=Path(plan.declaration['product_directory'])
                 if product.is_dir():
-                    locks.enter_context(bounded_lock(product/'prometheus.yml.lock'))
+                    product_guard=source_guard if original and Path(original).parent==product else locks.enter_context(bounded_lock(product/'prometheus.yml.lock'))
                 elif record['state']!='prepared':
                     raise AdoptionError('active recovery product directory missing; forward repair required')
-                result=ControllerAdoption(adapter,journal).recover(guard=guard)
+                def locked_guard(): guard(); source_guard(); product_guard()
+                adapter._controller_guard_check=locked_guard
+                result=ControllerAdoption(adapter,journal).recover(guard=locked_guard)
                 if result['state'] in ('adopted','restored'):
                     guard(); guard.complete()
                     record=journal.read(); record['exclusion_released']=True; journal.write(record)
