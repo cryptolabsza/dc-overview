@@ -572,6 +572,12 @@ docker run -d --name vastai-exporter \
 - `vastai_machine_*` - Detailed metrics (disk, inet, rentals, earnings)
 - `vastai_machine_gpu_occupancy` - Per-GPU occupancy state
 
+Vast historical panels show the **observed previous UTC day**, using provider-reported, revisable GPU, storage, upload and download amounts. Total requires all four components; bandwidth requires both directions. Valid zero and signed corrections are visible. Unknown components, stale reports and duplicate canonical sources produce gaps. Currency is displayed as USD based on Vast host-payment documentation; the report has no explicit currency or finality field.
+
+The background worker refreshes successful reports hourly, retries failures after at least five minutes, and spaces earnings request starts by at least two seconds. Accepted reports expire after two hours of monotonic elapsed time and become invalid at UTC rollover or account replacement. Scrapes use the snapshot without earnings network calls. The compact status table shows account/provider identity, report date, last success, readiness and exporter scrape availability.
+
+The historical x-axis records observation time. There is no backfill for uncollected days or later corrections to older reports. Do not sum or integrate repeated gauge samples; coarse sampling on long ranges can miss daily observations.
+
 ### RunPod Exporter
 
 CryptoLabs-built Prometheus exporter for RunPod host metrics.

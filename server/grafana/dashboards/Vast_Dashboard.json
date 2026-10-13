@@ -6846,9 +6846,9 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
-      "description": "As reported by vast api for the day before. ",
+      "description": "Vast-reported, revisable previous UTC day amounts in USD (currency inferred from host-payment documentation). The x-axis is observation time, not the accounting day; no backfill of missing days or older corrections. Explicit zero is visible; missing components, stale reports and duplicate sources leave gaps. Do not sum or integrate repeated gauge observations. Coarse sampling on long ranges can omit daily observations.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -6870,13 +6870,13 @@
               "viz": false
             },
             "insertNulls": false,
-            "lineInterpolation": "linear",
+            "lineInterpolation": "stepAfter",
             "lineWidth": 1,
             "pointSize": 5,
             "scaleDistribution": {
               "type": "linear"
             },
-            "showPoints": "auto",
+            "showPoints": "always",
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -6926,38 +6926,26 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(sum(vastai_per_machine_gpu_earn)  by (machine_id) ) !=0",
-          "legendFormat": "{{machine_id}}",
+          "expr": "(vastai_per_machine_gpu_earn)\nand on(job,instance,provider_account_id,account) (vastai_earnings_report_day_timestamp_seconds == (time() - (time() % 86400) - 86400))\nand on(job,instance,provider_account_id,account) (vastai_earnings_report_valid == 1)\nand on(job,instance,provider_account_id,account) ((time() - vastai_earnings_last_success_timestamp_seconds >= 0) and (time() - vastai_earnings_last_success_timestamp_seconds <= 7200))\nand on(provider_account_id) (count by(provider_account_id) (vastai_earnings_report_day_timestamp_seconds{provider_account_id!=\"\"}) == 1)",
+          "legendFormat": "{{account}} / {{provider_account_id}} / {{machine_id}} · {{instance}}",
           "range": true,
-          "refId": "A"
+          "refId": "A",
+          "instant": false
         }
       ],
-      "title": "Historic Machine earnings for GPUs  per day",
-      "transformations": [
-        {
-          "filter": {
-            "id": "byRefId",
-            "options": ""
-          },
-          "id": "filterByValue",
-          "options": {
-            "filters": [],
-            "match": "any",
-            "type": "include"
-          }
-        }
-      ],
+      "title": "GPU earnings — observed previous UTC day",
+      "transformations": [],
       "type": "timeseries"
     },
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
-      "description": "As reported by vast api for the day before. ",
+      "description": "Vast-reported, revisable previous UTC day amounts in USD (currency inferred from host-payment documentation). The x-axis is observation time, not the accounting day; no backfill of missing days or older corrections. Explicit zero is visible; missing components, stale reports and duplicate sources leave gaps. Do not sum or integrate repeated gauge observations. Coarse sampling on long ranges can omit daily observations.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -6979,13 +6967,13 @@
               "viz": false
             },
             "insertNulls": false,
-            "lineInterpolation": "linear",
+            "lineInterpolation": "stepAfter",
             "lineWidth": 1,
             "pointSize": 5,
             "scaleDistribution": {
               "type": "linear"
             },
-            "showPoints": "auto",
+            "showPoints": "always",
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -7035,30 +7023,18 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(sum(vastai_per_machine_gpu_earn+vastai_per_machine_bwd_earn+vastai_per_machine_bwu_earn+vastai_per_machine_sto_earn)  by (machine_id) ) !=0",
-          "legendFormat": "{{machine_id}}",
+          "expr": "(vastai_per_machine_gpu_earn + on(job,instance,provider_account_id,account,machine_id) vastai_per_machine_sto_earn + on(job,instance,provider_account_id,account,machine_id) vastai_per_machine_bwu_earn + on(job,instance,provider_account_id,account,machine_id) vastai_per_machine_bwd_earn)\nand on(job,instance,provider_account_id,account) (vastai_earnings_report_day_timestamp_seconds == (time() - (time() % 86400) - 86400))\nand on(job,instance,provider_account_id,account) (vastai_earnings_report_valid == 1)\nand on(job,instance,provider_account_id,account) ((time() - vastai_earnings_last_success_timestamp_seconds >= 0) and (time() - vastai_earnings_last_success_timestamp_seconds <= 7200))\nand on(provider_account_id) (count by(provider_account_id) (vastai_earnings_report_day_timestamp_seconds{provider_account_id!=\"\"}) == 1)",
+          "legendFormat": "{{account}} / {{provider_account_id}} / {{machine_id}} · {{instance}}",
           "range": true,
-          "refId": "A"
+          "refId": "A",
+          "instant": false
         }
       ],
-      "title": "Historic Machine earnings per day",
-      "transformations": [
-        {
-          "filter": {
-            "id": "byRefId",
-            "options": ""
-          },
-          "id": "filterByValue",
-          "options": {
-            "filters": [],
-            "match": "any",
-            "type": "include"
-          }
-        }
-      ],
+      "title": "Total earnings — observed previous UTC day",
+      "transformations": [],
       "type": "timeseries"
     },
     {
@@ -7173,9 +7149,9 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
-      "description": "As reported by vast api for the day before. ",
+      "description": "Vast-reported, revisable previous UTC day amounts in USD (currency inferred from host-payment documentation). The x-axis is observation time, not the accounting day; no backfill of missing days or older corrections. Explicit zero is visible; missing components, stale reports and duplicate sources leave gaps. Do not sum or integrate repeated gauge observations. Coarse sampling on long ranges can omit daily observations.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -7197,13 +7173,13 @@
               "viz": false
             },
             "insertNulls": false,
-            "lineInterpolation": "linear",
+            "lineInterpolation": "stepAfter",
             "lineWidth": 1,
             "pointSize": 5,
             "scaleDistribution": {
               "type": "linear"
             },
-            "showPoints": "auto",
+            "showPoints": "always",
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -7253,38 +7229,26 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(sum(vastai_per_machine_sto_earn)  by (machine_id) ) !=0",
-          "legendFormat": "{{machine_id}}",
+          "expr": "(vastai_per_machine_sto_earn)\nand on(job,instance,provider_account_id,account) (vastai_earnings_report_day_timestamp_seconds == (time() - (time() % 86400) - 86400))\nand on(job,instance,provider_account_id,account) (vastai_earnings_report_valid == 1)\nand on(job,instance,provider_account_id,account) ((time() - vastai_earnings_last_success_timestamp_seconds >= 0) and (time() - vastai_earnings_last_success_timestamp_seconds <= 7200))\nand on(provider_account_id) (count by(provider_account_id) (vastai_earnings_report_day_timestamp_seconds{provider_account_id!=\"\"}) == 1)",
+          "legendFormat": "{{account}} / {{provider_account_id}} / {{machine_id}} · {{instance}}",
           "range": true,
-          "refId": "A"
+          "refId": "A",
+          "instant": false
         }
       ],
-      "title": "Historic Machine earnings storage  per day",
-      "transformations": [
-        {
-          "filter": {
-            "id": "byRefId",
-            "options": ""
-          },
-          "id": "filterByValue",
-          "options": {
-            "filters": [],
-            "match": "any",
-            "type": "include"
-          }
-        }
-      ],
+      "title": "Storage earnings — observed previous UTC day",
+      "transformations": [],
       "type": "timeseries"
     },
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "ffamzhijdn1fke"
+        "uid": "prometheus"
       },
-      "description": "As reported by vast api for the day before. ",
+      "description": "Vast-reported, revisable previous UTC day amounts in USD (currency inferred from host-payment documentation). The x-axis is observation time, not the accounting day; no backfill of missing days or older corrections. Explicit zero is visible; missing components, stale reports and duplicate sources leave gaps. Do not sum or integrate repeated gauge observations. Coarse sampling on long ranges can omit daily observations.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -7306,13 +7270,13 @@
               "viz": false
             },
             "insertNulls": false,
-            "lineInterpolation": "linear",
+            "lineInterpolation": "stepAfter",
             "lineWidth": 1,
             "pointSize": 5,
             "scaleDistribution": {
               "type": "linear"
             },
-            "showPoints": "auto",
+            "showPoints": "always",
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -7362,30 +7326,18 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "ffamzhijdn1fke"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(sum(vastai_per_machine_bwd_earn+vastai_per_machine_bwu_earn)  by (machine_id) ) !=0",
-          "legendFormat": "{{machine_id}}",
+          "expr": "(vastai_per_machine_bwu_earn + on(job,instance,provider_account_id,account,machine_id) vastai_per_machine_bwd_earn)\nand on(job,instance,provider_account_id,account) (vastai_earnings_report_day_timestamp_seconds == (time() - (time() % 86400) - 86400))\nand on(job,instance,provider_account_id,account) (vastai_earnings_report_valid == 1)\nand on(job,instance,provider_account_id,account) ((time() - vastai_earnings_last_success_timestamp_seconds >= 0) and (time() - vastai_earnings_last_success_timestamp_seconds <= 7200))\nand on(provider_account_id) (count by(provider_account_id) (vastai_earnings_report_day_timestamp_seconds{provider_account_id!=\"\"}) == 1)",
+          "legendFormat": "{{account}} / {{provider_account_id}} / {{machine_id}} · {{instance}}",
           "range": true,
-          "refId": "A"
+          "refId": "A",
+          "instant": false
         }
       ],
-      "title": "Historic Machine earnings Bandwith  per day",
-      "transformations": [
-        {
-          "filter": {
-            "id": "byRefId",
-            "options": ""
-          },
-          "id": "filterByValue",
-          "options": {
-            "filters": [],
-            "match": "any",
-            "type": "include"
-          }
-        }
-      ],
+      "title": "Bandwidth earnings — observed previous UTC day",
+      "transformations": [],
       "type": "timeseries"
     },
     {
@@ -7605,6 +7557,222 @@
         }
       ],
       "type": "timeseries"
+    },
+    {
+      "id": 90,
+      "title": "Previous UTC day earnings readiness",
+      "type": "table",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 120
+      },
+      "description": "Live account/provider_account_id/source readiness, report midnight UTC and last accepted retrieval. Refresh error may retain a fresh same-day report; expired or configuration-error amounts are omitted. Duplicate canonical sources fail closed. Exporter scrape state is separate: down=0, absent=2. Timestamps are UTC.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "vastai_earnings_status",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "expr": "vastai_earnings_report_day_timestamp_seconds * 1000",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code"
+        },
+        {
+          "refId": "C",
+          "expr": "vastai_earnings_last_success_timestamp_seconds * 1000",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code"
+        },
+        {
+          "refId": "D",
+          "expr": "up{job=\"vastai\"} or (absent(up{job=\"vastai\"}) * 2)",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Report date (UTC)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Last success (UTC)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Earnings status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "Awaiting",
+                        "color": "orange",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "Valid",
+                        "color": "green",
+                        "index": 1
+                      },
+                      "2": {
+                        "text": "Partial",
+                        "color": "orange",
+                        "index": 2
+                      },
+                      "3": {
+                        "text": "Valid empty",
+                        "color": "orange",
+                        "index": 3
+                      },
+                      "4": {
+                        "text": "Refresh error",
+                        "color": "orange",
+                        "index": 4
+                      },
+                      "5": {
+                        "text": "Expired",
+                        "color": "orange",
+                        "index": 5
+                      },
+                      "6": {
+                        "text": "Configuration error",
+                        "color": "orange",
+                        "index": 6
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Exporter scrape"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "Down",
+                        "color": "orange",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "Up",
+                        "color": "green",
+                        "index": 1
+                      },
+                      "2": {
+                        "text": "Absent",
+                        "color": "orange",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value #A": "Earnings status",
+              "Value #B": "Report date (UTC)",
+              "Value #C": "Last success (UTC)",
+              "Value #D": "Exporter scrape"
+            }
+          }
+        }
+      ]
     }
   ],
   "refresh": "5s",
