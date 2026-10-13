@@ -1,3 +1,6 @@
+# TRACEWEAVER: file-role=shipped-dashboard-verification; req=REQ-EARN-009; trace=TRACE-EARN-009; ver=VER-EARN-009
+# TRACEWEAVER: verifies=VER-EARN-009; req=REQ-EARN-009; trace=TRACE-EARN-009
+# TRACEWEAVER: file-role=shipped-dashboard-verification; req=REQ-EARN-009; trace=TRACE-EARN-009; ver=VER-EARN-009
 """Evaluate the shipped registration query with Prometheus, not a Python imitation."""
 
 import json
@@ -169,3 +172,113 @@ def test_docker_publish_requires_semantic_dashboard_checks():
     assert test_step["env"]["REQUIRE_PROMTOOL"] == "1"
     assert "test_vast_dashboard_registration.py" in test_step["run"]
     assert "test_vast_income_dashboard.py" in test_step["run"]
+
+
+# These evaluate the actual shipped earnings expressions with promtool. The
+# synthetic test clock begins at Unix epoch zero; report `day` stays numeric.
+DAILY_QUERY_COMPONENTS = {14: ["gpu", "sto", "bwu", "bwd"], 15: ["gpu"],
+                          16: ["sto"], 17: ["bwu", "bwd"]}
+
+
+def earnings_panel(filename, panel_id):
+    dashboard = json.loads((ROOT / filename).read_text())
+    return next(panel for panel in dashboard["panels"] if panel.get("id") == panel_id)
+
+
+def daily_series(metric, value, *, at=25, provider="101", account="first", machine="7", job="vastai", instance="host:8622"):
+    labels = dict(job=job, instance=instance, provider_account_id=provider, account=account)
+    if metric.startswith("vastai_per_machine_"):
+        labels["machine_id"] = machine
+    return {"series": metric + "{" + ",".join(f'{k}="{v}"' for k, v in labels.items()) + "}",
+            "values": " ".join(["_"] * at + [str(value)])}
+
+
+def daily_report(amounts=(10, 2, 3, 4), *, at=25, day=0, valid=1, age=0, omit=(), **labels):
+    result = [daily_series("vastai_earnings_report_day_timestamp_seconds", day, at=at, **labels),
+              daily_series("vastai_earnings_report_valid", valid, at=at, **labels),
+              daily_series("vastai_earnings_last_success_timestamp_seconds", at * 3600 - age, at=at, **labels)]
+    result += [daily_series("vastai_per_machine_" + component + "_earn", value, at=at, **labels)
+               for component, value in zip(["gpu", "sto", "bwu", "bwd"], amounts) if component not in omit]
+    return result
+
+
+def daily_expected(panel_id, value, *, provider="101", account="first", machine="7", job="vastai", instance="host:8622"):
+    labels = dict(job=job, instance=instance, provider_account_id=provider, account=account, machine_id=machine)
+    metric_name = "vastai_per_machine_" + DAILY_QUERY_COMPONENTS[panel_id][0] + "_earn" if panel_id in [15, 16] else ""
+    return {"labels": metric_name + "{" + ",".join(f'{k}="{v}"' for k, v in labels.items()) + "}", "value": value}
+
+
+DAILY_SEMANTIC_CASES = ["all-components", "explicit-zero", "negative-adjustment", "missing-upload",
+    "missing-storage", "missing-gpu", "missing-download", "no-amounts", "invalid-report", "wrong-day", "missing-day", "missing-success",
+    "expired", "future-success", "freshness-boundary", "two-accounts-same-machine", "different-job-no-cross-join",
+    "different-instance-no-cross-join", "duplicate-canonical-target", "duplicate-conflicting-target",
+    "duplicate-stale-target", "duplicate-with-no-amount", "historical-evaluation-day", "predecessor-stale-clears-gap"]
+
+
+@pytest.mark.parametrize("filename", DASHBOARDS)
+@pytest.mark.parametrize("panel_id", [14, 15, 16, 17])
+def test_daily_shipped_queries_with_real_prometheus(filename, panel_id, tmp_path):
+    promtool = shutil.which("promtool")
+    if not promtool:
+        if os.environ.get("REQUIRE_PROMTOOL") == "1": pytest.fail("promtool required in CI")
+        pytest.skip("promtool required for semantic query evaluation")
+    expression = earnings_panel(filename, panel_id)["targets"][0]["expr"]
+    expected_full = {14: 19, 15: 10, 16: 2, 17: 7}[panel_id]
+    tests = []
+    for name in DAILY_SEMANTIC_CASES:
+        series, expected, at = daily_report(), [daily_expected(panel_id, expected_full)], 25
+        if name == "explicit-zero":
+            series, expected = daily_report((0, 0, 0, 0)), [daily_expected(panel_id, 0)]
+        elif name == "negative-adjustment":
+            series = daily_report((-10, 2, 3, 4))
+            expected = [daily_expected(panel_id, {14: -1, 15: -10, 16: 2, 17: 7}[panel_id])]
+        elif name.startswith("missing-") and name.split("missing-")[1] in ["upload", "storage", "gpu", "download"]:
+            missing = {"upload": "bwu", "storage": "sto", "gpu": "gpu", "download": "bwd"}[name.split("missing-")[1]]
+            series = daily_report(omit=[missing])
+            if missing in DAILY_QUERY_COMPONENTS[panel_id]: expected = []
+        elif name == "no-amounts": series, expected = daily_report(omit=["gpu", "sto", "bwu", "bwd"]), []
+        elif name == "invalid-report": series, expected = daily_report(valid=0), []
+        elif name == "wrong-day": series, expected = daily_report(day=86400), []
+        elif name == "missing-day": series, expected = [s for s in series if not s["series"].startswith("vastai_earnings_report_day_")], []
+        elif name == "missing-success": series, expected = [s for s in series if not s["series"].startswith("vastai_earnings_last_success_")], []
+        elif name == "expired": series, expected = daily_report(age=7201), []
+        elif name == "future-success": series, expected = daily_report(age=-1), []
+        elif name == "freshness-boundary": series = daily_report(age=7200)
+        elif name == "two-accounts-same-machine":
+            series += daily_report(provider="102", account="second", amounts=(20, 4, 6, 8))
+            expected += [daily_expected(panel_id, expected_full * 2, provider="102", account="second")]
+        elif name in ["different-job-no-cross-join", "different-instance-no-cross-join"]:
+            label = "job" if "job" in name else "instance"
+            # Metadata belongs to source A; amounts are present only at B.
+            series = [s for s in series if not s["series"].startswith("vastai_per_machine_")]
+            series += [s for s in daily_report(**{label: "other"}) if s["series"].startswith("vastai_per_machine_")]
+            expected = []
+        elif name.startswith("duplicate-"):
+            kwargs = {"instance": "replica:8622"}
+            if name == "duplicate-conflicting-target": kwargs["amounts"] = (100, 200, 300, 400)
+            if name == "duplicate-stale-target": kwargs.update(day=-86400, age=7201)
+            if name == "duplicate-with-no-amount": kwargs["omit"] = ["gpu", "sto", "bwu", "bwd"]
+            series += daily_report(**kwargs)
+            expected = []
+        elif name == "historical-evaluation-day":
+            # Evaluate yesterday's observations at their historical time and
+            # today's observations at today's time within one loaded fixture.
+            later = daily_report(at=49, day=86400, amounts=(20, 4, 6, 8))
+            for first, last in zip(series, later):
+                first["values"] += " " + " ".join(["_"] * 23 + [last["values"].split()[-1]])
+            tests.append({"name": name + "-later", "interval": "1h", "input_series": series,
+                          "promql_expr_test": [{"expr": expression, "eval_time": "49h",
+                                               "exp_samples": [daily_expected(panel_id, expected_full * 2)]}]})
+        elif name == "predecessor-stale-clears-gap":
+            # Source switch preserves unconstrained history. Stale predecessor
+            # metadata produces an intentional gap until its marker is stale.
+            series += [{"series": s["series"], "values": " ".join(["_"] * 24 + ["0", "stale"])}
+                       for s in daily_report(instance="predecessor:8622")[:3]]
+        tests.append({"name": name, "interval": "1h", "input_series": series,
+                      "promql_expr_test": [{"expr": expression, "eval_time": str(at) + "h", "exp_samples": expected}]})
+    path = tmp_path / ("daily-" + str(panel_id) + ".yml")
+    path.write_text(yaml.safe_dump({"evaluation_interval": "1h", "tests": tests}))
+    result = subprocess.run([promtool, "test", "rules", str(path)], capture_output=True, text=True, timeout=30)
+    (tmp_path / "promtool-result.json").write_text(json.dumps({"command": result.args, "exit_code": result.returncode,
+                                                             "stdout": result.stdout, "stderr": result.stderr}, indent=2))
+    assert result.returncode == 0, result.stdout + result.stderr

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# TRACEWEAVER: file-role=earnings-exporter; req=REQ-EARN-001; trace=TRACE-EARN-001; ver=VER-EARN-001
 """
 Vast.ai Prometheus Exporter
 
@@ -17,11 +18,18 @@ Metrics exposed:
 - Machine: current_rentals (running, on_demand, resident, bid)
 - Machine: earn_hour, earn_day
 - Summary: total_gpu, total_stor, total_bwu, total_bwd
+
+Daily observation gauges: canonical account/machine GPU, storage, upload and
+download amounts for the previous completed UTC day. Reports are revisable;
+unknown components are absent, and explicit zero/signed adjustments survive.
+The background worker publishes atomic snapshots; scrapes never fetch earnings.
 """
 
 import argparse
 import json
 import logging
+import math
+import re
 import os
 import sys
 import time
@@ -30,6 +38,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Dict, List, Optional, Any
 import urllib.request
 import urllib.error
+import urllib.parse
 import ssl
 
 # Configure logging
@@ -42,6 +51,13 @@ logger = logging.getLogger(__name__)
 # Vast.ai API endpoint
 VASTAI_API_URL = "https://console.vast.ai/api/v0"
 GPU_OCCUPANCY_STATES = {"x": 0, "I": 1, "D": 2, "R": 3}
+
+
+class _RejectEarningsRedirect(urllib.request.HTTPRedirectHandler):
+    """Keep bearer authentication on the exact canonical request only."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 class VastAIClient:
@@ -92,26 +108,292 @@ class VastAIClient:
         elif isinstance(data, list):
             return data
         return None
+
+# TRACEWEAVER: entrypoint=get_earnings; req=REQ-EARN-001; trace=TRACE-EARN-001; ver=VER-EARN-001
+    def get_earnings(self, start_day: int, end_day: int) -> Optional[Dict[str, Any]]:
+        """Fetch a bounded single-day report without a global opener change.
+
+        The socket timeout and cooperative read budget cannot enforce an
+        absolute OS/DNS/network deadline. Redirects are rejected, including
+        same-origin redirects: the canonical endpoint already has its slash.
+        """
+        started = time.monotonic()
+        query = urllib.parse.urlencode({'owner': 'me', 'sday': start_day, 'eday': end_day})
+        request = urllib.request.Request(
+            f'{VASTAI_API_URL}/users/me/machine-earnings/?{query}',
+            headers={'Authorization': f'Bearer {self.api_key}', 'Accept': 'application/json'},
+            method='GET',
+        )
+        limit = 1024 * 1024
+        try:
+            opener = urllib.request.build_opener(
+                urllib.request.HTTPSHandler(context=ssl.create_default_context()),
+                _RejectEarningsRedirect(),
+            )
+            with opener.open(request, timeout=15) as response:
+                body = bytearray()
+                while True:
+                    if time.monotonic() - started > 30:
+                        raise ValueError('cooperative read budget exceeded')
+                    chunk = response.read(min(65536, limit + 1 - len(body)))
+                    if time.monotonic() - started > 30:
+                        raise ValueError('cooperative read budget exceeded')
+                    if not chunk:
+                        break
+                    body.extend(chunk)
+                    if len(body) > limit:
+                        raise ValueError('response body limit exceeded')
+                data = json.loads(body)
+                return data if isinstance(data, dict) else None
+        except Exception as error:
+            if isinstance(error, urllib.error.HTTPError):
+                error.close()
+            # Do not log provider bodies, authenticated URLs or exception text.
+            logger.warning('Historical earnings unavailable for %s (%s)',
+                           self.account_name, type(error).__name__)
+            return None
     
 class MetricsCollector:
     """Collects metrics from multiple Vast.ai accounts"""
     
-    def __init__(self, api_keys: List[tuple]):
+    def __init__(self, api_keys: List[tuple], *, wall_clock=None, monotonic_clock=None):
         """
         Initialize collector with API keys
         
         Args:
             api_keys: List of (account_name, api_key) tuples
         """
-        self.clients = [
-            VastAIClient(api_key, account_name) 
-            for account_name, api_key in api_keys
-        ]
+        self._wall_clock = wall_clock or time.time
+        self._monotonic_clock = monotonic_clock or time.monotonic
+        self._earnings_lock = threading.Lock()
+        self._generation = 0
+        self._clients = ()
+        self._earnings = {}
+        self._last_attempt = float('-inf')
+        self._refreshing = False
+        self._worker = None
+        self._stop_event = threading.Event()
         self.metrics_cache = {}
         self.last_update = 0
-        self.cache_ttl = 60  # Cache for 60 seconds
+        self.cache_ttl = 60
         self.lock = threading.Lock()
-    
+        self.replace_clients([VastAIClient(key, name) for name, key in api_keys])
+
+    @property
+    def clients(self):
+        # A copied view prevents mutations bypassing generation invalidation.
+        with self._earnings_lock:
+            return list(self._clients)
+
+    @clients.setter
+    def clients(self, clients):
+        self.replace_clients(clients)
+
+# TRACEWEAVER: entrypoint=replace_clients; req=REQ-EARN-006; trace=TRACE-EARN-006; ver=VER-EARN-006
+    def replace_clients(self, clients):
+        """Replace account configuration and invalidate outstanding reports."""
+        clients = tuple(clients)
+        with self._earnings_lock:
+            self._generation += 1
+            self._clients = clients
+            self._earnings = {
+                id(client): {'account': client.account_name, 'provider': None,
+                             'status': 0, 'next_attempt': float('-inf'),
+                             'identity_retry': float('-inf'), 'report': None}
+                for client in clients
+            }
+            self.metrics_cache = {}
+            self.last_update = 0
+
+    @staticmethod
+    def _provider_identifier(value):
+        if type(value) is int and value > 0:
+            return str(value)
+        if isinstance(value, str) and re.fullmatch(r'[1-9][0-9]*', value):
+            return value
+        return None
+
+    @staticmethod
+# TRACEWEAVER: entrypoint=_normalize_earnings; req=REQ-EARN-003; trace=TRACE-EARN-003; ver=VER-EARN-003
+    def _normalize_earnings(response, target_day):
+        if not isinstance(response, dict):
+            raise ValueError('invalid report')
+        days = response.get('per_day')
+        rows = response.get('per_machine')
+        if (not isinstance(days, list) or len(days) != 1
+                or not isinstance(days[0], dict)
+                or type(days[0].get('day')) is not int
+                or days[0]['day'] != target_day or not isinstance(rows, list)):
+            raise ValueError('unproved report day or machine list')
+        normalized = {}
+        partial = False
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ValueError('invalid machine row')
+            machine = MetricsCollector._provider_identifier(row.get('machine_id'))
+            if machine is None or machine in normalized:
+                raise ValueError('invalid or duplicate machine identifier')
+            amounts = {}
+            for component in ('gpu_earn', 'sto_earn', 'bwu_earn', 'bwd_earn'):
+                value = row.get(component)
+                if type(value) in (int, float):
+                    try:
+                        if math.isfinite(value):
+                            amounts[component] = value
+                    except OverflowError:
+                        pass
+                if component not in amounts:
+                    partial = True
+            normalized[machine] = amounts
+        return normalized, (3 if not rows else 2 if partial else 1)
+
+# TRACEWEAVER: entrypoint=refresh_earnings_once; req=REQ-EARN-007; trace=TRACE-EARN-007; ver=VER-EARN-007
+    def refresh_earnings_once(self):
+        """Attempt at most one eligible account; never hold a lock over I/O."""
+        with self._earnings_lock:
+            if self._refreshing or self._stop_event.is_set():
+                return
+            self._refreshing = True
+            clients, generation = self._clients, self._generation
+        try:
+            # Resolve every new identity before choosing a source, so duplicates
+            # fail closed even if only one earnings request is due this tick.
+            for client in clients:
+                with self._earnings_lock:
+                    if generation != self._generation:
+                        return
+                    state = self._earnings[id(client)]
+                    needs_identity = (state['provider'] is None and
+                                      self._monotonic_clock() >= state['identity_retry'])
+                if needs_identity:
+                    try:
+                        user = client.get_user_info()
+                        provider = self._provider_identifier(user.get('id')) if isinstance(user, dict) else None
+                    except Exception:
+                        provider = None
+                    with self._earnings_lock:
+                        if generation != self._generation:
+                            return
+                        state['provider'] = provider
+                        state['status'] = 0 if provider else 6
+                        state['identity_retry'] = self._monotonic_clock() + 300
+            with self._earnings_lock:
+                if generation != self._generation or self._stop_event.is_set():
+                    return
+                states = [self._earnings[id(client)] for client in clients]
+                for state in states:
+                    duplicate = (sum(s['account'] == state['account'] for s in states) > 1
+                                 or (state['provider'] is not None and
+                                     sum(s['provider'] == state['provider'] for s in states) > 1))
+                    if duplicate or state['provider'] is None:
+                        state['status'] = 6
+                        state['report'] = None
+                now = self._monotonic_clock()
+                if now - self._last_attempt < 2:
+                    return
+                eligible = [c for c in clients if self._earnings[id(c)]['status'] != 6
+                            and self._earnings[id(c)]['next_attempt'] <= now]
+                if not eligible:
+                    return
+                client = min(eligible, key=lambda c: self._earnings[id(c)]['next_attempt'])
+                state = self._earnings[id(client)]
+                provider = state['provider']
+                target_day = int(self._wall_clock() // 86400) - 1
+                self._last_attempt = now
+                state['next_attempt'] = now + 300
+            try:
+                response = client.get_earnings(target_day, target_day)
+                rows, status = self._normalize_earnings(response, target_day)
+            except Exception:
+                rows, status = None, 4
+            with self._earnings_lock:
+                if (generation != self._generation or self._stop_event.is_set()
+                        or target_day != int(self._wall_clock() // 86400) - 1
+                        or state['provider'] != provider):
+                    return
+                state['status'] = status
+                state['next_attempt'] = self._monotonic_clock() + (3600 if rows is not None else 300)
+                if rows is not None:
+                    state['report'] = (target_day, self._wall_clock(), self._monotonic_clock(), rows)
+        finally:
+            with self._earnings_lock:
+                self._refreshing = False
+
+# TRACEWEAVER: entrypoint=start_earnings_worker; req=REQ-EARN-007; trace=TRACE-EARN-007; ver=VER-EARN-007
+    def start_earnings_worker(self):
+        """Start one explicit daemon after account loading."""
+        with self._earnings_lock:
+            if self._worker is not None and self._worker.is_alive():
+                return
+            self._stop_event.clear()
+            event = self._stop_event
+            def run():
+                while not event.is_set():
+                    try:
+                        self.refresh_earnings_once()
+                    except Exception:
+                        logger.warning('Historical earnings worker attempt failed')
+                    event.wait(1)
+            self._worker = threading.Thread(target=run, name='vast-earnings', daemon=True)
+            self._worker.start()
+
+# TRACEWEAVER: entrypoint=stop_earnings_worker; req=REQ-EARN-007; trace=TRACE-EARN-007; ver=VER-EARN-007
+    def stop_earnings_worker(self):
+        """Invalidate publication and wait at most two seconds for the daemon."""
+        with self._earnings_lock:
+            self._stop_event.set()
+            self._generation += 1
+            self._earnings = {}
+            worker = self._worker
+        if worker is not None and worker is not threading.current_thread():
+            worker.join(2)
+            if worker.is_alive():
+                logger.warning('Earnings daemon still waiting for provider I/O after bounded join')
+
+    @staticmethod
+    def _earnings_label(value):
+        return str(value).replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+
+# TRACEWEAVER: entrypoint=_format_earnings; req=REQ-EARN-005; trace=TRACE-EARN-005; ver=VER-EARN-005
+    def _format_earnings(self):
+        with self._earnings_lock:
+            states = [dict(state) for state in self._earnings.values()]
+        day = int(self._wall_clock() // 86400) - 1
+        now = self._monotonic_clock()
+        families = {name: [] for name in (
+            'vastai_per_machine_gpu_earn', 'vastai_per_machine_sto_earn',
+            'vastai_per_machine_bwu_earn', 'vastai_per_machine_bwd_earn',
+            'vastai_earnings_report_day_timestamp_seconds',
+            'vastai_earnings_last_success_timestamp_seconds',
+            'vastai_earnings_report_valid', 'vastai_earnings_status')}
+        for state in states:
+            labels = f'account="{self._earnings_label(state["account"])}"'
+            if state['provider'] is not None:
+                labels = f'provider_account_id="{state["provider"]}",' + labels
+            report, status = state['report'], state['status']
+            valid = False
+            if report is not None:
+                report_day, success, accepted_mono, rows = report
+                valid = report_day == day and 0 <= now - accepted_mono <= 7200 and status != 6
+                if not valid:
+                    status = 5
+                families['vastai_earnings_report_day_timestamp_seconds'].append(f'{{{labels}}} {report_day * 86400}')
+                families['vastai_earnings_last_success_timestamp_seconds'].append(f'{{{labels}}} {success}')
+                if valid:
+                    for machine, amounts in rows.items():
+                        for component, amount in amounts.items():
+                            families['vastai_per_machine_' + component].append(f'{{{labels},machine_id="{machine}"}} {amount}')
+            if state['provider'] is not None:
+                families['vastai_earnings_report_valid'].append(f'{{{labels}}} {int(valid)}')
+            families['vastai_earnings_status'].append(f'{{{labels}}} {status}')
+        lines = []
+        for name, samples in families.items():
+            lines.extend([f'# HELP {name} As-reported previous UTC day earnings or readiness metadata.', f'# TYPE {name} gauge'])
+            # Invalid duplicate configurations may share an identical metadata
+            # label set; expose one configuration-error sample for that identity.
+            lines.extend(dict.fromkeys(name + sample for sample in samples))
+        return lines
+
     def collect(self) -> str:
         """Collect metrics from all accounts and return Prometheus format"""
         now = time.time()
@@ -484,6 +766,7 @@ class MetricsCollector:
             lines.append(f'vastai_account_machines_total{{account="{account}"}} {count}')
         
         lines.append("")
+        lines.extend(self._format_earnings())
         return "\n".join(lines)
     
     def _machine_labels(self, machine: Dict) -> str:
@@ -629,7 +912,7 @@ class AccountManager:
                 return {'error': f'API key validation failed - could not connect to Vast.ai', 'status': 400}
             
             # Add to collector
-            self.collector.clients.append(test_client)
+            self.collector.replace_clients(self.collector.clients + [test_client])
             
             # Invalidate metrics cache to pick up new account
             self.collector.last_update = 0
@@ -651,7 +934,7 @@ class AccountManager:
         with self.lock:
             for i, client in enumerate(self.collector.clients):
                 if client.account_name == name:
-                    self.collector.clients.pop(i)
+                    self.collector.replace_clients([c for c in self.collector.clients if c is not client])
                     
                     # Invalidate metrics cache
                     self.collector.last_update = 0
@@ -954,11 +1237,14 @@ Examples:
     logger.info(f"Metrics available at http://{args.listen_address}:{args.port}/metrics")
     logger.info(f"Management API at http://{args.listen_address}:{args.port}/api/accounts")
     
+    collector.start_earnings_worker()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         logger.info("Shutting down...")
         server.shutdown()
+    finally:
+        collector.stop_earnings_worker()
 
 
 if __name__ == '__main__':

@@ -1,3 +1,6 @@
+# TRACEWEAVER: file-role=existing-occupancy-regression; req=REQ-EARN-008; trace=TRACE-EARN-008; ver=VER-EARN-008
+# TRACEWEAVER: verifies=VER-EARN-008; req=REQ-EARN-008; trace=TRACE-EARN-008
+# TRACEWEAVER: file-role=existing-occupancy-regression; req=REQ-EARN-008; trace=TRACE-EARN-008; ver=VER-EARN-008
 """Real Prometheus evaluation of the shipped, fixed-window occupancy summary."""
 
 import copy
@@ -32,13 +35,14 @@ METRICS = [
     "vastai_machine_gpu_idle",
 ]
 MINUTES = 43200
-# Reviewed base d910a642: every previous panel/root property is preserved, apart
-# from the explicitly approved y += 8 below the new full-width summary.
+# Clean HEAD49b039 projection preserves root and every unaffected panel,
+# excluding approved earnings panels14-17/90 and the separately checked43.
+# Reverse the existing approved y += 8 below the full-width occupancy summary.
 BASELINE = {
-    "dashboards/Vast_Dashboard.json": "f1b2f9ad47e8e1e70331576deeb19f6c204de099ee766051ae9194a6bd4cfd1f",
-    "src/dc_overview/dashboards/Vast_Dashboard.json": "f1b2f9ad47e8e1e70331576deeb19f6c204de099ee766051ae9194a6bd4cfd1f",
-    "server/grafana/dashboards/Vast_Dashboard.json": "49b6e1876e3bb85f94e98092eec256c0aea221230a70fc7cd0e9c98c373063ec",
-    "server/grafana/dashboards/vast-dashboard.json": "d29c92d10187699a10872df943d0d9d9c77190d51e6839f581b0695f69cf0cac",
+    "dashboards/Vast_Dashboard.json": "6340ffd4d970c8669fff110fa2470c55e63866fce856a531726ccba0afd87a9a",
+    "src/dc_overview/dashboards/Vast_Dashboard.json": "6340ffd4d970c8669fff110fa2470c55e63866fce856a531726ccba0afd87a9a",
+    "server/grafana/dashboards/Vast_Dashboard.json": "956639019d2bed781bc41541474670550301292d647d823d4b195f3dfc09749c",
+    "server/grafana/dashboards/vast-dashboard.json": "54ec2abe08fccc4f40001ac36f0a053fb30d906d128b1d08bafc218f14343a12",
 }
 
 
@@ -59,8 +63,8 @@ def test_panel_layout_datasource_and_existing_configuration(filename):
     dashboard = json.loads((ROOT / filename).read_text())
     current = panel(filename)
     restored = copy.deepcopy(dashboard)
-    restored["panels"] = [p for p in restored["panels"] if p["id"] != 43]
-    assert len(restored["panels"]) == 40
+    restored["panels"] = [p for p in restored["panels"] if p["id"] not in {14, 15, 16, 17, 43, 90}]
+    assert len(restored["panels"]) == 36
     for previous in restored["panels"]:
         if previous["gridPos"]["y"] >= 56:
             previous["gridPos"]["y"] -= 8

@@ -1,0 +1,27 @@
+{
+  "provenance": {
+    "kind": "contract-derived synthetic fixture",
+    "captured_live": false,
+    "authority": ".orchestra/vast-daily-earnings/approved-plan.html revision 2, R01-R09",
+    "separate_live_witness": {
+      "evidence": ".orchestra/vast-daily-earnings-20261013/artifacts/sol-provider-canonical-20261013",
+      "report": ".orchestra/vast-daily-earnings-20261013/findings/sol-earnings-provider-canonical.html",
+      "observed_utc": "2026-10-13T12:34:52Z to 2026-10-13T12:35:10Z",
+      "supports": ["exact HTTPS console.vast.ai/api/v0/users/me/machine-earnings/ endpoint", "owner=me", "equal inclusive sday/eday bounds select one UTC day for both witnessed accounts", "per_day numeric epoch-day day", "authenticated current canonical account identity for the witnessed accounts"],
+      "numeric_representation": "The witness sanitizer emits JSON number tokens as decimal strings; it rejects original JSON strings. The synthetic response below retains numeric JSON values."
+    },
+    "pending_witness": ["currency", "empty/missing-machine semantics", "finality", "publication lag guarantees", "row completeness"],
+    "note": "Artificial IDs and amounts remain contract-derived, never a live capture. Independent witness supports request/date/account attribution only for the observed accounts; it does not prove these synthetic amounts, USD currency, valid-empty completeness, finality, or universal publication lag. Numeric day is epoch day, never Unix seconds."
+  },
+  "user": {"id": 101, "balance": 100, "credit": 5, "service_fee": 0.25},
+  "current_machine": {"id": 7, "hostname": "fixture-host", "num_gpus": 2, "gpu_occupancy": "x x", "current_rentals_running": 0, "earn_hour": 26.3, "earn_day": 283.1},
+  "target_day": 20738,
+  "response": {
+    "per_day": [{"day": 20738, "gpu_earn": 9000, "sto_earn": 8000, "bwu_earn": 7000, "bwd_earn": 6000}],
+    "per_machine": [{"machine_id": 7, "gpu_earn": 10, "sto_earn": 2, "bwu_earn": 3, "bwd_earn": 4}],
+    "total_gpu": 9999,
+    "total_stor": 8888,
+    "total_bwu": 7777,
+    "total_bwd": 6666
+  }
+}

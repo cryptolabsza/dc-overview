@@ -23,6 +23,27 @@ Prometheus exporter for Vast.ai host/provider metrics. Exposes account balance, 
 | `vastai_account_machines_total` | gauge | Total machines per account |
 | `vastai_account_gpus_total` | gauge | Total GPUs per account |
 
+## Previous UTC day earnings
+
+The worker retrieves the previous completed UTC calendar day from the canonical `users/me/machine-earnings/` endpoint with equal inclusive `sday` and `eday` epoch-day bounds. Reports are as reported and revisable, with no finality guarantee. Per-day/account summaries and current `earn_day` are never allocated to machines. Retired-machine report rows are retained.
+
+| Gauge | Meaning |
+|-------|---------|
+| `vastai_per_machine_gpu_earn` | Machine GPU amount |
+| `vastai_per_machine_sto_earn` | Machine storage amount |
+| `vastai_per_machine_bwu_earn` | Machine upload amount |
+| `vastai_per_machine_bwd_earn` | Machine download amount |
+| `vastai_earnings_report_day_timestamp_seconds` | Accepted report midnight UTC |
+| `vastai_earnings_last_success_timestamp_seconds` | Accepted retrieval Unix time |
+| `vastai_earnings_report_valid` | 1 while report day, generation and age remain valid; 0 otherwise |
+| `vastai_earnings_status` | 0 awaiting, 1 valid, 2 partial, 3 valid empty, 4 refresh error, 5 expired, 6 configuration error |
+
+Amount gauges carry `provider_account_id`, configured `account` alias and `machine_id`; account metadata omits machine ID. Unknown identity exposes alias-only status. USD display is inferred from provider host-payment documentation, rather than an explicit report currency field. Finite numeric zero and signed adjustments are retained; missing, boolean, string and non-finite components are omitted. Missing operands remove total/bandwidth values. Empty reports produce no machine zeros. Duplicate aliases or canonical accounts suppress historical values with configuration-error status.
+
+One explicit daemon worker starts after accounts load. Reports refresh hourly, failures retry after at least five minutes, and request starts are separated by at least two seconds. The transport uses a 15-second socket timeout, a 1 MiB body limit and a 30-second cooperative read budget checked between chunks. These are not a hard end-to-end OS/DNS/network deadline. Historical I/O runs outside snapshot and management locks; existing current-metric API latency remains unchanged. Stop invalidates outstanding publication and joins for at most two seconds; a daemon may still await provider I/O after that join.
+
+Last-good same-day data survives refresh failure only until its original two-hour monotonic expiry. UTC rollover, account replacement/removal and restart make amounts unknown. Report snapshots replace all old rows/components atomically. The Grafana history records observation time with step/point rendering and null gaps, without accounting backfill. Later corrections to older days are not replayed. Never integrate or sum repeated gauge observations; coarse long-range sampling can omit daily points.
+
 ## Usage
 
 ### Docker (recommended)
