@@ -1,0 +1,139 @@
+{
+  "provenance": {
+    "labels": "LTX raw thermal/uname 2026-10-14, retained live-raw-labels.json",
+    "docker_instances": "Prior LTX 39_H wire counterpart",
+    "numeric_workload": "Synthetic deterministic layout workload except actual raw temperature values"
+  },
+  "columns": [
+    "Machine",
+    "Kernel",
+    "CPU %",
+    "CPU Temp C",
+    "Memory Used %",
+    "Uptime(h)",
+    "Network_transmit Mbps",
+    "Network_receive Mbps ",
+    "Root FS Disk Usage %",
+    "Docker Disk Usage %"
+  ],
+  "rows": [
+    {
+      "instance": "r630-3c7jfb2",
+      "Machine": "r630-3c7jfb2",
+      "Kernel": "7.0.14-23-pve",
+      "CPU %": 25,
+      "CPU Temp C": 58.5,
+      "Memory Used %": 60,
+      "Uptime(h)": 24,
+      "Network_transmit Mbps": 10,
+      "Network_receive Mbps ": 20,
+      "Root FS Disk Usage %": 40,
+      "Docker Disk Usage %": null
+    },
+    {
+      "instance": "r630-c08rqd2",
+      "Machine": "r630-c08rqd2",
+      "Kernel": "7.0.14-23-pve",
+      "CPU %": 25,
+      "CPU Temp C": 51.0,
+      "Memory Used %": 60,
+      "Uptime(h)": 24,
+      "Network_transmit Mbps": 10,
+      "Network_receive Mbps ": 20,
+      "Root FS Disk Usage %": 40,
+      "Docker Disk Usage %": null
+    },
+    {
+      "instance": "r630-c1mrqd2",
+      "Machine": "r630-c1mrqd2",
+      "Kernel": "7.0.14-23-pve",
+      "CPU %": 25,
+      "CPU Temp C": 39.5,
+      "Memory Used %": 60,
+      "Uptime(h)": 24,
+      "Network_transmit Mbps": 10,
+      "Network_receive Mbps ": 20,
+      "Root FS Disk Usage %": 40,
+      "Docker Disk Usage %": null
+    },
+    {
+      "instance": "r630-c26pqd2",
+      "Machine": "r630-c26pqd2",
+      "Kernel": "7.0.14-23-pve",
+      "CPU %": 25,
+      "CPU Temp C": 54.5,
+      "Memory Used %": 60,
+      "Uptime(h)": 24,
+      "Network_transmit Mbps": 10,
+      "Network_receive Mbps ": 20,
+      "Root FS Disk Usage %": 40,
+      "Docker Disk Usage %": null
+    },
+    {
+      "instance": "ada6000",
+      "Machine": "venter-ada6000-01",
+      "Kernel": "6.8.0-146-generic",
+      "CPU %": 25,
+      "CPU Temp C": null,
+      "Memory Used %": 60,
+      "Uptime(h)": 24,
+      "Network_transmit Mbps": 10,
+      "Network_receive Mbps ": 20,
+      "Root FS Disk Usage %": 40,
+      "Docker Disk Usage %": 50
+    },
+    {
+      "instance": "h100x4",
+      "Machine": "venter-h100x4-01",
+      "Kernel": "6.8.0-139-generic",
+      "CPU %": 25,
+      "CPU Temp C": null,
+      "Memory Used %": 60,
+      "Uptime(h)": 24,
+      "Network_transmit Mbps": 10,
+      "Network_receive Mbps ": 20,
+      "Root FS Disk Usage %": 40,
+      "Docker Disk Usage %": 50
+    },
+    {
+      "instance": "h100x8",
+      "Machine": "venter-h100x8-01",
+      "Kernel": "6.8.0-142-generic",
+      "CPU %": 25,
+      "CPU Temp C": null,
+      "Memory Used %": 60,
+      "Uptime(h)": 24,
+      "Network_transmit Mbps": 10,
+      "Network_receive Mbps ": 20,
+      "Root FS Disk Usage %": 40,
+      "Docker Disk Usage %": 50
+    },
+    {
+      "instance": "l40sx8",
+      "Machine": "venter-l40sx8-01",
+      "Kernel": "6.8.0-146-generic",
+      "CPU %": 25,
+      "CPU Temp C": null,
+      "Memory Used %": 60,
+      "Uptime(h)": 24,
+      "Network_transmit Mbps": 10,
+      "Network_receive Mbps ": 20,
+      "Root FS Disk Usage %": 40,
+      "Docker Disk Usage %": 50
+    },
+    {
+      "instance": "rtx4090",
+      "Machine": "venter-rtx4090-01",
+      "Kernel": "6.8.0-146-generic",
+      "CPU %": 25,
+      "CPU Temp C": null,
+      "Memory Used %": 60,
+      "Uptime(h)": 24,
+      "Network_transmit Mbps": 10,
+      "Network_receive Mbps ": 20,
+      "Root FS Disk Usage %": 40,
+      "Docker Disk Usage %": 50
+    }
+  ],
+  "total_power": 3075
+}
