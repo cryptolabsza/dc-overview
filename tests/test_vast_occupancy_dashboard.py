@@ -37,12 +37,12 @@ METRICS = [
 MINUTES = 43200
 # Whole-dashboard projection preserves root and every unaffected panel,
 # excluding approved earnings panels14-17/90 and the separately checked43.
-# Canonical baselines include the approved 2026-10-14 snapshot39/41 fix;
+# Canonical baselines include the approved snapshot39/41 and power26 changes;
 # legacy baselines retain clean HEAD49b039 without those snapshot changes.
 # Reverse the existing approved y += 8 below the full-width occupancy summary.
 BASELINE = {
-    "dashboards/Vast_Dashboard.json": "43d6941275500ae6b60f5197285c05053c12b2297fc6f0a180bb11c448c26ff1",
-    "src/dc_overview/dashboards/Vast_Dashboard.json": "43d6941275500ae6b60f5197285c05053c12b2297fc6f0a180bb11c448c26ff1",
+    "dashboards/Vast_Dashboard.json": "1eb6c0357105db989b0b91746e1f47949cc6d46e9cc3814adbabb203cfca6ec3",
+    "src/dc_overview/dashboards/Vast_Dashboard.json": "1eb6c0357105db989b0b91746e1f47949cc6d46e9cc3814adbabb203cfca6ec3",
     "server/grafana/dashboards/Vast_Dashboard.json": "956639019d2bed781bc41541474670550301292d647d823d4b195f3dfc09749c",
     "server/grafana/dashboards/vast-dashboard.json": "54ec2abe08fccc4f40001ac36f0a053fb30d906d128b1d08bafc218f14343a12",
 }

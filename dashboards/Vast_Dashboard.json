@@ -1349,7 +1349,7 @@
               "type": "linear"
             },
             "showPoints": "auto",
-            "spanNulls": true,
+            "spanNulls": false,
             "stacking": {
               "group": "A",
               "mode": "none"
@@ -1402,14 +1402,29 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
+          "expr": "job:cpu_busy:ratio5m * $CPU_Max_Power + sum by (job) (gpu:power_usage:watts or DCGM_FI_DEV_POWER_USAGE{UUID=\"VM-PASSTHROUGH\"}) + $BasePower",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
           "expr": "(sum by (job) (rate(node_cpu_seconds_total{mode!=\"idle\"}[$__rate_interval])) / sum by (job) (rate(node_cpu_seconds_total[$__rate_interval]))) * $CPU_Max_Power + sum by (job) (DCGM_FI_DEV_POWER_USAGE) + $BasePower",
           "legendFormat": "__auto",
           "range": true,
-          "refId": "A"
+          "refId": "B",
+          "hide": true
         }
       ],
       "title": "Machines Power usage",
-      "type": "timeseries"
+      "type": "timeseries",
+      "maxDataPoints": 1440,
+      "description": "Estimated machine watts: fixed 5-minute CPU busy ratio × CPU_Max_Power + GPU watts + BasePower. Recorded history begins at rule activation; no backfill. For older retained history, dashboard owners can Edit this panel, disable A and enable B in Queries, then inspect the preview without saving. Discard the edits or reopen the saved dashboard to return to recorded history. B uses the original raw query and can be slow. A selection crossing activation shows only the recorded portion; use B for the full retained range."
     },
     {
       "datasource": {
