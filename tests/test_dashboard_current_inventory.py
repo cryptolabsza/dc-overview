@@ -11,6 +11,8 @@ ROOT = Path(__file__).parents[1]
 @pytest.mark.parametrize('path', [
     ROOT / 'src/dc_overview/dashboards/DC_Overview.json',
     ROOT / 'dashboards/DC_Overview.json',
+    ROOT / 'src/dc_overview/dashboards/Vast_Dashboard.json',
+    ROOT / 'dashboards/Vast_Dashboard.json',
 ])
 def test_machine_overview_uses_instant_queries_only(path):
     dashboard = json.loads(path.read_text())
