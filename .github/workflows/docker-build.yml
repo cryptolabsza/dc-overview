@@ -96,6 +96,8 @@ jobs:
             tests/test_vast_dashboard_registration.py \
             tests/test_vast_income_dashboard.py \
             tests/test_vast_occupancy_dashboard.py \
+            tests/test_vast_snapshot_panels.py \
+            tests/test_power_recording_rules.py \
             tests/test_vastai_exporter_metrics.py
 
       - name: Docker login

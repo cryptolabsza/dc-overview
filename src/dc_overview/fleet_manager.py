@@ -1266,6 +1266,12 @@ scrape_configs:
 
       - record: fleet:utilization:avg_percent
         expr: avg(gpu:utilization:percent)
+
+  - name: machine_power_estimate
+    interval: 30s
+    rules:
+      - record: job:cpu_busy:ratio5m
+        expr: sum by (job) (rate(node_cpu_seconds_total{mode!="idle"}[5m])) / sum by (job) (rate(node_cpu_seconds_total[5m]))
 '''
     
     # ============ Step 4: Deploy to Workers ============

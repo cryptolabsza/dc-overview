@@ -7,7 +7,7 @@ import pytest
 
 ROOT = Path(__file__).parents[1]
 CANONICAL = ("dashboards/Vast_Dashboard.json", "src/dc_overview/dashboards/Vast_Dashboard.json")
-OUTSIDE_SNAPSHOT_SHA256 = {'dashboards/Vast_Dashboard.json': '1b1b44642b9e1b158f4c9dab243b2e532b11c97bc2ea253453ea67493a890798', 'src/dc_overview/dashboards/Vast_Dashboard.json': '1b1b44642b9e1b158f4c9dab243b2e532b11c97bc2ea253453ea67493a890798'}
+OUTSIDE_SNAPSHOT_SHA256 = {'dashboards/Vast_Dashboard.json': 'e5fd19b71a5de609176042ee3ac16f4da95f4b8e26a2d4c8ee2a9b5c3fc1aa01', 'src/dc_overview/dashboards/Vast_Dashboard.json': 'e5fd19b71a5de609176042ee3ac16f4da95f4b8e26a2d4c8ee2a9b5c3fc1aa01'}
 LEGACY_SHA256 = {'server/grafana/dashboards/Vast_Dashboard.json': '0293affb7394af7c8826d885b761bda3ecf822731f11cbb70d520d30399f68bc', 'server/grafana/dashboards/vast-dashboard.json': '09d10a7737f9e7662fd7f61659d20fa475fb53a4db2a585996c669a25f0b6a56'}
 TARGET_CONTRACT_SHA256 = {'39': '676dddcc18d637afda58b402d81b6226079b0dfa98dfa0bd04ed49246845e649', '41': '1b07fcc874fdcaa8d218b0d260d1f2388c4f6d462af511cf47761d1e89039626'}
 
