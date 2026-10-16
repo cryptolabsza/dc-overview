@@ -27,7 +27,9 @@ def _workflow() -> dict:
 
 
 def _compute_tags_script(job_name: str) -> str:
-    steps = _workflow()["jobs"][job_name]["steps"]
+    caller = _workflow()["jobs"][job_name]
+    recipe = caller["uses"].split("/.github/workflows/", 1)[1].split("@", 1)[0]
+    steps = yaml.safe_load((ROOT / ".github/workflows" / recipe).read_text())["jobs"][job_name]["steps"]
     return next(step["run"] for step in steps if step.get("name") == "Compute safe build tags")
 
 
@@ -89,7 +91,7 @@ def test_pull_requests_cannot_push_any_workflow_image():
     push_steps = [
         step
         for job in workflow["jobs"].values()
-        for step in job["steps"]
+        for step in job.get("steps", [])
         if step.get("name", "").startswith("Push ")
     ]
 

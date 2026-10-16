@@ -198,10 +198,10 @@ def test_build_workflows_use_the_same_safe_generator_and_no_automatic_aliases():
     trigger=workflow.get('on',workflow.get(True))
     assert 'tag_override' not in trigger.get('workflow_dispatch',{}).get('inputs',{})
     for job in workflow['jobs'].values():
-        if not any('image_promotion.py tags' in step.get('run','') for step in job['steps']):continue
-        assert job['runs-on']==['self-hosted','linux']
-        assert any('DOCKER_CONFIG=' in step.get('run','') and '$RUNNER_TEMP' in step['run'] for step in job['steps'])
-        steps=job['steps']
+        if not any('image_promotion.py tags' in step.get('run','') for step in job.get('steps',[])):continue
+        assert job['runs-on']==['self-hosted','ci-authority-held-r1133295682']
+        assert any('DOCKER_CONFIG=' in step.get('run','') and '$RUNNER_TEMP' in step['run'] for step in job.get('steps',[]))
+        steps=job.get('steps',[])
         assert any('image_promotion.py tags' in s.get('run','') for s in steps)
         assert any(s.get('if')=='always()' and 'DOCKER_CONFIG' in s.get('run','') for s in steps)
         assert any(s.get('uses','').startswith('docker/login-action@') for s in steps)
@@ -225,12 +225,12 @@ def test_manual_promotion_is_explicit_and_never_builds_or_triggers_on_release():
     assert inputs['release_tag']['required'] and inputs['source_sha']['required']
     for image in IMAGES:assert inputs[image.replace('-','_')+'_digest']['required']
     assert len(workflow['jobs'])==1
-    job=workflow['jobs']['promote'];assert job['runs-on']==['self-hosted','linux']
-    assert any('PROMOTION_DIR=' in step.get('run','') and '$GITHUB_RUN_ID' in step['run'] and '$GITHUB_RUN_ATTEMPT' in step['run'] for step in job['steps'])
+    job=workflow['jobs']['promote'];assert job['runs-on']==['self-hosted','ci-authority-held-r1133295682']
+    assert any('PROMOTION_DIR=' in step.get('run','') and '$GITHUB_RUN_ID' in step['run'] and '$GITHUB_RUN_ATTEMPT' in step['run'] for step in job.get('steps',[]))
     assert job['permissions']=={'contents':'read','packages':'write'}
-    assert any('image_promotion.py promote' in s.get('run','') for s in job['steps'])
-    assert any(s.get('if')=='always()' and 'promotion-receipt.json' in str(s) for s in job['steps'])
-    for s in job['steps']:
+    assert any('image_promotion.py promote' in s.get('run','') for s in job.get('steps',[]))
+    assert any(s.get('if')=='always()' and 'promotion-receipt.json' in str(s) for s in job.get('steps',[]))
+    for s in job.get('steps',[]):
         assert 'docker build' not in s.get('run','') and 'build-push-action' not in s.get('uses','')
         assert '${{ inputs.' not in s.get('run','') and '${{ secrets.' not in s.get('run','')
         if s.get('uses','').startswith('actions/checkout@'):
@@ -406,11 +406,11 @@ def test_normal_push_and_manual_runs_share_serialized_product_guard():
     assert command['env']['GHCR_TOKEN']=='${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}'
     assert 'TAG_OVERRIDE' in command['env']
     assert any(s.get('if')=='always()' and s.get('uses','').startswith('actions/upload-artifact@') for s in guard['steps'])
-    image_jobs=[job for job in workflow['jobs'].values() if any('image_promotion.py tags' in s.get('run','') for s in job['steps'])]
+    image_jobs=[job for job in workflow['jobs'].values() if any('image_promotion.py tags' in s.get('run','') for s in job.get('steps',[]))]
     assert len(image_jobs)==len(IMAGES)
     for job in image_jobs:
         assert job['needs']=='release-preflight'
-        for step in job['steps']:
+        for step in job.get('steps',[]):
             if 'docker build ' in step.get('run','') or step.get('uses','').startswith('docker/build-push-action@'):
                 assert step.get('if')=="needs.release-preflight.outputs.build == 'true'"
             if 'docker --config "$DOCKER_CONFIG" push' in step.get('run',''):
@@ -453,7 +453,7 @@ def test_actual_workflow_conditions_do_zero_build_or_push_on_reuse():
     workflow=yaml.safe_load((ROOT/'.github/workflows/docker-build.yml').read_text())
     evaluated=[]
     for job in workflow['jobs'].values():
-        for step in job['steps']:
+        for step in job.get('steps',[]):
             run=step.get('run','');uses=step.get('uses','')
             if 'docker build ' in run or 'docker --config "$DOCKER_CONFIG" push' in run or uses.startswith('docker/build-push-action@'):
                 condition=step['if']
@@ -498,8 +498,9 @@ def test_runner_paths_are_initialized_in_steps_with_valid_contexts(tmp_path):
     for filename in ('docker-build.yml','promote-images.yml'):
         workflow=yaml.safe_load((ROOT/'.github/workflows'/filename).read_text())
         for job_name,job in workflow['jobs'].items():
+            if 'steps' not in job:continue  # CPU callers are tested in the immutable recipes.
             assert 'runner.' not in str(job.get('env',{}))
-            path_steps=[step for step in job['steps'] if step.get('name')=='Initialize isolated runner path']
+            path_steps=[step for step in job.get('steps',[]) if step.get('name')=='Initialize isolated runner path']
             assert len(path_steps)==1
             script=path_steps[0]['run'];envfile=tmp_path/(filename+'-'+job_name)
             result=subprocess.run(['bash','-euo','pipefail','-c',script],capture_output=True,text=True,

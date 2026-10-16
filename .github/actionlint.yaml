@@ -1,0 +1,4 @@
+self-hosted-runner:
+  labels:
+  - ci-linux-cpu-v1-r1133295682
+  - ci-authority-held-r1133295682

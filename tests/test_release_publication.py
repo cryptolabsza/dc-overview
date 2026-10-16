@@ -218,7 +218,7 @@ def test_workflow_builds_once_at_tag_and_limits_write_permission():
     text = (ROOT/'.github/workflows/publish.yml').read_text()
     workflow = yaml.safe_load(text)
     jobs = workflow['jobs']
-    assert len(jobs) == 2 and jobs['build']['permissions'] == {'contents': 'read'}
+    assert len(jobs) == 3 and jobs['build']['permissions'] == {'contents': 'read'}
     assert jobs['publish']['permissions'] == {'contents': 'write'}
     assert jobs['publish']['needs'] == 'build'
     assert text.count('python -m build ') == 1
@@ -226,8 +226,12 @@ def test_workflow_builds_once_at_tag_and_limits_write_permission():
     assert 'GITHUB_REF_NAME="$RELEASE_TAG"' in text
     assert '--skip-existing' not in text and 'id-token' not in text
     assert 'secrets.PYPI_API_TOKEN' in text
-    for job in jobs.values():
-        assert job['runs-on'] == ['self-hosted', 'linux']
+    assert jobs['cpu-build']['permissions'] == {'contents': 'read'}
+    assert '/ci-python-build-recipe.yml@' in jobs['cpu-build']['uses']
+    for name, job in jobs.items():
+        if name == 'cpu-build':
+            continue
+        assert job['runs-on'] == ['self-hosted', 'ci-authority-held-r1133295682']
         for step in job['steps']:
             if step.get('uses', '').startswith('actions/checkout@'):
                 assert step['with']['ref'] == '${{ env.RELEASE_TAG }}'

@@ -1,0 +1,121 @@
+{
+  "repository_id": 1133295682,
+  "recipes": {
+    "ci-build-recipe.yml": {
+      "job": "build",
+      "commands": [
+        "set -euo pipefail\nTEST_DIR=$(mktemp -d /tmp/vast-dashboard-tests.XXXXXX)\ntrap 'rm -rf \"$TEST_DIR\"' EXIT\nARCHIVE=prometheus-3.13.1.linux-amd64.tar.gz\ncurl --fail --location --retry 3 \\\n  \"https://github.com/prometheus/prometheus/releases/download/v3.13.1/$ARCHIVE\" \\\n  --output \"$TEST_DIR/$ARCHIVE\"\nprintf '%s  %s\\n' \\\n  962b812371aff838d152b6ff2d56fdb7a6396f5542f48ebf73421b9721f0d103 \\\n  \"$TEST_DIR/$ARCHIVE\" | sha256sum --check -\ntar -xzf \"$TEST_DIR/$ARCHIVE\" -C \"$TEST_DIR\" \\\n  prometheus-3.13.1.linux-amd64/promtool \\\n  prometheus-3.13.1.linux-amd64/prometheus\nexport PATH=\"$TEST_DIR/prometheus-3.13.1.linux-amd64:$PATH\"\npromtool --version\npython3 -m venv \"$TEST_DIR/venv\"\n\"$TEST_DIR/venv/bin/pip\" install --disable-pip-version-check pytest pyyaml\n\"$TEST_DIR/venv/bin/python\" -m pytest -q \\\n  tests/test_vast_dashboard_registration.py \\\n  tests/test_vast_income_dashboard.py \\\n  tests/test_vast_occupancy_dashboard.py \\\n  tests/test_vast_snapshot_panels.py \\\n  tests/test_power_recording_rules.py \\\n  tests/test_vastai_exporter_metrics.py\n",
+        "python scripts/image_promotion.py tags --image ghcr.io/cryptolabsza/dc-overview",
+        "IFS=',' read -ra TAG_ARRAY <<< \"${{ steps.tags.outputs.tags }}\"\nTAG_ARGS=\"\"\nfor tag in \"${TAG_ARRAY[@]}\"; do\n  TAG_ARGS=\"$TAG_ARGS -t $tag\"\ndone\n\ndocker build --platform linux/amd64 \\\n  --label org.opencontainers.image.revision=\"$GITHUB_SHA\" \\\n  --label org.opencontainers.image.version=\"${{ steps.tags.outputs.version }}\" \\\n  $TAG_ARGS \\\n  --build-arg GIT_COMMIT=${{ github.sha }} \\\n  --build-arg GIT_BRANCH=${{ github.ref_name }} \\\n  --build-arg BUILD_TIME=\"$(date -u '+%Y-%m-%d %H:%M UTC')\" \\\n  .\n"
+      ]
+    },
+    "ci-build-runpod-exporter-recipe.yml": {
+      "job": "build-runpod-exporter",
+      "commands": [
+        "TEST_VENV=$(mktemp -d /tmp/runpod-exporter-tests.XXXXXX)\ncleanup() {\n  rm -rf \"$TEST_VENV\"\n}\ntrap cleanup EXIT\npython3 -m venv \"$TEST_VENV\"\n\"$TEST_VENV/bin/pip\" install --disable-pip-version-check pytest\n\"$TEST_VENV/bin/python\" -m pytest -q \\\n  tests/test_runpod_health_state.py \\\n  tests/test_runpod_exporter_health.py \\\n  tests/test_runpod_alerts.py\n",
+        "python scripts/image_promotion.py tags --image ghcr.io/cryptolabsza/runpod-exporter",
+        "IFS=',' read -ra TAG_ARRAY <<< \"${{ steps.tags.outputs.tags }}\"\nTAG_ARGS=\"\"\nfor tag in \"${TAG_ARRAY[@]}\"; do\n  TAG_ARGS=\"$TAG_ARGS -t $tag\"\ndone\n\ndocker build --platform linux/amd64 \\\n  --label org.opencontainers.image.revision=\"$GITHUB_SHA\" \\\n  --label org.opencontainers.image.version=\"${{ steps.tags.outputs.version }}\" \\\n  $TAG_ARGS \\\n  --build-arg GIT_COMMIT=${{ github.sha }} \\\n  --build-arg GIT_BRANCH=${{ github.ref_name }} \\\n  --build-arg BUILD_TIME=\"$(date -u '+%Y-%m-%d %H:%M UTC')\" \\\n  ./runpod-exporter\n",
+        "PRIMARY_TAG=\"${{ steps.tags.outputs.tags }}\"\nPRIMARY_TAG=\"${PRIMARY_TAG%%,*}\"\ndocker run --rm --network none --entrypoint python3 \"$PRIMARY_TAG\" -c '\nimport runpod_exporter\nfrom health_state import HealthState\n\nmetrics = HealthState(path=None).format_metrics([\"contract-check\"])\nrequired = (\n    \"runpod_health_state_schema_version 1\",\n    \"runpod_health_state_persist_success 1\",\n    \"runpod_api_poll_success{account=\\\"contract-check\\\"} 0\",\n    \"# HELP runpod_machine_health_known\",\n    \"# HELP runpod_machine_present\",\n    \"# HELP runpod_machine_health_listed\",\n)\nmissing = [metric for metric in required if metric not in metrics]\nassert not missing, f\"RunPod health contract missing: {missing}\"\n'\n"
+      ]
+    },
+    "ci-build-vastai-exporter-recipe.yml": {
+      "job": "build-vastai-exporter",
+      "commands": [
+        "python scripts/image_promotion.py tags --image ghcr.io/cryptolabsza/vastai-exporter",
+        "IFS=',' read -ra TAG_ARRAY <<< \"${{ steps.tags.outputs.tags }}\"\nTAG_ARGS=\"\"\nfor tag in \"${TAG_ARRAY[@]}\"; do\n  TAG_ARGS=\"$TAG_ARGS -t $tag\"\ndone\n\ndocker build --platform linux/amd64 \\\n  --label org.opencontainers.image.revision=\"$GITHUB_SHA\" \\\n  --label org.opencontainers.image.version=\"${{ steps.tags.outputs.version }}\" \\\n  $TAG_ARGS \\\n  --build-arg GIT_COMMIT=${{ github.sha }} \\\n  --build-arg GIT_BRANCH=${{ github.ref_name }} \\\n  --build-arg BUILD_TIME=\"$(date -u '+%Y-%m-%d %H:%M UTC')\" \\\n  ./vastai-exporter\n"
+      ]
+    },
+    "ci-python-build-recipe.yml": {
+      "job": "build",
+      "commands": [
+        "release_job_dir=$(mktemp -d \"$RUNNER_TEMP/python-release-build.XXXXXX\")\nprintf 'RELEASE_JOB_DIR=%s\\n' \"$release_job_dir\" >> \"$GITHUB_ENV\"\n",
+        "python -m pip install build",
+        "mkdir \"$RELEASE_JOB_DIR/release-source\" \"$RELEASE_JOB_DIR/release-dist\"\ngit archive HEAD | tar -x -C \"$RELEASE_JOB_DIR/release-source\"\nGIT_DIR=\"$GITHUB_WORKSPACE/.git\" GIT_WORK_TREE=\"$RELEASE_JOB_DIR/release-source\" GITHUB_REF_NAME=\"$RELEASE_TAG\" \\\n  python -m build \"$RELEASE_JOB_DIR/release-source\" --outdir \"$RELEASE_JOB_DIR/release-dist\"\n"
+      ]
+    },
+    "ci-pages-build-recipe.yml": {
+      "job": "build",
+      "commands": []
+    }
+  },
+  "callers": {
+    "docker-build.yml#build": "ci-build-recipe.yml",
+    "docker-build.yml#build-runpod-exporter": "ci-build-runpod-exporter-recipe.yml",
+    "docker-build.yml#build-vastai-exporter": "ci-build-vastai-exporter-recipe.yml",
+    "publish.yml#cpu-build": "ci-python-build-recipe.yml",
+    "pages.yml#build": "ci-pages-build-recipe.yml"
+  },
+  "held": {
+    "docker-build.yml#release-preflight": {
+      "commands": [
+        "printf 'RELEASE_RECEIPT=%s/image-release-preflight-%s-%s.json\\n' \"$RUNNER_TEMP\" \"$GITHUB_RUN_ID\" \"$GITHUB_RUN_ATTEMPT\" >> \"$GITHUB_ENV\"\n",
+        "python scripts/image_promotion.py guard --platform linux/amd64 --receipt \"$RELEASE_RECEIPT\""
+      ]
+    },
+    "docker-build.yml#publish-build": {
+      "commands": [
+        "printf 'DOCKER_CONFIG=%s/docker-config-build-%s-%s\\n' \"$RUNNER_TEMP\" \"$GITHUB_RUN_ID\" \"$GITHUB_RUN_ATTEMPT\" >> \"$GITHUB_ENV\"\n",
+        "set -euo pipefail\nTEST_DIR=$(mktemp -d /tmp/vast-dashboard-tests.XXXXXX)\ntrap 'rm -rf \"$TEST_DIR\"' EXIT\nARCHIVE=prometheus-3.13.1.linux-amd64.tar.gz\ncurl --fail --location --retry 3 \\\n  \"https://github.com/prometheus/prometheus/releases/download/v3.13.1/$ARCHIVE\" \\\n  --output \"$TEST_DIR/$ARCHIVE\"\nprintf '%s  %s\\n' \\\n  962b812371aff838d152b6ff2d56fdb7a6396f5542f48ebf73421b9721f0d103 \\\n  \"$TEST_DIR/$ARCHIVE\" | sha256sum --check -\ntar -xzf \"$TEST_DIR/$ARCHIVE\" -C \"$TEST_DIR\" \\\n  prometheus-3.13.1.linux-amd64/promtool \\\n  prometheus-3.13.1.linux-amd64/prometheus\nexport PATH=\"$TEST_DIR/prometheus-3.13.1.linux-amd64:$PATH\"\npromtool --version\npython3 -m venv \"$TEST_DIR/venv\"\n\"$TEST_DIR/venv/bin/pip\" install --disable-pip-version-check pytest pyyaml\n\"$TEST_DIR/venv/bin/python\" -m pytest -q \\\n  tests/test_vast_dashboard_registration.py \\\n  tests/test_vast_income_dashboard.py \\\n  tests/test_vast_occupancy_dashboard.py \\\n  tests/test_vast_snapshot_panels.py \\\n  tests/test_power_recording_rules.py \\\n  tests/test_vastai_exporter_metrics.py\n",
+        "python scripts/image_promotion.py tags --image ghcr.io/cryptolabsza/dc-overview",
+        "IFS=',' read -ra TAG_ARRAY <<< \"${{ steps.tags.outputs.tags }}\"\nTAG_ARGS=\"\"\nfor tag in \"${TAG_ARRAY[@]}\"; do\n  TAG_ARGS=\"$TAG_ARGS -t $tag\"\ndone\n\ndocker build --platform linux/amd64 \\\n  --label org.opencontainers.image.revision=\"$GITHUB_SHA\" \\\n  --label org.opencontainers.image.version=\"${{ steps.tags.outputs.version }}\" \\\n  $TAG_ARGS \\\n  --build-arg GIT_COMMIT=${{ github.sha }} \\\n  --build-arg GIT_BRANCH=${{ github.ref_name }} \\\n  --build-arg BUILD_TIME=\"$(date -u '+%Y-%m-%d %H:%M UTC')\" \\\n  .\n",
+        "IFS=',' read -ra TAG_ARRAY <<< \"${{ steps.tags.outputs.tags }}\"\nfor tag in \"${TAG_ARRAY[@]}\"; do\n  echo \"Pushing $tag...\"\n  docker --config \"$DOCKER_CONFIG\" push \"$tag\"\ndone\n",
+        "docker --config \"$DOCKER_CONFIG\" logout ${{ env.REGISTRY }} 2>/dev/null || true\nrm -rf \"$DOCKER_CONFIG\"\n",
+        "echo \"## Docker image workflow result\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\necho \"**Channel:** ${{ steps.tags.outputs.channel }}\" >> $GITHUB_STEP_SUMMARY\necho \"**Version:** ${{ steps.tags.outputs.version }}\" >> $GITHUB_STEP_SUMMARY\necho \"**Preflight:** ${{ needs.release-preflight.outputs.status }}\" >> $GITHUB_STEP_SUMMARY\necho \"**Commit:** ${{ github.sha }}\" >> $GITHUB_STEP_SUMMARY\necho \"**Platform:** linux/amd64\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\necho \"### Requested identity tags:\" >> $GITHUB_STEP_SUMMARY\necho '```' >> $GITHUB_STEP_SUMMARY\necho \"${{ steps.tags.outputs.tags }}\" | tr ',' '\\n' >> $GITHUB_STEP_SUMMARY\necho '```' >> $GITHUB_STEP_SUMMARY\n"
+      ]
+    },
+    "docker-build.yml#publish-build-runpod-exporter": {
+      "commands": [
+        "printf 'DOCKER_CONFIG=%s/docker-config-runpod-%s-%s\\n' \"$RUNNER_TEMP\" \"$GITHUB_RUN_ID\" \"$GITHUB_RUN_ATTEMPT\" >> \"$GITHUB_ENV\"\n",
+        "TEST_VENV=$(mktemp -d /tmp/runpod-exporter-tests.XXXXXX)\ncleanup() {\n  rm -rf \"$TEST_VENV\"\n}\ntrap cleanup EXIT\npython3 -m venv \"$TEST_VENV\"\n\"$TEST_VENV/bin/pip\" install --disable-pip-version-check pytest\n\"$TEST_VENV/bin/python\" -m pytest -q \\\n  tests/test_runpod_health_state.py \\\n  tests/test_runpod_exporter_health.py \\\n  tests/test_runpod_alerts.py\n",
+        "python scripts/image_promotion.py tags --image ghcr.io/cryptolabsza/runpod-exporter",
+        "IFS=',' read -ra TAG_ARRAY <<< \"${{ steps.tags.outputs.tags }}\"\nTAG_ARGS=\"\"\nfor tag in \"${TAG_ARRAY[@]}\"; do\n  TAG_ARGS=\"$TAG_ARGS -t $tag\"\ndone\n\ndocker build --platform linux/amd64 \\\n  --label org.opencontainers.image.revision=\"$GITHUB_SHA\" \\\n  --label org.opencontainers.image.version=\"${{ steps.tags.outputs.version }}\" \\\n  $TAG_ARGS \\\n  --build-arg GIT_COMMIT=${{ github.sha }} \\\n  --build-arg GIT_BRANCH=${{ github.ref_name }} \\\n  --build-arg BUILD_TIME=\"$(date -u '+%Y-%m-%d %H:%M UTC')\" \\\n  ./runpod-exporter\n",
+        "PRIMARY_TAG=\"${{ steps.tags.outputs.tags }}\"\nPRIMARY_TAG=\"${PRIMARY_TAG%%,*}\"\ndocker run --rm --network none --entrypoint python3 \"$PRIMARY_TAG\" -c '\nimport runpod_exporter\nfrom health_state import HealthState\n\nmetrics = HealthState(path=None).format_metrics([\"contract-check\"])\nrequired = (\n    \"runpod_health_state_schema_version 1\",\n    \"runpod_health_state_persist_success 1\",\n    \"runpod_api_poll_success{account=\\\"contract-check\\\"} 0\",\n    \"# HELP runpod_machine_health_known\",\n    \"# HELP runpod_machine_present\",\n    \"# HELP runpod_machine_health_listed\",\n)\nmissing = [metric for metric in required if metric not in metrics]\nassert not missing, f\"RunPod health contract missing: {missing}\"\n'\n",
+        "IFS=',' read -ra TAG_ARRAY <<< \"${{ steps.tags.outputs.tags }}\"\nfor tag in \"${TAG_ARRAY[@]}\"; do\n  echo \"Pushing $tag...\"\n  docker --config \"$DOCKER_CONFIG\" push \"$tag\"\ndone\n",
+        "docker --config \"$DOCKER_CONFIG\" logout ${{ env.REGISTRY }} 2>/dev/null || true\nrm -rf \"$DOCKER_CONFIG\"\n",
+        "echo \"## RunPod image workflow result\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\necho \"**Preflight:** ${{ needs.release-preflight.outputs.status }}\" >> $GITHUB_STEP_SUMMARY\necho \"**Commit:** ${{ github.sha }}\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\necho \"### Requested identity tags:\" >> $GITHUB_STEP_SUMMARY\necho '```' >> $GITHUB_STEP_SUMMARY\necho \"${{ steps.tags.outputs.tags }}\" | tr ',' '\\n' >> $GITHUB_STEP_SUMMARY\necho '```' >> $GITHUB_STEP_SUMMARY\n"
+      ]
+    },
+    "docker-build.yml#publish-build-vastai-exporter": {
+      "commands": [
+        "printf 'DOCKER_CONFIG=%s/docker-config-vastai-%s-%s\\n' \"$RUNNER_TEMP\" \"$GITHUB_RUN_ID\" \"$GITHUB_RUN_ATTEMPT\" >> \"$GITHUB_ENV\"\n",
+        "python scripts/image_promotion.py tags --image ghcr.io/cryptolabsza/vastai-exporter",
+        "IFS=',' read -ra TAG_ARRAY <<< \"${{ steps.tags.outputs.tags }}\"\nTAG_ARGS=\"\"\nfor tag in \"${TAG_ARRAY[@]}\"; do\n  TAG_ARGS=\"$TAG_ARGS -t $tag\"\ndone\n\ndocker build --platform linux/amd64 \\\n  --label org.opencontainers.image.revision=\"$GITHUB_SHA\" \\\n  --label org.opencontainers.image.version=\"${{ steps.tags.outputs.version }}\" \\\n  $TAG_ARGS \\\n  --build-arg GIT_COMMIT=${{ github.sha }} \\\n  --build-arg GIT_BRANCH=${{ github.ref_name }} \\\n  --build-arg BUILD_TIME=\"$(date -u '+%Y-%m-%d %H:%M UTC')\" \\\n  ./vastai-exporter\n",
+        "IFS=',' read -ra TAG_ARRAY <<< \"${{ steps.tags.outputs.tags }}\"\nfor tag in \"${TAG_ARRAY[@]}\"; do\n  echo \"Pushing $tag...\"\n  docker --config \"$DOCKER_CONFIG\" push \"$tag\"\ndone\n",
+        "docker --config \"$DOCKER_CONFIG\" logout ${{ env.REGISTRY }} 2>/dev/null || true\nrm -rf \"$DOCKER_CONFIG\"\n",
+        "echo \"## Vast.ai image workflow result\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\necho \"**Preflight:** ${{ needs.release-preflight.outputs.status }}\" >> $GITHUB_STEP_SUMMARY\necho \"**Commit:** ${{ github.sha }}\" >> $GITHUB_STEP_SUMMARY\necho \"\" >> $GITHUB_STEP_SUMMARY\necho \"### Requested identity tags:\" >> $GITHUB_STEP_SUMMARY\necho '```' >> $GITHUB_STEP_SUMMARY\necho \"${{ steps.tags.outputs.tags }}\" | tr ',' '\\n' >> $GITHUB_STEP_SUMMARY\necho '```' >> $GITHUB_STEP_SUMMARY\n"
+      ]
+    },
+    "docker-build.yml#release-readback": {
+      "commands": [
+        "printf 'RELEASE_RECEIPT=%s/image-release-readback-%s-%s.json\\n' \"$RUNNER_TEMP\" \"$GITHUB_RUN_ID\" \"$GITHUB_RUN_ATTEMPT\" >> \"$GITHUB_ENV\"\n",
+        "python scripts/image_promotion.py guard --platform linux/amd64 --receipt \"$RELEASE_RECEIPT\" --require-existing"
+      ]
+    },
+    "publish.yml#build": {
+      "commands": [
+        "release_job_dir=$(mktemp -d \"$RUNNER_TEMP/python-release-build.XXXXXX\")\nprintf 'RELEASE_JOB_DIR=%s\\n' \"$release_job_dir\" >> \"$GITHUB_ENV\"\n",
+        "python -m pip install build",
+        "python scripts/release_publication.py context",
+        "mkdir \"$RELEASE_JOB_DIR/release-source\" \"$RELEASE_JOB_DIR/release-dist\"\ngit archive HEAD | tar -x -C \"$RELEASE_JOB_DIR/release-source\"\nGIT_DIR=\"$GITHUB_WORKSPACE/.git\" GIT_WORK_TREE=\"$RELEASE_JOB_DIR/release-source\" GITHUB_REF_NAME=\"$RELEASE_TAG\" \\\n  python -m build \"$RELEASE_JOB_DIR/release-source\" --outdir \"$RELEASE_JOB_DIR/release-dist\"\n",
+        "python scripts/release_publication.py prepare --dist \"$RELEASE_JOB_DIR/release-dist\" --plan \"$RELEASE_JOB_DIR/build-receipt.json\""
+      ]
+    },
+    "publish.yml#publish": {
+      "commands": [
+        "release_job_dir=$(mktemp -d \"$RUNNER_TEMP/python-release-publish.XXXXXX\")\nprintf 'RELEASE_JOB_DIR=%s\\n' \"$release_job_dir\" >> \"$GITHUB_ENV\"\n",
+        "python -m pip install twine",
+        "gh --version",
+        "python scripts/release_publication.py publish \\\n  --dist \"$RELEASE_JOB_DIR/release-bundle/release-dist\" \\\n  --plan \"$RELEASE_JOB_DIR/release-bundle/build-receipt.json\" \\\n  --receipt \"$RELEASE_JOB_DIR/verified-publication.json\"\n"
+      ]
+    },
+    "pages.yml#build-and-deploy": {
+      "commands": []
+    },
+    "promote-images.yml#promote": {
+      "commands": [
+        "printf 'PROMOTION_DIR=%s/image-promotion-%s-%s\\n' \"$RUNNER_TEMP\" \"$GITHUB_RUN_ID\" \"$GITHUB_RUN_ATTEMPT\" >> \"$GITHUB_ENV\"\n",
+        "mkdir -p \"$PROMOTION_DIR\"\npython scripts/image_promotion.py promote \\\n  --release-tag \"$RELEASE_TAG\" --source-sha \"$SOURCE_SHA\" \\\n  --expected-digest \"dc-overview=$DC_OVERVIEW_DIGEST\" \\\n  --expected-digest \"runpod-exporter=$RUNPOD_EXPORTER_DIGEST\" \\\n  --expected-digest \"vastai-exporter=$VASTAI_EXPORTER_DIGEST\" \\\n  --platform linux/amd64 \\\n  --receipt \"$PROMOTION_DIR/promotion-receipt.json\"\n"
+      ]
+    }
+  }
+}
