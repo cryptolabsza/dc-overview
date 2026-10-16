@@ -1,0 +1,12 @@
+{
+  "repository": "cryptolabsza/dc-overview",
+  "repository_id": 1133295682,
+  "public_repository": true,
+  "project": "dc-overview",
+  "project_file": "pyproject.toml",
+  "workflow_path": ".github/workflows/publish.yml",
+  "build_ref": "cryptolabsza/dc-overview/.github/workflows/ci-python-build-recipe.yml@f995901eb7fbb1bf6d94fd75d1a8b69d8edfdcef",
+  "build_group_id": 11,
+  "mirror_github": true,
+  "verifier_sha256": "54bd08ddf7e59e755c0f21b3413699459cb837d152ff4b57716660f2ff71c7c3"
+}
