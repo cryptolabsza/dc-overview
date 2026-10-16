@@ -4,109 +4,24 @@ permissions:
 concurrency:
   group: python-release-${{ github.repository }}-${{ inputs.release_tag || github.event.release.tag_name || github.ref }}
   cancel-in-progress: false
-env:
-  RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
-  RELEASE_VERSION: ${{ inputs.version }}
 jobs:
-  build:
-    runs-on:
-    - self-hosted
-    - ci-authority-held-r1133295682
-    permissions:
-      contents: read
-    steps:
-    - name: Allocate unique job temporary directory
-      id: release_paths
-      run: |
-        release_job_dir=$(mktemp -d "$RUNNER_TEMP/python-release-build.XXXXXX")
-        printf 'RELEASE_JOB_DIR=%s\n' "$release_job_dir" >> "$GITHUB_ENV"
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      with:
-        ref: ${{ env.RELEASE_TAG }}
-        fetch-depth: 0
-        persist-credentials: false
-    - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
-      with:
-        python-version: '3.12'
-    - name: Install build tools
-      run: python -m pip install build
-    - name: Validate published tag and pristine source
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: python scripts/release_publication.py context
-    - name: Build once from the checked-out revision
-      run: |
-        mkdir "$RELEASE_JOB_DIR/release-source" "$RELEASE_JOB_DIR/release-dist"
-        git archive HEAD | tar -x -C "$RELEASE_JOB_DIR/release-source"
-        GIT_DIR="$GITHUB_WORKSPACE/.git" GIT_WORK_TREE="$RELEASE_JOB_DIR/release-source" GITHUB_REF_NAME="$RELEASE_TAG" \
-          python -m build "$RELEASE_JOB_DIR/release-source" --outdir "$RELEASE_JOB_DIR/release-dist"
-    - name: Validate wheel and sdist metadata and retain checksums
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: python scripts/release_publication.py prepare --dist "$RELEASE_JOB_DIR/release-dist" --plan "$RELEASE_JOB_DIR/build-receipt.json"
-    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-      with:
-        name: python-release-build
-        path: |
-          ${{ env.RELEASE_JOB_DIR }}/release-dist/*
-          ${{ env.RELEASE_JOB_DIR }}/build-receipt.json
-        if-no-files-found: error
-        retention-days: 30
-    timeout-minutes: 45
-    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
-  publish:
-    needs: build
-    runs-on:
-    - self-hosted
-    - ci-authority-held-r1133295682
-    permissions:
-      contents: write
-    steps:
-    - name: Allocate unique job temporary directory
-      id: release_paths
-      run: |
-        release_job_dir=$(mktemp -d "$RUNNER_TEMP/python-release-publish.XXXXXX")
-        printf 'RELEASE_JOB_DIR=%s\n' "$release_job_dir" >> "$GITHUB_ENV"
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      with:
-        ref: ${{ env.RELEASE_TAG }}
-        fetch-depth: 0
-        persist-credentials: false
-    - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
-      with:
-        python-version: '3.12'
-    - name: Install upload tool
-      run: python -m pip install twine
-    - name: Check GitHub uploader
-      run: gh --version
-    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-      with:
-        name: python-release-build
-        path: ${{ env.RELEASE_JOB_DIR }}/release-bundle
-    - name: Publish and verify exact artifacts
-      env:
-        GH_TOKEN: ${{ github.token }}
-        TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-      run: |
-        python scripts/release_publication.py publish \
-          --dist "$RELEASE_JOB_DIR/release-bundle/release-dist" \
-          --plan "$RELEASE_JOB_DIR/release-bundle/build-receipt.json" \
-          --receipt "$RELEASE_JOB_DIR/verified-publication.json"
-    - name: Retain verified publication receipt
-      if: always() && steps.release_paths.outcome == 'success'
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-      with:
-        name: verified-python-publication
-        path: ${{ env.RELEASE_JOB_DIR }}/verified-publication.json
-        if-no-files-found: error
-        retention-days: 90
-    timeout-minutes: 45
-    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
   cpu-build:
     uses: cryptolabsza/dc-overview/.github/workflows/ci-python-build-recipe.yml@f995901eb7fbb1bf6d94fd75d1a8b69d8edfdcef
     permissions:
       contents: read
+  publish:
+    needs: cpu-build
+    if: always() && (github.event_name == 'release' || github.event_name == 'workflow_dispatch')
+    uses: cryptolabsza/dc-overview/.github/workflows/ci-pypi-publish-recipe.yml@7a9f35ac827576140fa4cc328ce43026f525da36
+    permissions:
+      actions: read
+      contents: write
+    with:
+      producer_run_id: ${{ inputs.producer_run_id || (needs.cpu-build.result == 'success' && github.run_id) || '' }}
+      producer_attempt: ${{ inputs.producer_attempt || (needs.cpu-build.result == 'success' && github.run_attempt) || '' }}
+      artifact_id: ${{ inputs.artifact_id || needs.cpu-build.outputs.artifact_id || '' }}
+    secrets:
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
 'on':
   release:
     types:
@@ -120,6 +35,18 @@ jobs:
       version:
         description: Version matching the tag and pyproject.toml (X.Y.Z)
         required: true
+        type: string
+      producer_run_id:
+        description: Existing verified producer producer run id, or leave all three blank
+        required: false
+        type: string
+      producer_attempt:
+        description: Existing verified producer producer attempt, or leave all three blank
+        required: false
+        type: string
+      artifact_id:
+        description: Existing verified producer artifact id, or leave all three blank
+        required: false
         type: string
   push:
     branches:

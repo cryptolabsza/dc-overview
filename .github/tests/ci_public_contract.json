@@ -91,23 +91,6 @@
         "python scripts/image_promotion.py guard --platform linux/amd64 --receipt \"$RELEASE_RECEIPT\" --require-existing"
       ]
     },
-    "publish.yml#build": {
-      "commands": [
-        "release_job_dir=$(mktemp -d \"$RUNNER_TEMP/python-release-build.XXXXXX\")\nprintf 'RELEASE_JOB_DIR=%s\\n' \"$release_job_dir\" >> \"$GITHUB_ENV\"\n",
-        "python -m pip install build",
-        "python scripts/release_publication.py context",
-        "mkdir \"$RELEASE_JOB_DIR/release-source\" \"$RELEASE_JOB_DIR/release-dist\"\ngit archive HEAD | tar -x -C \"$RELEASE_JOB_DIR/release-source\"\nGIT_DIR=\"$GITHUB_WORKSPACE/.git\" GIT_WORK_TREE=\"$RELEASE_JOB_DIR/release-source\" GITHUB_REF_NAME=\"$RELEASE_TAG\" \\\n  python -m build \"$RELEASE_JOB_DIR/release-source\" --outdir \"$RELEASE_JOB_DIR/release-dist\"\n",
-        "python scripts/release_publication.py prepare --dist \"$RELEASE_JOB_DIR/release-dist\" --plan \"$RELEASE_JOB_DIR/build-receipt.json\""
-      ]
-    },
-    "publish.yml#publish": {
-      "commands": [
-        "release_job_dir=$(mktemp -d \"$RUNNER_TEMP/python-release-publish.XXXXXX\")\nprintf 'RELEASE_JOB_DIR=%s\\n' \"$release_job_dir\" >> \"$GITHUB_ENV\"\n",
-        "python -m pip install twine",
-        "gh --version",
-        "python scripts/release_publication.py publish \\\n  --dist \"$RELEASE_JOB_DIR/release-bundle/release-dist\" \\\n  --plan \"$RELEASE_JOB_DIR/release-bundle/build-receipt.json\" \\\n  --receipt \"$RELEASE_JOB_DIR/verified-publication.json\"\n"
-      ]
-    },
     "pages.yml#build-and-deploy": {
       "commands": []
     },
