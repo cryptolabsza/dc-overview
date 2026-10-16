@@ -1,46 +1,33 @@
 name: Deploy Documentation to GitHub Pages
-
-on:
+'on':
   push:
-    branches: ["main", "master", "dev"]
-    paths:
-      - 'docs/**'
-      - '.github/workflows/pages.yml'
-  workflow_dispatch:
-
+    branches:
+    - dev
+    - main
+  pull_request:
+    branches:
+    - dev
+    - main
+  workflow_dispatch: {}
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
 concurrency:
-  group: "pages"
+  group: pages
   cancel-in-progress: false
-
 jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-        with:
-          enablement: true
-      
-      - name: Build with Jekyll
-        uses: actions/jekyll-build-pages@v1
-        with:
-          source: ./docs
-          destination: ./_site
-      
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-      
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+  build:
+    uses: cryptolabsza/dc-overview/.github/workflows/ci-pages-build-recipe.yml@5d7b7f894f958cf847c71408a143be89510b8391
+    permissions:
+      contents: read
+  publish:
+    needs: build
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && github.ref == 'refs/heads/main' && github.ref_protected == true
+    uses: cryptolabsza/dc-overview/.github/workflows/ci-pages-publish-recipe.yml@f1b9b6fbd92b67f9f67ba3eec8e4c7cef2e0ddff
+    permissions:
+      contents: read
+      actions: read
+      pages: write
+      id-token: write
+    with:
+      artifact_id: ${{ needs.build.outputs.artifact_id }}

@@ -198,10 +198,10 @@ def test_build_workflows_use_the_same_safe_generator_and_no_automatic_aliases():
     trigger=workflow.get('on',workflow.get(True))
     assert 'tag_override' not in trigger.get('workflow_dispatch',{}).get('inputs',{})
     for job in workflow['jobs'].values():
-        if not any('image_promotion.py tags' in step.get('run','') for step in job['steps']):continue
-        assert job['runs-on']==['self-hosted','linux']
-        assert any('DOCKER_CONFIG=' in step.get('run','') and '$RUNNER_TEMP' in step['run'] for step in job['steps'])
-        steps=job['steps']
+        if not any('image_promotion.py tags' in step.get('run','') for step in job.get('steps',[])):continue
+        assert job['runs-on']==['self-hosted','ci-authority-held-r1133295682']
+        assert any('DOCKER_CONFIG=' in step.get('run','') and '$RUNNER_TEMP' in step['run'] for step in job.get('steps',[]))
+        steps=job.get('steps',[])
         assert any('image_promotion.py tags' in s.get('run','') for s in steps)
         assert any(s.get('if')=='always()' and 'DOCKER_CONFIG' in s.get('run','') for s in steps)
         assert any(s.get('uses','').startswith('docker/login-action@') for s in steps)
@@ -218,25 +218,18 @@ def test_build_workflows_use_the_same_safe_generator_and_no_automatic_aliases():
 
 
 def test_manual_promotion_is_explicit_and_never_builds_or_triggers_on_release():
-    path=ROOT/'.github/workflows/promote-images.yml'
-    workflow=yaml.safe_load(path.read_text());trigger=workflow.get('on',workflow.get(True))
-    assert set(trigger)=={'workflow_dispatch'}
-    inputs=trigger['workflow_dispatch']['inputs']
-    assert inputs['release_tag']['required'] and inputs['source_sha']['required']
-    for image in IMAGES:assert inputs[image.replace('-','_')+'_digest']['required']
-    assert len(workflow['jobs'])==1
-    job=workflow['jobs']['promote'];assert job['runs-on']==['self-hosted','linux']
-    assert any('PROMOTION_DIR=' in step.get('run','') and '$GITHUB_RUN_ID' in step['run'] and '$GITHUB_RUN_ATTEMPT' in step['run'] for step in job['steps'])
-    assert job['permissions']=={'contents':'read','packages':'write'}
-    assert any('image_promotion.py promote' in s.get('run','') for s in job['steps'])
-    assert any(s.get('if')=='always()' and 'promotion-receipt.json' in str(s) for s in job['steps'])
-    for s in job['steps']:
-        assert 'docker build' not in s.get('run','') and 'build-push-action' not in s.get('uses','')
-        assert '${{ inputs.' not in s.get('run','') and '${{ secrets.' not in s.get('run','')
-        if s.get('uses','').startswith('actions/checkout@'):
-            assert s['with']['ref']=='${{ inputs.release_tag }}'
-            assert s['with']['persist-credentials'] is False
-
+    workflow=yaml.safe_load((ROOT/'.github/workflows/promote-images.yml').read_text())
+    assert set(workflow.get('on',workflow.get(True)))=={'workflow_dispatch'}
+    job=workflow['jobs']['promote'];assert re.fullmatch(r'cryptolabsza/[^/]+/\.github/workflows/ci-image-promote-recipe.yml@[0-9a-f]{40}',job['uses'])
+    assert set(job['with'])=={'release_tag','source_sha',*(image.replace('-','_')+'_digest' for image in IMAGES)}
+    leaf=yaml.safe_load((ROOT/'.github/workflows/ci-image-promote-recipe.yml').read_text())['jobs']['promote']
+    assert "github.ref == 'refs/heads/main'" in leaf['if'] and "github.event_name == 'workflow_dispatch'" in leaf['if']
+    checkout=leaf['steps'][0]['with'];assert re.fullmatch('[0-9a-f]{40}',checkout['ref']);assert checkout['sparse-checkout-cone-mode'] is False
+    assert all(path.startswith('/.github/image-publisher/') for path in checkout['sparse-checkout'].splitlines())
+    source=(ROOT/'.github/image-publisher/transport.py').read_text()
+    for retained in ["promotion.promote(context,expected,['linux/amd64'],client)",'client.release_commit(policy.repository,release_tag)==source_sha',"release_tag=='v'+version"]:assert retained in source
+    assert (ROOT/'.github/image-publisher/image_promotion.py').read_bytes()==(ROOT/'scripts/image_promotion.py').read_bytes()
+    assert 'docker build' not in str(leaf) and 'pip install' not in str(leaf)
 
 def modern_attestation(client):
     for image in IMAGES:
@@ -396,30 +389,21 @@ def test_cross_image_partial_history_retains_each_observation_without_rebuild(mo
 
 def test_normal_push_and_manual_runs_share_serialized_product_guard():
     workflow=yaml.safe_load((ROOT/'.github/workflows/docker-build.yml').read_text())
-    triggers=workflow.get('on',workflow.get(True));assert 'workflow_dispatch' in triggers
-    concurrency=workflow['concurrency']
-    assert concurrency=={'group':'image-release-publication-${{ github.repository }}','cancel-in-progress':False}
-    guard=workflow['jobs']['release-preflight']
-    assert guard['permissions']=={'contents':'read','packages':'read'}
-    command=next(s for s in guard['steps'] if 'image_promotion.py guard' in s.get('run',''))
-    assert '--platform linux/amd64' in command['run'] and '--receipt' in command['run']
-    assert command['env']['GHCR_TOKEN']=='${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}'
-    assert 'TAG_OVERRIDE' in command['env']
-    assert any(s.get('if')=='always()' and s.get('uses','').startswith('actions/upload-artifact@') for s in guard['steps'])
-    image_jobs=[job for job in workflow['jobs'].values() if any('image_promotion.py tags' in s.get('run','') for s in job['steps'])]
-    assert len(image_jobs)==len(IMAGES)
-    for job in image_jobs:
-        assert job['needs']=='release-preflight'
-        for step in job['steps']:
-            if 'docker build ' in step.get('run','') or step.get('uses','').startswith('docker/build-push-action@'):
-                assert step.get('if')=="needs.release-preflight.outputs.build == 'true'"
-            if 'docker --config "$DOCKER_CONFIG" push' in step.get('run',''):
-                assert step.get('if')=="github.event_name != 'pull_request' && needs.release-preflight.outputs.build == 'true'"
-    final=workflow['jobs']['release-readback']
-    assert final['if']=="always() && needs.release-preflight.result == 'success'"
-    assert len(final['needs'])==len(IMAGES)+1
-    assert any('--require-existing' in s.get('run','') for s in final['steps'])
-
+    assert 'workflow_dispatch' in workflow.get('on',workflow.get(True))
+    assert workflow['concurrency']=={'group':"image-release-publication-${{ github.repository }}-${{ startsWith(github.ref, 'refs/tags/') && 'release' || github.ref }}",'cancel-in-progress':False}
+    for mode in ['preflight','readback']:
+        job=workflow['jobs']['release-'+mode];assert job['permissions']=={'contents':'read','packages':'read'}
+        assert re.fullmatch(r'cryptolabsza/[^/]+/\.github/workflows/ci-image-'+mode+r'-recipe.yml@[0-9a-f]{40}',job['uses'])
+        leaf=yaml.safe_load((ROOT/('.github/workflows/ci-image-'+mode+'-recipe.yml')).read_text())['jobs']['metadata']
+        assert leaf['permissions']=={'contents':'read','packages':'read'}
+        assert set(leaf['outputs'])=={'build','status'}
+        receipt=next(s for s in leaf['steps'] if s.get('uses','').startswith('actions/upload-artifact@'))
+        assert receipt['if']=='always()' and receipt['with']['name']=='image-release-'+mode+'-receipt'
+    publish=workflow['jobs']['publish-build'];assert publish['needs']==['build','release-preflight']
+    assert workflow['jobs']['release-readback']['if']=="always() && needs.release-preflight.result == 'success'"
+    assert workflow['jobs']['release-readback']['needs']==['release-preflight','publish-build']
+    transport=(ROOT/'.github/image-publisher/transport.py').read_text();assert "result['channel']=='main'" in transport
+    assert "'status':'discovery','build':True" in transport
 
 def test_release_guard_cli_executes_registry_preflight_and_emits_reuse(tmp_path,monkeypatch,mod):
     client=Registry();output=tmp_path/'outputs';receipt=tmp_path/'receipt.json'
@@ -450,19 +434,18 @@ def test_discovery_guard_never_reads_or_writes_registry(tmp_path,monkeypatch,mod
 
 
 def test_actual_workflow_conditions_do_zero_build_or_push_on_reuse():
-    workflow=yaml.safe_load((ROOT/'.github/workflows/docker-build.yml').read_text())
-    evaluated=[]
-    for job in workflow['jobs'].values():
-        for step in job['steps']:
-            run=step.get('run','');uses=step.get('uses','')
-            if 'docker build ' in run or 'docker --config "$DOCKER_CONFIG" push' in run or uses.startswith('docker/build-push-action@'):
-                condition=step['if']
-                expression=condition.replace('needs.release-preflight.outputs.build',repr('false')).replace(
-                    'github.event_name',repr('workflow_dispatch')).replace('&&','and')
-                evaluated.append(eval(expression,{'__builtins__':{}}))
-    assert len(evaluated)==(6 if PROJECT=='dc-overview' else 1)
-    assert not any(evaluated), 'A coherent release retry must execute zero build/push steps'
-
+    # Tagged release retries remain refused by the unchanged main/dev source contract.
+    # The artifact-only publisher cannot rebuild an already published release.
+    for file,jid in [('ci-image-build-recipe.yml','build'),('ci-image-publish-recipe.yml','publish')]:
+        leaf=yaml.safe_load((ROOT/('.github/workflows/'+file)).read_text())['jobs'][jid]
+        guard=leaf['if']
+        assert 'refs/heads/main' in guard and 'refs/tags/' not in guard
+    publisher=yaml.safe_load((ROOT/'.github/workflows/ci-image-publish-recipe.yml').read_text())['jobs']['publish']
+    for step in publisher['steps']:
+        assert not step.get('uses','').startswith('docker/build-push-action@')
+        assert 'docker build' not in step.get('run','')
+    frozen=(ROOT/'.github/image-publisher/image_promotion.py').read_bytes()
+    assert frozen==(ROOT/'scripts/image_promotion.py').read_bytes()
 
 def test_cli_retains_partial_history_and_no_build_output(tmp_path,monkeypatch,mod):
     client=Registry();repo='ghcr.io/cryptolabsza/'+IMAGES[-1]
@@ -498,8 +481,9 @@ def test_runner_paths_are_initialized_in_steps_with_valid_contexts(tmp_path):
     for filename in ('docker-build.yml','promote-images.yml'):
         workflow=yaml.safe_load((ROOT/'.github/workflows'/filename).read_text())
         for job_name,job in workflow['jobs'].items():
+            if 'steps' not in job:continue  # CPU callers are tested in the immutable recipes.
             assert 'runner.' not in str(job.get('env',{}))
-            path_steps=[step for step in job['steps'] if step.get('name')=='Initialize isolated runner path']
+            path_steps=[step for step in job.get('steps',[]) if step.get('name')=='Initialize isolated runner path']
             assert len(path_steps)==1
             script=path_steps[0]['run'];envfile=tmp_path/(filename+'-'+job_name)
             result=subprocess.run(['bash','-euo','pipefail','-c',script],capture_output=True,text=True,

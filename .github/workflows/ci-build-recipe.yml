@@ -1,0 +1,124 @@
+name: Public CPU build recipe
+'on':
+  workflow_call:
+    outputs:
+      artifact_id:
+        description: Uploaded artifact ID
+        value: ${{ jobs.build.outputs.artifact_id }}
+      artifact_digest:
+        description: GitHub upload artifact SHA256
+        value: ${{ jobs.build.outputs.artifact_digest }}
+permissions:
+  contents: read
+jobs:
+  build:
+    if: >
+      github.repository_id == '1133295682' && (((github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && github.ref_protected == true && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')) ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.id == 1133295682 && (github.base_ref
+      == 'dev' || github.base_ref == 'main')))
+    runs-on:
+      group: ci-build-public-ephemeral
+      labels:
+      - ci-linux-cpu-v1-r1133295682
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout exact source
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ github.sha }}
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Set up managed Python
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+      with:
+        python-version: '3.12'
+    - name: Verify public admission and source contracts
+      run: |
+        python -m pip install --quiet PyYAML==6.0.3
+        python -m unittest discover -s .github/tests -p 'test_ci_public_route.py' -v
+    - name: Allocate build artifact directory
+      run: |
+        mkdir -p ci-artifacts
+    - name: Test Vast dashboards
+      env:
+        REQUIRE_PROMTOOL: '1'
+      run: |
+        set -euo pipefail
+        TEST_DIR=$(mktemp -d /tmp/vast-dashboard-tests.XXXXXX)
+        trap 'rm -rf "$TEST_DIR"' EXIT
+        ARCHIVE=prometheus-3.13.1.linux-amd64.tar.gz
+        curl --fail --location --retry 3 \
+          "https://github.com/prometheus/prometheus/releases/download/v3.13.1/$ARCHIVE" \
+          --output "$TEST_DIR/$ARCHIVE"
+        printf '%s  %s\n' \
+          962b812371aff838d152b6ff2d56fdb7a6396f5542f48ebf73421b9721f0d103 \
+          "$TEST_DIR/$ARCHIVE" | sha256sum --check -
+        tar -xzf "$TEST_DIR/$ARCHIVE" -C "$TEST_DIR" \
+          prometheus-3.13.1.linux-amd64/promtool \
+          prometheus-3.13.1.linux-amd64/prometheus
+        export PATH="$TEST_DIR/prometheus-3.13.1.linux-amd64:$PATH"
+        promtool --version
+        python3 -m venv "$TEST_DIR/venv"
+        "$TEST_DIR/venv/bin/pip" install --disable-pip-version-check pytest pyyaml
+        "$TEST_DIR/venv/bin/python" -m pytest -q \
+          tests/test_vast_dashboard_registration.py \
+          tests/test_vast_income_dashboard.py \
+          tests/test_vast_occupancy_dashboard.py \
+          tests/test_vast_snapshot_panels.py \
+          tests/test_power_recording_rules.py \
+          tests/test_vastai_exporter_metrics.py
+    - name: Compute safe build tags
+      id: tags
+      env:
+        TAG_OVERRIDE: ''
+      run: python scripts/image_promotion.py tags --image ghcr.io/cryptolabsza/dc-overview
+    - name: Build Docker image
+      run: |
+        IFS=',' read -ra TAG_ARRAY <<< "${{ steps.tags.outputs.tags }}"
+        TAG_ARGS=""
+        for tag in "${TAG_ARRAY[@]}"; do
+          TAG_ARGS="$TAG_ARGS -t $tag"
+        done
+
+        docker build --platform linux/amd64 \
+          --label org.opencontainers.image.revision="$GITHUB_SHA" \
+          --label org.opencontainers.image.version="${{ steps.tags.outputs.version }}" \
+          $TAG_ARGS \
+          --build-arg GIT_COMMIT=${{ github.sha }} \
+          --build-arg GIT_BRANCH=${{ github.ref_name }} \
+          --build-arg BUILD_TIME="$(date -u '+%Y-%m-%d %H:%M UTC')" \
+          .
+    - name: Export the tested local Docker image
+      env:
+        IMAGE_TAGS: ${{ steps.tags.outputs.tags }}
+      run: |
+        PRIMARY_TAG="${IMAGE_TAGS%%,*}"
+        docker save --output ci-artifacts/build.tar "$PRIMARY_TAG"
+    - name: Record fixed image identity and artifact checksum
+      run: |
+        python - <<'PY'
+        import hashlib,json,os,pathlib
+        p=pathlib.Path('ci-artifacts/build.tar')
+        h=hashlib.sha256()
+        with p.open('rb') as stream:
+            for block in iter(lambda:stream.read(1024*1024),b''):h.update(block)
+        receipt={'artifact_kind':'docker-archive','expected_image':'ghcr.io/cryptolabsza/dc-overview','repository':'cryptolabsza/dc-overview','repository_id':1133295682,'source_sha':os.environ['GITHUB_SHA'],'run_id':os.environ['GITHUB_RUN_ID'],'run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],'filename':p.name,'sha256':h.hexdigest()}
+        p.with_suffix('.json').write_text(json.dumps(receipt,sort_keys=True)+'\n')
+        print(json.dumps(receipt,sort_keys=True))
+        PY
+    - name: Upload immutable image build
+      id: upload
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: cpu-build-${{ github.run_id }}-${{ github.run_attempt }}
+        path: |
+          ci-artifacts/build.tar
+          ci-artifacts/build.json
+        if-no-files-found: error
+        retention-days: 7
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
