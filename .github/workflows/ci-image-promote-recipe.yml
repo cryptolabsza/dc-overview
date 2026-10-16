@@ -39,7 +39,7 @@ jobs:
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       with:
         repository: cryptolabsza/dc-overview
-        ref: '0c8cdf2b7ea6e5396b927faaf0226ec623d12c7d'
+        ref: de12ba00b06b5804b26a86453e5d1c2eb142c805
         persist-credentials: false
         fetch-depth: 1
         path: publisher
@@ -80,3 +80,11 @@ jobs:
         RUNPOD_EXPORTER_DIGEST: ${{ inputs.runpod_exporter_digest }}
         VASTAI_EXPORTER_DIGEST: ${{ inputs.vastai_exporter_digest }}
       run: python3 publisher/.github/image-publisher/policy.py promote
+    - name: Retain exact success or held/partial promotion receipt
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: image-promotion-receipt
+        path: ${{ runner.temp }}/promotion-receipt.json
+        if-no-files-found: warn
+        retention-days: 90
