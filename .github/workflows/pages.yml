@@ -23,7 +23,7 @@ jobs:
     needs: build
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && github.ref == 'refs/heads/main' && github.ref_protected == true
-    uses: cryptolabsza/dc-overview/.github/workflows/ci-pages-publish-recipe.yml@508a0ae4e1793e39f53a168e5cf7e4374226a17e
+    uses: cryptolabsza/dc-overview/.github/workflows/ci-pages-publish-recipe.yml@f1b9b6fbd92b67f9f67ba3eec8e4c7cef2e0ddff
     permissions:
       contents: read
       actions: read
