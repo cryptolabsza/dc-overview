@@ -28,6 +28,6 @@ if __name__ == '__main__':
     try:
         require(len(sys.argv) == 2, 'artifact ID required')
         run(sys.argv[1])
-    except (ValueError, KeyError, TypeError, OSError):
+    except (Refused, ValueError, KeyError, TypeError, OSError):
         print('Pages artifact verification refused; no deployment authorized.',file=sys.stderr)
         sys.exit(1)

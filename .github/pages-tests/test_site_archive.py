@@ -53,4 +53,12 @@ class SiteArchiveTest(unittest.TestCase):
                 path = self.archive(Path(directory), [('index.html', b'ok', tarfile.REGTYPE)] + [(name,b'x',tarfile.REGTYPE) for name in names])
                 with self.assertRaises(site.Refused): site.validate(path, None)
 
+    def test_refuses_implicit_namespace_growth_and_wrong_case_index(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=self.archive(Path(directory), [('index.html',b'ok',tarfile.REGTYPE),('a/b/c/d',b'x',tarfile.REGTYPE)])
+            with self.assertRaises(site.Refused):site.validate(path,None,maximum_members=4)
+        with tempfile.TemporaryDirectory() as directory:
+            path=self.archive(Path(directory), [('Index.html',b'ok',tarfile.REGTYPE)])
+            with self.assertRaises(site.Refused):site.validate(path,None)
+
 if __name__ == '__main__': unittest.main()

@@ -7,15 +7,15 @@ class Refused(ValueError): pass
 def require(condition, reason):
     if not condition: raise Refused(reason)
 
-def validate(path, cname, maximum_bytes=512*1024**2):
+def validate(path, cname, maximum_bytes=512*1024**2, maximum_members=10000):
     path = Path(path)
     require(path.is_file() and not path.is_symlink() and 0 < path.stat().st_size <= maximum_bytes, 'site archive size')
-    seen = set(); files = set(); directories = set(); total = 0; count = 0; found_cname = None
+    seen = set(); files = set(); directories = set(); total = 0; count = 0; found_cname = None; found_index = False
     try:
         with tarfile.open(path, 'r|') as archive:
             for member in archive:
                 count += 1
-                require(count <= 10000, 'site member count')
+                require(count <= maximum_members, 'site member count')
                 raw = member.name
                 if raw in {'.', './'} and member.isdir(): continue
                 name = raw[2:] if raw.startswith('./') else raw
@@ -28,18 +28,21 @@ def validate(path, cname, maximum_bytes=512*1024**2):
                 parents = {'/'.join(parts[:n]).casefold() for n in range(1,len(parts))}
                 require(not parents & files, 'site file parent conflict')
                 directories.update(parents)
+                require(len(directories | files) <= maximum_members, 'site namespace bound')
                 if member.isdir():
                     require(key not in files, 'site directory conflict'); directories.add(key); continue
                 require(key not in directories, 'site file directory conflict')
                 files.add(key); total += member.size
                 require(0 <= member.size <= maximum_bytes and total <= maximum_bytes, 'site expanded size')
-                if name == 'index.html': require(member.size > 0, 'empty site index')
+                require(len(directories | files) <= maximum_members, 'site namespace bound')
+                if name == 'index.html':
+                    require(member.size > 0, 'empty site index'); found_index = True
                 if name == 'CNAME':
                     require(member.size <= 254, 'site CNAME size')
                     found_cname = archive.extractfile(member).read(255).decode('ascii').strip()
     except (tarfile.TarError, OSError, UnicodeError, ValueError) as error:
         if isinstance(error, Refused): raise
         raise Refused('site archive invalid') from None
-    require('index.html' in files and 'index.html' in seen, 'site index required')
+    require(found_index, 'site index required')
     require(cname is None or found_cname == cname, 'site CNAME changed')
     return {'files': len(files), 'bytes': total, 'cname': found_cname}

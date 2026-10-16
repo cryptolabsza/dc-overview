@@ -48,4 +48,17 @@ class PagesRouteTest(unittest.TestCase):
         self.assertIn("summary['branch'] == 'main'",runtime)
         self.assertIn("{'artifact.tar'}",runtime)
 
+    def test_caller_requires_build_success_and_protected_main_publisher(self):
+        data=yaml.safe_load((ROOT/'.github/workflows/pages.yml').read_text())
+        self.assertEqual(data['permissions'],{'contents':'read'})
+        build=data['jobs']['build'];publish=data['jobs']['publish']
+        self.assertEqual(publish['needs'],'build')
+        self.assertEqual(publish['with'],{'artifact_id':'${{ needs.build.outputs.artifact_id }}'})
+        self.assertIn("github.ref == 'refs/heads/main'",publish['if'])
+        self.assertIn('github.ref_protected == true',publish['if'])
+        self.assertNotIn('secrets',publish)
+        for job in (build,publish):
+            self.assertRegex(job['uses'],r'@[a-f0-9]{40}$')
+            self.assertNotIn('runs-on',job)
+
 if __name__=='__main__':unittest.main()
