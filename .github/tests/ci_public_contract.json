@@ -91,9 +91,6 @@
         "python scripts/image_promotion.py guard --platform linux/amd64 --receipt \"$RELEASE_RECEIPT\" --require-existing"
       ]
     },
-    "pages.yml#build-and-deploy": {
-      "commands": []
-    },
     "promote-images.yml#promote": {
       "commands": [
         "printf 'PROMOTION_DIR=%s/image-promotion-%s-%s\\n' \"$RUNNER_TEMP\" \"$GITHUB_RUN_ID\" \"$GITHUB_RUN_ATTEMPT\" >> \"$GITHUB_ENV\"\n",
