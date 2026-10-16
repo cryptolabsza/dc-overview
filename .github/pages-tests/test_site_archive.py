@@ -61,4 +61,10 @@ class SiteArchiveTest(unittest.TestCase):
             path=self.archive(Path(directory), [('Index.html',b'ok',tarfile.REGTYPE)])
             with self.assertRaises(site.Refused):site.validate(path,None)
 
+    def test_refuses_concatenated_or_nonzero_trailing_tar_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=self.archive(Path(directory), [('index.html',b'ok',tarfile.REGTYPE)])
+            path.write_bytes(path.read_bytes()+b'nonzero trailing data')
+            with self.assertRaises(site.Refused):site.validate(path,None)
+
 if __name__ == '__main__': unittest.main()

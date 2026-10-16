@@ -40,6 +40,10 @@ def validate(path, cname, maximum_bytes=512*1024**2, maximum_members=10000):
                 if name == 'CNAME':
                     require(member.size <= 254, 'site CNAME size')
                     found_cname = archive.extractfile(member).read(255).decode('ascii').strip()
+            # tar readers can differ on concatenated archives. Refuse every
+            # nonzero trailing byte instead of leaving another payload opaque.
+            while trailing := archive.fileobj.read(64*1024):
+                require(not any(trailing), 'site trailing payload')
     except (tarfile.TarError, OSError, UnicodeError, ValueError) as error:
         if isinstance(error, Refused): raise
         raise Refused('site archive invalid') from None
