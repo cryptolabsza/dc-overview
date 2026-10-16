@@ -1,0 +1,60 @@
+name: Verified artifact-only Pages publisher recipe
+'on':
+  workflow_call:
+    inputs:
+      artifact_id:
+        type: string
+        required: true
+permissions: &id001
+  contents: read
+  actions: read
+  pages: write
+  id-token: write
+jobs:
+  publish:
+    if: github.repository_id == '1133295682' && (github.event_name == 'push' || github.event_name
+      == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.ref_protected
+      == true
+    runs-on:
+      group: ci-publish-ephemeral
+      labels:
+      - ci-linux-publish-v1-r1133295682
+    timeout-minutes: 45
+    permissions: *id001
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+    - name: Checkout immutable publisher helpers only
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        repository: cryptolabsza/dc-overview
+        ref: f51d3f8c69fbe536e674ec8a2ae1762f9f4a2f05
+        path: publisher-code
+        persist-credentials: false
+        sparse-checkout-cone-mode: false
+        sparse-checkout: /.github/pages/
+    - name: Set up managed Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.12'
+    - name: Install verified official GitHub CLI
+      run: python publisher-code/.github/pages/bootstrap_gh.py
+    - name: Verify exact producer, artifact bytes and safe site archive
+      id: verify
+      env:
+        GH_TOKEN: ${{ github.token }}
+        ARTIFACT_ID: ${{ inputs.artifact_id }}
+      run: python publisher-code/.github/pages/pages_runtime.py "$ARTIFACT_ID"
+    - name: Deploy verified immutable site artifact
+      id: deployment
+      uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e
+      with:
+        artifact_name: ${{ steps.verify.outputs.artifact_name }}
+    - name: Retain verified site receipt
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: verified-pages-receipt-${{ github.run_id }}-${{ github.run_attempt }}
+        path: verified-artifact/pages-receipt.json
+        if-no-files-found: error
+        retention-days: 90
