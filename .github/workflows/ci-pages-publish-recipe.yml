@@ -29,7 +29,7 @@ jobs:
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       with:
         repository: cryptolabsza/dc-overview
-        ref: f51d3f8c69fbe536e674ec8a2ae1762f9f4a2f05
+        ref: 8d27f026530970dea776b4992f684b756fcf2817
         path: publisher-code
         persist-credentials: false
         sparse-checkout-cone-mode: false
