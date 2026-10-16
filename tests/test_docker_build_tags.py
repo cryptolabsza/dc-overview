@@ -27,10 +27,11 @@ def _workflow() -> dict:
 
 
 def _compute_tags_script(job_name: str) -> str:
-    caller = _workflow()["jobs"][job_name]
-    recipe = caller["uses"].split("/.github/workflows/", 1)[1].split("@", 1)[0]
-    steps = yaml.safe_load((ROOT / ".github/workflows" / recipe).read_text())["jobs"][job_name]["steps"]
-    return next(step["run"] for step in steps if step.get("name") == "Compute safe build tags")
+    image=IMAGE_JOBS[job_name]
+    caller=_workflow()['jobs']['build'];recipe=caller['uses'].split('/.github/workflows/',1)[1].split('@',1)[0]
+    steps=yaml.safe_load((ROOT/'.github/workflows'/recipe).read_text())['jobs']['build']['steps']
+    return next(s['run'] for s in steps if s.get('run')=='python scripts/image_promotion.py tags --image ghcr.io/cryptolabsza/'+image)
+
 
 
 def _tags_from_workflow_script(
@@ -87,21 +88,10 @@ def test_exporter_main_and_release_tag_contract_is_preserved(tmp_path: Path, job
 
 
 def test_pull_requests_cannot_push_any_workflow_image():
-    workflow = _workflow()
-    push_steps = [
-        step
-        for job in workflow["jobs"].values()
-        for step in job.get("steps", [])
-        if step.get("name", "").startswith("Push ")
-    ]
-
-    assert push_steps
-    assert len(push_steps) == len(IMAGE_JOBS)
-    for step in push_steps:
-        # Both predicates must hold: a PR cannot push even if a guard requests a build.
-        condition = step.get("if")
-        assert condition == "github.event_name != 'pull_request' && needs.release-preflight.outputs.build == 'true'"
-        for build in ("true", "false"):
-            expression = condition.replace("github.event_name", repr("pull_request")).replace(
-                "needs.release-preflight.outputs.build", repr(build)).replace("&&", "and")
-            assert eval(expression, {"__builtins__": {}}) is False
+    workflow=_workflow();job=workflow['jobs']['publish-build']
+    assert job['if']=="github.event_name != 'pull_request'"
+    for event in ['pull_request','push','workflow_dispatch']:
+        assert eval(job['if'].replace('github.event_name',repr(event)),{'__builtins__':{}})==(event!='pull_request')
+    leaf=yaml.safe_load((ROOT/'.github/workflows/ci-image-publish-recipe.yml').read_text())['jobs']['publish']
+    assert "github.ref == 'refs/heads/main'" in leaf['if'] and 'github.ref_protected == true' in leaf['if']
+    assert 'docker build' not in str(leaf)
