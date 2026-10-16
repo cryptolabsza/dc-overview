@@ -398,7 +398,7 @@ def test_normal_push_and_manual_runs_share_serialized_product_guard():
     workflow=yaml.safe_load((ROOT/'.github/workflows/docker-build.yml').read_text())
     triggers=workflow.get('on',workflow.get(True));assert 'workflow_dispatch' in triggers
     concurrency=workflow['concurrency']
-    assert concurrency=={'group':'image-release-publication-${{ github.repository }}','cancel-in-progress':False}
+    assert concurrency=={'group':"image-release-publication-${{ github.repository }}-${{ startsWith(github.ref, 'refs/tags/') && 'release' || github.ref }}",'cancel-in-progress':False}
     guard=workflow['jobs']['release-preflight']
     assert guard['permissions']=={'contents':'read','packages':'read'}
     command=next(s for s in guard['steps'] if 'image_promotion.py guard' in s.get('run',''))

@@ -2,7 +2,7 @@ name: Publish verified Python release
 permissions:
   contents: read
 concurrency:
-  group: python-release-${{ github.repository }}-${{ inputs.release_tag || github.event.release.tag_name }}
+  group: python-release-${{ github.repository }}-${{ inputs.release_tag || github.event.release.tag_name || github.ref }}
   cancel-in-progress: false
 env:
   RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
