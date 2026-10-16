@@ -40,8 +40,6 @@
   },
   "callers": {
     "docker-build.yml#build": "ci-image-build-recipe.yml",
-    "docker-build.yml#build-runpod-exporter": "ci-build-runpod-exporter-recipe.yml",
-    "docker-build.yml#build-vastai-exporter": "ci-build-vastai-exporter-recipe.yml",
     "publish.yml#cpu-build": "ci-python-build-recipe.yml",
     "pages.yml#build": "ci-pages-build-recipe.yml"
   },

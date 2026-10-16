@@ -9,7 +9,7 @@ env:
 jobs:
   release-preflight:
     if: github.event_name != 'pull_request'
-    uses: cryptolabsza/dc-overview/.github/workflows/ci-image-preflight-recipe.yml@98fc1d4be4e4a091cad8b5d5a2d5b3b7c5c57225
+    uses: cryptolabsza/dc-overview/.github/workflows/ci-image-preflight-recipe.yml@8ff3429c6687b0d381cb3e961de30563cccb43e6
     permissions:
       contents: read
       packages: read
@@ -22,7 +22,7 @@ jobs:
     needs:
     - build
     - release-preflight
-    uses: cryptolabsza/dc-overview/.github/workflows/ci-image-publish-recipe.yml@98fc1d4be4e4a091cad8b5d5a2d5b3b7c5c57225
+    uses: cryptolabsza/dc-overview/.github/workflows/ci-image-publish-recipe.yml@8ff3429c6687b0d381cb3e961de30563cccb43e6
     permissions:
       contents: read
       actions: read
@@ -31,17 +31,9 @@ jobs:
       producer_run_id: ${{ github.run_id }}
       producer_attempt: ${{ github.run_attempt }}
       artifact_id: ${{ needs.build.outputs.artifact_id }}
-  build-runpod-exporter:
-    uses: cryptolabsza/dc-overview/.github/workflows/ci-build-runpod-exporter-recipe.yml@f995901eb7fbb1bf6d94fd75d1a8b69d8edfdcef
-    permissions:
-      contents: read
-  build-vastai-exporter:
-    uses: cryptolabsza/dc-overview/.github/workflows/ci-build-vastai-exporter-recipe.yml@f995901eb7fbb1bf6d94fd75d1a8b69d8edfdcef
-    permissions:
-      contents: read
   release-readback:
     if: always() && needs.release-preflight.result == 'success'
-    uses: cryptolabsza/dc-overview/.github/workflows/ci-image-readback-recipe.yml@98fc1d4be4e4a091cad8b5d5a2d5b3b7c5c57225
+    uses: cryptolabsza/dc-overview/.github/workflows/ci-image-readback-recipe.yml@8ff3429c6687b0d381cb3e961de30563cccb43e6
     permissions:
       contents: read
       packages: read

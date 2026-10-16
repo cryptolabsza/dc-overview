@@ -6,7 +6,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   promote:
-    uses: cryptolabsza/dc-overview/.github/workflows/ci-image-promote-recipe.yml@98fc1d4be4e4a091cad8b5d5a2d5b3b7c5c57225
+    uses: cryptolabsza/dc-overview/.github/workflows/ci-image-promote-recipe.yml@8ff3429c6687b0d381cb3e961de30563cccb43e6
     permissions:
       contents: read
       actions: read
