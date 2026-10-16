@@ -6,52 +6,17 @@ concurrency:
   cancel-in-progress: false
 jobs:
   promote:
-    runs-on:
-    - self-hosted
-    - ci-authority-held-r1133295682
+    uses: cryptolabsza/dc-overview/.github/workflows/ci-image-promote-recipe.yml@98fc1d4be4e4a091cad8b5d5a2d5b3b7c5c57225
     permissions:
       contents: read
+      actions: read
       packages: write
-    steps:
-    - name: Initialize isolated runner path
-      run: |
-        printf 'PROMOTION_DIR=%s/image-promotion-%s-%s\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      with:
-        ref: ${{ inputs.release_tag }}
-        fetch-depth: 0
-        persist-credentials: false
-    - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
-      with:
-        python-version: '3.12'
-    - name: Promote exact tested manifests and verify aliases
-      env:
-        RELEASE_TAG: ${{ inputs.release_tag }}
-        SOURCE_SHA: ${{ inputs.source_sha }}
-        GHCR_USER: ${{ github.actor }}
-        GHCR_TOKEN: ${{ secrets.CR_PAT || secrets.GITHUB_TOKEN }}
-        GH_TOKEN: ${{ github.token }}
-        DC_OVERVIEW_DIGEST: ${{ inputs.dc_overview_digest }}
-        RUNPOD_EXPORTER_DIGEST: ${{ inputs.runpod_exporter_digest }}
-        VASTAI_EXPORTER_DIGEST: ${{ inputs.vastai_exporter_digest }}
-      run: |
-        mkdir -p "$PROMOTION_DIR"
-        python scripts/image_promotion.py promote \
-          --release-tag "$RELEASE_TAG" --source-sha "$SOURCE_SHA" \
-          --expected-digest "dc-overview=$DC_OVERVIEW_DIGEST" \
-          --expected-digest "runpod-exporter=$RUNPOD_EXPORTER_DIGEST" \
-          --expected-digest "vastai-exporter=$VASTAI_EXPORTER_DIGEST" \
-          --platform linux/amd64 \
-          --receipt "$PROMOTION_DIR/promotion-receipt.json"
-    - name: Retain success or held/partial promotion receipt
-      if: always()
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-      with:
-        name: image-promotion-receipt
-        path: ${{ env.PROMOTION_DIR }}/promotion-receipt.json
-        if-no-files-found: warn
-        retention-days: 90
-    timeout-minutes: 45
+    with:
+      release_tag: ${{ inputs.release_tag }}
+      source_sha: ${{ inputs.source_sha }}
+      dc_overview_digest: ${{ inputs.dc_overview_digest }}
+      runpod_exporter_digest: ${{ inputs.runpod_exporter_digest }}
+      vastai_exporter_digest: ${{ inputs.vastai_exporter_digest }}
 'on':
   workflow_dispatch:
     inputs:
