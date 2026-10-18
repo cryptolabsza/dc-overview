@@ -32,6 +32,18 @@ jobs:
         ref: ${{ github.sha }}
         fetch-depth: 0
         persist-credentials: false
+    - name: Checkout immutable local image producer
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        repository: cryptolabsza/dc-overview
+        ref: b3280034af9414026c610a18d9a9e26ab8755126
+        persist-credentials: false
+        fetch-depth: 1
+        path: .local-image-producer
+        sparse-checkout: |
+          /.github/image-publisher/local_handoff.py
+          /.github/image-publisher/local_artifacts/
+        sparse-checkout-cone-mode: false
     - name: Set up managed Python
       uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
       with:
@@ -177,26 +189,21 @@ jobs:
         \ p.with_suffix('.json').write_text(json.dumps(receipt,sort_keys=True)+'\\n');sums.append(h.hexdigest()+'  '+p.name+'\\\
         n')\nif len(['dc-overview', 'runpod-exporter', 'vastai-exporter'])>1:(root/'SHA256SUMS').write_text(''.join(sums))\n\
         PYRECEIPT\n"
+    - name: Verify immutable local producer bytes
+      run: |
+        echo 'a2e3e04dcc2814a5090df0b306f00c353a306b87b86dc96b44ec3461461c6a78  .local-image-producer/.github/image-publisher/local_handoff.py' | sha256sum --check -
+        echo 'ebc03d2cfb813919cdc863df3b29e94a5f2bfb801ef3afbeb60aed114944da89  .local-image-producer/.github/image-publisher/local_artifacts/local_artifact.py' | sha256sum --check -
+        echo 'ac0096956e71204b59f80f12753a245ccff918ef0c812d301b092d7d84ccb0e7  .local-image-producer/.github/image-publisher/local_artifacts/local_artifact_routes.py' | sha256sum --check -
+        echo '8992c0f2c0a29d5d1697a2f2fade9dbc5e03539505cec63ad1608c2026a49623  .local-image-producer/.github/image-publisher/local_artifacts/verify_artifact.py' | sha256sum --check -
+    - name: Upload fixed image bundle to local store
+      run: python3 .local-image-producer/.github/image-publisher/local_handoff.py
     - name: Upload immutable OCI image artifacts
       id: upload
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: cpu-image-${{ github.run_id }}-${{ github.run_attempt }}
-        path: 'ci-artifacts/dc-overview.tar
-
-          ci-artifacts/dc-overview.json
-
-          ci-artifacts/runpod-exporter.tar
-
-          ci-artifacts/runpod-exporter.json
-
-          ci-artifacts/vastai-exporter.tar
-
-          ci-artifacts/vastai-exporter.json
-
-          ci-artifacts/SHA256SUMS
-
-          '
+        path: ${{ runner.temp }}/image-local-manifest/manifest.json
+        compression-level: 0
         if-no-files-found: error
         retention-days: 7
     outputs:
