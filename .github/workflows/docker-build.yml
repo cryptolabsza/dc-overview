@@ -14,7 +14,7 @@ jobs:
       contents: read
       packages: read
   build:
-    uses: cryptolabsza/dc-overview/.github/workflows/ci-image-build-recipe.yml@3561d105715442e7b029b885304aab82d96204fe
+    uses: cryptolabsza/dc-overview/.github/workflows/ci-image-build-recipe.yml@c10c7b567e466a5e1719b9c0f45045f368b6f03f
     permissions:
       contents: read
   publish-build:
@@ -22,7 +22,7 @@ jobs:
     needs:
     - build
     - release-preflight
-    uses: cryptolabsza/dc-overview/.github/workflows/ci-image-publish-recipe.yml@8ff3429c6687b0d381cb3e961de30563cccb43e6
+    uses: cryptolabsza/dc-overview/.github/workflows/ci-image-publish-recipe.yml@c4ecff559264c9a3be297ce91516ee0304987b27
     permissions:
       contents: read
       actions: read
