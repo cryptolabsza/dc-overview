@@ -1,4 +1,4 @@
-"""Execute workflow temp/build paths with offline package/publisher boundaries."""
+"""Retain offline compatibility coverage for the retired release helper workflow."""
 import concurrent.futures
 import glob
 import hashlib
@@ -14,7 +14,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / '.github/workflows/publish.yml'
+WORKFLOW = ROOT / '.github/tests/fixtures/legacy-python-release.yml'
 publisher_spec = importlib.util.spec_from_file_location('publisher_fixtures', ROOT / 'tests/test_release_publication.py')
 publisher_fixtures = importlib.util.module_from_spec(publisher_spec)
 publisher_spec.loader.exec_module(publisher_fixtures)

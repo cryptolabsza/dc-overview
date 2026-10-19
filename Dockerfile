@@ -20,7 +20,8 @@ ENV GIT_BRANCH=${GIT_BRANCH}
 ENV BUILD_TIME=${BUILD_TIME}
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+COPY .github/ci/use-https-apt-mirrors.sh /tmp/ci-use-https-apt-mirrors.sh
+RUN sh /tmp/ci-use-https-apt-mirrors.sh && apt-get update && apt-get install -y --no-install-recommends \
     curl \
     openssh-client \
     sshpass \

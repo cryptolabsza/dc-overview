@@ -164,7 +164,9 @@ def test_registration_semantics_with_prometheus(filename, tmp_path):
 
 def test_docker_publish_requires_semantic_dashboard_checks():
     workflow = yaml.safe_load((ROOT / ".github/workflows/docker-build.yml").read_text())
-    steps = workflow["jobs"]["build"]["steps"]
+    caller = workflow["jobs"]["build"]
+    recipe = caller["uses"].split("/.github/workflows/", 1)[1].split("@", 1)[0]
+    steps = yaml.safe_load((ROOT / ".github/workflows" / recipe).read_text())["jobs"]["build"]["steps"]
     names = [step.get("name") for step in steps]
     assert "Test Vast dashboards" in names
     assert names.index("Test Vast dashboards") < names.index("Build Docker image")
