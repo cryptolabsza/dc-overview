@@ -17,6 +17,7 @@ class LocalBuildRecipeTests(unittest.TestCase):
   upload=next(s for s in steps if s.get('id')=='upload');self.assertEqual(upload['with']['path'],'${{ runner.temp }}/image-local-manifest/manifest.json');self.assertEqual(upload['with']['compression-level'],0);self.assertEqual(upload['with']['retention-days'],7)
   baseline=yaml.safe_load(subprocess.check_output(['git','show',BH_BASE+':'+path],cwd=ROOT));normal=copy.deepcopy(recipe);normal['jobs']['build']['steps']=[s for s in normal['jobs']['build']['steps'] if s['name'] not in {checkout['name'],verify['name'],handoff['name']}]
   target=next(s for s in normal['jobs']['build']['steps'] if s.get('id')=='upload');target['with']=next(s for s in baseline['jobs']['build']['steps'] if s.get('id')=='upload')['with']
+  next(s for s in normal['jobs']['build']['steps'] if s.get('name')=='Build Docker image')['name']='Build actual dc-overview without publication'
   self.assertEqual(normal,baseline)
 
 PH='5bbab686ebc689b23f45380f2a66b0603afc4b56'
