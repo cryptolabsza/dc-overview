@@ -20,7 +20,7 @@ class LocalBuildRecipeTests(unittest.TestCase):
   next(s for s in normal['jobs']['build']['steps'] if s.get('name')=='Build Docker image')['name']='Build actual dc-overview without publication'
   self.assertEqual(normal,baseline)
 
-PH='a771d0e0650cbc598d261640b21893470fd105b2'
+PH='0d00dbc795d2282c63b93946e9d2b2bb718bcfee'
 PH_BASE='3828ff628d6c5450275cd49d069c9653c1acd234'
 class LocalPublicationRecipeTests(unittest.TestCase):
  def test_publisher_recipe_uses_exact_real_common_snapshot_without_permission_changes(self):
@@ -37,7 +37,7 @@ class LocalPublicationRecipeTests(unittest.TestCase):
    next(s for s in normal['jobs'][name]['steps'] if s.get('name')==verify['name'])['run']=previous['run']
   self.assertEqual(normal,baseline)
 
-P='34c90f93084c21ce360f61f6af0f94113f176f9c'
+P='48154ab06d70b953663c34ec4842a70b1285fa94'
 P_BASE='c4ecff559264c9a3be297ce91516ee0304987b27'
 BR_REAL='c6757ad493d514f076c913b50b08355609ea28fd'
 class LocalCallerTests(unittest.TestCase):

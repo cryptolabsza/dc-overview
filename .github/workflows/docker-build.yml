@@ -22,7 +22,7 @@ jobs:
     needs:
     - build
     - release-preflight
-    uses: cryptolabsza/dc-overview/.github/workflows/ci-image-publish-recipe.yml@34c90f93084c21ce360f61f6af0f94113f176f9c
+    uses: cryptolabsza/dc-overview/.github/workflows/ci-image-publish-recipe.yml@48154ab06d70b953663c34ec4842a70b1285fa94
     permissions:
       contents: read
       actions: read
