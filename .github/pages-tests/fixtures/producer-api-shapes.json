@@ -1,0 +1,65 @@
+{
+  "provenance": "Read-only 2026-10-16 GitHub API: Convergence run38895924564/job116956245795 and Core artifact12048805786. Fields below are unmodified API subsets; positive tests explicitly adapt them into a protected producer scenario. These actual PR artifacts are not release-authorized.",
+  "run": {
+    "id": 38895924564,
+    "path": ".github/workflows/verify.yml",
+    "event": "pull_request",
+    "run_attempt": 1,
+    "head_branch": "feat/isolated-ci-20261013",
+    "head_sha": "954e852d46c9f093983ca20550bbb97912ce4d01",
+    "repository": {
+      "id": 1306996892,
+      "full_name": "Oxiom-Systems/Convergence"
+    },
+    "head_repository": {
+      "id": 1306996892,
+      "full_name": "Oxiom-Systems/Convergence"
+    },
+    "status": "completed",
+    "conclusion": "success",
+    "pull_requests": [],
+    "referenced_workflows": [
+      {
+        "path": "Oxiom-Systems/Convergence/.github/workflows/ci-build-recipe.yml@05de2fe7997b85206c5188c3ef2ccd931075ec41",
+        "sha": "05de2fe7997b85206c5188c3ef2ccd931075ec41"
+      }
+    ]
+  },
+  "job": {
+    "id": 116956245795,
+    "name": "l0-l2 / l0-l2",
+    "run_id": 38895924564,
+    "run_attempt": 1,
+    "head_sha": "954e852d46c9f093983ca20550bbb97912ce4d01",
+    "status": "completed",
+    "conclusion": "success",
+    "labels": [
+      "ci-linux-cpu-v1-r1306996892"
+    ],
+    "runner_group_id": 4,
+    "runner_group_name": "ci-build-ephemeral",
+    "runner_id": 89,
+    "started_at": "2026-10-16T11:57:49Z",
+    "completed_at": "2026-10-16T11:58:42Z"
+  },
+  "artifact": {
+    "id": 12048805786,
+    "node_id": "MDg6QXJ0aWZhY3QxMjA0ODgwNTc4Ng==",
+    "name": "cryptolabsza~vestro-core~IFUUA4.dockerbuild",
+    "size_in_bytes": 36947,
+    "url": "https://api.github.com/repos/cryptolabsza/vestro-core/actions/artifacts/12048805786",
+    "archive_download_url": "https://api.github.com/repos/cryptolabsza/vestro-core/actions/artifacts/12048805786/zip",
+    "expired": false,
+    "digest": "sha256:7fcfd46b90899087d33fb68bdba06f35148e1616e487462b35f65f76a9364d93",
+    "created_at": "2026-10-16T13:10:27Z",
+    "updated_at": "2026-10-16T13:10:27Z",
+    "expires_at": "2027-01-14T12:02:32Z",
+    "workflow_run": {
+      "id": 38897787164,
+      "repository_id": 1359011432,
+      "head_repository_id": 1359011432,
+      "head_branch": "feat/shared-vm-ci-20261016",
+      "head_sha": "b81729683b928826ef451ab8398c2bcc2da53f12"
+    }
+  }
+}

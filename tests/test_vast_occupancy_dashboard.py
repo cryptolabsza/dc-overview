@@ -663,7 +663,9 @@ def test_registered_unknown_history_keeps_both_numeric_columns(filename, prometh
 
 def test_docker_publish_requires_occupancy_semantics():
     workflow = yaml.safe_load((ROOT / ".github/workflows/docker-build.yml").read_text())
-    steps = workflow["jobs"]["build"]["steps"]
+    caller = workflow["jobs"]["build"]
+    recipe = caller["uses"].split("/.github/workflows/", 1)[1].split("@", 1)[0]
+    steps = yaml.safe_load((ROOT / ".github/workflows" / recipe).read_text())["jobs"]["build"]["steps"]
     names = [s.get("name") for s in steps]
     test_step = steps[names.index("Test Vast dashboards")]
     assert names.index("Test Vast dashboards") < names.index("Build Docker image")

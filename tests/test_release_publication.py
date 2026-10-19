@@ -214,32 +214,19 @@ def test_transport_tamper_is_held_before_publisher_writes(mod, built, failure):
     assert client.writes == []
 
 
-def test_workflow_builds_once_at_tag_and_limits_write_permission():
+def test_workflow_separates_artifact_producer_from_publisher_authority():
     text = (ROOT/'.github/workflows/publish.yml').read_text()
-    workflow = yaml.safe_load(text)
-    jobs = workflow['jobs']
-    assert len(jobs) == 2 and jobs['build']['permissions'] == {'contents': 'read'}
-    assert jobs['publish']['permissions'] == {'contents': 'write'}
-    assert jobs['publish']['needs'] == 'build'
-    assert text.count('python -m build ') == 1
-    assert 'GIT_DIR="$GITHUB_WORKSPACE/.git"' in text
-    assert 'GITHUB_REF_NAME="$RELEASE_TAG"' in text
-    assert '--skip-existing' not in text and 'id-token' not in text
-    assert 'secrets.PYPI_API_TOKEN' in text
-    for job in jobs.values():
-        assert job['runs-on'] == ['self-hosted', 'linux']
-        for step in job['steps']:
-            if step.get('uses', '').startswith('actions/checkout@'):
-                assert step['with']['ref'] == '${{ env.RELEASE_TAG }}'
-                assert step['with']['persist-credentials'] is False
-            assert '${{ inputs.' not in step.get('run', '')
-    steps = jobs['publish']['steps']
-    tool_check = next(i for i, s in enumerate(steps) if s.get('run') == 'gh --version')
-    publication_index = next(i for i, s in enumerate(steps) if s.get('name') == 'Publish and verify exact artifacts')
-    assert tool_check < publication_index
-    publish = steps[publication_index]
-    assert 'release_publication.py publish' in publish['run']
-    assert not any('Published' in s.get('run', '') for s in jobs['publish']['steps'])
+    jobs = yaml.safe_load(text)['jobs']
+    assert set(jobs) == {'cpu-build', 'publish'}
+    assert jobs['cpu-build']['permissions'] == {'contents': 'read'}
+    assert 'secrets' not in jobs['cpu-build']
+    assert '/ci-python-build-recipe.yml@' in jobs['cpu-build']['uses']
+    assert jobs['publish']['permissions'] == {'actions': 'read', 'contents': 'write'}
+    assert jobs['publish']['needs'] == 'cpu-build'
+    assert '/ci-pypi-publish-recipe.yml@' in jobs['publish']['uses']
+    assert jobs['publish']['secrets'] == {'PYPI_API_TOKEN': '${{ secrets.PYPI_API_TOKEN }}'}
+    assert 'python -m build' not in text and '--skip-existing' not in text
+    assert 'release_publication.py' not in text
 
 
 @pytest.mark.parametrize('phase', ['before', 'after'])

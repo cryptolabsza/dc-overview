@@ -1,0 +1,211 @@
+name: Public CPU OCI image artifact recipe
+'on':
+  workflow_call:
+    outputs:
+      artifact_id:
+        description: Uploaded artifact ID
+        value: ${{ jobs.build.outputs.artifact_id }}
+      artifact_digest:
+        description: GitHub upload artifact SHA256
+        value: ${{ jobs.build.outputs.artifact_digest }}
+permissions:
+  contents: read
+jobs:
+  build:
+    if: 'github.repository_id == ''1133295682'' && (((github.event_name == ''push'' || github.event_name == ''workflow_dispatch'')
+      && github.ref_protected == true && (github.ref == ''refs/heads/dev'' || github.ref == ''refs/heads/main'')) || (github.event_name
+      == ''pull_request'' && github.event.pull_request.head.repo.id == 1133295682 && (github.base_ref == ''dev'' || github.base_ref
+      == ''main'')))
+
+      '
+    runs-on:
+      group: ci-build-public-ephemeral
+      labels:
+      - ci-linux-cpu-v1-r1133295682
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout exact source
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: ${{ github.sha }}
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Checkout immutable local image producer
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        repository: cryptolabsza/dc-overview
+        ref: 42fdbb7dc237b59861b9bb59670f3f980559ce1e
+        persist-credentials: false
+        fetch-depth: 1
+        path: .local-image-producer
+        sparse-checkout: |
+          /.github/image-publisher/local_handoff.py
+          /.github/image-publisher/local_artifacts/
+        sparse-checkout-cone-mode: false
+    - name: Set up managed Python
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+      with:
+        python-version: '3.12'
+    - name: Verify public admission and source contracts
+      run: 'python -m pip install --quiet PyYAML==6.0.3
+
+        python -m unittest discover -s .github/tests -p ''test_ci_public_route.py'' -v
+
+        python -m unittest discover -s .github/tests -p ''test_image_transport.py'' -v
+
+        '
+    - name: Allocate build artifact directory
+      run: 'mkdir -p ci-artifacts
+
+        '
+    - name: Test Vast dashboards
+      env:
+        REQUIRE_PROMTOOL: '1'
+      run: "set -euo pipefail\nTEST_DIR=$(mktemp -d /tmp/vast-dashboard-tests.XXXXXX)\ntrap 'rm -rf \"$TEST_DIR\"' EXIT\n\
+        ARCHIVE=prometheus-3.13.1.linux-amd64.tar.gz\ncurl --fail --location --retry 3 \\\n  \"https://github.com/prometheus/prometheus/releases/download/v3.13.1/$ARCHIVE\"\
+        \ \\\n  --output \"$TEST_DIR/$ARCHIVE\"\nprintf '%s  %s\\n' \\\n  962b812371aff838d152b6ff2d56fdb7a6396f5542f48ebf73421b9721f0d103\
+        \ \\\n  \"$TEST_DIR/$ARCHIVE\" | sha256sum --check -\ntar -xzf \"$TEST_DIR/$ARCHIVE\" -C \"$TEST_DIR\" \\\n  prometheus-3.13.1.linux-amd64/promtool\
+        \ \\\n  prometheus-3.13.1.linux-amd64/prometheus\nexport PATH=\"$TEST_DIR/prometheus-3.13.1.linux-amd64:$PATH\"\n\
+        promtool --version\npython3 -m venv \"$TEST_DIR/venv\"\n\"$TEST_DIR/venv/bin/pip\" install --disable-pip-version-check\
+        \ pytest pyyaml\n\"$TEST_DIR/venv/bin/python\" -m pytest -q \\\n  tests/test_vast_dashboard_registration.py \\\n \
+        \ tests/test_vast_income_dashboard.py \\\n  tests/test_vast_occupancy_dashboard.py \\\n  tests/test_vast_snapshot_panels.py\
+        \ \\\n  tests/test_power_recording_rules.py \\\n  tests/test_vastai_exporter_metrics.py\n"
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+    - name: Record build timestamp
+      id: build_info
+      run: 'echo "time=$(date -u ''+%Y-%m-%d %H:%M UTC'')" >> "$GITHUB_OUTPUT"
+
+        '
+    - name: Compute fixed dc-overview build tags
+      id: tags_dc_overview
+      env:
+        TAG_OVERRIDE: ''
+      run: python scripts/image_promotion.py tags --image ghcr.io/cryptolabsza/dc-overview
+    - name: Build Docker image
+      uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
+      with:
+        context: .
+        platforms: linux/amd64
+        push: false
+        provenance: false
+        tags: ${{ steps.tags_dc_overview.outputs.tags }}
+        labels: 'org.opencontainers.image.source=https://github.com/cryptolabsza/dc-overview
+
+          org.opencontainers.image.revision=${{ github.sha }}
+
+          org.opencontainers.image.version=${{ steps.tags_dc_overview.outputs.version }}
+
+          '
+        build-args: 'GIT_COMMIT=${{ github.sha }}
+
+          GIT_BRANCH=${{ github.ref_name }}
+
+          BUILD_TIME=${{ steps.build_info.outputs.time }}
+
+          '
+        outputs: type=oci,dest=${{ github.workspace }}/ci-artifacts/dc-overview.tar
+    - name: Verify RunPod exporter health and alert contract
+      run: "TEST_VENV=$(mktemp -d /tmp/runpod-exporter-tests.XXXXXX)\ncleanup() {\n  rm -rf \"$TEST_VENV\"\n}\ntrap cleanup\
+        \ EXIT\npython3 -m venv \"$TEST_VENV\"\n\"$TEST_VENV/bin/pip\" install --disable-pip-version-check pytest\n\"$TEST_VENV/bin/python\"\
+        \ -m pytest -q \\\n  tests/test_runpod_health_state.py \\\n  tests/test_runpod_exporter_health.py \\\n  tests/test_runpod_alerts.py\n"
+    - name: Compute fixed runpod-exporter build tags
+      id: tags_runpod_exporter
+      env:
+        TAG_OVERRIDE: ''
+      run: python scripts/image_promotion.py tags --image ghcr.io/cryptolabsza/runpod-exporter
+    - name: Build actual runpod-exporter without publication
+      uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
+      with:
+        context: ./runpod-exporter
+        platforms: linux/amd64
+        push: false
+        provenance: false
+        tags: ${{ steps.tags_runpod_exporter.outputs.tags }}
+        labels: 'org.opencontainers.image.source=https://github.com/cryptolabsza/dc-overview
+
+          org.opencontainers.image.revision=${{ github.sha }}
+
+          org.opencontainers.image.version=${{ steps.tags_runpod_exporter.outputs.version }}
+
+          '
+        build-args: 'GIT_COMMIT=${{ github.sha }}
+
+          GIT_BRANCH=${{ github.ref_name }}
+
+          BUILD_TIME=${{ steps.build_info.outputs.time }}
+
+          '
+        outputs: 'type=oci,dest=${{ github.workspace }}/ci-artifacts/runpod-exporter.tar
+
+          type=docker,dest=${{ github.workspace }}/ci-artifacts/runpod-test.tar'
+    - name: Load the matching tested RunPod Docker export
+      run: 'docker load --input ci-artifacts/runpod-test.tar
+
+        '
+    - name: Verify packaged RunPod health contract
+      if: success()
+      run: "PRIMARY_TAG=\"${{ steps.tags_runpod_exporter.outputs.tags }}\"\nPRIMARY_TAG=\"${PRIMARY_TAG%%,*}\"\ndocker run\
+        \ --rm --network none --entrypoint python3 \"$PRIMARY_TAG\" -c '\nimport runpod_exporter\nfrom health_state import\
+        \ HealthState\n\nmetrics = HealthState(path=None).format_metrics([\"contract-check\"])\nrequired = (\n    \"runpod_health_state_schema_version\
+        \ 1\",\n    \"runpod_health_state_persist_success 1\",\n    \"runpod_api_poll_success{account=\\\"contract-check\\\
+        \"} 0\",\n    \"# HELP runpod_machine_health_known\",\n    \"# HELP runpod_machine_present\",\n    \"# HELP runpod_machine_health_listed\"\
+        ,\n)\nmissing = [metric for metric in required if metric not in metrics]\nassert not missing, f\"RunPod health contract\
+        \ missing: {missing}\"\n'\n"
+    - name: Compute fixed vastai-exporter build tags
+      id: tags_vastai_exporter
+      env:
+        TAG_OVERRIDE: ''
+      run: python scripts/image_promotion.py tags --image ghcr.io/cryptolabsza/vastai-exporter
+    - name: Build actual vastai-exporter without publication
+      uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
+      with:
+        context: ./vastai-exporter
+        platforms: linux/amd64
+        push: false
+        provenance: false
+        tags: ${{ steps.tags_vastai_exporter.outputs.tags }}
+        labels: 'org.opencontainers.image.source=https://github.com/cryptolabsza/dc-overview
+
+          org.opencontainers.image.revision=${{ github.sha }}
+
+          org.opencontainers.image.version=${{ steps.tags_vastai_exporter.outputs.version }}
+
+          '
+        build-args: 'GIT_COMMIT=${{ github.sha }}
+
+          GIT_BRANCH=${{ github.ref_name }}
+
+          BUILD_TIME=${{ steps.build_info.outputs.time }}
+
+          '
+        outputs: type=oci,dest=${{ github.workspace }}/ci-artifacts/vastai-exporter.tar
+    - name: Record complete OCI image receipts
+      run: "python - <<'PYRECEIPT'\nimport hashlib,json,os,pathlib\nroot=pathlib.Path('ci-artifacts');sums=[]\nfor image in\
+        \ ['dc-overview', 'runpod-exporter', 'vastai-exporter']:\n p=root/(image+'.tar');h=hashlib.sha256()\n with p.open('rb')\
+        \ as stream:\n  for block in iter(lambda:stream.read(1024*1024),b''):h.update(block)\n receipt={'artifact_kind':'oci-archive','expected_image':'ghcr.io/cryptolabsza/'+image,'repository':os.environ['GITHUB_REPOSITORY'],'repository_id':int(os.environ['GITHUB_REPOSITORY_ID']),'source_sha':os.environ['GITHUB_SHA'],'run_id':os.environ['GITHUB_RUN_ID'],'run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],'filename':p.name,'sha256':h.hexdigest()}\n\
+        \ p.with_suffix('.json').write_text(json.dumps(receipt,sort_keys=True)+'\\n');sums.append(h.hexdigest()+'  '+p.name+'\\\
+        n')\nif len(['dc-overview', 'runpod-exporter', 'vastai-exporter'])>1:(root/'SHA256SUMS').write_text(''.join(sums))\n\
+        PYRECEIPT\n"
+    - name: Verify immutable local producer bytes
+      run: |
+        echo 'a2e3e04dcc2814a5090df0b306f00c353a306b87b86dc96b44ec3461461c6a78  .local-image-producer/.github/image-publisher/local_handoff.py' | sha256sum --check -
+        echo 'd3a0f0ce8482e12404ad0fc8c9228100d863fcab28b986ec3c0b1c165e48cefb  .local-image-producer/.github/image-publisher/local_artifacts/local_artifact.py' | sha256sum --check -
+        echo 'ac0096956e71204b59f80f12753a245ccff918ef0c812d301b092d7d84ccb0e7  .local-image-producer/.github/image-publisher/local_artifacts/local_artifact_routes.py' | sha256sum --check -
+        echo '8992c0f2c0a29d5d1697a2f2fade9dbc5e03539505cec63ad1608c2026a49623  .local-image-producer/.github/image-publisher/local_artifacts/verify_artifact.py' | sha256sum --check -
+    - name: Upload fixed image bundle to local store
+      run: python3 .local-image-producer/.github/image-publisher/local_handoff.py
+    - name: Upload immutable OCI image artifacts
+      id: upload
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: cpu-image-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/image-local-manifest/manifest.json
+        compression-level: 0
+        if-no-files-found: error
+        retention-days: 7
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
