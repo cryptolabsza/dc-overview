@@ -19,10 +19,11 @@ class LocalBuildRecipeTests(unittest.TestCase):
   target=next(s for s in normal['jobs']['build']['steps'] if s.get('id')=='upload');target['with']=next(s for s in baseline['jobs']['build']['steps'] if s.get('id')=='upload')['with']
   self.assertEqual(normal,baseline)
 
-PH='3828ff628d6c5450275cd49d069c9653c1acd234'
+PH='5bbab686ebc689b23f45380f2a66b0603afc4b56'
+PH_BASE='3828ff628d6c5450275cd49d069c9653c1acd234'
 class LocalPublicationRecipeTests(unittest.TestCase):
  def test_publisher_recipe_uses_exact_real_common_snapshot_without_permission_changes(self):
-  path='.github/workflows/ci-image-publish-recipe.yml';actual=yaml.safe_load((ROOT/path).read_text());baseline=yaml.safe_load(subprocess.check_output(['git','show',PH+':'+path],cwd=ROOT));normal=copy.deepcopy(actual)
+  path='.github/workflows/ci-image-publish-recipe.yml';actual=yaml.safe_load((ROOT/path).read_text());baseline=yaml.safe_load(subprocess.check_output(['git','show',PH_BASE+':'+path],cwd=ROOT));normal=copy.deepcopy(actual)
   for name,job in actual['jobs'].items():
    old=baseline['jobs'][name];checkout=job['steps'][0];self.assertEqual(checkout['with']['ref'],PH)
    sparse=checkout['with']['sparse-checkout'].splitlines();self.assertIn('/.github/image-publisher/local_artifact.py',sparse);self.assertIn('/.github/image-publisher/local_artifact_routes.py',sparse)
