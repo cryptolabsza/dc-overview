@@ -2,7 +2,8 @@
 import copy,hashlib,json,subprocess,unittest,yaml
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
-BH='b3280034af9414026c610a18d9a9e26ab8755126'
+BH='42fdbb7dc237b59861b9bb59670f3f980559ce1e'
+BH_BASE='b3280034af9414026c610a18d9a9e26ab8755126'
 class LocalBuildRecipeTests(unittest.TestCase):
  def test_build_recipe_pins_actual_producer_and_only_uploads_tiny_manifest(self):
   path='.github/workflows/ci-image-build-recipe.yml';recipe=yaml.safe_load((ROOT/path).read_text());job=recipe['jobs']['build'];steps=job['steps']
@@ -14,7 +15,7 @@ class LocalBuildRecipeTests(unittest.TestCase):
    raw=subprocess.check_output(['git','show',BH+':.github/image-publisher/'+name],cwd=ROOT);self.assertIn(hashlib.sha256(raw).hexdigest()+'  .local-image-producer/.github/image-publisher/'+name,verify['run'])
   handoff=next(s for s in steps if s['name']=='Upload fixed image bundle to local store');self.assertEqual(handoff['run'],'python3 .local-image-producer/.github/image-publisher/local_handoff.py');self.assertNotIn('env',handoff)
   upload=next(s for s in steps if s.get('id')=='upload');self.assertEqual(upload['with']['path'],'${{ runner.temp }}/image-local-manifest/manifest.json');self.assertEqual(upload['with']['compression-level'],0);self.assertEqual(upload['with']['retention-days'],7)
-  baseline=yaml.safe_load(subprocess.check_output(['git','show',BH+':'+path],cwd=ROOT));normal=copy.deepcopy(recipe);normal['jobs']['build']['steps']=[s for s in normal['jobs']['build']['steps'] if s['name'] not in {checkout['name'],verify['name'],handoff['name']}]
+  baseline=yaml.safe_load(subprocess.check_output(['git','show',BH_BASE+':'+path],cwd=ROOT));normal=copy.deepcopy(recipe);normal['jobs']['build']['steps']=[s for s in normal['jobs']['build']['steps'] if s['name'] not in {checkout['name'],verify['name'],handoff['name']}]
   target=next(s for s in normal['jobs']['build']['steps'] if s.get('id')=='upload');target['with']=next(s for s in baseline['jobs']['build']['steps'] if s.get('id')=='upload')['with']
   self.assertEqual(normal,baseline)
 

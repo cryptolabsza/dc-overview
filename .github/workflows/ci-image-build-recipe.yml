@@ -36,7 +36,7 @@ jobs:
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       with:
         repository: cryptolabsza/dc-overview
-        ref: b3280034af9414026c610a18d9a9e26ab8755126
+        ref: 42fdbb7dc237b59861b9bb59670f3f980559ce1e
         persist-credentials: false
         fetch-depth: 1
         path: .local-image-producer
@@ -192,7 +192,7 @@ jobs:
     - name: Verify immutable local producer bytes
       run: |
         echo 'a2e3e04dcc2814a5090df0b306f00c353a306b87b86dc96b44ec3461461c6a78  .local-image-producer/.github/image-publisher/local_handoff.py' | sha256sum --check -
-        echo 'ebc03d2cfb813919cdc863df3b29e94a5f2bfb801ef3afbeb60aed114944da89  .local-image-producer/.github/image-publisher/local_artifacts/local_artifact.py' | sha256sum --check -
+        echo 'd3a0f0ce8482e12404ad0fc8c9228100d863fcab28b986ec3c0b1c165e48cefb  .local-image-producer/.github/image-publisher/local_artifacts/local_artifact.py' | sha256sum --check -
         echo 'ac0096956e71204b59f80f12753a245ccff918ef0c812d301b092d7d84ccb0e7  .local-image-producer/.github/image-publisher/local_artifacts/local_artifact_routes.py' | sha256sum --check -
         echo '8992c0f2c0a29d5d1697a2f2fade9dbc5e03539505cec63ad1608c2026a49623  .local-image-producer/.github/image-publisher/local_artifacts/verify_artifact.py' | sha256sum --check -
     - name: Upload fixed image bundle to local store
