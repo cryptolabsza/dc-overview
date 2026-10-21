@@ -29,6 +29,9 @@ MANAGED_ALERT_UIDS = frozenset(
         "fleet-gpu-hardware-failure",
         "fleet-gpu-inventory-mismatch",
         "fleet-gpu-thermal-slowdown",
+        "vast-machine-unlisted",
+        "vast-listing-telemetry-unavailable",
+        "vast-listing-state-unavailable",
     }
 )
 _THERMAL_EXPRESSION = "__DC_OVERVIEW_THERMAL_EXPRESSION__"
@@ -111,7 +114,10 @@ def _template_path(filename: str):
 
 
 def _template_document() -> Dict[str, Any]:
-    return yaml.safe_load(_template_path(ALERT_RULES_FILENAME).read_text(encoding="utf-8"))
+    document = yaml.safe_load(_template_path(ALERT_RULES_FILENAME).read_text(encoding="utf-8"))
+    vast = yaml.safe_load(_template_path("vast-listing.yml").read_text(encoding="utf-8"))
+    document["groups"].extend(vast["groups"])
+    return document
 
 
 def _notification_template_content() -> bytes:
@@ -577,6 +583,11 @@ def configure_grafana_telegram_receiver(
         admin_user=admin_user,
         timeout=timeout,
     )
+    if any(point.get("disableResolveMessage") for point in originals):
+        raise GrafanaReceiverError(
+            f"Telegram receiver {receiver!r} must enable resolved notifications "
+            "to deliver confirmed Vast LISTED messages"
+        )
     desired_message = f'{{{{ template "{NOTIFICATION_TEMPLATE_NAME}" . }}}}'
     previous_messages: Tuple[Tuple[str, Optional[str]], ...] = tuple(
         (str(point["uid"]), point["settings"].get("message"))

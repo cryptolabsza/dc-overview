@@ -8,14 +8,23 @@ templates:
       {{ define "cryptolabs.telegram.message" }}
       {{ with .Alerts.Firing }}🔴 FIRING
       {{ range . }}
+      {{ if eq .Labels.alert_category "vast_listing" }}Vast UNLISTED — {{ .Annotations.summary }}
+      {{ else }}
       {{ .Annotations.summary }}
       {{ .Annotations.description }}
+      {{ end }}
       {{ end }}
       {{ end }}
       {{ with .Alerts.Resolved }}🟢 RESOLVED
       {{ range . }}
+      {{ if eq .Labels.alert_category "vast_listing" }}
+      {{ if .Annotations.grafana_state_reason }}Vast listing monitoring changed ({{ .Annotations.grafana_state_reason }}) — {{ .Annotations.summary }}
+      {{ else }}Vast LISTED — {{ .Annotations.summary }}
+      {{ end }}
+      {{ else }}
       {{ .Annotations.summary }}
       {{ .Annotations.description }}
+      {{ end }}
       {{ end }}
       {{ end }}
       {{ end }}

@@ -63,6 +63,8 @@ services:
     image: ghcr.io/cryptolabsza/vastai-exporter:latest
     container_name: vastai-exporter
     restart: unless-stopped
+    volumes:
+      - vastai-data:/data
     ports:
       - "8622:8622"
     command:
@@ -73,6 +75,10 @@ services:
 volumes:
   prometheus-data:
   grafana-data:
+{% if vast_api_key %}
+  vastai-data:
+    name: vastai-exporter-data
+{% endif %}
 """
 
 GRAFANA_DATASOURCE_TEMPLATE = """apiVersion: 1

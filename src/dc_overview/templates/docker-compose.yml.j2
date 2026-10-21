@@ -195,6 +195,8 @@ services:
     image: ghcr.io/cryptolabsza/vastai-exporter:latest
     container_name: vastai-exporter
     restart: unless-stopped
+    volumes:
+      - vastai_data:/data
     ports:
       - "8622:8622"
     command:
@@ -218,6 +220,10 @@ volumes:
     name: prometheus-data
   grafana_data:
     name: grafana-data
+{% if vast_enabled %}
+  vastai_data:
+    name: vastai-exporter-data
+{% endif %}
 
 # =============================================================================
 # Networks
