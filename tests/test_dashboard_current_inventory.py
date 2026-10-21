@@ -74,7 +74,7 @@ def test_shared_pool_ships_and_uses_current_stats_with_bounded_slot_states():
         else:
             assert target.get('range') is True and target.get('instant') is False
         if 'ci_pool_slot_' in target['expr']:
-            assert 'slot=~"[0-7]"' in target['expr']
+            assert 'slot=~"[0-9]"' in target['expr']
     timeline = next(p for p in dashboard['panels'] if p['type'] == 'state-timeline')
     mappings = timeline['fieldConfig']['defaults']['mappings'][0]['options']
     assert {int(code): value['text'].lower() for code, value in mappings.items()} == {
@@ -102,7 +102,7 @@ def pool_series(overrides=None, omit=(), gone=False):
     for metric, values in metrics.items():
         if metric not in omit:
             series.append({'series': f'ci_pool_{metric}{{{POOL_LABELS}}}', 'values': values if not gone else '0 stale'})
-    for slot, state in enumerate([0, 1, 5, 6, 7, 2, 10, 10, 5, 5]):
+    for slot, state in enumerate([0, 1, 5, 6, 7, 2, 10, 10, 10, 10, 5, 5]):
         for metric, value in [('slot_state', state), ('slot_memory_used_bytes', 536870912),
                               ('slot_memory_reserved_bytes', 1073741824),
                               ('slot_guest_memory_used_bytes', 268435456),
@@ -119,7 +119,7 @@ def test_shared_pool_actual_queries_hide_stale_invalid_and_missing_measurements(
     assert executable, 'promtool is required for shared runner query acceptance'
     dashboard = pool_dashboard()
     measured = [(p, t) for p, t in pool_targets(dashboard)
-                if p['title'] != 'Source health' and p['title'] not in SAMPLED_TIME_TITLES]
+                if p['title'] != 'Source health' and not p['title'].startswith('Waiting jobs') and p['title'] not in SAMPLED_TIME_TITLES]
     # Each tuple is (source overrides, omitted metrics, eval time, CPU valid, inventory valid, source gone).
     scenarios = [
         ({}, (), '60s', True, True, False),
@@ -146,13 +146,13 @@ def test_shared_pool_actual_queries_hide_stale_invalid_and_missing_measurements(
             timeline = panel['type'] == 'state-timeline'
             valid = cpu_ok if 'ci_pool_cpu_used_cores' in expr or 'ci_pool_cpu_limit_cores' in expr else inventory_ok
             per_slot = 'ci_pool_slot_' in expr and panel['title'] != 'Quarantined slots'
-            count = (8 if per_slot else 1) if valid or (timeline and not gone) else None
+            count = (10 if per_slot else 1) if valid or (timeline and not gone) else None
             queries.append({'expr': f'count(({expr}))', 'eval_time': at,
                             'exp_samples': [] if count is None else [{'labels': '{}', 'value': count}]})
             if timeline and index in (0, 2):
                 # Exact label identities must survive fresh → unknown transitions.
-                # A retained metric name on only one branch creates 16 range series.
-                states = [0, 1, 5, 6, 7, 2, 10, 10] if inventory_ok else [9] * 8
+                # A retained metric name on only one branch creates 20 range series.
+                states = [0, 1, 5, 6, 7, 2, 10, 10, 10, 10] if inventory_ok else [9] * 10
                 queries.append({'expr': expr, 'eval_time': at, 'exp_samples': [
                     {'labels': f'{{{POOL_LABELS},slot="{slot}"}}', 'value': state}
                     for slot, state in enumerate(states)]})
@@ -242,3 +242,52 @@ def test_shared_pool_sampled_time_excludes_unknown_and_gaps_and_counts_quarantin
     fixture.write_text(yaml.safe_dump({'evaluation_interval': '30s', 'tests': cases}, sort_keys=False))
     result = subprocess.run([shutil.which('promtool'), 'test', 'rules', str(fixture)], text=True, capture_output=True)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_shared_pool_waiting_jobs_have_independent_freshness_and_high_slots_are_retained(tmp_path):
+    dashboard=pool_dashboard()
+    panels={p['title']:p for p in dashboard['panels']}
+    for title in ('Occupied slots','Available slots'):
+        assert panels[title]['type']=='gauge'
+        assert panels[title]['fieldConfig']['defaults']['max']==10
+    queue_panels=[p for p in dashboard['panels'] if p['title'].startswith('Waiting jobs')]
+    assert {p['type'] for p in queue_panels}=={'stat','timeseries'}
+    cases=[]
+    def query(expr,value):
+        return {'expr':f'sum(({expr}))','eval_time':'60s',
+                'exp_samples':[] if value is None else [{'labels':'{}','value':value}]}
+    for name,extra,omit,expected in (
+        ('full pool waiting',{},(),4),
+        ('known zero',{'queue_waiting_jobs':'0+0x8'},(),0),
+        ('fresh at300',{'queue_observed_timestamp_seconds':'0+0x8'},(),4),
+        ('stale',{'queue_observed_timestamp_seconds':'0+0x8'},(),None),
+        ('invalid',{'queue_valid':'0+0x8'},(),None),
+        ('future',{'queue_observed_timestamp_seconds':'90+0x8'},(),None),
+        ('missing',{},('queue_waiting_jobs',),None),
+        ('missing valid',{},('queue_valid',),None),
+        ('missing timestamp',{},('queue_observed_timestamp_seconds',),None),
+        ('invalid inventory independent',{'inventory_valid':'0+0x8'},(),4),
+        ('stale export',{'collection_timestamp_seconds':'0+0x8'},(),None),
+    ):
+        overrides={'queue_waiting_jobs':'4+0x12','queue_valid':'1+0x12',
+                   'queue_observed_timestamp_seconds':'0+30x12',
+                   'capacity_slots':'10+0x12','occupied_slots':'10+0x12',**extra}
+        at='300s' if name=='fresh at300' else '330s' if name=='stale' else '120s' if name=='stale export' else '60s'
+        if at in ('300s','330s'):
+            overrides['collection_timestamp_seconds']='0+30x12'
+        queries=[{**query(t['expr'],expected),'eval_time':at} for p in queue_panels for t in p['targets']]
+        cases.append({'name':name,'interval':'30s','input_series':pool_series(overrides,omit),'promql_expr_test':queries})
+    series=pool_series({'capacity_slots':'10+0x8'})
+    series=[dict(row,values='5+0x8') if row['series'].startswith('ci_pool_slot_state{') and any(f'slot="{slot}"' in row['series'] for slot in (8,9)) else row for row in series]
+    timeline=panels['Slot state history']['targets'][0]['expr']
+    queries=[query(f'({timeline}) and on (slot) ci_pool_slot_state{{{POOL_LABELS},slot=~"[89]"}}',10),
+             query(f'({timeline}) and on (slot) ci_pool_slot_state{{{POOL_LABELS},slot="10"}}',None)]
+    for title in SAMPLED_TIME_TITLES:
+        expr=panels[title]['targets'][0]['expr'].replace('$__range','60s')
+        # Three real running slots (2,8,9), two samples each; rogue10/11 excluded.
+        queries.append(query(expr,180 if title!='Charged VM time (sampled)' else 420))
+    cases.append({'name':'high slots and timing','interval':'30s','input_series':series,'promql_expr_test':queries})
+    fixture=tmp_path/'shared-pool-queue.test.yml'
+    fixture.write_text(yaml.safe_dump({'evaluation_interval':'30s','tests':cases},sort_keys=False))
+    result=subprocess.run([shutil.which('promtool'),'test','rules',str(fixture)],text=True,capture_output=True)
+    assert result.returncode==0,result.stdout+result.stderr
