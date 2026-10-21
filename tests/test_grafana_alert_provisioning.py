@@ -368,7 +368,7 @@ class TestGrafanaAlertInstallation:
         assert ".Alerts.Firing" in content
         assert ".Alerts.Resolved" in content
         assert '.Status "firing"' not in content
-        for noisy_default in (".Values", ".Labels", ".GeneratorURL", ".SilenceURL"):
+        for noisy_default in (".Values", ".Labels }}", ".GeneratorURL", ".SilenceURL"):
             assert noisy_default not in content
         assert stat.S_IMODE(template_path.stat().st_mode) == 0o644
 

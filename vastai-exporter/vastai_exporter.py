@@ -26,15 +26,18 @@ The background worker publishes atomic snapshots; scrapes never fetch earnings.
 """
 
 import argparse
+import copy
 import json
 import logging
 import math
 import re
 import os
 import sys
+import tempfile
 import time
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
 from typing import Dict, List, Optional, Any
 import urllib.request
 import urllib.error
@@ -153,10 +156,137 @@ class VastAIClient:
                            self.account_name, type(error).__name__)
             return None
     
+
+def escape_label(value) -> str:
+    return str(value).replace('\\', '\\\\').replace('\n', '\\n').replace('"', '\\"')
+
+
+class ListingState:
+    """Keep explicit listing observations independent of transient inventory gaps."""
+
+    def __init__(self, path=None):
+        self.path = Path(path) if path else None
+        self.accounts = {}
+        self.poll_success = {}
+        self.storage_success = 1
+        if self.path and self.path.exists():
+            try:
+                saved = json.loads(self.path.read_text())
+                if saved.get('version') != 1 or not isinstance(saved.get('accounts'), dict):
+                    raise ValueError('invalid listing state')
+                for name, account in saved['accounts'].items():
+                    if not isinstance(name, str) or not isinstance(account, dict):
+                        raise ValueError('invalid account')
+                    self._validate_time(account['last_success'])
+                    if not isinstance(account['machines'], dict):
+                        raise ValueError('invalid machines')
+                    for machine_id, record in account['machines'].items():
+                        if not machine_id or not isinstance(record, dict):
+                            raise ValueError('invalid machine')
+                        if not isinstance(record['hostname'], str) or not record['hostname']:
+                            raise ValueError('invalid hostname')
+                        if type(record['listed']) is not bool or type(record['present']) is not bool:
+                            raise ValueError('invalid listing')
+                        self._validate_time(record['last_success'])
+                self.accounts = saved['accounts']
+            except (OSError, ValueError, TypeError, KeyError, AttributeError):
+                self.storage_success = 0
+                logger.error('Vast listing state could not be loaded; awaiting explicit observations')
+
+    @staticmethod
+    def _validate_time(value):
+        if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+            raise ValueError('invalid observation timestamp')
+
+    def _save(self, candidate):
+        if self.path is None:
+            return True
+        temporary = None
+        committed = False
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            fd, temporary = tempfile.mkstemp(prefix='.listing-state-', dir=self.path.parent)
+            with os.fdopen(fd, 'w') as target:
+                json.dump({'version': 1, 'accounts': candidate}, target)
+                target.flush()
+                os.fsync(target.fileno())
+            os.replace(temporary, self.path)
+            temporary = None
+            committed = True
+            directory = os.open(self.path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+            self.storage_success = 1
+        except OSError:
+            self.storage_success = 0
+            logger.error('Vast listing state could not be persisted')
+        finally:
+            if temporary:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+        return committed
+
+    def observe(self, name, machines, now):
+        self.poll_success[name] = 0
+        if not isinstance(machines, list):
+            return
+        seen = set()
+        for machine in machines:
+            if not isinstance(machine, dict):
+                return
+            machine_id = machine.get('id', machine.get('machine_id'))
+            if (type(machine_id) not in (int, str) or not str(machine_id)
+                    or str(machine_id) in seen or type(machine.get('listed')) is not bool):
+                return
+            seen.add(str(machine_id))
+        candidate = copy.deepcopy(self.accounts)
+        account = candidate.setdefault(name, {'last_success': 0, 'machines': {}})
+        account['last_success'] = now
+        for record in account['machines'].values():
+            record['present'] = False
+        for machine in machines:
+            machine_id = str(machine.get('id', machine.get('machine_id')))
+            record = account['machines'].setdefault(machine_id, {
+                'hostname': str(machine.get('hostname') or machine_id),
+            })
+            record.update(listed=machine['listed'], present=True, last_success=now)
+        if self._save(candidate):
+            self.accounts = candidate
+            self.poll_success[name] = 1
+
+    def forget(self, name):
+        candidate = copy.deepcopy(self.accounts)
+        candidate.pop(name, None)
+        if not self._save(candidate):
+            return False
+        self.accounts = candidate
+        self.poll_success.pop(name, None)
+        return True
+
+    def format_metrics(self, active_accounts):
+        lines = [f'vast_listing_state_persist_success {self.storage_success}']
+        for name in sorted(set(active_accounts)):
+            labels = f'account="{escape_label(name)}"'
+            account = self.accounts.get(name, {'last_success': 0, 'machines': {}})
+            lines.append(f'vast_listing_poll_success{{{labels}}} {self.poll_success.get(name, 0)}')
+            lines.append(f'vast_listing_last_success_timestamp_seconds{{{labels}}} {account["last_success"]}')
+            for machine_id, record in sorted(account['machines'].items()):
+                identity = (f'{labels},machine_id="{escape_label(machine_id)}",'
+                            f'hostname="{escape_label(record["hostname"])}"')
+                lines.append(f'vast_machine_listing_listed{{{identity}}} {int(record["listed"])}')
+                lines.append(f'vast_machine_listing_present{{{identity}}} {int(record["present"])}')
+                lines.append(f'vast_machine_listing_last_success_timestamp_seconds{{{identity}}} {record["last_success"]}')
+        return '\n'.join(lines) + '\n'
+
+
 class MetricsCollector:
     """Collects metrics from multiple Vast.ai accounts"""
     
-    def __init__(self, api_keys: List[tuple], *, wall_clock=None, monotonic_clock=None):
+    def __init__(self, api_keys: List[tuple], *, wall_clock=None, monotonic_clock=None, state_path=None):
         """
         Initialize collector with API keys
         
@@ -177,6 +307,7 @@ class MetricsCollector:
         self.last_update = 0
         self.cache_ttl = 60
         self.lock = threading.Lock()
+        self.listing_state = ListingState(state_path)
         self.replace_clients([VastAIClient(key, name) for name, key in api_keys])
 
     @property
@@ -410,6 +541,7 @@ class MetricsCollector:
             }
             
             for client in self.clients:
+                self.listing_state.poll_success[client.account_name] = 0
                 try:
                     # Get user info
                     user_info = client.get_user_info()
@@ -423,6 +555,7 @@ class MetricsCollector:
                     
                     # Get machines
                     machines = client.get_machines()
+                    self.listing_state.observe(client.account_name, machines, now)
                     if machines:
                         # Log machine fields on first fetch for diagnostics
                         if not self.metrics_cache and machines:
@@ -480,32 +613,32 @@ class MetricsCollector:
         lines.append("# HELP vastai_account_balance The current account balance of the user")
         lines.append("# TYPE vastai_account_balance gauge")
         for item in metrics.get('accounts', []):
-            lines.append(f'vastai_account_balance{{account="{item["account"]}"}} {item["balance"]}')
+            lines.append(f'vastai_account_balance{{account="{escape_label(item["account"])}"}} {item["balance"]}')
         
         lines.append("")
         lines.append("# HELP vastai_current_balance Current balance")
         lines.append("# TYPE vastai_current_balance gauge")
         for item in metrics.get('accounts', []):
-            lines.append(f'vastai_current_balance{{account="{item["account"]}"}} {item["balance"]}')
+            lines.append(f'vastai_current_balance{{account="{escape_label(item["account"])}"}} {item["balance"]}')
         
         lines.append("")
         lines.append("# HELP vastai_current_credit Current credit")
         lines.append("# TYPE vastai_current_credit gauge")
         for item in metrics.get('accounts', []):
-            lines.append(f'vastai_current_credit{{account="{item["account"]}"}} {item["credit"]}')
+            lines.append(f'vastai_current_credit{{account="{escape_label(item["account"])}"}} {item["credit"]}')
         
         lines.append("")
         lines.append("# HELP vastai_current_service_fee Current service fee")
         lines.append("# TYPE vastai_current_service_fee gauge")
         for item in metrics.get('accounts', []):
-            lines.append(f'vastai_current_service_fee{{account="{item["account"]}"}} {item["service_fee"]}')
+            lines.append(f'vastai_current_service_fee{{account="{escape_label(item["account"])}"}} {item["service_fee"]}')
         
         lines.append("")
         lines.append("# HELP vastai_current_total Current total")
         lines.append("# TYPE vastai_current_total gauge")
         for item in metrics.get('accounts', []):
             total = round(item["balance"] + item["credit"], 2)
-            lines.append(f'vastai_current_total{{account="{item["account"]}"}} {total}')
+            lines.append(f'vastai_current_total{{account="{escape_label(item["account"])}"}} {total}')
         
         # Machine ID
         lines.append("")
@@ -530,7 +663,7 @@ class MetricsCollector:
         lines.append("# TYPE vast_machine_Listed gauge")
         for m in metrics.get('machines', []):
             labels = self._machine_labels(m)
-            listed = 1 if m.get('listed') else 0
+            listed = int(m['listed']) if type(m.get('listed')) is bool else 'NaN'
             lines.append(f'vast_machine_Listed{{{labels}}} {listed}')
         
         # Machine Verification
@@ -574,10 +707,10 @@ class MetricsCollector:
         lines.append("# HELP vast_machine_gpu_name Type and total number of GPUs in the machine")
         lines.append("# TYPE vast_machine_gpu_name gauge")
         for m in metrics.get('machines', []):
-            account = m.get('_account', 'default')
-            hostname = (m.get('hostname', '') or '').replace('"', '\\"')
-            machine_id = str(m.get('id', m.get('machine_id', 'unknown')))
-            gpu_name = (m.get('gpu_name', '') or '').replace('"', '\\"')
+            account = escape_label(m.get('_account', 'default'))
+            hostname = escape_label(m.get('hostname') or '')
+            machine_id = escape_label(m.get('id', m.get('machine_id', 'unknown')))
+            gpu_name = escape_label(m.get('gpu_name') or '')
             num_gpus = self._safe_int(m.get('num_gpus', 0))
             lines.append(f'vast_machine_gpu_name{{account="{account}",gpu_name="{gpu_name}",hostname="{hostname}",machine_id="{machine_id}"}} {num_gpus}')
         
@@ -679,10 +812,10 @@ class MetricsCollector:
         lines.append("# HELP vastai_machine_ErrorDescription Machine Error Description")
         lines.append("# TYPE vastai_machine_ErrorDescription gauge")
         for m in metrics.get('machines', []):
-            account = m.get('_account', 'default')
-            hostname = (m.get('hostname', '') or '').replace('"', '\\"')
-            machine_id = str(m.get('id', m.get('machine_id', 'unknown')))
-            error_desc = (m.get('error_description', '') or '').replace('"', '\\"')
+            account = escape_label(m.get('_account', 'default'))
+            hostname = escape_label(m.get('hostname') or '')
+            machine_id = escape_label(m.get('id', m.get('machine_id', 'unknown')))
+            error_desc = escape_label(m.get('error_description') or '')
             lines.append(f'vastai_machine_ErrorDescription{{account="{account}",error_description="{error_desc}",hostname="{hostname}",machine_id="{machine_id}"}} 1')
         
         # GPU occupancy (per-GPU rental state)
@@ -697,9 +830,9 @@ class MetricsCollector:
         lines.append("# TYPE vastai_machine_gpu_occupancy gauge")
         machine_gpu_capacity = []
         for m in metrics.get('machines', []):
-            account = m.get('_account', 'default')
-            hostname = (m.get('hostname', '') or '').replace('"', '\\"')
-            machine_id = str(m.get('id', m.get('machine_id', 'unknown')))
+            account = escape_label(m.get('_account', 'default'))
+            hostname = escape_label(m.get('hostname') or '')
+            machine_id = escape_label(m.get('id', m.get('machine_id', 'unknown')))
             num_gpus = self._safe_int(m.get('num_gpus', 0))
             gpu_states, aggregates = self._gpu_occupancy(m, num_gpus)
             machine_gpu_capacity.append((m, gpu_states, aggregates))
@@ -751,29 +884,30 @@ class MetricsCollector:
         lines.append("# HELP vastai_summary_total_gpu Total GPU earnings in summary")
         lines.append("# TYPE vastai_summary_total_gpu gauge")
         for account, earn in account_earnings.items():
-            lines.append(f'vastai_summary_total_gpu{{account="{account}"}} {earn}')
+            lines.append(f'vastai_summary_total_gpu{{account="{escape_label(account)}"}} {earn}')
         
         lines.append("")
         lines.append("# HELP vastai_account_gpus_total Total GPUs per account")
         lines.append("# TYPE vastai_account_gpus_total gauge")
         for account, gpus in account_gpus.items():
-            lines.append(f'vastai_account_gpus_total{{account="{account}"}} {gpus}')
+            lines.append(f'vastai_account_gpus_total{{account="{escape_label(account)}"}} {gpus}')
         
         lines.append("")
         lines.append("# HELP vastai_account_machines_total Total machines per account")
         lines.append("# TYPE vastai_account_machines_total gauge")
         for account, count in account_machines.items():
-            lines.append(f'vastai_account_machines_total{{account="{account}"}} {count}')
+            lines.append(f'vastai_account_machines_total{{account="{escape_label(account)}"}} {count}')
         
         lines.append("")
         lines.extend(self._format_earnings())
+        lines.append(self.listing_state.format_metrics(client.account_name for client in self.clients))
         return "\n".join(lines)
     
     def _machine_labels(self, machine: Dict) -> str:
         """Generate Prometheus labels for a machine"""
-        account = machine.get('_account', 'default')
-        machine_id = str(machine.get('id', machine.get('machine_id', 'unknown')))
-        hostname = (machine.get('hostname', '') or machine_id).replace('"', '\\"')
+        account = escape_label(machine.get('_account', 'default'))
+        machine_id = escape_label(machine.get('id', machine.get('machine_id', 'unknown')))
+        hostname = escape_label(machine.get('hostname') or machine.get('id', machine.get('machine_id', 'unknown')))
         
         return f'account="{account}",hostname="{hostname}",machine_id="{machine_id}"'
 
@@ -934,6 +1068,9 @@ class AccountManager:
         with self.lock:
             for i, client in enumerate(self.collector.clients):
                 if client.account_name == name:
+                    with self.collector.lock:
+                        if not self.collector.listing_state.forget(name):
+                            return {'error': 'Could not clear persisted listing state', 'status': 500}
                     self.collector.replace_clients([c for c in self.collector.clients if c is not client])
                     
                     # Invalidate metrics cache
@@ -1165,7 +1302,7 @@ Examples:
     
     # Create collector (may start empty - accounts can be added via API)
     # We start empty and populate below based on the right source
-    collector = MetricsCollector([])
+    collector = MetricsCollector([], state_path='/data/listing-state.json')
     collector.cache_ttl = args.interval
     
     # Create account manager (handles persistence + API)

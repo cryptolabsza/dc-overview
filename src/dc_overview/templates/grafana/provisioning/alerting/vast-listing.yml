@@ -1,0 +1,160 @@
+# Vast listing alerts, merged into the canonical managed provisioning file.
+apiVersion: 1
+groups:
+- orgId: 1
+  name: Vast Listing
+  folder: Infrastructure Alerts
+  interval: 30s
+  rules:
+  - uid: vast-machine-unlisted
+    title: Vast machine listing status
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 300
+        to: 0
+      datasourceUid: prometheus
+      model:
+        expr: 1 - vast_machine_listing_listed
+        instant: true
+        range: false
+        refId: A
+        editorMode: code
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: query
+    noDataState: KeepLast
+    execErrState: KeepLast
+    for: 0s
+    annotations:
+      summary: '{{ $labels.hostname }} (machine {{ $labels.machine_id }}, account
+        {{ $labels.account }})'
+      description: 'Vast listing indicator: {{ printf "%.0f" $values.A.Value }} (1
+        = confirmed UNLISTED; 0 = confirmed LISTED). API failures and missing inventory
+        retain the last confirmed status.'
+    labels:
+      alert_category: vast_listing
+      severity: warning
+    isPaused: false
+  - uid: vast-listing-telemetry-unavailable
+    title: Vast listing monitoring unavailable
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 300
+        to: 0
+      datasourceUid: prometheus
+      model:
+        expr: max by (account) ((1 - vast_listing_poll_success) or (1 - vast_machine_listing_present))
+          + max by (account) (time() - vast_listing_last_success_timestamp_seconds
+          > bool 300)
+        instant: true
+        range: false
+        refId: A
+        editorMode: code
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: query
+    noDataState: OK
+    execErrState: Error
+    for: 2m
+    annotations:
+      summary: Vast listing monitoring unavailable for {{ $labels.account }}
+      description: Vast API polling failed, a previously observed machine is missing,
+        or the last successful inventory is more than five minutes old. Listing status
+        is retained; this does not mean a machine was listed or unlisted.
+    labels:
+      alert_category: vast_telemetry
+      severity: warning
+    isPaused: false
+  - uid: vast-listing-state-unavailable
+    title: Vast listing state unavailable
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 300
+        to: 0
+      datasourceUid: prometheus
+      model:
+        expr: max((1 - vast_listing_state_persist_success) or ((1 + 0 * up{job="vastai"})
+          unless on(job, instance) vast_listing_state_persist_success))
+        instant: true
+        range: false
+        refId: A
+        editorMode: code
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: query
+    noDataState: OK
+    execErrState: Error
+    for: 2m
+    annotations:
+      summary: Vast listing state unavailable
+      description: The Vast exporter is unavailable, lacks listing-state support,
+        or cannot load/save its confirmed listing observations. Check the exporter
+        and its persistent /data volume. Monitoring recovery is not a machine listing
+        confirmation.
+    labels:
+      alert_category: vast_telemetry
+      severity: warning
+    isPaused: false
