@@ -59,7 +59,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "Eight stable slots \u00b730-second sampling \u00b7shared across both organisations. **Occupied includes warm, destroying and quarantined VMs.** Available is verified capacity minus occupied; admission also depends on resources.\n\nUsage gaps mean stale, invalid or missing observations. Pool history starts at the first scrape; existing host history is unchanged. VM time is a sampled lifecycle estimate and gaps can undercount.\n\n**Job success/failure is not collected.** Quarantine does not identify a failed job. Sampled time is not exact job duration or billable time."
+        "content": "Ten stable slots \u00b730-second sampling \u00b7shared across both organisations. **Occupied includes warm, destroying and quarantined VMs.** Available is verified capacity minus occupied; admission also depends on resources.\n\nUsage gaps mean stale, invalid or missing observations. Pool history starts at the first scrape; existing host history is unchanged. VM time is a sampled lifecycle estimate and gaps can undercount.\n\n**Job success/failure is not collected.** Quarantine does not identify a failed job. Sampled time is not exact job duration or billable time.\n\nWaiting jobs counts observed queued jobs matching admitted pool routes across both organisations. It is separate from charged VMs; workflow concurrency-held work is not observed. Queue refresh can take 120 seconds; observations older than 300 seconds are Unknown."
       }
     },
     {
@@ -169,7 +169,7 @@
           },
           "decimals": 0,
           "min": 0,
-          "max": 8
+          "max": 10
         },
         "overrides": []
       },
@@ -232,7 +232,7 @@
           },
           "decimals": 0,
           "min": 0,
-          "max": 8
+          "max": 10
         },
         "overrides": []
       },
@@ -323,7 +323,7 @@
         "w": 5,
         "h": 4
       },
-      "description": "Current quarantined VM count, derived from lifecycle state6. Requires fresh verified inventory plus all eight bounded slot series with known states (including verified Disabled slots). Zero means a known complete inventory with no quarantine; stale, unknown or incomplete observations show Unknown. This is lifecycle health, not a failed-job count.",
+      "description": "Current quarantined VM count, derived from lifecycle state6. Requires fresh verified inventory plus all ten bounded slot series with known states (including verified Disabled slots). Zero means a known complete inventory with no quarantine; stale, unknown or incomplete observations show Unknown. This is lifecycle health, not a failed-job count.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -335,7 +335,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(sum by (job, instance, exporter) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} == bool 6) and on (job, instance, exporter) (count by (job, instance, exporter) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} != 9) == 8)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "expr": "(sum by (job, instance, exporter) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} == bool 6) and on (job, instance, exporter) (count by (job, instance, exporter) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} != 9) == 10)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
           "legendFormat": "Quarantined slots",
           "refId": "A",
           "instant": true,
@@ -398,7 +398,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(sum_over_time((((ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} == bool 5) and on (job, instance, exporter, slot) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} <= 8)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90))[$__range:30s])) * 30",
+          "expr": "sum(sum_over_time((((ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} == bool 5) and on (job, instance, exporter, slot) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} <= 8)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90))[$__range:30s])) * 30",
           "legendFormat": "Running VM time (sampled)",
           "refId": "A",
           "instant": true,
@@ -461,7 +461,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(sum_over_time((((ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} >= bool 1) and on (job, instance, exporter, slot) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} <= 8)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90))[$__range:30s])) * 30",
+          "expr": "sum(sum_over_time((((ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} >= bool 1) and on (job, instance, exporter, slot) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} <= 8)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90))[$__range:30s])) * 30",
           "legendFormat": "Charged VM time (sampled)",
           "refId": "A",
           "instant": true,
@@ -524,7 +524,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum_over_time((((ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} == bool 5) and on (job, instance, exporter, slot) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} <= 8)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90))[$__range:30s]) * 30",
+          "expr": "sum_over_time((((ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} == bool 5) and on (job, instance, exporter, slot) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} <= 8)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90))[$__range:30s]) * 30",
           "legendFormat": "Slot {{slot}}",
           "refId": "A",
           "instant": true,
@@ -590,7 +590,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "((ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} * 1) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) or (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} * 0 + 9)",
+          "expr": "((ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} * 1) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) or (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} * 0 + 9)",
           "legendFormat": "Slot {{slot}}",
           "refId": "A",
           "instant": false,
@@ -697,7 +697,7 @@
           "mode": "single",
           "sort": "none"
         },
-        "perPage": 8
+        "perPage": 10
       }
     },
     {
@@ -1107,7 +1107,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "ci_pool_slot_memory_used_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "expr": "ci_pool_slot_memory_used_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
           "legendFormat": "Slot {{slot}} \u00b7 actual",
           "refId": "A",
           "instant": false,
@@ -1121,7 +1121,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "ci_pool_slot_memory_reserved_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "expr": "ci_pool_slot_memory_reserved_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
           "legendFormat": "Slot {{slot}} \u00b7 reserved",
           "refId": "B",
           "instant": false,
@@ -1215,7 +1215,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "ci_pool_slot_guest_memory_used_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "expr": "ci_pool_slot_guest_memory_used_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
           "legendFormat": "Slot {{slot}} \u00b7 actual",
           "refId": "A",
           "instant": false,
@@ -1229,7 +1229,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "ci_pool_slot_guest_memory_reserved_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "expr": "ci_pool_slot_guest_memory_reserved_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
           "legendFormat": "Slot {{slot}} \u00b7 reserved",
           "refId": "B",
           "instant": false,
@@ -1307,7 +1307,7 @@
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 0,
-        "y": 50,
+        "y": 56,
         "w": 24,
         "h": 5
       },
@@ -1464,6 +1464,139 @@
         "graphMode": "none",
         "justifyMode": "auto",
         "wideLayout": true
+      }
+    },
+    {
+      "id": 18,
+      "title": "Waiting jobs",
+      "type": "stat",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 0,
+        "y": 50,
+        "w": 6,
+        "h": 6
+      },
+      "description": "Observed queued jobs matching admitted pool routes, separate from occupied VMs. Total across both organisations. Fresh complete zero is zero; missing, invalid, future or older than 300-second source is Unknown. Workflow concurrency-held jobs are not observed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_queue_waiting_jobs{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_queue_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_queue_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_queue_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 300) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "Waiting jobs",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 19,
+      "title": "Waiting jobs history",
+      "type": "timeseries",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 6,
+        "y": 50,
+        "w": 18,
+        "h": 6
+      },
+      "description": "Observed queued jobs matching admitted pool routes, separate from occupied VMs. Total across both organisations. Fresh complete zero is zero; missing, invalid, future or older than 300-second source is Unknown. Workflow concurrency-held jobs are not observed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_queue_waiting_jobs{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_queue_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_queue_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_queue_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 300) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "Waiting jobs",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false,
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 6,
+            "showPoints": "never",
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
       }
     }
   ]
