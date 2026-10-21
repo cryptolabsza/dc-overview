@@ -1,0 +1,1468 @@
+{
+  "id": null,
+  "uid": "shared-runner-pool",
+  "title": "Shared Runner Pool",
+  "description": "Shared disposable VM pool on WK01: charged slots, measured resource usage, reservations and independent source freshness.",
+  "tags": [
+    "ci",
+    "runner-pool",
+    "wk01"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 41,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Shared VM runner pool \u00b7 WK01",
+      "type": "text",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 6
+      },
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Eight stable slots \u00b730-second sampling \u00b7shared across both organisations. **Occupied includes warm, destroying and quarantined VMs.** Available is verified capacity minus occupied; admission also depends on resources.\n\nUsage gaps mean stale, invalid or missing observations. Pool history starts at the first scrape; existing host history is unchanged. VM time is a sampled lifecycle estimate and gaps can undercount.\n\n**Job success/failure is not collected.** Quarantine does not identify a failed job. Sampled time is not exact job duration or billable time."
+      }
+    },
+    {
+      "id": 2,
+      "title": "Verified capacity",
+      "type": "stat",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 4,
+        "h": 4
+      },
+      "description": "Current verified inventory only. Collection and original inventory observation must both be 0\u201390 seconds old; missing or invalid data is Unknown.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "Verified capacity",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "title": "Occupied slots",
+      "type": "stat",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 4,
+        "y": 6,
+        "w": 5,
+        "h": 4
+      },
+      "description": "Current verified inventory only. Collection and original inventory observation must both be 0\u201390 seconds old; missing or invalid data is Unknown.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "Occupied slots",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Available slots",
+      "type": "stat",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 9,
+        "y": 6,
+        "w": 5,
+        "h": 4
+      },
+      "description": "Current verified inventory only. Collection and original inventory observation must both be 0\u201390 seconds old; missing or invalid data is Unknown.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} - ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "Available slots",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "title": "Warm slots",
+      "type": "stat",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 14,
+        "y": 6,
+        "w": 5,
+        "h": 4
+      },
+      "description": "Current verified inventory only. Collection and original inventory observation must both be 0\u201390 seconds old; missing or invalid data is Unknown.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_warm_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "Warm slots",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 14,
+      "title": "Quarantined slots",
+      "type": "stat",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 19,
+        "y": 6,
+        "w": 5,
+        "h": 4
+      },
+      "description": "Current quarantined VM count, derived from lifecycle state6. Requires fresh verified inventory plus all eight bounded slot series with known states (including verified Disabled slots). Zero means a known complete inventory with no quarantine; stale, unknown or incomplete observations show Unknown. This is lifecycle health, not a failed-job count.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(sum by (job, instance, exporter) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} == bool 6) and on (job, instance, exporter) (count by (job, instance, exporter) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} != 9) == 8)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "Quarantined slots",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "interval": "30s"
+    },
+    {
+      "id": 15,
+      "title": "Running VM time (sampled)",
+      "type": "stat",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 6,
+        "h": 7
+      },
+      "description": "Sampled cumulative VM lifecycle time in the chosen dashboard window: fixed30-second state samples \u00d730 seconds. Freshness is evaluated at each historical sample; unknown/disabled states and missing or stale intervals are excluded. This is an estimate, not exact job duration or billable time. History starts at the first scrape and gaps can undercount. An entirely unobserved window is No data; a known idle window can be zero. Running includes state5 only. Totals add VM time across slots and can exceed the elapsed window.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(sum_over_time((((ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} == bool 5) and on (job, instance, exporter, slot) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} <= 8)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90))[$__range:30s])) * 30",
+          "legendFormat": "Running VM time (sampled)",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dtdurations",
+          "noValue": "No data",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "interval": "30s"
+    },
+    {
+      "id": 16,
+      "title": "Charged VM time (sampled)",
+      "type": "stat",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 6,
+        "y": 10,
+        "w": 6,
+        "h": 7
+      },
+      "description": "Sampled cumulative VM lifecycle time in the chosen dashboard window: fixed30-second state samples \u00d730 seconds. Freshness is evaluated at each historical sample; unknown/disabled states and missing or stale intervals are excluded. This is an estimate, not exact job duration or billable time. History starts at the first scrape and gaps can undercount. An entirely unobserved window is No data; a known idle window can be zero. Charged includes states1\u20138, including warm, quarantine and destroying; it excludes verified empty slots. Totals add VM time across slots and can exceed the elapsed window.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(sum_over_time((((ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} >= bool 1) and on (job, instance, exporter, slot) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} <= 8)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90))[$__range:30s])) * 30",
+          "legendFormat": "Charged VM time (sampled)",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dtdurations",
+          "noValue": "No data",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "interval": "30s"
+    },
+    {
+      "id": 17,
+      "title": "Per-slot running time (sampled)",
+      "type": "bargauge",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 12,
+        "y": 10,
+        "w": 12,
+        "h": 7
+      },
+      "description": "Sampled cumulative VM lifecycle time in the chosen dashboard window: fixed30-second state samples \u00d730 seconds. Freshness is evaluated at each historical sample; unknown/disabled states and missing or stale intervals are excluded. This is an estimate, not exact job duration or billable time. History starts at the first scrape and gaps can undercount. An entirely unobserved window is No data; a known idle window can be zero. Running includes state5 only. One bar per observed slot0\u20137; slots with no known samples are absent.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum_over_time((((ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} == bool 5) and on (job, instance, exporter, slot) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} <= 8)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90))[$__range:30s]) * 30",
+          "legendFormat": "Slot {{slot}}",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dtdurations",
+          "noValue": "No data",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "custom": {
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "valueMode": "color",
+        "showUnfilled": false,
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "sizing": "auto",
+        "minVizHeight": 12,
+        "maxVizHeight": 300
+      },
+      "interval": "30s"
+    },
+    {
+      "id": 6,
+      "title": "Slot state history",
+      "type": "state-timeline",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 24,
+        "h": 9
+      },
+      "description": "Slots 0\u20137 only. Verified inactive slots are Disabled. Invalid or stale inventory becomes Unknown while a slot series exists; disappearing sources leave gaps. Warm guests retain preparing, destroying or quarantine lifecycle states. These are pool observations, not individual job durations.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) or (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} * 0 + 9)",
+          "legendFormat": "Slot {{slot}}",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#B3B3B3"
+          },
+          "custom": {
+            "spanNulls": false,
+            "lineWidth": 0,
+            "fillOpacity": 100,
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": 90000
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Empty",
+                  "color": "#73BF69",
+                  "index": 0
+                },
+                "1": {
+                  "text": "Warm",
+                  "color": "#5794F2",
+                  "index": 1
+                },
+                "2": {
+                  "text": "Reserved",
+                  "color": "#F2CC0C",
+                  "index": 2
+                },
+                "3": {
+                  "text": "Preparing",
+                  "color": "#FF9830",
+                  "index": 3
+                },
+                "4": {
+                  "text": "Launching",
+                  "color": "#FFB357",
+                  "index": 4
+                },
+                "5": {
+                  "text": "Running",
+                  "color": "#56A64B",
+                  "index": 5
+                },
+                "6": {
+                  "text": "Quarantined",
+                  "color": "#F2495C",
+                  "index": 6
+                },
+                "7": {
+                  "text": "Destroying",
+                  "color": "#B877D9",
+                  "index": 7
+                },
+                "8": {
+                  "text": "Ready",
+                  "color": "#8AB8FF",
+                  "index": 8
+                },
+                "9": {
+                  "text": "Unknown",
+                  "color": "#B3B3B3",
+                  "index": 9
+                },
+                "10": {
+                  "text": "Disabled",
+                  "color": "#4C4C4C",
+                  "index": 10
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "mergeValues": true,
+        "showValue": "never",
+        "alignValue": "left",
+        "rowHeight": 0.8,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "perPage": 8
+      }
+    },
+    {
+      "id": 7,
+      "title": "Slot occupancy",
+      "type": "timeseries",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Charged occupancy and verified capacity at each historical evaluation. Warm is a subset of occupied; do not add them. Destroying and quarantined guests remain charged. Gaps indicate untrusted inventory.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "Occupied",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "Verified capacity",
+          "refId": "B",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_warm_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "Warm",
+          "refId": "C",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} - ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "Available",
+          "refId": "D",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false,
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 6,
+            "showPoints": "never",
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "CPU used and ceiling",
+      "type": "timeseries",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 12,
+        "y": 26,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Aggregate measured interval CPU utilization in cores versus the observed pool ceiling. Independent original CPU and collector ages must be 0\u201390 seconds. This is already an interval gauge; rate() is not applicable. No per-slot CPU is inferred.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_cpu_used_cores{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_cpu_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_cpu_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_cpu_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "Used cores",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_cpu_limit_cores{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_cpu_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_cpu_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_cpu_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "CPU ceiling",
+          "refId": "B",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false,
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 6,
+            "showPoints": "never",
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "CPU utilization heatmap",
+      "type": "heatmap",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 0,
+        "y": 34,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Distribution of sampled aggregate CPU utilization (% of observed pool CPU ceiling) over time. Calculated from the interval gauge, in 5 percentage point buckets. Cell intensity is sample count; missing/invalid sources contribute no samples, not zero utilization.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(ci_pool_cpu_used_cores{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} / (ci_pool_cpu_limit_cores{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} > 0) * 100) and on (job, instance, exporter) (ci_pool_cpu_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_cpu_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_cpu_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "CPU utilization",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "calculate": true,
+        "calculation": {
+          "xBuckets": {
+            "mode": "size",
+            "value": "1m"
+          },
+          "yBuckets": {
+            "mode": "size",
+            "value": "5"
+          }
+        },
+        "cellGap": 1,
+        "cellRadius": 0,
+        "color": {
+          "mode": "scheme",
+          "scheme": "Oranges",
+          "steps": 64,
+          "scale": "linear",
+          "exponent": 0.5
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "legend": {
+          "show": true
+        },
+        "showValue": "never",
+        "tooltip": {
+          "show": true,
+          "yHistogram": true
+        },
+        "yAxis": {
+          "axisPlacement": "left",
+          "unit": "percent",
+          "min": 0
+        },
+        "cellValues": {
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Pool memory: actual, reserved and limit",
+      "type": "timeseries",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 12,
+        "y": 34,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Parent workload cgroup actual RAM already includes its child VMs. Reservations and limit are separate planning values; never sum parent and child memory. Unavailable measurements remain gaps. Inventory and memory source freshness are required independently of CPU.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_memory_used_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "Actual parent cgroup",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_memory_reserved_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "Configured reservations",
+          "refId": "B",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_memory_limit_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "RAM limit",
+          "refId": "C",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false,
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 6,
+            "showPoints": "never",
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 11,
+      "title": "Per-slot QEMU memory",
+      "type": "timeseries",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 0,
+        "y": 42,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Measured QEMU cgroup RAM versus configured QEMU reservation. Slots 0\u20137 only. Unknown or unavailable numeric measurements remain gaps, including empty slots without observed RAM. Each query requires fresh verified inventory and collector.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_slot_memory_used_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "Slot {{slot}} \u00b7 actual",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_slot_memory_reserved_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "Slot {{slot}} \u00b7 reserved",
+          "refId": "B",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false,
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 6,
+            "showPoints": "never",
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*reserved"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    6,
+                    4
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 12,
+      "title": "Per-slot guest memory",
+      "type": "timeseries",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 12,
+        "y": 42,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Observed guest RAM versus configured guest reservation. Guest and QEMU values measure different boundaries; do not add them. Slots 0\u20137 only. Unknown or unavailable numeric measurements remain gaps, including empty slots without observed RAM. Each query requires fresh verified inventory and collector.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_slot_guest_memory_used_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "Slot {{slot}} \u00b7 actual",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_slot_guest_memory_reserved_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-7]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
+          "legendFormat": "Slot {{slot}} \u00b7 reserved",
+          "refId": "B",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false,
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 6,
+            "showPoints": "never",
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*reserved"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    6,
+                    4
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 13,
+      "title": "Source health",
+      "type": "stat",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 0,
+        "y": 50,
+        "w": 24,
+        "h": 5
+      },
+      "description": "Diagnostic values intentionally remain visible when stale or invalid. Healthy usage requires collector age AND its original source age in 0\u201390 seconds, plus that source validity = 1. Unknown means a missing diagnostic series. Age alone does not imply validity; inventory and CPU validity are shown separately.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}",
+          "legendFormat": "Collector age",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}",
+          "legendFormat": "Inventory / memory age",
+          "refId": "B",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "time() - ci_pool_cpu_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}",
+          "legendFormat": "CPU age",
+          "refId": "C",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}",
+          "legendFormat": "Inventory valid",
+          "refId": "D",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_cpu_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}",
+          "legendFormat": "CPU valid",
+          "refId": "E",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 90.001
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*valid"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "Invalid",
+                        "color": "red"
+                      },
+                      "1": {
+                        "text": "Valid",
+                        "color": "green"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "wideLayout": true
+      }
+    }
+  ]
+}
