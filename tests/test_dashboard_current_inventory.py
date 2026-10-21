@@ -69,7 +69,7 @@ def test_shared_pool_ships_and_uses_current_stats_with_bounded_slot_states():
         assert POOL_LABELS in target['expr']
         assert 'rate(' not in target['expr']  # CPU is already an interval gauge.
         assert '$__to' not in target['expr']  # Historical freshness must use evaluation time.
-        if panel['type'] in {'stat', 'bargauge'}:
+        if panel['type'] in {'stat', 'bargauge', 'gauge'}:
             assert target.get('instant') is True and target.get('range') is False
         else:
             assert target.get('range') is True and target.get('instant') is False
