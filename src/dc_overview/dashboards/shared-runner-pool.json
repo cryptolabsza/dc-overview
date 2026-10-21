@@ -127,7 +127,7 @@
     {
       "id": 3,
       "title": "Occupied slots",
-      "type": "stat",
+      "type": "gauge",
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 4,
@@ -161,13 +161,15 @@
           "unit": "short",
           "noValue": "Unknown",
           "color": {
-            "mode": "palette-classic"
+            "mode": "fixed",
+            "fixedColor": "blue"
           },
           "custom": {
             "spanNulls": false
           },
           "decimals": 0,
-          "min": 0
+          "min": 0,
+          "max": 8
         },
         "overrides": []
       },
@@ -180,16 +182,15 @@
           "fields": ""
         },
         "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "none",
-        "graphMode": "none",
-        "justifyMode": "auto"
+        "showThresholdLabels": false,
+        "showThresholdMarkers": false,
+        "sizing": "auto"
       }
     },
     {
       "id": 4,
       "title": "Available slots",
-      "type": "stat",
+      "type": "gauge",
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 9,
@@ -223,13 +224,15 @@
           "unit": "short",
           "noValue": "Unknown",
           "color": {
-            "mode": "palette-classic"
+            "mode": "fixed",
+            "fixedColor": "blue"
           },
           "custom": {
             "spanNulls": false
           },
           "decimals": 0,
-          "min": 0
+          "min": 0,
+          "max": 8
         },
         "overrides": []
       },
@@ -242,10 +245,9 @@
           "fields": ""
         },
         "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "none",
-        "graphMode": "none",
-        "justifyMode": "auto"
+        "showThresholdLabels": false,
+        "showThresholdMarkers": false,
+        "sizing": "auto"
       }
     },
     {
