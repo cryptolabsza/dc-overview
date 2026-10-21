@@ -149,6 +149,13 @@ def test_shared_pool_actual_queries_hide_stale_invalid_and_missing_measurements(
             count = (8 if per_slot else 1) if valid or (timeline and not gone) else None
             queries.append({'expr': f'count(({expr}))', 'eval_time': at,
                             'exp_samples': [] if count is None else [{'labels': '{}', 'value': count}]})
+            if timeline and index in (0, 2):
+                # Exact label identities must survive fresh → unknown transitions.
+                # A retained metric name on only one branch creates 16 range series.
+                states = [0, 1, 5, 6, 7, 2, 10, 10] if inventory_ok else [9] * 8
+                queries.append({'expr': expr, 'eval_time': at, 'exp_samples': [
+                    {'labels': f'{{{POOL_LABELS},slot="{slot}"}}', 'value': state}
+                    for slot, state in enumerate(states)]})
             if timeline and not inventory_ok and not gone:
                 for reduction in ('min', 'max'):
                     queries.append({'expr': f'{reduction}(({expr}))', 'eval_time': at,
