@@ -44,6 +44,58 @@ One explicit daemon worker starts after accounts load. Reports refresh hourly, f
 
 Last-good same-day data survives refresh failure only until its original two-hour monotonic expiry. UTC rollover, account replacement/removal and restart make amounts unknown. Report snapshots replace all old rows/components atomically. The Grafana history records observation time with step/point rendering and null gaps, without accounting backfill. Later corrections to older days are not replayed. Never integrate or sum repeated gauge observations; coarse long-range sampling can omit daily points.
 
+## Telegram listing notifications
+
+DC Overview provisions a per-machine Vast listing alert through Grafana, using
+the existing Telegram contact point. A confirmed unlisted observation fires
+`Vast UNLISTED`; a subsequent confirmed listed observation resolves it with
+`Vast LISTED`. Messages include hostname, machine ID, and account. An initially
+listed machine does not generate a startup notification. Repeated observations
+do not create new transitions; Grafana's normal reminder policy still applies.
+
+The exporter polls at most once per 60 seconds and the alert evaluates every
+30 seconds. Short transitions occurring entirely between polls cannot be observed.
+API failures, malformed listing fields, and absent machines retain the last
+confirmed status. Separate monitoring alerts report gaps after two minutes.
+Grafana rule removal, pause, and missing-series resolutions say monitoring changed,
+never that a machine was listed.
+
+Confirmed state is stored without credentials in `/data/listing-state.json`.
+Keep `/data` on a persistent volume. The Fleet installer already mounts
+`vastai-exporter-data`; generated Compose configurations now use that volume too.
+If running the script directly, `/data` must exist and be writable.
+
+### Activate on an existing installation
+
+1. Upgrade the Vast exporter image and the DC Overview package together.
+   Confirm `/metrics` includes `vast_machine_listing_listed` after a successful
+   inventory poll and `vast_listing_state_persist_success 1`.
+2. In Grafana's existing Telegram contact point, keep **Disable resolved message**
+   off. Alert sync rejects receivers that suppress recovery notifications.
+3. Run `dc-overview sync-alerts --config-dir <existing-config-directory>` on the
+   monitoring host. The command preserves the existing managed-alert receiver.
+   Supply `GRAFANA_PASSWORD` through the environment from your organisation's
+   secret manager.
+   When configuring a receiver for the first time, add `--receiver "<existing Telegram name>"`.
+   The existing command handles backups, reload, and rollback.
+4. Verify the three `vast-` rules appear under **Infrastructure Alerts / Vast Listing**
+   and use the intended Telegram receiver. An installation without a configured
+   Vast scrape target does not fire Vast monitoring alerts.
+
+For an existing **Compose** exporter, inspect the current `/data` mount before
+regenerating Compose:
+
+```bash
+docker inspect vastai-exporter --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Type}} {{.Name}} {{.Source}}{{end}}{{end}}'
+```
+
+Older Compose containers may use an anonymous Docker volume containing API-managed
+accounts. Preserve that volume: set the generated Vast volume's `name` to the
+exact existing volume name and `external: true` before recreating the container.
+For a bind mount, retain its exact existing `source:/data` mapping instead.
+Verify `/api/accounts` still contains all configured accounts afterward. Do not
+switch to an empty named volume or remove the original volume during the upgrade.
+
 ## Usage
 
 ### Docker (recommended)
@@ -53,6 +105,7 @@ docker run -d \
   --name vastai-exporter \
   --restart unless-stopped \
   -p 8622:8622 \
+  -v vastai-exporter-data:/data \
   -e VASTAI_API_KEY=your_api_key \
   ghcr.io/cryptolabsza/vastai-exporter:latest
 ```
@@ -64,6 +117,7 @@ docker run -d \
   --name vastai-exporter \
   --restart unless-stopped \
   -p 8622:8622 \
+  -v vastai-exporter-data:/data \
   -e VASTAI_API_KEYS="Account1:KEY1,Account2:KEY2" \
   ghcr.io/cryptolabsza/vastai-exporter:latest
 ```
