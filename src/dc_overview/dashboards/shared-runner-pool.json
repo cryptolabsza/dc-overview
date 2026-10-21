@@ -132,7 +132,7 @@
       "gridPos": {
         "x": 4,
         "y": 6,
-        "w": 5,
+        "w": 4,
         "h": 4
       },
       "description": "Current verified inventory only. Collection and original inventory observation must both be 0\u201390 seconds old; missing or invalid data is Unknown.",
@@ -193,9 +193,9 @@
       "type": "gauge",
       "pluginVersion": "12.3.3",
       "gridPos": {
-        "x": 9,
+        "x": 8,
         "y": 6,
-        "w": 5,
+        "w": 4,
         "h": 4
       },
       "description": "Current verified inventory only. Collection and original inventory observation must both be 0\u201390 seconds old; missing or invalid data is Unknown.",
@@ -256,9 +256,9 @@
       "type": "stat",
       "pluginVersion": "12.3.3",
       "gridPos": {
-        "x": 14,
+        "x": 16,
         "y": 6,
-        "w": 5,
+        "w": 4,
         "h": 4
       },
       "description": "Current verified inventory only. Collection and original inventory observation must both be 0\u201390 seconds old; missing or invalid data is Unknown.",
@@ -318,9 +318,9 @@
       "type": "stat",
       "pluginVersion": "12.3.3",
       "gridPos": {
-        "x": 19,
+        "x": 20,
         "y": 6,
-        "w": 5,
+        "w": 4,
         "h": 4
       },
       "description": "Current quarantined VM count, derived from lifecycle state6. Requires fresh verified inventory plus all ten bounded slot series with known states (including verified Disabled slots). Zero means a known complete inventory with no quarantine; stale, unknown or incomplete observations show Unknown. This is lifecycle health, not a failed-job count.",
@@ -1472,10 +1472,10 @@
       "type": "stat",
       "pluginVersion": "12.3.3",
       "gridPos": {
-        "x": 0,
-        "y": 50,
-        "w": 6,
-        "h": 6
+        "x": 12,
+        "y": 6,
+        "w": 4,
+        "h": 4
       },
       "description": "Observed queued jobs matching admitted pool routes, separate from occupied VMs. Total across both organisations. Fresh complete zero is zero; missing, invalid, future or older than 300-second source is Unknown. Workflow concurrency-held jobs are not observed.",
       "datasource": {
@@ -1534,9 +1534,9 @@
       "type": "timeseries",
       "pluginVersion": "12.3.3",
       "gridPos": {
-        "x": 6,
+        "x": 0,
         "y": 50,
-        "w": 18,
+        "w": 24,
         "h": 6
       },
       "description": "Observed queued jobs matching admitted pool routes, separate from occupied VMs. Total across both organisations. Fresh complete zero is zero; missing, invalid, future or older than 300-second source is Unknown. Workflow concurrency-held jobs are not observed.",
