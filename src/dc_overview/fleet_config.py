@@ -433,7 +433,7 @@ class FleetConfig:
             finally:
                 fcntl.flock(lock, fcntl.LOCK_UN)
 
-    def persist_lifecycle(self, *, expected_public: bytes, _locked=False) -> Path:
+    def persist_lifecycle(self, *, expected_public: bytes, _locked=False, selection_only=False) -> Path:
         """Persist lifecycle references only, preserving separately managed secrets."""
         import fcntl
         import hashlib
@@ -449,7 +449,7 @@ class FleetConfig:
             if not isinstance(values, dict):
                 raise ValueError('public configuration must be a mapping')
             changed = self._to_dict(include_secrets=False)
-            for name in ('release_selection', 'vast_price_manager'):
+            for name in (('release_selection',) if selection_only else ('release_selection', 'vast_price_manager')):
                 values[name] = {**values.get(name, {}), **changed[name]}
             if original:
                 backup = self.config_dir / ('fleet-config.lifecycle-' + hashlib.sha256(original).hexdigest() + '.bak')

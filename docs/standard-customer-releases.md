@@ -51,6 +51,111 @@ bundled service mutation; exact no-op updates and pulls remain supported. Use
 host configuration plan/adopt for proxy replacement, then rerun Fleet upgrade
 for the other services.
 
+## Select explicit components on an already-selected installation
+
+When installed release roles differ from older saved fleet component flags, use
+selection-only mode for explicitly named, already-installed proxy updater roles:
+
+```sh
+sudo dc-overview release select --release-manifest APPROVED_COMPONENT_MANIFEST.json \
+  --component cryptolabs-proxy --component dc-overview \
+  --component runpod-exporter --component vastai-exporter --record-cli
+```
+
+This command selects artifacts and prints JSON with `state: pending-deployment`,
+the explicit `scope`, selection ID/hash, `reference_adopted`, qualified
+`local_only_sources`, and `suite_complete: false`. It does
+not deploy, restart, pull, adopt, submit an updater job, synchronize alerts,
+render Compose, connect workers, or touch VPM/provider state. Saved component
+flags and inventory remain unchanged. Full `setup`/`upgrade` retain their strict
+role checks; selection-only mode does not resolve a legacy role mismatch or
+establish suite completion.
+
+If the canonical root-owned `/etc/dc-overview/releases` store is already
+selected and mounted read-only by the live proxy, but `fleet-config.yaml`
+**entirely omits** `release_selection`, add `--adopt-existing-selection`. This
+explicitly binds that existing authority while applying the requested component
+selection. The command validates the existing roles/pins, store custody and live
+proxy contract under lifecycle and updater locks, and reports
+`reference_adopted: true` only for this initial public binding. Partial, null,
+empty or conflicting present references are rejected; the flag never overwrites
+them or enables a role. Repeating the flag on an already matching bound
+installation is safe and reports `reference_adopted: false`.
+
+An old running local image may have no registry `RepoDigests`. For that case,
+inspect and review its exact local image ID first, then explicitly add, for
+example, `--source-image dc-overview=sha256:REVIEWED_64_HEX_IMAGE_ID`. Repeat this
+option only for scoped components needing that source identity. The exact
+container image ID and platform must match, and container/image identities are
+rechecked before publication. Wrong, duplicate or unscoped expectations are
+rejected. Registry digest verification remains the default; the exception only
+accepts an empty digest list with an explicit exact image ID. Output records
+these as `local_only_sources`, without inventing or persisting registry
+provenance for the old image. The candidate target still requires a validated
+published immutable registry digest. This flag selects a target and does not
+restart the old image.
+
+The manifest must preserve every existing catalog role and the exact component
+release/artifacts for every unscoped role, including disabled entries, worker
+pins, monitoring and VPM. Existing policy origin/enabled state remains unchanged.
+An explicitly scoped customer pin can move to the candidate's exact platform
+artifact while keeping `customer-pin` origin. New catalog entries remain
+disabled. Removed roles, unknown names, worker/VPM scopes, disabled targets,
+missing/stopped containers, platform/digest uncertainty and changed owners fail
+before release publication. Only proxy-updater component names are accepted;
+repeat `--component` for each intended target.
+
+If host CLI tooling changes, install the normally published, verified wheel
+first and include `--record-cli`. The command verifies installed version and
+exact `direct_url.json` URL/SHA256; it never manufactures provenance. Recording
+a new tooling entry keeps it disabled when it was absent from the installed
+selection. An existing CLI role keeps its policy. A changed existing CLI
+artifact, including a newly introduced dormant CLI entry, requires this
+explicit flag. A CLI artifact in the candidate always
+requires exact installed-wheel verification.
+
+Run on the local Linux Docker Engine host as root, using its local Unix socket.
+Remote Docker contexts are unsupported. The compatible **published host proxy
+package must be installed in the DC CLI's own Python environment**, using the
+verified wheel injection step above; a separate proxy CLI environment does not
+satisfy this prerequisite. The command derives the updater directory from that
+package's `JOBS_DIR` and the running proxy's actual writable `/data/auth` bind
+or named-volume mount. The proxy must advertise selection contract 1 and
+`host-adoption-required-v1`, and mount the actual selected release directory
+read-only at `/etc/cryptolabs/releases`. Missing/incompatible host packages or
+unavailable/mismatched private updater custody are errors, not permission to
+create a second store or use a private import helper.
+
+Quiesce queued/running/interrupted updater work and resolve controller recovery
+first. Selection holds the actual existing `dispatch.lock` and `operation.lock`
+in updater order throughout the protected lifecycle publication transaction;
+busy locks fail immediately for a later retry. It checks updater/controller
+recovery, live identities and custody again before publication. Concurrent
+public configuration or selection edits fail the existing compare-and-swap
+checks. All journal recovery and release publication run while both updater
+locks and the lifecycle lock remain held; a busy updater leaves the public
+reference, selection and existing journal unchanged. Interrupted publication is
+recovered using the existing journal only after this exclusion; retry
+with the same reviewed manifest after resolving any reported conflict. Only
+`release_selection` public values are updated; YAML formatting can change, but
+other public keys/values, including absent VPM configuration, are preserved.
+
+After selection, use the published proxy configuration plan/adopt workflow for
+proxy replacement. For individual managed service updates, use the selected ID
+and exact hash through the published updater contract, for example:
+
+```sh
+docker exec cryptolabs-proxy env PYTHONPATH=/app/src python3 -m cryptolabs_proxy.updates \
+  submit --branch main --service dc-overview --action update \
+  --selection-id SELECTED_ID --selection-sha256 SELECTED_SHA256
+```
+
+Poll the returned job ID with `status JOB_ID` and verify preservation and health
+before submitting the next explicit service (for example `runpod-exporter`).
+Selecting a component does not prove its deployment; avoid `--service all` when
+only these component lifecycles are intended. Proxy plan/adopt and later service
+submissions independently reread and validate the protected selection.
+
 ## One-time bootstrap for an old, unselected proxy
 
 An existing old proxy may lack the live updater policy that DC requires before
