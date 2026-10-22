@@ -69,6 +69,30 @@ def main():
     pass
 
 
+
+@main.group('release')
+def release():
+    """Manage explicit release selections independently of deployment."""
+
+
+@release.command('select')
+@click.option('--release-manifest', required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option('--component', 'components', multiple=True, required=True, help='Explicit installed proxy-updater component; repeat for each target.')
+@click.option('--record-cli', is_flag=True, help='Explicitly record the verified installed host wheel without enabling a new role.')
+@click.option('--adopt-existing-selection', is_flag=True, help='Bind a trusted canonical existing selection only when the public reference is entirely absent.')
+@click.option('--source-image', 'source_images', multiple=True, help='Expected local source image for a scoped container without RepoDigests: COMPONENT=sha256:IMAGE_ID.')
+def release_select(release_manifest, components, record_cli, adopt_existing_selection, source_images):
+    """Select installed component artifacts; print JSON with deployment pending."""
+    import json
+    from .fleet_upgrade import select_release_components
+    try:
+        result = select_release_components(FleetConfig.load(DOCKER_CONFIG_DIR), release_manifest,
+                                           components, record_cli=record_cli,
+                                           adopt_existing_selection=adopt_existing_selection, source_images=source_images)
+    except (OSError, ValueError, RuntimeError) as error:
+        raise click.ClickException(str(error)) from None
+    click.echo(json.dumps(result, sort_keys=True))
+
 @click.command("install-exporters")
 @click.option("--node-exporter/--no-node-exporter", default=True, help="Install node_exporter")
 @click.option("--dc-exporter/--no-dc-exporter", default=True, help="Install dc-exporter (includes GPU metrics)")

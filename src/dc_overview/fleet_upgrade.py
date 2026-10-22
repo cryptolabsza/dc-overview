@@ -5,6 +5,9 @@ import subprocess
 import time
 import copy
 import yaml
+import os
+from contextlib import contextmanager, nullcontext
+from pathlib import Path
 
 PROXY_REPLACEMENT_POLICY = 'host-adoption-required-v1'
 
@@ -260,12 +263,12 @@ def preflight_release(config, manifest_path=None, *, platform=None, fresh_setup=
     return plan
 
 
-def commit_release(config, plan):
+def commit_release(config, plan, *, selection_only=False, precommit=None, _locked=False):
     from .controller_adoption import ensure_mutation_allowed
     ensure_mutation_allowed(config.config_dir)
     public_path = config.config_dir / 'fleet-config.yaml'
     previous = getattr(config, '_lifecycle_public_snapshot', public_path.read_bytes() if public_path.exists() else b'')
-    with config.lifecycle_lock():
+    with nullcontext() if _locked else config.lifecycle_lock():
         store = release_store(config)
         store.recover_publication(public_path)
         if (public_path.read_bytes() if public_path.exists() else b'') != previous:
@@ -274,6 +277,12 @@ def commit_release(config, plan):
         current = selection_path.read_bytes() if selection_path.exists() else None
         if current != getattr(config, '_lifecycle_selection_snapshot', current):
             raise RuntimeError('release selection changed after preflight')
+        if precommit is not None:
+            precommit()
+            if (public_path.read_bytes() if public_path.exists() else b'') != previous:
+                raise RuntimeError('public configuration changed after release preflight')
+            if (selection_path.read_bytes() if selection_path.exists() else None) != current:
+                raise RuntimeError('release selection changed after preflight')
         store.begin_publication(plan, previous)
         prior_reference = copy.deepcopy(config.release_selection)
         try:
@@ -281,7 +290,10 @@ def commit_release(config, plan):
             config.release_selection.selection_id = plan.selection['selection_id']
             config.release_selection.selection_sha256 = plan.selection_sha256
             config.release_selection.components = plan.selection['components']
-            config.persist_lifecycle(expected_public=previous, _locked=True)
+            if selection_only:
+                config.persist_lifecycle(expected_public=previous, _locked=True, selection_only=True)
+            else:
+                config.persist_lifecycle(expected_public=previous, _locked=True)
             if (selection_path.read_bytes() != plan.selection_raw or
                     yaml.safe_load(public_path.read_bytes())['release_selection']['selection_sha256'] != plan.selection_sha256):
                 raise RuntimeError('release publication changed during transaction; reconcile before retry')
@@ -294,6 +306,275 @@ def commit_release(config, plan):
                 config.release_selection = prior_reference
             raise
 
+
+
+def _scoped_inspect(identity):
+    """Bounded read-only Engine inventory, never a lifecycle operation."""
+    try:
+        result = subprocess.run(['docker', 'inspect', identity, '--format', '{{json .}}'],
+                                capture_output=True, text=True, timeout=15)
+        value = json.loads(result.stdout) if result.returncode == 0 else None
+        if not isinstance(value, dict):
+            raise ValueError()
+        return value
+    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError):
+        raise RuntimeError('scoped selection requires available installed container/image identity') from None
+
+
+def _scoped_updater_directory(proxy):
+    """Resolve the actual updater store on a local Engine; no helper or job."""
+    import platform
+    if platform.system() != 'Linux':
+        raise RuntimeError('scoped selection requires the local Linux Docker Engine host')
+    result = subprocess.run(['docker', 'context', 'inspect', '--format', '{{json .Endpoints.docker.Host}}'],
+                            capture_output=True, text=True, timeout=15)
+    try:
+        endpoint = json.loads(result.stdout)
+        if not os.environ.get('DOCKER_CONTEXT'):
+            endpoint = os.environ.get('DOCKER_HOST') or endpoint
+        if result.returncode or endpoint not in ('unix:///var/run/docker.sock', 'unix:///run/docker.sock'):
+            raise ValueError()
+        from cryptolabs_proxy.updates import JOBS_DIR, get_capabilities
+        _require_proxy_update_authority(get_capabilities())
+        relative = Path(JOBS_DIR).relative_to('/data/auth')
+        if relative != Path('update-jobs'):
+            raise ValueError()
+        mounts = [m for m in proxy['Mounts'] if m.get('Destination') == '/data/auth' and m.get('RW') is True]
+        if len(mounts) != 1 or mounts[0].get('Type') not in ('bind', 'volume'):
+            raise ValueError()
+        source = Path(mounts[0]['Source'])
+        if not source.is_absolute() or not source.is_dir():
+            raise ValueError()
+        return source / relative
+    except (ImportError, KeyError, TypeError, ValueError):
+        raise RuntimeError('scoped selection requires the compatible host proxy package and local writable updater mount') from None
+
+
+def _scoped_private(path, *, directory=False):
+    """Reject links, shared records and writable/foreign updater custody."""
+    import stat
+    path = Path(path)
+    if not path.is_absolute() or '..' in path.parts or any(p.is_symlink() for p in (path, *path.parents)):
+        raise PermissionError('unsafe scoped updater custody')
+    info = path.lstat()
+    if (info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != (0o700 if directory else 0o600)
+            or not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode))
+            or (not directory and info.st_nlink != 1)):
+        raise PermissionError('unsafe scoped updater custody')
+    return info
+
+
+def _scoped_idle(directory):
+    """Read records directly: status polling may mutate interrupted jobs."""
+    from .release_catalog import _json
+    _scoped_private(directory, directory=True)
+    if os.path.lexists(directory / 'controller-adoption.json'):
+        raise RuntimeError('controller recovery required before scoped selection')
+    active = directory / 'active.json'
+    if os.path.lexists(active):
+        _scoped_private(active)
+        value = _json(active.read_bytes())
+        job_id = value.get('id')
+        if not isinstance(job_id, str) or not re.fullmatch('[0-9a-f]{32}', job_id):
+            raise RuntimeError('updater active record is invalid')
+        path = directory / (job_id + '.json')
+        _scoped_private(path)
+        job = _json(path.read_bytes())
+        if (job.get('id') != job_id or job.get('state') not in ('completed', 'failed', 'blocked')
+                or any(r.get('state') == 'recovery_required' for r in job.get('results', {}).values())):
+            raise RuntimeError('updater active/recovery work must finish before scoped selection')
+
+
+@contextmanager
+def _scoped_updater_guard(directory):
+    """Hold the same inodes/order as dispatch and worker execution; fail busy."""
+    import fcntl
+    _scoped_private(directory, directory=True)
+    descriptors = []
+    try:
+        for name in ('dispatch.lock', 'operation.lock'):
+            path = directory / name
+            before = _scoped_private(path)
+            descriptor = os.open(path, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
+            descriptors.append((path, descriptor, before))
+            actual = os.fstat(descriptor)
+            if (before.st_dev, before.st_ino) != (actual.st_dev, actual.st_ino):
+                raise RuntimeError('updater custody changed during scoped selection')
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise RuntimeError('updater is busy; retry scoped selection after it finishes') from None
+        def check():
+            for path, descriptor, before in descriptors:
+                actual = _scoped_private(path)
+                if (before.st_dev, before.st_ino) != (actual.st_dev, actual.st_ino):
+                    raise RuntimeError('updater lock changed during scoped selection')
+            _scoped_idle(directory)
+        check()
+        yield check
+    finally:
+        for path, descriptor, before in reversed(descriptors):
+            os.close(descriptor)
+
+
+def _scoped_proxy(config, proxy_id=None):
+    proxy = _scoped_inspect('cryptolabs-proxy')
+    if (not isinstance(proxy.get('Id'), str) or not re.fullmatch('[0-9a-f]{64}', proxy['Id'])
+            or proxy.get('State', {}).get('Running') is not True):
+        raise RuntimeError('running proxy identity is required for scoped selection')
+    if proxy_id is not None and proxy['Id'] != proxy_id:
+        raise RuntimeError('proxy changed during scoped selection')
+    _require_proxy_update_authority(proxy_capabilities(container_id=proxy['Id']))
+    root = release_store(config).root
+    if not any(m.get('Source') == str(root) and m.get('Destination') == '/etc/cryptolabs/releases'
+               and m.get('RW') is False for m in proxy.get('Mounts', [])):
+        raise RuntimeError('proxy read-only release mount prerequisite')
+    return proxy
+
+
+def _scoped_runtime(config, plan, components, source_images, proxy_id=None):
+    """Observe exact source identities without inventing registry provenance."""
+    proxy = _scoped_proxy(config, proxy_id)
+    from .release_catalog import COMPONENTS
+    identities, local_only = {}, {}
+    for name in components:
+        live = proxy if name == 'cryptolabs-proxy' else _scoped_inspect(name)
+        if (not isinstance(live.get('Id'), str) or not re.fullmatch('[0-9a-f]{64}', live['Id'])
+                or live.get('State', {}).get('Running') is not True):
+            raise RuntimeError('scoped component must already be installed and running: ' + name)
+        image_id = live.get('Image', '')
+        if not isinstance(image_id, str) or not re.fullmatch('sha256:[0-9a-f]{64}', image_id):
+            raise RuntimeError('scoped component image identity unavailable: ' + name)
+        if name in source_images and source_images[name] != image_id:
+            raise RuntimeError('explicit scoped source image does not match: ' + name)
+        image = _scoped_inspect(image_id)
+        platform = image.get('Os', '') + '/' + image.get('Architecture', '')
+        repository = COMPONENTS[name][1]
+        references = image.get('RepoDigests', [])
+        if image.get('Id') != image_id or platform != plan.platform or not isinstance(references, list):
+            raise RuntimeError('scoped component immutable platform identity unavailable: ' + name)
+        registry_known = any(isinstance(ref, str) and re.fullmatch(re.escape(repository) + '@sha256:[0-9a-f]{64}', ref) for ref in references)
+        if not registry_known:
+            if references or source_images.get(name) != image_id:
+                raise RuntimeError('scoped component immutable platform identity unavailable: ' + name)
+            local_only[name] = image_id
+        identities[name] = (live['Id'], image_id)
+    return proxy, identities, local_only
+
+
+def select_release_components(config, manifest_path, components, *, record_cli=False,
+                              adopt_existing_selection=False, source_images=(), platform=None):
+    """Select explicit installed roles, preserving all other roles and intent."""
+    from .controller_adoption import ensure_mutation_allowed
+    from .release_catalog import COMPONENTS, Manifest, artifact_identity, _require_root
+    _require_root()
+    components = tuple(components)
+    if (not components or len(set(components)) != len(components)
+            or any(name not in COMPONENTS or COMPONENTS[name][0] != 'proxy-updater' for name in components)):
+        raise ValueError('scoped selection requires explicit unique proxy-updater components')
+    expected_sources = {}
+    for entry in source_images:
+        if not isinstance(entry, str) or '=' not in entry:
+            raise ValueError('--source-image requires COMPONENT=sha256:IMAGE_ID')
+        name, image_id = entry.split('=', 1)
+        if name not in components or name in expected_sources or not re.fullmatch('sha256:[0-9a-f]{64}', image_id):
+            raise ValueError('--source-image requires a unique scoped component and exact local image ID')
+        expected_sources[name] = image_id
+    ensure_mutation_allowed(config.config_dir)
+    store = release_store(config)
+    public_path = config.config_dir / 'fleet-config.yaml'
+    public = public_path.read_bytes()
+    values = yaml.safe_load(public)
+    if not isinstance(values, dict):
+        raise ValueError('public configuration must be a mapping')
+    selected = config.release_selection
+    adopting = 'release_selection' not in values
+    if adopting:
+        if (not adopt_existing_selection or selected.selection_id or selected.selection_sha256 or selected.components
+                or store.root != config.config_dir / 'releases'):
+            raise ValueError('existing selected store requires --adopt-existing-selection for an absent public reference')
+    else:
+        reference = values['release_selection']
+        if (not isinstance(reference, dict) or not reference.get('selection_id') or not reference.get('selection_sha256')
+                or not isinstance(reference.get('components'), dict)):
+            raise ValueError('partial/conflicting public selection reference cannot be adopted')
+        if (reference.get('selection_id') != selected.selection_id
+                or reference.get('selection_sha256') != selected.selection_sha256
+                or reference.get('components') != selected.components):
+            raise RuntimeError('public configuration/selection snapshot is stale')
+    # Resolve actual mounted updater custody read-only before any journal write.
+    proxy = _scoped_proxy(config)
+    directory = _scoped_updater_directory(proxy)
+    # Match controller adoption order: lifecycle exclusion, then updater locks.
+    with config.lifecycle_lock():
+        with _scoped_updater_guard(directory) as check_idle:
+            ensure_mutation_allowed(config.config_dir)
+            if public_path.read_bytes() != public:
+                raise RuntimeError('public configuration changed after release preflight')
+            current_proxy = _scoped_proxy(config, proxy['Id'])
+            if _scoped_updater_directory(current_proxy) != directory:
+                raise RuntimeError('updater mount changed during scoped selection')
+            check_idle()
+            store.recover_publication(public_path)
+            previous = store.load(platform=platform,
+                                  expected_id=None if adopting else selected.selection_id,
+                                  expected_sha256=None if adopting else selected.selection_sha256)
+            if not adopting and selected.components != previous.selection['components']:
+                raise RuntimeError('public configuration/selection snapshot is stale')
+            manifest = Manifest.from_bytes(Path(manifest_path).read_bytes())
+            old = previous.manifest.data['components']; new = manifest.data['components']
+            if set(old) - set(new):
+                raise ValueError('scoped selection cannot remove existing catalog roles')
+            if 'dc-overview-cli' in new and 'dc-overview-cli' not in old and not record_cli:
+                raise ValueError('new CLI selection record requires --record-cli')
+            policy = copy.deepcopy(previous.selection['components'])
+            changed = set(components) | ({'dc-overview-cli'} if record_cli else set())
+            for name in components:
+                if name not in previous.targets or name not in new:
+                    raise ValueError('scoped target must already be selected and enabled: ' + name)
+            for name in old:
+                if old[name]['owner'] != new[name]['owner']:
+                    raise ValueError('scoped selection cannot change lifecycle owners')
+                if name not in changed and old[name] != new[name]:
+                    raise ValueError('unscoped artifact identity/release must remain unchanged: ' + name)
+            for name in set(new) - set(old):
+                policy[name] = {'origin': 'baseline', 'enabled': False}
+            cli_target = None
+            if 'dc-overview-cli' in new:
+                item = new['dc-overview-cli']
+                cli_target = {**item['artifacts']['any'], 'release': item['release'], 'owner': item['owner']}
+                verify_running_cli(cli_target)
+            elif record_cli:
+                raise ValueError('--record-cli requires the exact installed CLI wheel in the manifest')
+            for name in changed:
+                if name not in new:
+                    raise ValueError('explicit scoped target missing from manifest: ' + name)
+                if name in policy and policy[name]['origin'] == 'customer-pin':
+                    artifacts = new[name]['artifacts']
+                    artifact = artifacts.get(previous.platform, artifacts.get('any'))
+                    if artifact is None:
+                        raise ValueError('missing scoped artifact platform')
+                    policy[name]['pin'] = artifact_identity(artifact)
+            plan = store.prepare(manifest_path, platform=previous.platform, policies=policy, enabled_components=())
+            if plan.manifest.raw != manifest.raw:
+                raise RuntimeError('manifest changed during scoped preparation')
+            config._lifecycle_public_snapshot = public
+            config._lifecycle_selection_snapshot = previous.selection_raw
+            _, runtime, local_only = _scoped_runtime(config, plan, components, expected_sources, proxy['Id'])
+            def precommit():
+                ensure_mutation_allowed(config.config_dir)
+                check_idle()
+                current_proxy, current_runtime, current_local = _scoped_runtime(config, plan, components, expected_sources, proxy['Id'])
+                if (_scoped_updater_directory(current_proxy) != directory or current_runtime != runtime
+                        or current_local != local_only):
+                    raise RuntimeError('scoped runtime changed during selection')
+                if cli_target is not None:
+                    verify_running_cli(cli_target)
+            commit_release(config, plan, selection_only=True, precommit=precommit, _locked=True)
+    return {'state': 'pending-deployment', 'scope': list(components), 'tooling_recorded': bool(record_cli),
+            'reference_adopted': adopting, 'local_only_sources': local_only,
+            'suite_complete': False, 'selection_id': plan.selection['selection_id'],
+            'selection_sha256': plan.selection_sha256, 'manifest_sha256': plan.manifest.sha256}
 
 def vpm_spec(config, target):
     from .vpm_service import VPMServiceSpec

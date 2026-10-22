@@ -1357,6 +1357,11 @@ def configure_grafana(password: str):
     # Using packaged dashboards from dc_overview/dashboards/ folder
     dashboards = [
         {
+            "name": "Shared Runner Pool",
+            "local_file": "shared-runner-pool.json",
+            "github_url": None,  # Packaged, fixed WK01 metric interface; no moving fallback.
+        },
+        {
             "name": "DC Overview",
             "local_file": "DC OverView-1768678619438.json",
             "github_url": "https://raw.githubusercontent.com/jjziets/DCMontoring/main/DC_OverView.json",
