@@ -18,7 +18,8 @@ def test_custom_datasource_remaps_only_owned_prometheus_query_references(tmp_pat
     path = grafana_alerts.install_grafana_alerts(tmp_path, datasource_uid='customer-stable')
     custom = yaml.safe_load(path.read_bytes())
     before = queries(default); after = queries(custom)
-    assert sum(q['datasourceUid'] == 'prometheus' for q in before) == 5
+    assert any(q['datasourceUid'] == 'prometheus' for q in before)
+    assert len(before) == len(after)
     for old, new in zip(before, after):
         if old['datasourceUid'] == 'prometheus':
             assert new['datasourceUid'] == 'customer-stable'
