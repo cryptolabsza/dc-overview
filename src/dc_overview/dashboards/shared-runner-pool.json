@@ -29,14 +29,14 @@
   "panels": [
     {
       "id": 1,
-      "title": "Shared VM runner pool \u00b7 WK01",
+      "title": "Shared VM runner pool \u00b7 WK01 + master",
       "type": "text",
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 0,
         "y": 0,
         "w": 24,
-        "h": 6
+        "h": 8
       },
       "description": "",
       "datasource": {
@@ -59,7 +59,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "Ten stable slots \u00b730-second sampling \u00b7shared across both organisations. **Occupied includes warm, destroying and quarantined VMs.** Available is verified capacity minus occupied; admission also depends on resources.\n\nUsage gaps mean stale, invalid or missing observations. Pool history starts at the first scrape; existing host history is unchanged. VM time is a sampled lifecycle estimate and gaps can undercount.\n\n**Job success/failure is not collected.** Quarantine does not identify a failed job. Sampled time is not exact job duration or billable time.\n\nWaiting jobs counts observed queued jobs matching admitted pool routes across both organisations. It is separate from charged VMs; workflow concurrency-held work is not observed. Queue refresh can take 120 seconds; observations older than 300 seconds are Unknown."
+        "content": "Stable slots per host \u00b7 30-second sampling \u00b7 shared across both organisations. **Occupied includes warm, destroying and quarantined VMs.** Available is verified capacity minus occupied; admission also depends on resources.\n\nUsage gaps mean stale, invalid or missing observations. Pool history starts at the first scrape; existing host history is unchanged. VM time is a sampled lifecycle estimate and gaps can undercount.\n\n**Job success/failure is not collected.** Quarantine does not identify a failed job. Sampled time is not exact job duration or billable time.\n\nWaiting jobs counts observed queued jobs matching admitted pool routes across both organisations. It is separate from charged VMs; workflow concurrency-held work is not observed. Queue refresh can take 120 seconds; observations older than 300 seconds are Unknown.\n\nBoth hosts are shown by default. Fleet counts require fresh, valid observations from WK01 and master: initial verified capacity is 10 + 2; 18 appears only after master admission and observations verify eight active slots. Missing or stale hosts leave fleet totals unknown. Master slots 0\u20133 belong to NUMA node 0 and slots 4\u20137 to node 1; initial slots are 0 and 4. Queue demand is observed once on WK01. History starts at the first scrape, without backfill. CPU ceilings are observed per host, not a shared fleet policy measurement."
       }
     },
     {
@@ -69,7 +69,7 @@
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 0,
-        "y": 6,
+        "y": 12,
         "w": 4,
         "h": 4
       },
@@ -86,8 +86,22 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "Verified capacity",
+          "legendFormat": "{{instance}} \u00b7 Verified capacity",
           "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_capacity_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
+          "legendFormat": "{{instance}} \u00b7 Verified capacity",
+          "refId": "A_master",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -131,7 +145,7 @@
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 4,
-        "y": 6,
+        "y": 12,
         "w": 4,
         "h": 4
       },
@@ -148,8 +162,22 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "Occupied slots",
+          "legendFormat": "{{instance}} \u00b7 Occupied slots",
           "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_occupied_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
+          "legendFormat": "{{instance}} \u00b7 Occupied slots",
+          "refId": "A_master",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -194,7 +222,7 @@
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 8,
-        "y": 6,
+        "y": 12,
         "w": 4,
         "h": 4
       },
@@ -211,8 +239,22 @@
           },
           "editorMode": "code",
           "expr": "(ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} - ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "Available slots",
+          "legendFormat": "{{instance}} \u00b7 Available slots",
           "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(ci_pool_capacity_slots{job=\"master\",instance=\"master\",exporter=\"node\"} - ci_pool_occupied_slots{job=\"master\",instance=\"master\",exporter=\"node\"}) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
+          "legendFormat": "{{instance}} \u00b7 Available slots",
+          "refId": "A_master",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -257,7 +299,7 @@
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 16,
-        "y": 6,
+        "y": 12,
         "w": 4,
         "h": 4
       },
@@ -274,8 +316,22 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_warm_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "Warm slots",
+          "legendFormat": "{{instance}} \u00b7 Warm slots",
           "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_warm_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
+          "legendFormat": "{{instance}} \u00b7 Warm slots",
+          "refId": "A_master",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -319,7 +375,7 @@
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 20,
-        "y": 6,
+        "y": 12,
         "w": 4,
         "h": 4
       },
@@ -336,8 +392,22 @@
           },
           "editorMode": "code",
           "expr": "(sum by (job, instance, exporter) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} == bool 6) and on (job, instance, exporter) (count by (job, instance, exporter) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} != 9) == 10)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "Quarantined slots",
+          "legendFormat": "{{instance}} \u00b7 Quarantined slots",
           "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(sum by (job, instance, exporter) (ci_pool_slot_state{job=\"master\",instance=\"master\",exporter=\"node\",slot=~\"[0-9]\"} == bool 6) and on (job, instance, exporter) (count by (job, instance, exporter) (ci_pool_slot_state{job=\"master\",instance=\"master\",exporter=\"node\",slot=~\"[0-9]\"} != 9) == 10)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
+          "legendFormat": "{{instance}} \u00b7 Quarantined slots",
+          "refId": "A_master",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -382,7 +452,7 @@
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 0,
-        "y": 10,
+        "y": 16,
         "w": 6,
         "h": 7
       },
@@ -399,8 +469,22 @@
           },
           "editorMode": "code",
           "expr": "sum(sum_over_time((((ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} == bool 5) and on (job, instance, exporter, slot) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} <= 8)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90))[$__range:30s])) * 30",
-          "legendFormat": "Running VM time (sampled)",
+          "legendFormat": "WK01 \u00b7 Running VM time (sampled)",
           "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(sum_over_time((((ci_pool_slot_state{job=\"master\",instance=\"master\",exporter=\"node\",slot=~\"[0-9]\"} == bool 5) and on (job, instance, exporter, slot) (ci_pool_slot_state{job=\"master\",instance=\"master\",exporter=\"node\",slot=~\"[0-9]\"} <= 8)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90))[$__range:30s])) * 30",
+          "legendFormat": "master \u00b7 Running VM time (sampled)",
+          "refId": "A_master",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -445,7 +529,7 @@
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 6,
-        "y": 10,
+        "y": 16,
         "w": 6,
         "h": 7
       },
@@ -462,8 +546,22 @@
           },
           "editorMode": "code",
           "expr": "sum(sum_over_time((((ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} >= bool 1) and on (job, instance, exporter, slot) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} <= 8)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90))[$__range:30s])) * 30",
-          "legendFormat": "Charged VM time (sampled)",
+          "legendFormat": "WK01 \u00b7 Charged VM time (sampled)",
           "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(sum_over_time((((ci_pool_slot_state{job=\"master\",instance=\"master\",exporter=\"node\",slot=~\"[0-9]\"} >= bool 1) and on (job, instance, exporter, slot) (ci_pool_slot_state{job=\"master\",instance=\"master\",exporter=\"node\",slot=~\"[0-9]\"} <= 8)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90))[$__range:30s])) * 30",
+          "legendFormat": "master \u00b7 Charged VM time (sampled)",
+          "refId": "A_master",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -508,7 +606,7 @@
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 12,
-        "y": 10,
+        "y": 16,
         "w": 12,
         "h": 7
       },
@@ -525,8 +623,22 @@
           },
           "editorMode": "code",
           "expr": "sum_over_time((((ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} == bool 5) and on (job, instance, exporter, slot) (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} <= 8)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90))[$__range:30s]) * 30",
-          "legendFormat": "Slot {{slot}}",
+          "legendFormat": "{{instance}} \u00b7 Slot {{slot}}",
           "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum_over_time((((ci_pool_slot_state{job=\"master\",instance=\"master\",exporter=\"node\",slot=~\"[0-9]\"} == bool 5) and on (job, instance, exporter, slot) (ci_pool_slot_state{job=\"master\",instance=\"master\",exporter=\"node\",slot=~\"[0-9]\"} <= 8)) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90))[$__range:30s]) * 30",
+          "legendFormat": "{{instance}} \u00b7 Slot {{slot}}",
+          "refId": "A_master",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -574,7 +686,7 @@
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 0,
-        "y": 17,
+        "y": 23,
         "w": 24,
         "h": 9
       },
@@ -591,8 +703,22 @@
           },
           "editorMode": "code",
           "expr": "((ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} * 1) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) or (ci_pool_slot_state{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} * 0 + 9)",
-          "legendFormat": "Slot {{slot}}",
+          "legendFormat": "{{instance}} \u00b7 Slot {{slot}}",
           "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "((ci_pool_slot_state{job=\"master\",instance=\"master\",exporter=\"node\",slot=~\"[0-9]\"} * 1) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)) or (ci_pool_slot_state{job=\"master\",instance=\"master\",exporter=\"node\",slot=~\"[0-9]\"} * 0 + 9)",
+          "legendFormat": "{{instance}} \u00b7 Slot {{slot}}",
+          "refId": "A_master",
           "instant": false,
           "range": true,
           "format": "time_series",
@@ -707,7 +833,7 @@
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 0,
-        "y": 26,
+        "y": 32,
         "w": 12,
         "h": 8
       },
@@ -724,7 +850,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "Occupied",
+          "legendFormat": "{{instance}} \u00b7 Occupied",
           "refId": "A",
           "instant": false,
           "range": true,
@@ -738,7 +864,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "Verified capacity",
+          "legendFormat": "{{instance}} \u00b7 Verified capacity",
           "refId": "B",
           "instant": false,
           "range": true,
@@ -752,7 +878,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_warm_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "Warm",
+          "legendFormat": "{{instance}} \u00b7 Warm",
           "refId": "C",
           "instant": false,
           "range": true,
@@ -766,8 +892,64 @@
           },
           "editorMode": "code",
           "expr": "(ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} - ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "Available",
+          "legendFormat": "{{instance}} \u00b7 Available",
           "refId": "D",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_occupied_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
+          "legendFormat": "{{instance}} \u00b7 Occupied",
+          "refId": "A_master",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_capacity_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
+          "legendFormat": "{{instance}} \u00b7 Verified capacity",
+          "refId": "B_master",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_warm_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
+          "legendFormat": "{{instance}} \u00b7 Warm",
+          "refId": "C_master",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(ci_pool_capacity_slots{job=\"master\",instance=\"master\",exporter=\"node\"} - ci_pool_occupied_slots{job=\"master\",instance=\"master\",exporter=\"node\"}) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
+          "legendFormat": "{{instance}} \u00b7 Available",
+          "refId": "D_master",
           "instant": false,
           "range": true,
           "format": "time_series",
@@ -820,7 +1002,7 @@
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 12,
-        "y": 26,
+        "y": 32,
         "w": 12,
         "h": 8
       },
@@ -837,7 +1019,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_cpu_used_cores{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_cpu_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_cpu_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_cpu_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "Used cores",
+          "legendFormat": "{{instance}} \u00b7 Used cores",
           "refId": "A",
           "instant": false,
           "range": true,
@@ -851,8 +1033,36 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_cpu_limit_cores{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_cpu_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_cpu_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_cpu_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "CPU ceiling",
+          "legendFormat": "{{instance}} \u00b7 CPU ceiling",
           "refId": "B",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_cpu_used_cores{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_cpu_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_cpu_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_cpu_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
+          "legendFormat": "{{instance}} \u00b7 Used cores",
+          "refId": "A_master",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_cpu_limit_cores{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_cpu_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_cpu_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_cpu_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
+          "legendFormat": "{{instance}} \u00b7 CPU ceiling",
+          "refId": "B_master",
           "instant": false,
           "range": true,
           "format": "time_series",
@@ -905,11 +1115,11 @@
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 0,
-        "y": 34,
+        "y": 40,
         "w": 12,
         "h": 8
       },
-      "description": "Distribution of sampled aggregate CPU utilization (% of observed pool CPU ceiling) over time. Calculated from the interval gauge, in 5 percentage point buckets. Cell intensity is sample count; missing/invalid sources contribute no samples, not zero utilization.",
+      "description": "Distribution of sampled aggregate CPU utilization (% of observed pool CPU ceiling) over time. Calculated from the interval gauge, in 5 percentage point buckets. Cell intensity is sample count; missing/invalid sources contribute no samples, not zero utilization. WK01 only; master has its own heatmap below.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -992,7 +1202,7 @@
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 12,
-        "y": 34,
+        "y": 40,
         "w": 12,
         "h": 8
       },
@@ -1009,7 +1219,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_memory_used_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "Actual parent cgroup",
+          "legendFormat": "{{instance}} \u00b7 Actual parent cgroup",
           "refId": "A",
           "instant": false,
           "range": true,
@@ -1023,7 +1233,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_memory_reserved_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "Configured reservations",
+          "legendFormat": "{{instance}} \u00b7 Configured reservations",
           "refId": "B",
           "instant": false,
           "range": true,
@@ -1037,8 +1247,50 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_memory_limit_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "RAM limit",
+          "legendFormat": "{{instance}} \u00b7 RAM limit",
           "refId": "C",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_memory_used_bytes{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
+          "legendFormat": "{{instance}} \u00b7 Actual parent cgroup",
+          "refId": "A_master",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_memory_reserved_bytes{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
+          "legendFormat": "{{instance}} \u00b7 Configured reservations",
+          "refId": "B_master",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_memory_limit_bytes{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
+          "legendFormat": "{{instance}} \u00b7 RAM limit",
+          "refId": "C_master",
           "instant": false,
           "range": true,
           "format": "time_series",
@@ -1091,7 +1343,7 @@
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 0,
-        "y": 42,
+        "y": 48,
         "w": 12,
         "h": 8
       },
@@ -1108,7 +1360,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_slot_memory_used_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "Slot {{slot}} \u00b7 actual",
+          "legendFormat": "{{instance}} \u00b7 Slot {{slot}} \u00b7 actual",
           "refId": "A",
           "instant": false,
           "range": true,
@@ -1122,8 +1374,36 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_slot_memory_reserved_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "Slot {{slot}} \u00b7 reserved",
+          "legendFormat": "{{instance}} \u00b7 Slot {{slot}} \u00b7 reserved",
           "refId": "B",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_slot_memory_used_bytes{job=\"master\",instance=\"master\",exporter=\"node\",slot=~\"[0-9]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
+          "legendFormat": "{{instance}} \u00b7 Slot {{slot}} \u00b7 actual",
+          "refId": "A_master",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_slot_memory_reserved_bytes{job=\"master\",instance=\"master\",exporter=\"node\",slot=~\"[0-9]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
+          "legendFormat": "{{instance}} \u00b7 Slot {{slot}} \u00b7 reserved",
+          "refId": "B_master",
           "instant": false,
           "range": true,
           "format": "time_series",
@@ -1199,7 +1479,7 @@
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 12,
-        "y": 42,
+        "y": 48,
         "w": 12,
         "h": 8
       },
@@ -1216,7 +1496,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_slot_guest_memory_used_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "Slot {{slot}} \u00b7 actual",
+          "legendFormat": "{{instance}} \u00b7 Slot {{slot}} \u00b7 actual",
           "refId": "A",
           "instant": false,
           "range": true,
@@ -1230,8 +1510,36 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_slot_guest_memory_reserved_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",slot=~\"[0-9]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "Slot {{slot}} \u00b7 reserved",
+          "legendFormat": "{{instance}} \u00b7 Slot {{slot}} \u00b7 reserved",
           "refId": "B",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_slot_guest_memory_used_bytes{job=\"master\",instance=\"master\",exporter=\"node\",slot=~\"[0-9]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
+          "legendFormat": "{{instance}} \u00b7 Slot {{slot}} \u00b7 actual",
+          "refId": "A_master",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_slot_guest_memory_reserved_bytes{job=\"master\",instance=\"master\",exporter=\"node\",slot=~\"[0-9]\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
+          "legendFormat": "{{instance}} \u00b7 Slot {{slot}} \u00b7 reserved",
+          "refId": "B_master",
           "instant": false,
           "range": true,
           "format": "time_series",
@@ -1307,7 +1615,7 @@
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 0,
-        "y": 56,
+        "y": 62,
         "w": 24,
         "h": 5
       },
@@ -1324,7 +1632,7 @@
           },
           "editorMode": "code",
           "expr": "time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}",
-          "legendFormat": "Collector age",
+          "legendFormat": "{{instance}} \u00b7 Collector age",
           "refId": "A",
           "instant": true,
           "range": false,
@@ -1338,7 +1646,7 @@
           },
           "editorMode": "code",
           "expr": "time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}",
-          "legendFormat": "Inventory / memory age",
+          "legendFormat": "{{instance}} \u00b7 Inventory / memory age",
           "refId": "B",
           "instant": true,
           "range": false,
@@ -1352,7 +1660,7 @@
           },
           "editorMode": "code",
           "expr": "time() - ci_pool_cpu_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}",
-          "legendFormat": "CPU age",
+          "legendFormat": "{{instance}} \u00b7 CPU age",
           "refId": "C",
           "instant": true,
           "range": false,
@@ -1366,7 +1674,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}",
-          "legendFormat": "Inventory valid",
+          "legendFormat": "{{instance}} \u00b7 Inventory valid",
           "refId": "D",
           "instant": true,
           "range": false,
@@ -1380,8 +1688,78 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_cpu_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}",
-          "legendFormat": "CPU valid",
+          "legendFormat": "{{instance}} \u00b7 CPU valid",
           "refId": "E",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"}",
+          "legendFormat": "{{instance}} \u00b7 Collector age",
+          "refId": "A_master",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"}",
+          "legendFormat": "{{instance}} \u00b7 Inventory / memory age",
+          "refId": "B_master",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "time() - ci_pool_cpu_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"}",
+          "legendFormat": "{{instance}} \u00b7 CPU age",
+          "refId": "C_master",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"}",
+          "legendFormat": "{{instance}} \u00b7 Inventory valid",
+          "refId": "D_master",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "ci_pool_cpu_valid{job=\"master\",instance=\"master\",exporter=\"node\"}",
+          "legendFormat": "{{instance}} \u00b7 CPU valid",
+          "refId": "E_master",
           "instant": true,
           "range": false,
           "format": "time_series",
@@ -1473,7 +1851,7 @@
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 12,
-        "y": 6,
+        "y": 12,
         "w": 4,
         "h": 4
       },
@@ -1535,7 +1913,7 @@
       "pluginVersion": "12.3.3",
       "gridPos": {
         "x": 0,
-        "y": 50,
+        "y": 56,
         "w": 24,
         "h": 6
       },
@@ -1596,6 +1974,282 @@
             "lastNotNull",
             "max"
           ]
+        }
+      }
+    },
+    {
+      "id": 20,
+      "title": "Fleet verified capacity",
+      "type": "stat",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 8,
+        "h": 4
+      },
+      "description": "Requires independently fresh, valid inventory and active capacity from both exact hosts. Missing, invalid or stale observations produce unknown, never a partial sum. Capacity is observed admission, not the configured maximum.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(((ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) or (ci_pool_capacity_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)))) and on() (count(((ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) or (ci_pool_capacity_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)))) == 2) and on() (count(((ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) or (ci_pool_capacity_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)))) == 2)",
+          "legendFormat": "Fleet verified capacity",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "min": 0,
+          "max": 18
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 21,
+      "title": "Fleet occupied slots",
+      "type": "gauge",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 8,
+        "y": 8,
+        "w": 8,
+        "h": 4
+      },
+      "description": "Requires independently fresh, valid inventory and active capacity from both exact hosts. Missing, invalid or stale observations produce unknown, never a partial sum. Capacity is observed admission, not the configured maximum.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(((ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) or (ci_pool_occupied_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)))) and on() (count(((ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) or (ci_pool_occupied_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)))) == 2) and on() (count(((ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) or (ci_pool_capacity_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)))) == 2)",
+          "legendFormat": "Fleet occupied slots",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "custom": {
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "min": 0,
+          "max": 18
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": false,
+        "sizing": "auto"
+      }
+    },
+    {
+      "id": 22,
+      "title": "Fleet available slots",
+      "type": "gauge",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 16,
+        "y": 8,
+        "w": 8,
+        "h": 4
+      },
+      "description": "Requires independently fresh, valid inventory and active capacity from both exact hosts. Missing, invalid or stale observations produce unknown, never a partial sum. Capacity is observed admission, not the configured maximum.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum((((ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} - ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) or ((ci_pool_capacity_slots{job=\"master\",instance=\"master\",exporter=\"node\"} - ci_pool_occupied_slots{job=\"master\",instance=\"master\",exporter=\"node\"}) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)))) and on() (count((((ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} - ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) or ((ci_pool_capacity_slots{job=\"master\",instance=\"master\",exporter=\"node\"} - ci_pool_occupied_slots{job=\"master\",instance=\"master\",exporter=\"node\"}) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)))) == 2) and on() (count(((ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) or (ci_pool_capacity_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)))) == 2)",
+          "legendFormat": "Fleet available slots",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "custom": {
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "min": 0,
+          "max": 18
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": false,
+        "sizing": "auto"
+      }
+    },
+    {
+      "id": 23,
+      "title": "Master CPU utilization heatmap",
+      "type": "heatmap",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 0,
+        "y": 67,
+        "w": 24,
+        "h": 8
+      },
+      "description": "Master measured interval CPU / master observed CPU ceiling. Same percentage scale as WK01; not a shared fleet policy ceiling.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(ci_pool_cpu_used_cores{job=\"master\",instance=\"master\",exporter=\"node\"} / (ci_pool_cpu_limit_cores{job=\"master\",instance=\"master\",exporter=\"node\"} > 0) * 100) and on (job, instance, exporter) (ci_pool_cpu_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_cpu_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_cpu_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
+          "legendFormat": "master \u00b7 CPU utilization",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "calculate": true,
+        "calculation": {
+          "xBuckets": {
+            "mode": "size",
+            "value": "1m"
+          },
+          "yBuckets": {
+            "mode": "size",
+            "value": "5"
+          }
+        },
+        "cellGap": 1,
+        "cellRadius": 0,
+        "color": {
+          "mode": "scheme",
+          "scheme": "Oranges",
+          "steps": 64,
+          "scale": "linear",
+          "exponent": 0.5
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "legend": {
+          "show": true
+        },
+        "showValue": "never",
+        "tooltip": {
+          "show": true,
+          "yHistogram": true
+        },
+        "yAxis": {
+          "axisPlacement": "left",
+          "unit": "percent",
+          "min": 0
+        },
+        "cellValues": {
+          "unit": "short"
         }
       }
     }
