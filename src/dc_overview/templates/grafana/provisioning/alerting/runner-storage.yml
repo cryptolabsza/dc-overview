@@ -1,0 +1,844 @@
+# Shared runner storage: read-only observations, separate missing-data signal.
+apiVersion: 1
+groups:
+- orgId: 1
+  name: Runner Storage
+  folder: Infrastructure Alerts
+  interval: 30s
+  rules:
+  - uid: runner-storage-telemetry
+    title: Runner storage telemetry unavailable
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 300
+        to: 0
+      datasourceUid: prometheus
+      model:
+        expr: ((label_replace(label_replace(vector(1),"job","wk01","",""),"instance","wk01","","")
+          or label_replace(label_replace(vector(1),"job","master","",""),"instance","master","",""))
+          unless on(job,instance) (((ci_storage_valid{job=~"wk01|master",exporter="node"}
+          == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          <= 90)) and on(job,instance) (up{job=~"wk01|master",exporter="node"} ==
+          1) and on(job,instance) (ci_storage_pool_valid{job=~"wk01|master",exporter="node"}
+          == 1) and on(job,instance) (min by(job,instance) (ci_storage_volume_valid{job=~"wk01|master",exporter="node",volume=~"root|pool|quota|artifact"})
+          == 1) and on(job,instance) (count by(job,instance) (ci_storage_volume_valid{job=~"wk01|master",exporter="node",volume=~"root|pool|quota|artifact"})
+          == 3) and on(job,instance) ((ci_storage_quota_valid{job="master",instance="master",exporter="node"}
+          == 1) or (ci_storage_artifact_valid{job="wk01",instance="wk01",exporter="node"}
+          == 1)))) or ((label_replace(label_replace(vector(1),"job","wk01","",""),"instance","wk01","","")
+          or label_replace(label_replace(vector(1),"job","master","",""),"instance","master","",""))
+          * 0)
+        instant: true
+        range: false
+        refId: A
+        editorMode: code
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: query
+    noDataState: Alerting
+    execErrState: Alerting
+    for: 2m
+    annotations:
+      summary: Runner storage telemetry unavailable · {{ $labels.instance }}
+      description: Storage collection, original observation age, pool accounting,
+        master quota or WK01 artifact ledger is missing/invalid. Values must be treated
+        as unknown. Inspect ci-storage-metrics.service and Node Exporter.
+    labels:
+      alert_category: runner_storage
+      severity: warning
+    isPaused: false
+  - uid: runner-storage-pool-warning
+    title: Runner conservative storage headroom warning
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 300
+        to: 0
+      datasourceUid: prometheus
+      model:
+        expr: (ci_storage_pool_effective_free_bytes{job=~"wk01|master",exporter="node"}
+          < bool 781684047872) and on(job,instance) ((ci_storage_valid{job=~"wk01|master",exporter="node"}
+          == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          <= 90)) and on(job,instance) (ci_storage_pool_valid{job=~"wk01|master",exporter="node"}
+          == 1)
+        instant: true
+        range: false
+        refId: A
+        editorMode: code
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: query
+    noDataState: KeepLast
+    execErrState: KeepLast
+    for: 5m
+    annotations:
+      summary: Runner conservative storage headroom warning · {{ $labels.instance
+        }}
+      description: Physical free minus every existing raw disk logical reservation
+        is below 728 GiB. The protected floor is 600 GiB. This is conservative admission
+        headroom, not an allocatable VM count; retain uncertain cleanup reservations.
+    labels:
+      alert_category: runner_storage
+      severity: warning
+    isPaused: false
+  - uid: runner-storage-pool-critical
+    title: Runner conservative storage headroom critical
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 300
+        to: 0
+      datasourceUid: prometheus
+      model:
+        expr: (ci_storage_pool_effective_free_bytes{job=~"wk01|master",exporter="node"}
+          < bool 712964571136) and on(job,instance) ((ci_storage_valid{job=~"wk01|master",exporter="node"}
+          == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          <= 90)) and on(job,instance) (ci_storage_pool_valid{job=~"wk01|master",exporter="node"}
+          == 1)
+        instant: true
+        range: false
+        refId: A
+        editorMode: code
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: query
+    noDataState: KeepLast
+    execErrState: KeepLast
+    for: 2m
+    annotations:
+      summary: Runner conservative storage headroom critical · {{ $labels.instance
+        }}
+      description: Physical free minus every existing raw disk logical reservation
+        is below 664 GiB. The protected floor is 600 GiB. This is conservative admission
+        headroom, not an allocatable VM count; retain uncertain cleanup reservations.
+    labels:
+      alert_category: runner_storage
+      severity: critical
+    isPaused: false
+  - uid: runner-storage-root-warning
+    title: Runner root filesystem space warning
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 300
+        to: 0
+      datasourceUid: prometheus
+      model:
+        expr: (ci_storage_volume_available_bytes{job=~"wk01|master",exporter="node",volume="root"}
+          / ci_storage_volume_total_bytes{job=~"wk01|master",exporter="node",volume="root"}
+          < bool 0.15) and on(job,instance) ((ci_storage_valid{job=~"wk01|master",exporter="node"}
+          == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          <= 90))
+        instant: true
+        range: false
+        refId: A
+        editorMode: code
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: query
+    noDataState: KeepLast
+    execErrState: KeepLast
+    for: 10m
+    annotations:
+      summary: Runner root filesystem space warning · {{ $labels.instance }}
+      description: Root filesystem available space is below 15%. Inspect growth and
+        logs before removing any retained data.
+    labels:
+      alert_category: runner_storage
+      severity: warning
+    isPaused: false
+  - uid: runner-storage-root-critical
+    title: Runner root filesystem space critical
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 300
+        to: 0
+      datasourceUid: prometheus
+      model:
+        expr: (ci_storage_volume_available_bytes{job=~"wk01|master",exporter="node",volume="root"}
+          / ci_storage_volume_total_bytes{job=~"wk01|master",exporter="node",volume="root"}
+          < bool 0.1) and on(job,instance) ((ci_storage_valid{job=~"wk01|master",exporter="node"}
+          == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          <= 90))
+        instant: true
+        range: false
+        refId: A
+        editorMode: code
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: query
+    noDataState: KeepLast
+    execErrState: KeepLast
+    for: 5m
+    annotations:
+      summary: Runner root filesystem space critical · {{ $labels.instance }}
+      description: Root filesystem available space is below 10%. Inspect growth and
+        logs before removing any retained data.
+    labels:
+      alert_category: runner_storage
+      severity: critical
+    isPaused: false
+  - uid: runner-storage-inode-warning
+    title: Runner filesystem inode availability warning
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 300
+        to: 0
+      datasourceUid: prometheus
+      model:
+        expr: (ci_storage_volume_free_inodes{job=~"wk01|master",exporter="node",volume=~"root|pool|quota|artifact"}
+          / ci_storage_volume_total_inodes{job=~"wk01|master",exporter="node",volume=~"root|pool|quota|artifact"}
+          < bool 0.1) and on(job,instance) ((ci_storage_valid{job=~"wk01|master",exporter="node"}
+          == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          <= 90))
+        instant: true
+        range: false
+        refId: A
+        editorMode: code
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: query
+    noDataState: KeepLast
+    execErrState: KeepLast
+    for: 10m
+    annotations:
+      summary: Runner filesystem inode availability warning · {{ $labels.instance
+        }}
+      description: Core storage has fewer than 10% free inodes. Bytes alone do not
+        show this exhaustion risk.
+    labels:
+      alert_category: runner_storage
+      severity: warning
+    isPaused: false
+  - uid: runner-storage-inode-critical
+    title: Runner filesystem inode availability critical
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 300
+        to: 0
+      datasourceUid: prometheus
+      model:
+        expr: (ci_storage_volume_free_inodes{job=~"wk01|master",exporter="node",volume=~"root|pool|quota|artifact"}
+          / ci_storage_volume_total_inodes{job=~"wk01|master",exporter="node",volume=~"root|pool|quota|artifact"}
+          < bool 0.05) and on(job,instance) ((ci_storage_valid{job=~"wk01|master",exporter="node"}
+          == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          <= 90))
+        instant: true
+        range: false
+        refId: A
+        editorMode: code
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: query
+    noDataState: KeepLast
+    execErrState: KeepLast
+    for: 5m
+    annotations:
+      summary: Runner filesystem inode availability critical · {{ $labels.instance
+        }}
+      description: Core storage has fewer than 5% free inodes. Bytes alone do not
+        show this exhaustion risk.
+    labels:
+      alert_category: runner_storage
+      severity: critical
+    isPaused: false
+  - uid: runner-storage-core-mount
+    title: Runner core filesystem missing or read only
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 300
+        to: 0
+      datasourceUid: prometheus
+      model:
+        expr: (max by (job,instance,exporter,volume) (label_replace((ci_storage_volume_mount_present{job=~"wk01|master",exporter="node",volume=~"root|pool|quota|artifact"}
+          == bool 0),"signal","missing","","") or label_replace((ci_storage_volume_readonly{job=~"wk01|master",exporter="node",volume=~"root|pool|quota|artifact"}
+          == bool 1),"signal","readonly","",""))) and on(job,instance) ((ci_storage_valid{job=~"wk01|master",exporter="node"}
+          == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          <= 90))
+        instant: true
+        range: false
+        refId: A
+        editorMode: code
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: query
+    noDataState: KeepLast
+    execErrState: KeepLast
+    for: 1m
+    annotations:
+      summary: Runner core filesystem missing or read only · {{ $labels.instance }}
+      description: A required core filesystem is missing or read only. Admission must
+        retain reservations; investigate the mount/device and do not write into an
+        uncovered mountpoint.
+    labels:
+      alert_category: runner_storage
+      severity: critical
+    isPaused: false
+  - uid: runner-storage-cache-mount
+    title: Runner cache storage unavailable
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 300
+        to: 0
+      datasourceUid: prometheus
+      model:
+        expr: (max by(job,instance,exporter,volume) (label_replace((1 - ci_storage_volume_valid{job=~"wk01|master",exporter="node",volume=~"apt|docker|ghcr"}),"signal","invalid","","")
+          or label_replace(ci_storage_volume_readonly{job=~"wk01|master",exporter="node",volume=~"apt|docker|ghcr"},"signal","readonly","","")))
+          and on(job,instance) ((ci_storage_valid{job=~"wk01|master",exporter="node"}
+          == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          <= 90))
+        instant: true
+        range: false
+        refId: A
+        editorMode: code
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: query
+    noDataState: KeepLast
+    execErrState: KeepLast
+    for: 2m
+    annotations:
+      summary: Runner cache storage unavailable · {{ $labels.instance }}
+      description: A cache filesystem/backing identity is invalid. Cache acceleration
+        is degraded; verify origin fallback and restore the fixed cache mount.
+    labels:
+      alert_category: runner_storage
+      severity: warning
+    isPaused: false
+  - uid: runner-storage-cache-warning
+    title: Runner cache capacity 80%
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 300
+        to: 0
+      datasourceUid: prometheus
+      model:
+        expr: ((1 - ci_storage_volume_available_bytes{job=~"wk01|master",exporter="node",volume=~"apt|docker|ghcr"}
+          / ci_storage_volume_total_bytes{job=~"wk01|master",exporter="node",volume=~"apt|docker|ghcr"})
+          > bool 0.8) and on(job,instance) ((ci_storage_valid{job=~"wk01|master",exporter="node"}
+          == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          <= 90))
+        instant: true
+        range: false
+        refId: A
+        editorMode: code
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: query
+    noDataState: KeepLast
+    execErrState: KeepLast
+    for: 15m
+    annotations:
+      summary: Runner cache capacity 80% · {{ $labels.instance }}
+      description: Cache utilization is high. Inspect bounded cache maintenance and
+        verify upstream fallback; cache pressure is degraded acceleration, not a host
+        storage emergency.
+    labels:
+      alert_category: runner_storage
+      severity: warning
+    isPaused: false
+  - uid: runner-storage-cache-high
+    title: Runner cache capacity 90%
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 300
+        to: 0
+      datasourceUid: prometheus
+      model:
+        expr: ((1 - ci_storage_volume_available_bytes{job=~"wk01|master",exporter="node",volume=~"apt|docker|ghcr"}
+          / ci_storage_volume_total_bytes{job=~"wk01|master",exporter="node",volume=~"apt|docker|ghcr"})
+          > bool 0.9) and on(job,instance) ((ci_storage_valid{job=~"wk01|master",exporter="node"}
+          == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          <= 90))
+        instant: true
+        range: false
+        refId: A
+        editorMode: code
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: query
+    noDataState: KeepLast
+    execErrState: KeepLast
+    for: 5m
+    annotations:
+      summary: Runner cache capacity 90% · {{ $labels.instance }}
+      description: Cache utilization is high. Inspect bounded cache maintenance and
+        verify upstream fallback; cache pressure is degraded acceleration, not a host
+        storage emergency.
+    labels:
+      alert_category: runner_storage
+      severity: warning
+    isPaused: false
+  - uid: runner-storage-cache-reservation
+    title: Runner cache physical reservation incomplete
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 300
+        to: 0
+      datasourceUid: prometheus
+      model:
+        expr: (ci_storage_cache_unallocated_bytes{job=~"wk01|master",exporter="node"}
+          > bool 0) and on(job,instance) ((ci_storage_valid{job=~"wk01|master",exporter="node"}
+          == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
+          <= 90))
+        instant: true
+        range: false
+        refId: A
+        editorMode: code
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: query
+    noDataState: KeepLast
+    execErrState: KeepLast
+    for: 2m
+    annotations:
+      summary: Runner cache physical reservation incomplete · {{ $labels.instance
+        }}
+      description: 'The cache backing file is sparse: allocated bytes are below its
+        full logical reservation. Repair with a reviewed data-preserving allocation;
+        never format an existing cache or trim its reserved backing.'
+    labels:
+      alert_category: runner_storage
+      severity: warning
+    isPaused: false
+  - uid: runner-storage-quota-pressure
+    title: Master runner quota has limited allocation headroom
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 300
+        to: 0
+      datasourceUid: prometheus
+      model:
+        expr: ((ci_storage_quota_effective_remaining_bytes{job="master",instance="master",exporter="node"}
+          < bool 68719476736) and on(job,instance) ((ci_storage_valid{job="master",instance="master",exporter="node"}
+          == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job="master",instance="master",exporter="node"}
+          >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job="master",instance="master",exporter="node"}
+          <= 90)) and on(job,instance) (ci_storage_quota_valid{job="master",instance="master",exporter="node"}
+          == 1)) * on(job,instance) ((ci_pool_occupied_slots{job="master",instance="master",exporter="node"}
+          < bool ci_pool_capacity_slots{job="master",instance="master",exporter="node"})
+          and on(job,instance) (ci_pool_inventory_valid{job="master",instance="master",exporter="node"}
+          == 1) and on(job,instance) ((time()-ci_pool_memory_observed_timestamp_seconds{job="master",instance="master",exporter="node"}
+          >= 0) and on(job,instance) (time()-ci_pool_memory_observed_timestamp_seconds{job="master",instance="master",exporter="node"}
+          <= 90)) and on(job,instance) ((time()-ci_pool_collection_timestamp_seconds{job="master",instance="master",exporter="node"}
+          >= 0) and on(job,instance) (time()-ci_pool_collection_timestamp_seconds{job="master",instance="master",exporter="node"}
+          <= 90))) * on() group_left() ((sum(ci_pool_queue_waiting_jobs{job="wk01",instance="wk01",exporter="node"})
+          > bool 0) and (sum(ci_pool_queue_valid{job="wk01",instance="wk01",exporter="node"})
+          == 1) and (sum(time()-ci_pool_queue_observed_timestamp_seconds{job="wk01",instance="wk01",exporter="node"})
+          >= 0) and (sum(time()-ci_pool_queue_observed_timestamp_seconds{job="wk01",instance="wk01",exporter="node"})
+          <= 300) and (sum(time()-ci_pool_collection_timestamp_seconds{job="wk01",instance="wk01",exporter="node"})
+          >= 0) and (sum(time()-ci_pool_collection_timestamp_seconds{job="wk01",instance="wk01",exporter="node"})
+          <= 90))
+        instant: true
+        range: false
+        refId: A
+        editorMode: code
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: query
+    noDataState: KeepLast
+    execErrState: KeepLast
+    for: 5m
+    annotations:
+      summary: Master runner quota has limited allocation headroom · {{ $labels.instance
+        }}
+      description: Master effective quota remaining is below 64 GiB while fresh waiting
+        demand and a configured vacant slot exist. New disk allocation may be constrained;
+        a ready warm guest can still serve demand. Full normal occupancy does not
+        trigger this warning.
+    labels:
+      alert_category: runner_storage
+      severity: warning
+    isPaused: false
+  - uid: runner-storage-artifact-pressure
+    title: Runner artifact ledger capacity pressure
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 300
+        to: 0
+      datasourceUid: prometheus
+      model:
+        expr: (((ci_storage_artifact_capacity_bytes{job="wk01",instance="wk01",exporter="node"}
+          - ci_storage_artifact_reserved_bytes{job="wk01",instance="wk01",exporter="node"})
+          < bool 5368709120) and on(job,instance) ((ci_storage_valid{job="wk01",instance="wk01",exporter="node"}
+          == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job="wk01",instance="wk01",exporter="node"}
+          >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job="wk01",instance="wk01",exporter="node"}
+          <= 90)) and on(job,instance) (ci_storage_artifact_valid{job="wk01",instance="wk01",exporter="node"}
+          == 1)) * on() group_left() ((sum(ci_pool_queue_waiting_jobs{job="wk01",instance="wk01",exporter="node"})
+          > bool 0) and (sum(ci_pool_queue_valid{job="wk01",instance="wk01",exporter="node"})
+          == 1) and (sum(time()-ci_pool_queue_observed_timestamp_seconds{job="wk01",instance="wk01",exporter="node"})
+          >= 0) and (sum(time()-ci_pool_queue_observed_timestamp_seconds{job="wk01",instance="wk01",exporter="node"})
+          <= 300) and (sum(time()-ci_pool_collection_timestamp_seconds{job="wk01",instance="wk01",exporter="node"})
+          >= 0) and (sum(time()-ci_pool_collection_timestamp_seconds{job="wk01",instance="wk01",exporter="node"})
+          <= 90))
+        instant: true
+        range: false
+        refId: A
+        editorMode: code
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: query
+    noDataState: KeepLast
+    execErrState: KeepLast
+    for: 10m
+    annotations:
+      summary: Runner artifact ledger capacity pressure · {{ $labels.instance }}
+      description: Fewer than 5 GiB of the approved 40 GiB artifact ledger remain
+        while demand waits. Expired/quarantined objects remain charged until normal
+        deletion. Do not remove retained records or artifacts by hand.
+    labels:
+      alert_category: runner_storage
+      severity: warning
+    isPaused: false
+  - uid: runner-storage-raid
+    title: Runner RAID member failed
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 300
+        to: 0
+      datasourceUid: prometheus
+      model:
+        expr: (node_md_disks{job=~"wk01|master",exporter="node",device=~"md0|md127",state="failed"}
+          > bool 0) and on(job,instance) (up{job=~"wk01|master",exporter="node"} ==
+          1) and on(job,instance) (node_scrape_collector_success{job=~"wk01|master",exporter="node",collector="mdadm"}
+          == 1)
+        instant: true
+        range: false
+        refId: A
+        editorMode: code
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            params:
+            - 0.5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - C
+          reducer:
+            params: []
+            type: last
+          type: query
+    noDataState: KeepLast
+    execErrState: KeepLast
+    for: 1m
+    annotations:
+      summary: Runner RAID member failed · {{ $labels.instance }}
+      description: A RAID member is failed. Inspect the fixed host array and storage
+        health; do not change customer workloads or release reservations as a workaround.
+    labels:
+      alert_category: runner_storage
+      severity: critical
+    isPaused: false

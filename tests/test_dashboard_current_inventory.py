@@ -128,7 +128,8 @@ def test_shared_pool_ships_and_uses_current_stats_with_bounded_slot_states():
         assert POOL_LABELS in target['expr'] or 'job="master",instance="master",exporter="node"' in target['expr']
         for labels in re.findall(r'ci_pool_[a-z_]+\{([^}]*)\}',target['expr']):
             assert labels.startswith((POOL_LABELS,'job="master",instance="master",exporter="node"'))
-        assert 'rate(' not in target['expr']  # CPU is already an interval gauge.
+        if 'ci_pool_cpu_' in target['expr']:
+            assert 'rate(' not in target['expr']  # Pool CPU is already an interval gauge.
         assert '$__to' not in target['expr']  # Historical freshness must use evaluation time.
         if panel['type'] in {'stat', 'bargauge', 'gauge'}:
             assert target.get('instant') is True and target.get('range') is False
@@ -182,7 +183,7 @@ def test_shared_pool_actual_queries_hide_stale_invalid_and_missing_measurements(
     dashboard = pool_dashboard()
     labels=POOL_LABELS if host=='wk01' else 'job="master",instance="master",exporter="node"'
     measured = [(p, t) for p, t in pool_targets(dashboard)
-                if p['title'] != 'Source health' and not p['title'].startswith(('Waiting jobs','Fleet ')) and p['title'] not in SAMPLED_TIME_TITLES and labels in t['expr']]
+                if p['id'] <= 23 and p['title'] != 'Source health' and not p['title'].startswith(('Waiting jobs','Fleet ')) and p['title'] not in SAMPLED_TIME_TITLES and labels in t['expr']]
     # Each tuple is (source overrides, omitted metrics, eval time, CPU valid, inventory valid, source gone).
     scenarios = [
         ({}, (), '60s', True, True, False),

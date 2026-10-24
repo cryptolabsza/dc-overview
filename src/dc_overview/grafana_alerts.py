@@ -29,6 +29,21 @@ MANAGED_ALERT_UIDS = frozenset(
         "fleet-gpu-hardware-failure",
         "fleet-gpu-inventory-mismatch",
         "fleet-gpu-thermal-slowdown",
+        "runner-storage-telemetry",
+        "runner-storage-pool-warning",
+        "runner-storage-pool-critical",
+        "runner-storage-root-warning",
+        "runner-storage-root-critical",
+        "runner-storage-inode-warning",
+        "runner-storage-inode-critical",
+        "runner-storage-core-mount",
+        "runner-storage-cache-mount",
+        "runner-storage-cache-warning",
+        "runner-storage-cache-high",
+        "runner-storage-cache-reservation",
+        "runner-storage-quota-pressure",
+        "runner-storage-artifact-pressure",
+        "runner-storage-raid",
         "vast-machine-unlisted",
         "vast-listing-telemetry-unavailable",
         "vast-listing-state-unavailable",
@@ -117,6 +132,8 @@ def _template_document() -> Dict[str, Any]:
     document = yaml.safe_load(_template_path(ALERT_RULES_FILENAME).read_text(encoding="utf-8"))
     vast = yaml.safe_load(_template_path("vast-listing.yml").read_text(encoding="utf-8"))
     document["groups"].extend(vast["groups"])
+    storage = yaml.safe_load(_template_path("runner-storage.yml").read_text(encoding="utf-8"))
+    document["groups"].extend(storage["groups"])
     return document
 
 
