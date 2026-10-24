@@ -2,7 +2,7 @@
   "id": null,
   "uid": "shared-runner-pool",
   "title": "Shared Runner Pool",
-  "description": "Shared disposable VM pool on WK01: charged slots, measured resource usage, reservations and independent source freshness.",
+  "description": "Shared disposable VM pool on WK01 and master: VM reservations, lifecycle states, measured resources and independently sampled queue demand.",
   "tags": [
     "ci",
     "runner-pool",
@@ -59,7 +59,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "Stable slots per host \u00b7 30-second sampling \u00b7 shared across both organisations. **Occupied includes warm, destroying and quarantined VMs.** Available is verified capacity minus occupied; admission also depends on resources.\n\nUsage gaps mean stale, invalid or missing observations. Pool history starts at the first scrape; existing host history is unchanged. VM time is a sampled lifecycle estimate and gaps can undercount.\n\n**Job success/failure is not collected.** Quarantine does not identify a failed job. Sampled time is not exact job duration or billable time.\n\nWaiting jobs counts observed queued jobs matching admitted pool routes across both organisations. It is separate from charged VMs; workflow concurrency-held work is not observed. Queue refresh can take 120 seconds; observations older than 300 seconds are Unknown.\n\nBoth hosts are shown by default. Fleet counts require fresh, valid observations from WK01 and master: initial verified capacity is 10 + 2; 18 appears only after master admission and observations verify eight active slots. Missing or stale hosts leave fleet totals unknown. Master slots 0\u20133 belong to NUMA node 0 and slots 4\u20137 to node 1; initial slots are 0 and 4. Queue demand is observed once on WK01. History starts at the first scrape, without backfill. CPU ceilings are observed per host, not a shared fleet policy measurement."
+        "content": "Stable slots per host \u00b7 30-second sampling \u00b7 shared across both organisations. **Reserved VM slots includes warm spares and every VM lifecycle state. Warm VMs are already included in that total. Unallocated slots are capacity to prepare VMs, not ready runners.** Use Slot state history to distinguish Preparing, Ready spare and Runner launched; launched does not prove a job is busy.\n\nUsage gaps mean stale, invalid or missing observations. Pool history starts at the first scrape; existing host history is unchanged. VM time is a sampled lifecycle estimate and gaps can undercount.\n\n**Job success/failure is not collected.** Quarantine does not identify a failed job. Sampled time is not exact job duration or billable time.\n\nQueued admitted jobs is the latest GitHub queue snapshot and can include jobs whose VM is already reserved or preparing. Queue and VM observations refresh independently. Unadmitted recipes and workflow concurrency-held jobs are excluded; queue observations older than 300 seconds are Unknown. WK01 gets first choice; master handles overflow, while its blank warm spares may exist before WK01 is full. Cold VM preparation is serial per host.\n\nBoth hosts are shown by default. Fleet counts require fresh, valid observations from WK01 and master: initial verified capacity is 10 + 2; 18 appears only after master admission and observations verify eight active slots. Missing or stale hosts leave fleet totals unknown. Master slots 0\u20133 belong to NUMA node 0 and slots 4\u20137 to node 1; initial slots are 0 and 4. Queue demand is observed once on WK01. History starts at the first scrape, without backfill. CPU ceilings are observed per host, not a shared fleet policy measurement."
       }
     },
     {
@@ -86,7 +86,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "{{instance}} \u00b7 Verified capacity",
+          "legendFormat": "{{instance}}",
           "refId": "A",
           "instant": true,
           "range": false,
@@ -100,7 +100,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_capacity_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
-          "legendFormat": "{{instance}} \u00b7 Verified capacity",
+          "legendFormat": "{{instance}}",
           "refId": "A_master",
           "instant": true,
           "range": false,
@@ -140,7 +140,7 @@
     },
     {
       "id": 3,
-      "title": "Occupied slots",
+      "title": "Reserved VM slots",
       "type": "gauge",
       "pluginVersion": "12.3.3",
       "gridPos": {
@@ -149,7 +149,7 @@
         "w": 4,
         "h": 4
       },
-      "description": "Current verified inventory only. Collection and original inventory observation must both be 0\u201390 seconds old; missing or invalid data is Unknown.",
+      "description": "Every VM reservation, including preparing, ready, launched runners, warm spares, quarantined and destroying VMs. Warm VMs are included in this total; do not add them. This is not a count of busy jobs. Current verified inventory only. Collection and original inventory observation must both be 0\u201390 seconds old; missing or invalid data is Unknown.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -162,7 +162,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "{{instance}} \u00b7 Occupied slots",
+          "legendFormat": "{{instance}}",
           "refId": "A",
           "instant": true,
           "range": false,
@@ -176,7 +176,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_occupied_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
-          "legendFormat": "{{instance}} \u00b7 Occupied slots",
+          "legendFormat": "{{instance}}",
           "refId": "A_master",
           "instant": true,
           "range": false,
@@ -217,7 +217,7 @@
     },
     {
       "id": 4,
-      "title": "Available slots",
+      "title": "Unallocated slots",
       "type": "gauge",
       "pluginVersion": "12.3.3",
       "gridPos": {
@@ -226,7 +226,7 @@
         "w": 4,
         "h": 4
       },
-      "description": "Current verified inventory only. Collection and original inventory observation must both be 0\u201390 seconds old; missing or invalid data is Unknown.",
+      "description": "Verified VM capacity minus reserved VM slots. These slots need VM preparation before a job can run; resource and admission checks still apply. This is not a count of ready runners. Current verified inventory only. Collection and original inventory observation must both be 0\u201390 seconds old; missing or invalid data is Unknown.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -239,7 +239,7 @@
           },
           "editorMode": "code",
           "expr": "(ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} - ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "{{instance}} \u00b7 Available slots",
+          "legendFormat": "{{instance}}",
           "refId": "A",
           "instant": true,
           "range": false,
@@ -253,7 +253,7 @@
           },
           "editorMode": "code",
           "expr": "(ci_pool_capacity_slots{job=\"master\",instance=\"master\",exporter=\"node\"} - ci_pool_occupied_slots{job=\"master\",instance=\"master\",exporter=\"node\"}) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
-          "legendFormat": "{{instance}} \u00b7 Available slots",
+          "legendFormat": "{{instance}}",
           "refId": "A_master",
           "instant": true,
           "range": false,
@@ -294,7 +294,7 @@
     },
     {
       "id": 5,
-      "title": "Warm slots",
+      "title": "Warm VMs (all states)",
       "type": "stat",
       "pluginVersion": "12.3.3",
       "gridPos": {
@@ -303,7 +303,7 @@
         "w": 4,
         "h": 4
       },
-      "description": "Current verified inventory only. Collection and original inventory observation must both be 0\u201390 seconds old; missing or invalid data is Unknown.",
+      "description": "Blank, unregistered VM reservations in all lifecycle states, including preparing, ready, quarantined and destroying. Included in Reserved VM slots. Only Ready spare in Slot state history means immediately ready. Current verified inventory only. Collection and original inventory observation must both be 0\u201390 seconds old; missing or invalid data is Unknown.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -316,7 +316,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_warm_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "{{instance}} \u00b7 Warm slots",
+          "legendFormat": "{{instance}}",
           "refId": "A",
           "instant": true,
           "range": false,
@@ -330,7 +330,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_warm_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
-          "legendFormat": "{{instance}} \u00b7 Warm slots",
+          "legendFormat": "{{instance}}",
           "refId": "A_master",
           "instant": true,
           "range": false,
@@ -610,7 +610,7 @@
         "w": 12,
         "h": 7
       },
-      "description": "Sampled cumulative VM lifecycle time in the chosen dashboard window: fixed30-second state samples \u00d730 seconds. Freshness is evaluated at each historical sample; unknown/disabled states and missing or stale intervals are excluded. This is an estimate, not exact job duration or billable time. History starts at the first scrape and gaps can undercount. An entirely unobserved window is No data; a known idle window can be zero. Running includes state5 only. One bar per observed slot0\u20137; slots with no known samples are absent.",
+      "description": "Sampled cumulative VM lifecycle time in the chosen dashboard window: fixed30-second state samples \u00d730 seconds. Freshness is evaluated at each historical sample; unknown/disabled states and missing or stale intervals are excluded. This is an estimate, not exact job duration or billable time. History starts at the first scrape and gaps can undercount. An entirely unobserved window is No data; a known idle window can be zero. Running includes state5 only. One bar per observed slot0\u20139; slots with no known samples are absent.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -690,7 +690,7 @@
         "w": 24,
         "h": 9
       },
-      "description": "Slots 0\u20137 only. Verified inactive slots are Disabled. Invalid or stale inventory becomes Unknown while a slot series exists; disappearing sources leave gaps. Warm guests retain preparing, destroying or quarantine lifecycle states. These are pool observations, not individual job durations.",
+      "description": "Slots 0\u20139 per host. Verified inactive slots are Disabled. Invalid or stale inventory becomes Unknown while a slot series exists; disappearing sources leave gaps. Warm guests retain preparing, destroying or quarantine lifecycle states. These are pool observations, not individual job durations. Ready spare is a blank VM ready to claim. Runner launched means the runner process started, not proof that a GitHub job is busy.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -754,7 +754,7 @@
                   "index": 0
                 },
                 "1": {
-                  "text": "Warm",
+                  "text": "Ready spare",
                   "color": "#5794F2",
                   "index": 1
                 },
@@ -774,7 +774,7 @@
                   "index": 4
                 },
                 "5": {
-                  "text": "Running",
+                  "text": "Runner launched",
                   "color": "#56A64B",
                   "index": 5
                 },
@@ -828,7 +828,7 @@
     },
     {
       "id": 7,
-      "title": "Slot occupancy",
+      "title": "VM slot reservations",
       "type": "timeseries",
       "pluginVersion": "12.3.3",
       "gridPos": {
@@ -837,7 +837,7 @@
         "w": 12,
         "h": 8
       },
-      "description": "Charged occupancy and verified capacity at each historical evaluation. Warm is a subset of occupied; do not add them. Destroying and quarantined guests remain charged. Gaps indicate untrusted inventory.",
+      "description": "Reserved VM slots and verified capacity at each historical observation. Warm VMs (all states) are a subset of reservations; do not add them. Unallocated is capacity minus reservations, not ready runners. Quarantined and destroying VMs retain their reservations. Gaps indicate untrusted inventory.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -850,7 +850,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "{{instance}} \u00b7 Occupied",
+          "legendFormat": "{{instance}} \u00b7 Reserved VM slots",
           "refId": "A",
           "instant": false,
           "range": true,
@@ -878,7 +878,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_warm_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "{{instance}} \u00b7 Warm",
+          "legendFormat": "{{instance}} \u00b7 Warm (all states)",
           "refId": "C",
           "instant": false,
           "range": true,
@@ -892,7 +892,7 @@
           },
           "editorMode": "code",
           "expr": "(ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} - ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "{{instance}} \u00b7 Available",
+          "legendFormat": "{{instance}} \u00b7 Unallocated",
           "refId": "D",
           "instant": false,
           "range": true,
@@ -906,7 +906,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_occupied_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
-          "legendFormat": "{{instance}} \u00b7 Occupied",
+          "legendFormat": "{{instance}} \u00b7 Reserved VM slots",
           "refId": "A_master",
           "instant": false,
           "range": true,
@@ -934,7 +934,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_warm_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
-          "legendFormat": "{{instance}} \u00b7 Warm",
+          "legendFormat": "{{instance}} \u00b7 Warm (all states)",
           "refId": "C_master",
           "instant": false,
           "range": true,
@@ -948,7 +948,7 @@
           },
           "editorMode": "code",
           "expr": "(ci_pool_capacity_slots{job=\"master\",instance=\"master\",exporter=\"node\"} - ci_pool_occupied_slots{job=\"master\",instance=\"master\",exporter=\"node\"}) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)",
-          "legendFormat": "{{instance}} \u00b7 Available",
+          "legendFormat": "{{instance}} \u00b7 Unallocated",
           "refId": "D_master",
           "instant": false,
           "range": true,
@@ -1347,7 +1347,7 @@
         "w": 12,
         "h": 8
       },
-      "description": "Measured QEMU cgroup RAM versus configured QEMU reservation. Slots 0\u20137 only. Unknown or unavailable numeric measurements remain gaps, including empty slots without observed RAM. Each query requires fresh verified inventory and collector.",
+      "description": "Measured QEMU cgroup RAM versus configured QEMU reservation. Slots 0\u20139 per host; inactive slots are Disabled. Unknown or unavailable numeric measurements remain gaps, including empty slots without observed RAM. Each query requires fresh verified inventory and collector.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1483,7 +1483,7 @@
         "w": 12,
         "h": 8
       },
-      "description": "Observed guest RAM versus configured guest reservation. Guest and QEMU values measure different boundaries; do not add them. Slots 0\u20137 only. Unknown or unavailable numeric measurements remain gaps, including empty slots without observed RAM. Each query requires fresh verified inventory and collector.",
+      "description": "Observed guest RAM versus configured guest reservation. Guest and QEMU values measure different boundaries; do not add them. Slots 0\u20139 per host; inactive slots are Disabled. Unknown or unavailable numeric measurements remain gaps, including empty slots without observed RAM. Each query requires fresh verified inventory and collector.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1846,7 +1846,7 @@
     },
     {
       "id": 18,
-      "title": "Waiting jobs",
+      "title": "Queued admitted jobs",
       "type": "stat",
       "pluginVersion": "12.3.3",
       "gridPos": {
@@ -1855,7 +1855,7 @@
         "w": 4,
         "h": 4
       },
-      "description": "Observed queued jobs matching admitted pool routes, separate from occupied VMs. Total across both organisations. Fresh complete zero is zero; missing, invalid, future or older than 300-second source is Unknown. Workflow concurrency-held jobs are not observed.",
+      "description": "Latest GitHub snapshot of queued jobs matching admitted pool routes across both organisations. May include jobs whose VM is already reserved or preparing. Published before allocation and refreshed after discovery; queue and inventory observations update independently. Unadmitted recipes and workflow concurrency-held jobs are excluded. Fresh complete zero is zero; missing, invalid, future or older than 300-second source is Unknown.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1868,7 +1868,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_queue_waiting_jobs{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_queue_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_queue_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_queue_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 300) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "Waiting jobs",
+          "legendFormat": "Queued admitted jobs",
           "refId": "A",
           "instant": true,
           "range": false,
@@ -1908,7 +1908,7 @@
     },
     {
       "id": 19,
-      "title": "Waiting jobs history",
+      "title": "Queued admitted jobs history",
       "type": "timeseries",
       "pluginVersion": "12.3.3",
       "gridPos": {
@@ -1917,7 +1917,7 @@
         "w": 24,
         "h": 6
       },
-      "description": "Observed queued jobs matching admitted pool routes, separate from occupied VMs. Total across both organisations. Fresh complete zero is zero; missing, invalid, future or older than 300-second source is Unknown. Workflow concurrency-held jobs are not observed.",
+      "description": "Latest GitHub snapshot of queued jobs matching admitted pool routes across both organisations. May include jobs whose VM is already reserved or preparing. Published before allocation and refreshed after discovery; queue and inventory observations update independently. Unadmitted recipes and workflow concurrency-held jobs are excluded. Fresh complete zero is zero; missing, invalid, future or older than 300-second source is Unknown.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1930,7 +1930,7 @@
           },
           "editorMode": "code",
           "expr": "ci_pool_queue_waiting_jobs{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_queue_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_queue_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_queue_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 300) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)",
-          "legendFormat": "Waiting jobs",
+          "legendFormat": "Queued admitted jobs",
           "refId": "A",
           "instant": false,
           "range": true,
@@ -2042,7 +2042,7 @@
     },
     {
       "id": 21,
-      "title": "Fleet occupied slots",
+      "title": "Fleet reserved VM slots",
       "type": "gauge",
       "pluginVersion": "12.3.3",
       "gridPos": {
@@ -2051,7 +2051,7 @@
         "w": 8,
         "h": 4
       },
-      "description": "Requires independently fresh, valid inventory and active capacity from both exact hosts. Missing, invalid or stale observations produce unknown, never a partial sum. Capacity is observed admission, not the configured maximum.",
+      "description": "Every VM reservation, including preparing, ready, launched runners, warm spares, quarantined and destroying VMs. Warm VMs are included in this total; do not add them. This is not a count of busy jobs. Requires independently fresh, valid inventory and active capacity from both exact hosts. Missing, invalid or stale observations produce unknown, never a partial sum. Capacity is observed admission, not the configured maximum.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -2064,7 +2064,7 @@
           },
           "editorMode": "code",
           "expr": "sum(((ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) or (ci_pool_occupied_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)))) and on() (count(((ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) or (ci_pool_occupied_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)))) == 2) and on() (count(((ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) or (ci_pool_capacity_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)))) == 2)",
-          "legendFormat": "Fleet occupied slots",
+          "legendFormat": "Fleet reserved VM slots",
           "refId": "A",
           "instant": true,
           "range": false,
@@ -2105,7 +2105,7 @@
     },
     {
       "id": 22,
-      "title": "Fleet available slots",
+      "title": "Fleet unallocated slots",
       "type": "gauge",
       "pluginVersion": "12.3.3",
       "gridPos": {
@@ -2114,7 +2114,7 @@
         "w": 8,
         "h": 4
       },
-      "description": "Requires independently fresh, valid inventory and active capacity from both exact hosts. Missing, invalid or stale observations produce unknown, never a partial sum. Capacity is observed admission, not the configured maximum.",
+      "description": "Verified VM capacity minus reserved VM slots. These slots need VM preparation before a job can run; resource and admission checks still apply. This is not a count of ready runners. Requires independently fresh, valid inventory and active capacity from both exact hosts. Missing, invalid or stale observations produce unknown, never a partial sum. Capacity is observed admission, not the configured maximum.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -2127,7 +2127,7 @@
           },
           "editorMode": "code",
           "expr": "sum((((ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} - ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) or ((ci_pool_capacity_slots{job=\"master\",instance=\"master\",exporter=\"node\"} - ci_pool_occupied_slots{job=\"master\",instance=\"master\",exporter=\"node\"}) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)))) and on() (count((((ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} - ci_pool_occupied_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) or ((ci_pool_capacity_slots{job=\"master\",instance=\"master\",exporter=\"node\"} - ci_pool_occupied_slots{job=\"master\",instance=\"master\",exporter=\"node\"}) and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)))) == 2) and on() (count(((ci_pool_capacity_slots{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) or (ci_pool_capacity_slots{job=\"master\",instance=\"master\",exporter=\"node\"} and on (job, instance, exporter) (ci_pool_inventory_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_memory_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on (job, instance, exporter) (time() - ci_pool_collection_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)))) == 2)",
-          "legendFormat": "Fleet available slots",
+          "legendFormat": "Fleet unallocated slots",
           "refId": "A",
           "instant": true,
           "range": false,
