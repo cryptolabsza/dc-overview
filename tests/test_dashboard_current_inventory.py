@@ -60,8 +60,8 @@ def test_shared_pool_two_host_fleet_and_slot_identity(tmp_path):
     dashboard=pool_dashboard()
     panels={p['title']:p for p in dashboard['panels']}
     assert 'Fleet verified capacity' in panels
-    assert panels['Fleet occupied slots']['type']=='gauge'
-    assert panels['Fleet occupied slots']['fieldConfig']['defaults']['max']==18
+    assert panels['Fleet reserved VM slots']['type']=='gauge'
+    assert panels['Fleet reserved VM slots']['fieldConfig']['defaults']['max']==18
     master_labels='job="master",instance="master",exporter="node"'
     cases=[]
     def host_series(host, overrides=None, omit=()):
@@ -96,10 +96,10 @@ def test_shared_pool_two_host_fleet_and_slot_identity(tmp_path):
             capacity=12 if failure=='healthy2' else 18
             occupied=6 if failure=='healthy2' else 10
             queries=[query(panels['Fleet verified capacity']['targets'][0]['expr'],capacity if valid else None),
-                     query(panels['Fleet occupied slots']['targets'][0]['expr'],occupied if valid else None),
-                     query(panels['Fleet available slots']['targets'][0]['expr'],capacity-occupied if valid else None)]
+                     query(panels['Fleet reserved VM slots']['targets'][0]['expr'],occupied if valid else None),
+                     query(panels['Fleet unallocated slots']['targets'][0]['expr'],capacity-occupied if valid else None)]
             # The only demand producer is WK01 even if master exposes queue gauges.
-            queries.append(query(panels['Waiting jobs']['targets'][0]['expr'],None if host=='wk01' and failure in ('missing','stale-export') else 4))
+            queries.append(query(panels['Queued admitted jobs']['targets'][0]['expr'],None if host=='wk01' and failure in ('missing','stale-export') else 4))
             if valid:
                 timeline=' or '.join('('+t['expr']+')' for t in panels['Slot state history']['targets'])
                 queries.append(query('count(('+timeline+'))',20))
@@ -117,6 +117,11 @@ def test_shared_pool_two_host_fleet_and_slot_identity(tmp_path):
 def test_shared_pool_ships_and_uses_current_stats_with_bounded_slot_states():
     dashboard = pool_dashboard()
     assert dashboard['uid'] == 'shared-runner-pool'
+    titles = {panel['id']: panel['title'] for panel in dashboard['panels']}
+    assert {key: titles[key] for key in (3, 4, 5, 18, 19)} == {
+        3: 'Reserved VM slots', 4: 'Unallocated slots', 5: 'Warm VMs (all states)',
+        18: 'Queued admitted jobs', 19: 'Queued admitted jobs history',
+    }
     assert '"dashboards/*.json"' in (ROOT / 'pyproject.toml').read_text()
     tree = ast.parse((ROOT / 'src/dc_overview/quickstart.py').read_text())
     configure = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == 'configure_grafana')
@@ -140,8 +145,8 @@ def test_shared_pool_ships_and_uses_current_stats_with_bounded_slot_states():
     timeline = next(p for p in dashboard['panels'] if p['type'] == 'state-timeline')
     mappings = timeline['fieldConfig']['defaults']['mappings'][0]['options']
     assert {int(code): value['text'].lower() for code, value in mappings.items()} == {
-        0: 'empty', 1: 'warm', 2: 'reserved', 3: 'preparing', 4: 'launching',
-        5: 'running', 6: 'quarantined', 7: 'destroying', 8: 'ready', 9: 'unknown', 10: 'disabled',
+        0: 'empty', 1: 'ready spare', 2: 'reserved', 3: 'preparing', 4: 'launching',
+        5: 'runner launched', 6: 'quarantined', 7: 'destroying', 8: 'ready', 9: 'unknown', 10: 'disabled',
     }
     assert timeline['fieldConfig']['defaults']['custom']['spanNulls'] is False
     assert any(panel['type'] == 'heatmap' for panel in dashboard['panels'])
@@ -183,7 +188,7 @@ def test_shared_pool_actual_queries_hide_stale_invalid_and_missing_measurements(
     dashboard = pool_dashboard()
     labels=POOL_LABELS if host=='wk01' else 'job="master",instance="master",exporter="node"'
     measured = [(p, t) for p, t in pool_targets(dashboard)
-                if p['id'] <= 23 and p['title'] != 'Source health' and not p['title'].startswith(('Waiting jobs','Fleet ')) and p['title'] not in SAMPLED_TIME_TITLES and labels in t['expr']]
+                if p['id'] <= 23 and p['title'] != 'Source health' and not p['title'].startswith(('Queued admitted jobs','Fleet ')) and p['title'] not in SAMPLED_TIME_TITLES and labels in t['expr']]
     # Each tuple is (source overrides, omitted metrics, eval time, CPU valid, inventory valid, source gone).
     scenarios = [
         ({}, (), '60s', True, True, False),
@@ -237,7 +242,7 @@ def test_shared_pool_actual_queries_hide_stale_invalid_and_missing_measurements(
         cases.append({'name': f'missing {metric}', 'interval': '30s',
                       'input_series': pool_series(omit=(metric,)), 'promql_expr_test': queries})
     # Validate available capacity arithmetic and interval CPU gauge units.
-    for panel_title, expected in [('Available slots', 1), ('CPU utilization heatmap', 25)]:
+    for panel_title, expected in [('Unallocated slots', 1), ('CPU utilization heatmap', 25)]:
         title='Master CPU utilization heatmap' if host=='master' and panel_title=='CPU utilization heatmap' else panel_title
         panel = next(p for p in dashboard['panels'] if p['title'] == title)
         target=next(t for t in panel['targets'] if labels in t['expr'])
@@ -316,10 +321,10 @@ def test_shared_pool_sampled_time_excludes_unknown_and_gaps_and_counts_quarantin
 def test_shared_pool_waiting_jobs_have_independent_freshness_and_high_slots_are_retained(tmp_path):
     dashboard=pool_dashboard()
     panels={p['title']:p for p in dashboard['panels']}
-    for title in ('Occupied slots','Available slots'):
+    for title in ('Reserved VM slots','Unallocated slots'):
         assert panels[title]['type']=='gauge'
         assert panels[title]['fieldConfig']['defaults']['max']==10
-    queue_panels=[p for p in dashboard['panels'] if p['title'].startswith('Waiting jobs')]
+    queue_panels=[p for p in dashboard['panels'] if p['title'].startswith('Queued admitted jobs')]
     assert {p['type'] for p in queue_panels}=={'stat','timeseries'}
     cases=[]
     def query(expr,value):
