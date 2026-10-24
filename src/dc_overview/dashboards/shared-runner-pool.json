@@ -2252,6 +2252,934 @@
           "unit": "short"
         }
       }
+    },
+    {
+      "id": 24,
+      "title": "Storage and cache health",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 75,
+        "w": 24,
+        "h": 3
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "Storage values require a fresh, valid read-only sample. **Unknown is never zero.** Headroom subtracts full existing raw disk reservations; the protected floor is **600 GiB**. Master quota is shown separately. Cache alerts mean degraded acceleration when origin fallback works."
+      }
+    },
+    {
+      "id": 25,
+      "title": "Conservative pool storage headroom",
+      "type": "timeseries",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 0,
+        "y": 78,
+        "w": 24,
+        "h": 8
+      },
+      "description": "Physical free minus the full logical size of every existing raw disk. Negative values are preserved. 600 GiB is the protected floor; this is not an allocatable VM count.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(ci_storage_pool_effective_free_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}) and on(job,instance) ((ci_storage_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) and on(job,instance) (ci_storage_pool_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1)",
+          "legendFormat": "wk01 \u00b7 {{volume}}",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(ci_storage_pool_effective_free_bytes{job=\"master\",instance=\"master\",exporter=\"node\"}) and on(job,instance) ((ci_storage_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)) and on(job,instance) (ci_storage_pool_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1)",
+          "legendFormat": "master \u00b7 {{volume}}",
+          "refId": "B",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false,
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 6,
+            "showPoints": "never",
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "min": null,
+          "max": null,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 26,
+      "title": "Physical filesystem available space",
+      "type": "timeseries",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 0,
+        "y": 86,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Available bytes on the root and actual pool filesystems, before conservative reservations.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(ci_storage_volume_available_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",volume=~\"root|pool\"}) and on(job,instance) ((ci_storage_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90))",
+          "legendFormat": "wk01 \u00b7 {{volume}}",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(ci_storage_volume_available_bytes{job=\"master\",instance=\"master\",exporter=\"node\",volume=~\"root|pool\"}) and on(job,instance) ((ci_storage_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90))",
+          "legendFormat": "master \u00b7 {{volume}}",
+          "refId": "B",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false,
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 6,
+            "showPoints": "never",
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "min": null,
+          "max": null,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 27,
+      "title": "Master quota effective remaining",
+      "type": "stat",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 12,
+        "y": 86,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Effective project quota remaining. Master pool is a bind mount of the XFS quota directory, not master /data physical storage. Capacity warnings require waiting demand and a configured vacant slot.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(ci_storage_quota_effective_remaining_bytes{job=\"master\",instance=\"master\",exporter=\"node\"}) and on(job,instance) ((ci_storage_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90)) and on(job,instance) (ci_storage_quota_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1)",
+          "legendFormat": "master \u00b7 effective quota remaining",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "min": null,
+          "max": null,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 28,
+      "title": "Cache filesystem usage",
+      "type": "timeseries",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 0,
+        "y": 94,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Bounded APT, Docker Hub and public GHCR cache filesystems. High usage signals degraded acceleration when fallback works.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(100*(1-ci_storage_volume_available_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",volume=~\"apt|docker|ghcr\"}/ci_storage_volume_total_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",volume=~\"apt|docker|ghcr\"})) and on(job,instance) ((ci_storage_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90))",
+          "legendFormat": "wk01 \u00b7 {{volume}}",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(100*(1-ci_storage_volume_available_bytes{job=\"master\",instance=\"master\",exporter=\"node\",volume=~\"apt|docker|ghcr\"}/ci_storage_volume_total_bytes{job=\"master\",instance=\"master\",exporter=\"node\",volume=~\"apt|docker|ghcr\"})) and on(job,instance) ((ci_storage_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90))",
+          "legendFormat": "master \u00b7 {{volume}}",
+          "refId": "B",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false,
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 6,
+            "showPoints": "never",
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "min": null,
+          "max": null,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 29,
+      "title": "Cache backing reservation debt",
+      "type": "bargauge",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 12,
+        "y": 94,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Logical bytes minus physically allocated backing bytes. Zero means fully reserved; unknown is not zero.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(ci_storage_cache_unallocated_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}) and on(job,instance) ((ci_storage_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90))",
+          "legendFormat": "wk01 \u00b7 {{cache}}",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(ci_storage_cache_unallocated_bytes{job=\"master\",instance=\"master\",exporter=\"node\"}) and on(job,instance) ((ci_storage_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90))",
+          "legendFormat": "master \u00b7 {{cache}}",
+          "refId": "B",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "custom": {
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "min": null,
+          "max": null,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "valueMode": "color",
+        "showUnfilled": false,
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "sizing": "auto",
+        "minVizHeight": 12,
+        "maxVizHeight": 300
+      },
+      "interval": "30s"
+    },
+    {
+      "id": 30,
+      "title": "Artifact ledger reservations",
+      "type": "gauge",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 0,
+        "y": 102,
+        "w": 6,
+        "h": 8
+      },
+      "description": "Every nondeleted artifact remains charged, including expired and quarantined records. Approved capacity: 40 GiB/eight objects.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(ci_storage_artifact_reserved_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}) and on(job,instance) ((ci_storage_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90)) and on(job,instance) (ci_storage_artifact_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1)",
+          "legendFormat": "wk01 \u00b7 artifact reservations",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "custom": {
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "min": null,
+          "max": 42949672960,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": false,
+        "sizing": "auto"
+      }
+    },
+    {
+      "id": 31,
+      "title": "Core filesystem inode availability",
+      "type": "timeseries",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 6,
+        "y": 102,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Available inodes on the fixed core filesystems; complements byte capacity.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(100*ci_storage_volume_free_inodes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",volume=~\"root|pool|quota|artifact\"}/ci_storage_volume_total_inodes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",volume=~\"root|pool|quota|artifact\"}) and on(job,instance) ((ci_storage_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90))",
+          "legendFormat": "wk01 \u00b7 {{volume}}",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(100*ci_storage_volume_free_inodes{job=\"master\",instance=\"master\",exporter=\"node\",volume=~\"root|pool|quota|artifact\"}/ci_storage_volume_total_inodes{job=\"master\",instance=\"master\",exporter=\"node\",volume=~\"root|pool|quota|artifact\"}) and on(job,instance) ((ci_storage_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90))",
+          "legendFormat": "master \u00b7 {{volume}}",
+          "refId": "B",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false,
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 6,
+            "showPoints": "never",
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "min": null,
+          "max": null,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 32,
+      "title": "Storage volume health",
+      "type": "stat",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 18,
+        "y": 102,
+        "w": 6,
+        "h": 8
+      },
+      "description": "Fresh fixed mount and backing validity. Missing or read-only core storage is critical; cache problems degrade acceleration.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(((ci_storage_volume_mount_present{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 0)*0+3) or on(job,instance,volume) ((ci_storage_volume_readonly{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1)*0+2) or on(job,instance,volume) ci_storage_volume_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"}) and on(job,instance) ((ci_storage_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90))",
+          "legendFormat": "wk01 \u00b7 {{volume}}",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(((ci_storage_volume_mount_present{job=\"master\",instance=\"master\",exporter=\"node\"} == 0)*0+3) or on(job,instance,volume) ((ci_storage_volume_readonly{job=\"master\",instance=\"master\",exporter=\"node\"} == 1)*0+2) or on(job,instance,volume) ci_storage_volume_valid{job=\"master\",instance=\"master\",exporter=\"node\"}) and on(job,instance) ((ci_storage_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90))",
+          "legendFormat": "master \u00b7 {{volume}}",
+          "refId": "B",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "min": null,
+          "max": null,
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Invalid",
+                  "color": "orange"
+                },
+                "1": {
+                  "text": "Healthy",
+                  "color": "green"
+                },
+                "2": {
+                  "text": "Read only",
+                  "color": "red"
+                },
+                "3": {
+                  "text": "Missing mount",
+                  "color": "red"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 33,
+      "title": "Pool array busy time",
+      "type": "timeseries",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 0,
+        "y": 110,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Array busy time from Node Exporter counters. This shows I/O pressure; it does not predict time to disk exhaustion.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(100*rate(node_disk_io_time_seconds_total{job=\"wk01\",instance=\"wk01\",exporter=\"node\",device=\"md0\"}[5m])) and on(job,instance) (up{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1)",
+          "legendFormat": "wk01 \u00b7 md0",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "(100*rate(node_disk_io_time_seconds_total{job=\"master\",instance=\"master\",exporter=\"node\",device=\"md127\"}[5m])) and on(job,instance) (up{job=\"master\",instance=\"master\",exporter=\"node\"} == 1)",
+          "legendFormat": "master \u00b7 md127",
+          "refId": "B",
+          "instant": false,
+          "range": true,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false,
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 6,
+            "showPoints": "never",
+            "axisPlacement": "auto",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "min": null,
+          "max": null,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 34,
+      "title": "Failed RAID members",
+      "type": "stat",
+      "pluginVersion": "12.3.3",
+      "gridPos": {
+        "x": 12,
+        "y": 110,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Failed member count from fresh Node Exporter mdadm collection. Missing series are Unknown.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "node_md_disks{job=\"wk01\",instance=\"wk01\",exporter=\"node\",device=\"md0\",state=\"failed\"} and on(job,instance) (up{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on(job,instance) (node_scrape_collector_success{job=\"wk01\",instance=\"wk01\",exporter=\"node\",collector=\"mdadm\"} == 1)",
+          "legendFormat": "wk01 \u00b7 md0",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "node_md_disks{job=\"master\",instance=\"master\",exporter=\"node\",device=\"md127\",state=\"failed\"} and on(job,instance) (up{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on(job,instance) (node_scrape_collector_success{job=\"master\",instance=\"master\",exporter=\"node\",collector=\"mdadm\"} == 1)",
+          "legendFormat": "master \u00b7 md127",
+          "refId": "B",
+          "instant": true,
+          "range": false,
+          "format": "time_series",
+          "interval": "30s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "Unknown",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "min": null,
+          "max": null,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
     }
   ]
 }

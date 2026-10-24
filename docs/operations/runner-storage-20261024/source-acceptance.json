@@ -1,0 +1,16 @@
+{
+  "status": "source-verified; live deployment pending",
+  "owner_approval": "Add GHCR and approve the plan, 2026-10-24",
+  "scope": "11 appended storage dashboard panels and 15 managed Runner Storage alert rules; existing 23 panels unchanged",
+  "validation": [
+    "88 focused Grafana/storage tests passed",
+    "86 existing Grafana/dashboard tests passed",
+    "real promtool cases: healthy, low/negative headroom, stale/invalid/missing data, missing core volume, demand/full occupancy, demand end, cache read-only",
+    "live Prometheus metric labels verified for both hosts",
+    "independent correctness review: no remaining findings"
+  ],
+  "notification_receiver": "Lab monitoring Telegram; existing routing/contact secrets preserved",
+  "no_service_restarts": true,
+  "alert_source_sha256": "a6b27eaedafc1ed40092dd5bb70ff6ec1410bcf35374b5c1e2fd370e637f6a49",
+  "publication_route": "feature PR into dev; no version change"
+}
