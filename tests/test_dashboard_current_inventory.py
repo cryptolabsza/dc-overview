@@ -1,5 +1,6 @@
 """Current-inventory dashboard controls must not read stale range data."""
 import json
+import re
 from pathlib import Path
 import ast
 import shutil
@@ -55,6 +56,64 @@ def pool_targets(dashboard):
             yield panel, target
 
 
+def test_shared_pool_two_host_fleet_and_slot_identity(tmp_path):
+    dashboard=pool_dashboard()
+    panels={p['title']:p for p in dashboard['panels']}
+    assert 'Fleet verified capacity' in panels
+    assert panels['Fleet occupied slots']['type']=='gauge'
+    assert panels['Fleet occupied slots']['fieldConfig']['defaults']['max']==18
+    master_labels='job="master",instance="master",exporter="node"'
+    cases=[]
+    def host_series(host, overrides=None, omit=()):
+        return [dict(row,series=row['series'].replace(POOL_LABELS,master_labels) if host=='master' else row['series'])
+                for row in pool_series(overrides,omit)]
+    def query(expr,value):
+        return {'expr':f'sum(({expr}))','eval_time':'120s',
+                'exp_samples':[] if value is None else [{'labels':'{}','value':value}]}
+    for host in ('wk01','master'):
+        for failure in ('healthy2','healthy8','missing','stale-memory','stale-export','invalid','missing-capacity'):
+            inputs=[]
+            for h in ('wk01','master'):
+                if h==host and failure=='missing':continue
+                overrides={'capacity_slots':f'{2 if failure=="healthy2" else 8}+0x8' if h=='master' else '10+0x8',
+                           'occupied_slots':f'{1 if failure=="healthy2" else 5}+0x8' if h=='master' else '5+0x8',
+                           'queue_waiting_jobs':'4+0x8','queue_valid':'1+0x8','queue_observed_timestamp_seconds':'0+30x8'}
+                omissions=()
+                if h==host:
+                    if failure=='stale-memory':overrides['memory_observed_timestamp_seconds']='0+0x8'
+                    elif failure=='stale-export':overrides['collection_timestamp_seconds']='0+0x8'
+                    elif failure=='invalid':overrides['inventory_valid']='0+0x8'
+                    elif failure=='missing-capacity':omissions=('capacity_slots',)
+                rows=host_series(h,overrides,omissions)
+                if h=='master':
+                    for row in rows:
+                        if row['series'].startswith('ci_pool_slot_state{'):
+                            slot=int(row['series'].split('slot="')[1].split('"')[0])
+                            if failure=='healthy2':row['values']=f'{5 if slot==0 else 0 if slot==4 else 10}+0x8'
+                            elif slot in (8,9):row['values']='10+0x8'
+                inputs+=rows
+            valid=failure.startswith('healthy')
+            capacity=12 if failure=='healthy2' else 18
+            occupied=6 if failure=='healthy2' else 10
+            queries=[query(panels['Fleet verified capacity']['targets'][0]['expr'],capacity if valid else None),
+                     query(panels['Fleet occupied slots']['targets'][0]['expr'],occupied if valid else None),
+                     query(panels['Fleet available slots']['targets'][0]['expr'],capacity-occupied if valid else None)]
+            # The only demand producer is WK01 even if master exposes queue gauges.
+            queries.append(query(panels['Waiting jobs']['targets'][0]['expr'],None if host=='wk01' and failure in ('missing','stale-export') else 4))
+            if valid:
+                timeline=' or '.join('('+t['expr']+')' for t in panels['Slot state history']['targets'])
+                queries.append(query('count(('+timeline+'))',20))
+                queries.append(query('count(('+timeline+') and on(job,instance,exporter,slot) ci_pool_slot_state{job="master",instance="master",exporter="node",slot="0"})',1))
+            cases.append({'name':host+' '+failure,'interval':'30s','input_series':inputs,'promql_expr_test':queries})
+    for panel,target in pool_targets(dashboard):
+        if panel['id'] in (18,19):assert master_labels not in target['expr']
+        if '{{slot}}' in target.get('legendFormat',''):assert '{{instance}}' in target['legendFormat']
+    fixture=tmp_path/'shared-pool-fleet.test.yml'
+    fixture.write_text(yaml.safe_dump({'evaluation_interval':'30s','tests':cases},sort_keys=False))
+    result=subprocess.run([shutil.which('promtool'),'test','rules',str(fixture)],text=True,capture_output=True)
+    assert result.returncode==0,result.stdout+result.stderr
+
+
 def test_shared_pool_ships_and_uses_current_stats_with_bounded_slot_states():
     dashboard = pool_dashboard()
     assert dashboard['uid'] == 'shared-runner-pool'
@@ -66,7 +125,9 @@ def test_shared_pool_ships_and_uses_current_stats_with_bounded_slot_states():
     assert any(item['local_file'] == POOL_PATH.name for item in registrations)
     for panel, target in pool_targets(dashboard):
         assert target['datasource'] == {'type': 'prometheus', 'uid': 'prometheus'}
-        assert POOL_LABELS in target['expr']
+        assert POOL_LABELS in target['expr'] or 'job="master",instance="master",exporter="node"' in target['expr']
+        for labels in re.findall(r'ci_pool_[a-z_]+\{([^}]*)\}',target['expr']):
+            assert labels.startswith((POOL_LABELS,'job="master",instance="master",exporter="node"'))
         assert 'rate(' not in target['expr']  # CPU is already an interval gauge.
         assert '$__to' not in target['expr']  # Historical freshness must use evaluation time.
         if panel['type'] in {'stat', 'bargauge', 'gauge'}:
@@ -113,13 +174,15 @@ def pool_series(overrides=None, omit=(), gone=False):
     return series
 
 
-def test_shared_pool_actual_queries_hide_stale_invalid_and_missing_measurements(tmp_path):
+@pytest.mark.parametrize('host',['wk01','master'])
+def test_shared_pool_actual_queries_hide_stale_invalid_and_missing_measurements(tmp_path,host):
     """Execute shipped PromQL, rather than a second implementation of freshness."""
     executable = shutil.which('promtool')
     assert executable, 'promtool is required for shared runner query acceptance'
     dashboard = pool_dashboard()
+    labels=POOL_LABELS if host=='wk01' else 'job="master",instance="master",exporter="node"'
     measured = [(p, t) for p, t in pool_targets(dashboard)
-                if p['title'] != 'Source health' and not p['title'].startswith('Waiting jobs') and p['title'] not in SAMPLED_TIME_TITLES]
+                if p['title'] != 'Source health' and not p['title'].startswith(('Waiting jobs','Fleet ')) and p['title'] not in SAMPLED_TIME_TITLES and labels in t['expr']]
     # Each tuple is (source overrides, omitted metrics, eval time, CPU valid, inventory valid, source gone).
     scenarios = [
         ({}, (), '60s', True, True, False),
@@ -154,7 +217,7 @@ def test_shared_pool_actual_queries_hide_stale_invalid_and_missing_measurements(
                 # A retained metric name on only one branch creates 20 range series.
                 states = [0, 1, 5, 6, 7, 2, 10, 10, 10, 10] if inventory_ok else [9] * 10
                 queries.append({'expr': expr, 'eval_time': at, 'exp_samples': [
-                    {'labels': f'{{{POOL_LABELS},slot="{slot}"}}', 'value': state}
+                    {'labels': f'{{{labels},slot="{slot}"}}', 'value': state}
                     for slot, state in enumerate(states)]})
             if timeline and not inventory_ok and not gone:
                 for reduction in ('min', 'max'):
@@ -174,9 +237,14 @@ def test_shared_pool_actual_queries_hide_stale_invalid_and_missing_measurements(
                       'input_series': pool_series(omit=(metric,)), 'promql_expr_test': queries})
     # Validate available capacity arithmetic and interval CPU gauge units.
     for panel_title, expected in [('Available slots', 1), ('CPU utilization heatmap', 25)]:
-        panel = next(p for p in dashboard['panels'] if p['title'] == panel_title)
-        cases[0]['promql_expr_test'].append({'expr': f'sum(({panel["targets"][0]["expr"]}))',
+        title='Master CPU utilization heatmap' if host=='master' and panel_title=='CPU utilization heatmap' else panel_title
+        panel = next(p for p in dashboard['panels'] if p['title'] == title)
+        target=next(t for t in panel['targets'] if labels in t['expr'])
+        cases[0]['promql_expr_test'].append({'expr': f'sum(({target["expr"]}))',
                                            'eval_time': '60s', 'exp_samples': [{'labels': '{}', 'value': expected}]})
+    if host=='master':
+        for case in cases:
+            case['input_series']=[dict(row,series=row['series'].replace(POOL_LABELS,labels)) for row in case['input_series']]
     fixture = tmp_path / 'shared-pool.test.yml'
     fixture.write_text(yaml.safe_dump({'evaluation_interval': '30s', 'tests': cases}, sort_keys=False))
     result = subprocess.run([executable, 'test', 'rules', str(fixture)], text=True, capture_output=True)
@@ -192,7 +260,7 @@ def test_shared_pool_sampled_time_excludes_unknown_and_gaps_and_counts_quarantin
         assert panel['fieldConfig']['defaults']['noValue'] == 'No data'
         assert '[$__range:30s]' in panel['targets'][0]['expr']
         assert panel['interval'] == '30s'
-    assert 'job success/failure is not collected' in panels['Shared VM runner pool · WK01']['options']['content'].lower()
+    assert 'job success/failure is not collected' in panels['Shared VM runner pool · WK01 + master']['options']['content'].lower()
 
     def expr(title):
         return panels[title]['targets'][0]['expr'].replace('$__range', '180s')
