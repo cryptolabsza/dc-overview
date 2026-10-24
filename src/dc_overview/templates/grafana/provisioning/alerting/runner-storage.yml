@@ -456,8 +456,8 @@ groups:
         to: 0
       datasourceUid: prometheus
       model:
-        expr: (max by(job,instance,exporter,volume) (label_replace((1 - ci_storage_volume_valid{job=~"wk01|master",exporter="node",volume=~"apt|docker|ghcr"}),"signal","invalid","","")
-          or label_replace(ci_storage_volume_readonly{job=~"wk01|master",exporter="node",volume=~"apt|docker|ghcr"},"signal","readonly","","")))
+        expr: (max by(job,instance,exporter,volume) (label_replace((1 - ci_storage_volume_valid{job=~"wk01|master",exporter="node",volume=~"apt|docker|ghcr|ngc"}),"signal","invalid","","")
+          or label_replace(ci_storage_volume_readonly{job=~"wk01|master",exporter="node",volume=~"apt|docker|ghcr|ngc"},"signal","readonly","","")))
           and on(job,instance) ((ci_storage_valid{job=~"wk01|master",exporter="node"}
           == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
           >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
@@ -509,8 +509,8 @@ groups:
         to: 0
       datasourceUid: prometheus
       model:
-        expr: ((1 - ci_storage_volume_available_bytes{job=~"wk01|master",exporter="node",volume=~"apt|docker|ghcr"}
-          / ci_storage_volume_total_bytes{job=~"wk01|master",exporter="node",volume=~"apt|docker|ghcr"})
+        expr: ((1 - ci_storage_volume_available_bytes{job=~"wk01|master",exporter="node",volume=~"apt|docker|ghcr|ngc"}
+          / ci_storage_volume_total_bytes{job=~"wk01|master",exporter="node",volume=~"apt|docker|ghcr|ngc"})
           > bool 0.8) and on(job,instance) ((ci_storage_valid{job=~"wk01|master",exporter="node"}
           == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
           >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
@@ -563,8 +563,8 @@ groups:
         to: 0
       datasourceUid: prometheus
       model:
-        expr: ((1 - ci_storage_volume_available_bytes{job=~"wk01|master",exporter="node",volume=~"apt|docker|ghcr"}
-          / ci_storage_volume_total_bytes{job=~"wk01|master",exporter="node",volume=~"apt|docker|ghcr"})
+        expr: ((1 - ci_storage_volume_available_bytes{job=~"wk01|master",exporter="node",volume=~"apt|docker|ghcr|ngc"}
+          / ci_storage_volume_total_bytes{job=~"wk01|master",exporter="node",volume=~"apt|docker|ghcr|ngc"})
           > bool 0.9) and on(job,instance) ((ci_storage_valid{job=~"wk01|master",exporter="node"}
           == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}
           >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=~"wk01|master",exporter="node"}

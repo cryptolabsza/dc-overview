@@ -2556,7 +2556,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(100*(1-ci_storage_volume_available_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",volume=~\"apt|docker|ghcr\"}/ci_storage_volume_total_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",volume=~\"apt|docker|ghcr\"})) and on(job,instance) ((ci_storage_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90))",
+          "expr": "(100*(1-ci_storage_volume_available_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",volume=~\"apt|docker|ghcr|ngc\"}/ci_storage_volume_total_bytes{job=\"wk01\",instance=\"wk01\",exporter=\"node\",volume=~\"apt|docker|ghcr|ngc\"})) and on(job,instance) ((ci_storage_valid{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"wk01\",instance=\"wk01\",exporter=\"node\"} <= 90))",
           "legendFormat": "wk01 \u00b7 {{volume}}",
           "refId": "A",
           "instant": false,
@@ -2570,7 +2570,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(100*(1-ci_storage_volume_available_bytes{job=\"master\",instance=\"master\",exporter=\"node\",volume=~\"apt|docker|ghcr\"}/ci_storage_volume_total_bytes{job=\"master\",instance=\"master\",exporter=\"node\",volume=~\"apt|docker|ghcr\"})) and on(job,instance) ((ci_storage_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90))",
+          "expr": "(100*(1-ci_storage_volume_available_bytes{job=\"master\",instance=\"master\",exporter=\"node\",volume=~\"apt|docker|ghcr|ngc\"}/ci_storage_volume_total_bytes{job=\"master\",instance=\"master\",exporter=\"node\",volume=~\"apt|docker|ghcr|ngc\"})) and on(job,instance) ((ci_storage_valid{job=\"master\",instance=\"master\",exporter=\"node\"} == 1) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} >= 0) and on(job,instance) (time()-ci_storage_observed_timestamp_seconds{job=\"master\",instance=\"master\",exporter=\"node\"} <= 90))",
           "legendFormat": "master \u00b7 {{volume}}",
           "refId": "B",
           "instant": false,
