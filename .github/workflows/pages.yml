@@ -16,14 +16,14 @@ concurrency:
   cancel-in-progress: false
 jobs:
   build:
-    uses: cryptolabsza/dc-overview/.github/workflows/ci-pages-build-recipe.yml@5d7b7f894f958cf847c71408a143be89510b8391
+    uses: cryptolabsza/dc-overview/.github/workflows/ci-pages-build-recipe.yml@751d216a4e7eb37c0286177601ed8f01f84a6034
     permissions:
       contents: read
   publish:
     needs: build
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && github.ref == 'refs/heads/main' && github.ref_protected == true
-    uses: cryptolabsza/dc-overview/.github/workflows/ci-pages-publish-recipe.yml@f1b9b6fbd92b67f9f67ba3eec8e4c7cef2e0ddff
+    uses: cryptolabsza/dc-overview/.github/workflows/ci-pages-publish-recipe.yml@a46fe6681498cca8c8f1dfef4046d31b9fe2983e
     permissions:
       contents: read
       actions: read

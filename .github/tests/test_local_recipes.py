@@ -18,9 +18,10 @@ class LocalBuildRecipeTests(unittest.TestCase):
   baseline=yaml.safe_load(subprocess.check_output(['git','show',BH_BASE+':'+path],cwd=ROOT));normal=copy.deepcopy(recipe);normal['jobs']['build']['steps']=[s for s in normal['jobs']['build']['steps'] if s['name'] not in {checkout['name'],verify['name'],handoff['name']}]
   target=next(s for s in normal['jobs']['build']['steps'] if s.get('id')=='upload');target['with']=next(s for s in baseline['jobs']['build']['steps'] if s.get('id')=='upload')['with']
   next(s for s in normal['jobs']['build']['steps'] if s.get('name')=='Build Docker image')['name']='Build actual dc-overview without publication'
+  self.assertEqual(normal['jobs']['build']['timeout-minutes'],120);normal['jobs']['build']['timeout-minutes']=45
   self.assertEqual(normal,baseline)
 
-PH='0d00dbc795d2282c63b93946e9d2b2bb718bcfee'
+PH='786763be47e68c8859a4b6fdd1f1e6148992d137'
 PH_BASE='3828ff628d6c5450275cd49d069c9653c1acd234'
 class LocalPublicationRecipeTests(unittest.TestCase):
  def test_publisher_recipe_uses_exact_real_common_snapshot_without_permission_changes(self):
@@ -37,9 +38,9 @@ class LocalPublicationRecipeTests(unittest.TestCase):
    next(s for s in normal['jobs'][name]['steps'] if s.get('name')==verify['name'])['run']=previous['run']
   self.assertEqual(normal,baseline)
 
-P='48154ab06d70b953663c34ec4842a70b1285fa94'
+P='a46fe6681498cca8c8f1dfef4046d31b9fe2983e'
 P_BASE='c4ecff559264c9a3be297ce91516ee0304987b27'
-BR_REAL='c6757ad493d514f076c913b50b08355609ea28fd'
+BR_REAL='751d216a4e7eb37c0286177601ed8f01f84a6034'
 class LocalCallerTests(unittest.TestCase):
  def test_only_image_handoff_caller_pins_change_and_real_git_objects_resolve(self):
   path='.github/workflows/docker-build.yml';actual=yaml.safe_load((ROOT/path).read_text());baseline=yaml.safe_load(subprocess.check_output(['git','show',P_BASE+':'+path],cwd=ROOT));normal=copy.deepcopy(actual)
