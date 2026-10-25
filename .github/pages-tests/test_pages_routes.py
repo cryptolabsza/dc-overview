@@ -12,7 +12,7 @@ class PagesRouteTest(unittest.TestCase):
         self.assertEqual(recipe['permissions'], {'contents':'read'})
         self.assertEqual(job['permissions'], {'contents':'read'})
         self.assertEqual(job['runs-on']['group'], 'ci-build-public-ephemeral')
-        self.assertEqual(job['timeout-minutes'],45)
+        self.assertEqual(job['timeout-minutes'],120)
         upload=next(s for s in job['steps'] if s.get('id')=='upload')
         self.assertEqual(upload['with']['name'],'pages-site-${{ github.run_id }}-${{ github.run_attempt }}')
         self.assertNotIn('secrets',str(recipe))
