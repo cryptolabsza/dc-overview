@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "authority": "Direct owner instruction, 2026-10-25: all build CI should have 120 minute cap",
+  "supersedes": "Earlier build/test/scan job timeout limits only; historical migration and review receipts remain unchanged",
+  "timeout_minutes": 120,
+  "repository": "cryptolabsza/dc-overview",
+  "repository_id": 1133295682,
+  "source_head": "806bc30b54a30573c4861918167a161fe64e32fb",
+  "recipe_commit": "751d216a4e7eb37c0286177601ed8f01f84a6034",
+  "recipe_sha256": {
+    ".github/workflows/ci-build-recipe.yml": "010d7719e6cce8f2064ea7fd01671edf99d3b154d4523283fd6300a37795172b",
+    ".github/workflows/ci-build-runpod-exporter-recipe.yml": "77e9fc1c6d31611ea5d085ece90f4943beec551751e6030a0d675d35fb637a7e",
+    ".github/workflows/ci-build-vastai-exporter-recipe.yml": "fc9f7fe2129db87dd5150cafd34ddc066d1c00bd61d44ef3b67fcf88841ffab9",
+    ".github/workflows/ci-image-build-recipe.yml": "74e9dcb8dbf8d527d5ed768d82c9e5373741d73f21212fa73a272a2bb7c5b52b",
+    ".github/workflows/ci-pages-build-recipe.yml": "de784ef652a29e49b741619246a4472a52e5aabd4f4f39e382781261063c829d",
+    ".github/workflows/ci-python-build-recipe.yml": "9fd42eccc2e82fcbab6afb94073195eb990a9a400193ac8afb0fae66b6c7f70e"
+  },
+  "publication_status": "Local proposal only; protected main route requires owner policy exception",
+  "publisher_recipe_commit": "a46fe6681498cca8c8f1dfef4046d31b9fe2983e",
+  "publisher_helpers": [
+    {
+      "old": "0d00dbc795d2282c63b93946e9d2b2bb718bcfee",
+      "new": "786763be47e68c8859a4b6fdd1f1e6148992d137"
+    },
+    {
+      "old": "9b8d6c1e17acec60af0ff5524a881e9d760fd032",
+      "new": "88fd9dc618d82495e7387e8b5f795b2d8ffc0c06"
+    },
+    {
+      "old": "957f279e80ab3afa040829405039ebe93d8a5285",
+      "new": "2a5aabcdd5020d5203ec7c418c5e096e2e8f8e01"
+    }
+  ],
+  "branch_role": "CI-only main feature proposal; no application release or version bump"
+}
