@@ -27,6 +27,16 @@ the real implementations.
 
 The test registry listens only on guest loopback. Its temporary TLS certificate,
 guest hosts entry and Docker trust directory exist only in that VM. The fixture
+accepts an existing root-owned, nonsymlink registry CA directory with no group or
+other write access. It exclusively creates one uniquely named fixture `.crt`,
+preserves all existing entries and directory ownership/mode, and removes only its
+own certificate. It removes the directory only if it created it and it is empty;
+it never replaces `ca.crt` or recursively deletes the baseline CA directory.
+Early preflight failures still write sanitized failed evidence and skip fixture
+cleanup over unowned paths. The run remains failed and external VM destruction
+is still required.
+
+The fixture
 uses the fixed accepted image namespaces so the production parser sees its real
 input contract. No push reaches the public registry. The script refuses occupied
 fixture paths, existing product containers, a non-VM context or a remote Docker

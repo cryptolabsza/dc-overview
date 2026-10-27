@@ -183,6 +183,59 @@ class FleetNativeRouteTest(unittest.TestCase):
                 self.assertIn("timed out", visible)
                 instance.cleanup.assert_called_once()
                 self.assertIn('"result":"failed"', (Path(directory) / "results.json").read_text())
+            with self.subTest("baseline registry CA survives exclusive fixture add and remove"):
+                ca = Path(directory) / "registry-ca"
+                ca.mkdir(mode=0o755)
+                baseline = ca / "ca.crt"
+                baseline.write_bytes(b"baseline trusted public CA")
+                before = baseline.stat()
+                directory_before = ca.stat()
+                source = Path(directory) / "fixture.crt"
+                source.write_bytes(b"synthetic fixture public CA")
+                original_lstat = module.Path.lstat
+
+                def root_owned(path, *args, **kwargs):
+                    # Ownership boundary only; all add/remove operations use real temporary files.
+                    observed = original_lstat(path, *args, **kwargs)
+                    fields = list(observed)
+                    fields[4] = 0
+                    return module.os.stat_result(fields)
+
+                with (
+                    patch.object(module, "REGISTRY_CA_DIR", ca),
+                    patch.object(module.Path, "lstat", root_owned),
+                ):
+                    instance.install_registry_ca(source)
+                    owned = instance.registry_ca_file
+                    self.assertNotEqual(owned.name, "ca.crt")
+                    self.assertEqual(owned.suffix, ".crt")
+                    self.assertEqual(owned.read_bytes(), source.read_bytes())
+                    instance.remove_registry_ca()
+                self.assertEqual(set(ca.iterdir()), {baseline})
+                self.assertEqual(baseline.read_bytes(), b"baseline trusted public CA")
+                after = baseline.stat()
+                self.assertEqual(
+                    (after.st_mode, after.st_uid, after.st_gid, after.st_mtime_ns),
+                    (before.st_mode, before.st_uid, before.st_gid, before.st_mtime_ns),
+                )
+                self.assertEqual(
+                    (ca.stat().st_mode, ca.stat().st_uid, ca.stat().st_gid),
+                    (directory_before.st_mode, directory_before.st_uid, directory_before.st_gid),
+                )
+            with self.subTest("early preflight failure emits red evidence without fixture cleanup"):
+                early = module.NativeQA(SimpleNamespace(evidence_dir=Path(directory) / "early"))
+                early.preflight = unittest.mock.Mock(
+                    side_effect=RuntimeError("occupied fixture path")
+                )
+                early.cleanup = unittest.mock.Mock()
+                early.images = unittest.mock.Mock()
+                with self.assertRaisesRegex(RuntimeError, "occupied fixture"):
+                    early.execute()
+                early.images.assert_not_called()
+                early.cleanup.assert_not_called()
+                result = (early.evidence / "results.json").read_text()
+                self.assertIn('"result":"failed"', result)
+                self.assertIn("occupied fixture path", result)
 
 
 if __name__ == "__main__":

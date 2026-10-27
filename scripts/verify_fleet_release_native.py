@@ -13,6 +13,7 @@ import re
 import secrets
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -27,6 +28,7 @@ ROOT = Path("/var/lib/fleet-native-qa")
 CONFIG = Path("/etc/dc-overview")
 PROXY_CONFIG = Path("/etc/cryptolabs-proxy")
 POLICY = CONFIG / "releases/broker-policy.json"
+REGISTRY_CA_DIR = Path("/etc/docker/certs.d/ghcr.io")
 SOCKET = "/run/dc-overview-release-broker.sock"
 SERVICE = "dc-overview-release-broker.service"
 SOCKET_UNIT = "dc-overview-release-broker.socket"
@@ -236,6 +238,51 @@ class NativeQA:
         self.policy = None
         self.owner_plans = set()
         self.job_ids = set()
+        self.registry_ca_file = None
+        self.registry_ca_identity = None
+        self.registry_ca_created = False
+
+    def verify_registry_ca_directory(self):
+        info = REGISTRY_CA_DIR.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise RuntimeError("registry CA directory custody is invalid; native gate held")
+
+    def install_registry_ca(self, certificate_path):
+        try:
+            REGISTRY_CA_DIR.lstat()
+        except FileNotFoundError:
+            REGISTRY_CA_DIR.mkdir(parents=True, mode=0o755)
+            self.registry_ca_created = True
+        self.verify_registry_ca_directory()
+        path = REGISTRY_CA_DIR / ("native-fleet-qa-" + uuid.uuid4().hex + ".crt")
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+        self.registry_ca_file = path
+        info = os.fstat(descriptor)
+        self.registry_ca_identity = (info.st_dev, info.st_ino)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(certificate_path.read_bytes())
+            stream.flush()
+            os.fsync(stream.fileno())
+
+    def remove_registry_ca(self):
+        if self.registry_ca_file is not None:
+            try:
+                info = self.registry_ca_file.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                if (info.st_dev, info.st_ino) != self.registry_ca_identity or not stat.S_ISREG(
+                    info.st_mode
+                ):
+                    raise RuntimeError("owned fixture CA identity changed; cleanup held")
+                self.registry_ca_file.unlink()
+            self.registry_ca_file = None
+        if self.registry_ca_created:
+            try:
+                REGISTRY_CA_DIR.rmdir()
+            except OSError:
+                pass  # Preserve any entry added since creation; external destruction remains required.
+            self.registry_ca_created = False
 
     def record(self, case, **details):
         self.events.append({"case": case, "utc": time.time(), **details})
@@ -316,10 +363,11 @@ class NativeQA:
             CONFIG,
             PROXY_CONFIG,
             Path("/usr/local/bin/dc-overview"),
-            Path("/etc/docker/certs.d/ghcr.io"),
         ):
             if path.exists() or path.is_symlink():
                 raise RuntimeError("fresh guest fixture path is already occupied: " + str(path))
+        if REGISTRY_CA_DIR.exists() or REGISTRY_CA_DIR.is_symlink():
+            self.verify_registry_ca_directory()
         for name in ("cryptolabs-proxy", "ipmi-monitor", "native-fleet-registry"):
             if docker("inspect", name, check=False).returncode == 0:
                 raise RuntimeError("fixture container name already occupied")
@@ -385,9 +433,7 @@ class NativeQA:
             timeout=300,
         )
         certificate(ROOT / "registry-certs", "ghcr.io")
-        ca = Path("/etc/docker/certs.d/ghcr.io")
-        ca.mkdir(parents=True, mode=0o755)
-        shutil.copyfile(ROOT / "registry-certs/server.crt", ca / "ca.crt")
+        self.install_registry_ca(ROOT / "registry-certs/server.crt")
         self.hosts = Path("/etc/hosts").read_bytes()
         Path("/etc/hosts").write_bytes(self.hosts + b"\n127.0.0.1 ghcr.io\n")
         if any(
@@ -1253,7 +1299,7 @@ class NativeQA:
             finally:
                 if self.hosts is not None:
                     Path("/etc/hosts").write_bytes(self.hosts)
-                shutil.rmtree("/etc/docker/certs.d/ghcr.io", ignore_errors=True)
+                self.remove_registry_ca()
                 for unit in self.units:
                     unit.unlink(missing_ok=True)
                 link = Path("/usr/local/bin/dc-overview")
@@ -1267,8 +1313,10 @@ class NativeQA:
                     shutil.rmtree(ROOT)
 
     def execute(self):
-        self.preflight()
+        prepared = False
         try:
+            self.preflight()
+            prepared = True
             self.images()
             self.units_install()
             for layout in ("named-volume", "bind"):
@@ -1299,7 +1347,8 @@ class NativeQA:
             )
             raise
         finally:
-            self.cleanup()
+            if prepared:
+                self.cleanup()
 
 
 def inspect_volume(name):
