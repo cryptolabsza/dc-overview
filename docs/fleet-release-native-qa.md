@@ -36,6 +36,21 @@ Early preflight failures still write sanitized failed evidence and skip fixture
 cleanup over unowned paths. The run remains failed and external VM destruction
 is still required.
 
+If a fixture registry push fails, its diagnostic event contains only
+`case=fixture-registry-push`, one of the five literal fixture keys, `result=failed`,
+an exit code bounded to -255 through 255 (or null for a command timeout),
+`diagnostic_version=1`, and `diagnostic_signals`. The signals are fixed literals
+selected by conservative byte markers: `certificate-untrusted`,
+`certificate-name-or-time`, `client-certificate-configuration`, `tls-protocol`,
+`name-resolution`, `connection-refused`, `timeout`, `registry-denied-or-auth`,
+`registry-http-error`, `manifest-or-blob-invalid`, `storage-error`, or `unknown`
+when no marker matches. These are observations, not established causes; Docker
+message variations may remain unknown. Captured output, command arguments,
+URLs, headers, environment values, keys and cookies are never copied into this
+event or the generic failure. The failed event is retained before the native
+flow fails and performs its existing cleanup. No retries or additional probes
+are added, and the underlying push cause remains unresolved until observed.
+
 The fixture
 uses the fixed accepted image namespaces so the production parser sees its real
 input contract. No push reaches the public registry. The script refuses occupied

@@ -104,6 +104,56 @@ def docker(*args, **kwargs):
     return run("docker", *args, **kwargs)
 
 
+def registry_push_signals(*outputs):
+    # Match bytes in memory; only these literal observations may enter evidence.
+    markers = (
+        ("certificate-untrusted", (b"x509: certificate signed by unknown authority",)),
+        (
+            "certificate-name-or-time",
+            (
+                b"x509: certificate has expired or is not yet valid",
+                b"x509: certificate is valid for",
+                b"x509: cannot validate certificate for",
+            ),
+        ),
+        ("client-certificate-configuration", (b"CA certificates should use the extension .crt.",)),
+        (
+            "tls-protocol",
+            (
+                b"server gave HTTP response to HTTPS client",
+                b"tls: first record does not look like a TLS handshake",
+            ),
+        ),
+        ("name-resolution", (b"no such host", b"Temporary failure in name resolution")),
+        ("connection-refused", (b"connect: connection refused",)),
+        ("timeout", (b"context deadline exceeded", b"i/o timeout", b"Client.Timeout exceeded")),
+        (
+            "registry-denied-or-auth",
+            (
+                b"unauthorized: authentication required",
+                b"denied: requested access to the resource is denied",
+            ),
+        ),
+        ("registry-http-error", (b"received unexpected HTTP status:", b"unexpected HTTP status")),
+        (
+            "manifest-or-blob-invalid",
+            (
+                b"manifest invalid",
+                b"manifest unknown",
+                b"blob unknown",
+                b"blob upload invalid",
+                b"unsupported manifest media type",
+            ),
+        ),
+        ("storage-error", (b"no space left on device", b"read-only file system")),
+    )
+    return [
+        signal
+        for signal, values in markers
+        if any(marker in output for marker in values for output in outputs)
+    ] or ["unknown"]
+
+
 def inspect(name, *, image=False):
     args = ("image", "inspect", name) if image else ("inspect", name)
     return json.loads(docker(*args).stdout)[0]
@@ -285,7 +335,10 @@ class NativeQA:
             self.registry_ca_created = False
 
     def record(self, case, **details):
-        self.events.append({"case": case, "utc": time.time(), **details})
+        self._record_event({"case": case, "utc": time.time(), **details})
+
+    def _record_event(self, event):
+        self.events.append(event)
         write(
             self.evidence / "results.json",
             {
@@ -384,6 +437,38 @@ class NativeQA:
             wheels={p.name: digest(p.read_bytes()) for p in self.args.wheel_dir.glob("*.whl")},
         )
 
+    def push_fixture(self, key, tag):
+        if key not in ("proxy-a", "proxy-b", "ipmi-old", "ipmi-new", "ipmi-bad"):
+            raise RuntimeError("unknown registry fixture key; native gate held")
+        try:
+            result = docker("push", tag, timeout=900, check=False)
+        except RuntimeError:
+            # run() already sanitizes timeouts; never inspect the original exception.
+            self._record_event(
+                {
+                    "case": "fixture-registry-push",
+                    "fixture_key": key,
+                    "result": "failed",
+                    "exit_code": None,
+                    "diagnostic_signals": ["timeout"],
+                    "diagnostic_version": 1,
+                }
+            )
+            raise RuntimeError("fixture registry push timed out; native gate held") from None
+        if result.returncode:
+            self._record_event(
+                {
+                    "case": "fixture-registry-push",
+                    "fixture_key": key,
+                    "result": "failed",
+                    "exit_code": max(-255, min(255, result.returncode)),
+                    "diagnostic_signals": registry_push_signals(result.stdout, result.stderr),
+                    "diagnostic_version": 1,
+                }
+            )
+            raise RuntimeError("fixture registry push failed; native gate held") from None
+        return result
+
     def images(self):
         for ref in (REGISTRY_IMAGE, NGINX_BASE, IPMI_OLD, IPMI_NEW):
             docker("pull", "--platform", "linux/amd64", ref, timeout=900)
@@ -481,7 +566,7 @@ class NativeQA:
             image_id = inspect(source, image=True)["Id"]
             tag = "ghcr.io/cryptolabsza/" + repository + ":native-" + key
             docker("tag", source, tag)
-            result = docker("push", tag, timeout=900)
+            result = self.push_fixture(key, tag)
             found = re.search(rb"digest: (sha256:[0-9a-f]{64})", result.stdout + result.stderr)
             if not found:
                 raise RuntimeError("registry push did not return actual digest")

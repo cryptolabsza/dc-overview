@@ -183,6 +183,114 @@ class FleetNativeRouteTest(unittest.TestCase):
                 self.assertIn("timed out", visible)
                 instance.cleanup.assert_called_once()
                 self.assertIn('"result":"failed"', (Path(directory) / "results.json").read_text())
+            # A failed fixture push must retain useful fixed signals without captured data.
+            private = (
+                b"SYNTHETIC_PRIVATE_ARG https://private.invalid/path Authorization: Bearer token "
+                b"Cookie: session=private -----BEGIN PRIVATE KEY----- ENV_SECRET=value"
+            )
+            cases = (
+                (b"x509: certificate signed by unknown authority", ["certificate-untrusted"]),
+                (
+                    b"x509: certificate has expired or is not yet valid",
+                    ["certificate-name-or-time"],
+                ),
+                (
+                    b"CA certificates should use the extension .crt.",
+                    ["client-certificate-configuration"],
+                ),
+                (b"server gave HTTP response to HTTPS client", ["tls-protocol"]),
+                (b"no such host", ["name-resolution"]),
+                (b"connect: connection refused", ["connection-refused"]),
+                (b"context deadline exceeded", ["timeout"]),
+                (b"unauthorized: authentication required", ["registry-denied-or-auth"]),
+                (b"received unexpected HTTP status:", ["registry-http-error"]),
+                (b"manifest invalid", ["manifest-or-blob-invalid"]),
+                (b"no space left on device", ["storage-error"]),
+                (
+                    b"x509: certificate signed by unknown authority\nconnect: connection refused",
+                    ["certificate-untrusted", "connection-refused"],
+                ),
+                (b"unrecognized failure", ["unknown"]),
+                (None, ["timeout"]),
+            )
+            keys = ("proxy-a", "proxy-b", "ipmi-old", "ipmi-new", "ipmi-bad")
+            for number, (output, signals) in enumerate(cases):
+                with self.subTest("fixture push diagnostics", signals=signals, number=number):
+                    failed = module.NativeQA(
+                        SimpleNamespace(evidence_dir=Path(directory) / str(number))
+                    )
+                    key = keys[number % len(keys)]
+                    failed.preflight = lambda: None
+                    failed.images = lambda failed=failed, key=key: failed.push_fixture(
+                        key, private.decode()
+                    )
+                    failed.cleanup = unittest.mock.Mock()
+                    exit_code = 99999 if signals == ["unknown"] else 1
+                    command_result = subprocess.CompletedProcess(
+                        [],
+                        exit_code,
+                        stdout=private + (output or b"" if number % 2 else b""),
+                        stderr=output or b"" if not number % 2 else b"",
+                    )
+                    error = subprocess.TimeoutExpired(
+                        [private], 900, output=private, stderr=private
+                    )
+                    with patch.object(
+                        module.subprocess,
+                        "run",
+                        side_effect=error if output is None else None,
+                        return_value=command_result,
+                    ):
+                        try:
+                            failed.execute()
+                        except Exception as caught:
+                            failure = caught
+                            visible = traceback.format_exc()
+                        else:
+                            self.fail("failed fixture push must fail the native gate")
+                    events = [e for e in failed.events if e["case"] == "fixture-registry-push"]
+                    self.assertEqual(
+                        events,
+                        [
+                            {
+                                "case": "fixture-registry-push",
+                                "fixture_key": key,
+                                "result": "failed",
+                                "exit_code": None if output is None else min(exit_code, 255),
+                                "diagnostic_signals": signals,
+                                "diagnostic_version": 1,
+                            }
+                        ],
+                    )
+                    self.assertIsInstance(failure, RuntimeError)
+                    failed.cleanup.assert_called_once()
+                    evidence = (failed.evidence / "results.json").read_text()
+                    self.assertEqual(failed.events[-1]["result"], "failed")
+                    for forbidden in (
+                        "SYNTHETIC_PRIVATE_ARG",
+                        "private.invalid",
+                        "Authorization:",
+                        "Cookie:",
+                        "BEGIN PRIVATE KEY",
+                        "ENV_SECRET",
+                        "TimeoutExpired",
+                        "99999",
+                    ):
+                        self.assertNotIn(forbidden, visible + evidence)
+            with self.subTest("successful push preserves digest output without diagnostic failure"):
+                completed = subprocess.CompletedProcess(
+                    [], 0, stdout=b"digest: sha256:" + b"a" * 64, stderr=b""
+                )
+                before = list(instance.events)
+                with patch.object(module.subprocess, "run", return_value=completed) as command:
+                    self.assertIs(instance.push_fixture("proxy-a", "fixture-tag"), completed)
+                    self.assertEqual(command.call_args.args[0], ["docker", "push", "fixture-tag"])
+                self.assertEqual(instance.events, before)
+                with patch.object(module.subprocess, "run") as command:
+                    with self.assertRaisesRegex(RuntimeError, "unknown registry fixture key"):
+                        instance.push_fixture(private.decode(), "fixture-tag")
+                    command.assert_not_called()
+                self.assertEqual(module.registry_push_signals(b"no such ", b"host"), ["unknown"])
             with self.subTest("baseline registry CA survives exclusive fixture add and remove"):
                 ca = Path(directory) / "registry-ca"
                 ca.mkdir(mode=0o755)
