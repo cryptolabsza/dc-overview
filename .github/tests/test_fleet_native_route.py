@@ -657,6 +657,107 @@ class FleetNativeRouteTest(unittest.TestCase):
                     early.execute()
                 early.cleanup.assert_called_once()
 
+            original_fixture = module.NativeQA.fixture
+            private = "SYNTHETIC_PRIVATE_FIXTURE_KEY_PATH"
+            foreign_error = type(private, (Exception,), {})
+            errors = (
+                (AssertionError, "assertion-error"),
+                (FileNotFoundError, "file-not-found"),
+                (PermissionError, "permission-error"),
+                (OSError, "os-error"),
+                (RuntimeError, "runtime-error"),
+                (foreign_error, "unknown"),
+            )
+            cases = [(error_type, kind, False) for error_type, kind in errors]
+            cases.append((RuntimeError, "unknown", True))
+            for number, (error_type, kind, foreign) in enumerate(cases):
+                with self.subTest("fixture diagnostics", kind=kind, foreign=foreign):
+                    root = Path(directory) / f"fixture-{number}-{foreign}"
+                    root.mkdir()
+                    guest = module.NativeQA(SimpleNamespace(evidence_dir=root / "evidence"))
+                    guest.preflight = lambda: None
+                    guest.images = lambda: None
+                    guest.units_install = lambda: None
+                    guest.cleanup = unittest.mock.Mock()
+                    cause = error_type(private)
+
+                    def fail_command(*args, cause=cause, **kwargs):
+                        self.assertEqual(kwargs["env"]["QA_USER_PASS"], private)
+                        self.assertEqual(kwargs["env"]["AUTH_SECRET_KEY"], private)
+                        raise cause
+
+                    # Same name and even filename must not confer trusted code identity.
+                    def fixture(self, layout, cause=cause):
+                        signing_key = private
+                        self.issuer = signing_key
+                        raise cause
+
+                    fixture.__code__ = fixture.__code__.replace(co_filename=str(SCRIPT))
+                    with (
+                        patch.object(
+                            module.NativeQA, "fixture", fixture if foreign else original_fixture
+                        ),
+                        patch.dict(
+                            module.sys.modules,
+                            {
+                                # Imported by the real fixture, unused before the failed command.
+                                "cryptography.hazmat.primitives.asymmetric.ed25519": SimpleNamespace(
+                                    Ed25519PrivateKey=None
+                                ),
+                                "cryptography.hazmat.primitives.serialization": SimpleNamespace(
+                                    Encoding=None, PublicFormat=None
+                                ),
+                                "cryptolabs_proxy.standard_adoption": SimpleNamespace(
+                                    _declaration=None, render_standard=None
+                                ),
+                                "dc_overview.fleet_config": SimpleNamespace(FleetConfig=None),
+                                "dc_overview.release_catalog": SimpleNamespace(ReleaseStore=None),
+                            },
+                        ),
+                        patch.dict(os.environ, {"FLEET_NATIVE_RUN_ID": "fixture-test"}),
+                        patch.object(module, "ROOT", root),
+                        patch.object(module, "CONFIG", root / "config"),
+                        patch.object(module, "PROXY_CONFIG", root / "proxy"),
+                        patch.object(module, "docker"),
+                        patch.object(module.secrets, "token_urlsafe", return_value=private),
+                        patch.object(module, "run", side_effect=fail_command) as command,
+                    ):
+                        # execute chooses named-volume first; bind avoids any fake Docker mount.
+                        if not foreign:
+                            guest.fixture = lambda layout, guest=guest: original_fixture(
+                                guest, "bind"
+                            )
+                        try:
+                            guest.execute()
+                        except RuntimeError:
+                            visible = traceback.format_exc()
+                        else:
+                            self.fail("fixture diagnostics must not green the original failure")
+                    guest.cleanup.assert_called_once()
+                    if foreign:
+                        command.assert_not_called()
+                    else:
+                        command.assert_called_once()
+                    retained = (guest.evidence / "results.json").read_text()
+                    self.assertNotIn(private, visible + retained)
+                    self.assertNotIn(str(root), visible + retained)
+                    flow = guest.events[-1]
+                    self.assertEqual((flow["result"], flow["phase"]), ("failed", "fixture"))
+                    lines = []
+                    frame = cause.__traceback__
+                    while frame is not None:
+                        if frame.tb_frame.f_code is original_fixture.__code__:
+                            lines.append(frame.tb_lineno)
+                        frame = frame.tb_next
+                    expected = None if foreign else lines[-1]
+                    self.assertEqual(flow.get("fixture_line"), expected)
+                    self.assertIn("fixture_line", flow)
+                    self.assertEqual(flow.get("fixture_error_kind"), kind)
+                    if expected is not None:
+                        self.assertIn(
+                            expected, {line for _, _, line in original_fixture.__code__.co_lines()}
+                        )
+
 
 if __name__ == "__main__":
     unittest.main()

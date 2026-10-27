@@ -1757,12 +1757,20 @@ class NativeQA:
                 "fixture registry push timed out; native gate held",
             ):
                 message = str(error)
+            diagnostics = {}
+            if phase == "fixture":
+                diagnostics = {"fixture_line": None, "fixture_error_kind": "unknown"}
+                try:
+                    diagnostics = fixture_failure_metadata(error)
+                except Exception:
+                    pass  # Diagnostic collection must preserve the original failure and cleanup.
             self.record(
                 "native-flow",
                 result="failed",
                 phase=phase,
                 reason="observable-native-gate-failed",
                 message=message,
+                **diagnostics,
             )
         finally:
             if prepared or self.fixture_owned:
@@ -1780,6 +1788,29 @@ class NativeQA:
                     )
         if failed:
             raise RuntimeError(message) from None
+
+
+def fixture_failure_metadata(error, fixture_code=NativeQA.fixture.__code__):
+    line = None
+    frame = error.__traceback__
+    while frame is not None:
+        if frame.tb_frame.f_code is fixture_code:
+            line = frame.tb_lineno
+        frame = frame.tb_next
+    if type(line) is not int or line not in {value for _, _, value in fixture_code.co_lines()}:
+        return {"fixture_line": None, "fixture_error_kind": "unknown"}
+    kind = "unknown"
+    for error_type, label in (
+        (AssertionError, "assertion-error"),
+        (FileNotFoundError, "file-not-found"),
+        (PermissionError, "permission-error"),
+        (OSError, "os-error"),
+        (RuntimeError, "runtime-error"),
+    ):
+        if isinstance(error, error_type):
+            kind = label
+            break
+    return {"fixture_line": line, "fixture_error_kind": kind}
 
 
 def inspect_volume(name):

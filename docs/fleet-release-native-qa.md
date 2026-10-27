@@ -68,6 +68,23 @@ exceptions. Failed `native-flow` events retain only a fixed phase label:
 these literals before their steps; phase labels never come from exception text,
 arguments or callable names.
 
+For a failed `fixture` phase, the same event also retains `fixture_line` and
+`fixture_error_kind`. The line is an integer from the innermost traceback frame
+whose code object is the original `NativeQA.fixture.__code__`, captured when the
+module loads and checked against that code object's line table. Filename or
+function-name matches cannot supply it. Interpret the line only against the
+exact DC source head retained by preflight; for a command helper failure it
+identifies the fixture caller boundary. The error kind uses ordered type checks
+into fixed literals: `assertion-error`, `file-not-found`, `permission-error`,
+`os-error`, `runtime-error`, or `unknown`. Missing trusted frames, invalid lines
+or diagnostic collection failure retain null/`unknown`; an unfamiliar exception
+type at a valid fixture line retains that line with `unknown`. These fields
+identify an observed boundary, not an established root cause. No exception
+text, arbitrary type names, arguments, locals, private paths, raw traceback or
+command output is retained. The original failure and cleanup still run; this
+metadata adds no retry, probe or behavior repair. All remaining native and
+release acceptance limits below continue to apply.
+
 These compare-before-rename guards rely on exclusive use of a fresh single-job
 guest. They are not atomic compare-and-swap against a concurrent root writer or
 a credential boundary. Early preflight failures emit sanitized failed evidence
