@@ -1,0 +1,10 @@
+contract_type: linked-owner-approved-work-item
+work_item: fleet-manager-build-20261027
+canonical_intent_contract: ../../artifacts/ipmi-readiness-20261026/release/fleet-manager-build-20261027/intent-contract.json
+canonical_authority_gate: ../../artifacts/ipmi-readiness-20261026/release/fleet-manager-build-20261027/authority-gate.json
+requirement: REQ-FLEETUPDATE-001
+trace: TRACE-FLEETUPDATE-001
+verification: VER-FLEETUPDATE-001
+validation: VAL-FLEETUPDATE-001
+publication: held
+production_writes: disabled

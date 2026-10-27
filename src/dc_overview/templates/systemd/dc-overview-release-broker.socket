@@ -1,0 +1,13 @@
+[Unit]
+Description=DC Overview fixed release owner socket (operator bootstrap required)
+
+[Socket]
+ListenStream=/run/dc-overview-release-broker.sock
+SocketUser=root
+SocketGroup=root
+SocketMode=0600
+RemoveOnStop=true
+Service=dc-overview-release-broker.service
+
+[Install]
+WantedBy=sockets.target

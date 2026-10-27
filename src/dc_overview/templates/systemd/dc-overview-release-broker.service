@@ -1,0 +1,20 @@
+[Unit]
+Description=DC Overview release owner (writes disabled by installed policy)
+Requires=dc-overview-release-broker.socket
+After=dc-overview-release-broker.socket
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/local/bin/dc-overview release broker-serve
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+Restart=on-failure
+RestartSec=5s

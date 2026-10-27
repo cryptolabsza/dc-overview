@@ -82,6 +82,8 @@ dc_overview = [
     "templates/*.j2",
     "templates/*.html",
     "templates/*.conf",
+    "templates/systemd/*.service",
+    "templates/systemd/*.socket",
     "templates/grafana/**/*.yml",
     "templates/grafana/**/*.yaml",
     "web_templates/*.html",

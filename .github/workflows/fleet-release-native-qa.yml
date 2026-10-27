@@ -1,0 +1,76 @@
+name: Fleet release native verification
+'on':
+  pull_request:
+    branches: [dev]
+permissions:
+  contents: read
+env:
+  PROXY_SOURCE_SHA: 3b1ff8e4a71da0b0392c976c1fe8c5aa5bfbc002
+jobs:
+  native:
+    if: >-
+      github.repository_id == '1133295682' && github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.id == 1133295682 && github.base_ref == 'dev'
+    runs-on:
+      group: ci-build-public-ephemeral
+      labels: [ci-linux-cpu-v1-r1133295682]
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact DC source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: dc
+          persist-credentials: false
+      - name: Reject unresolved source pin
+        run: python3 dc/scripts/verify_fleet_release_native.py --check-inputs-only --proxy-sha "$PROXY_SOURCE_SHA"
+      - name: Checkout exact reviewed public proxy source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: cryptolabsza/cryptolabs-proxy
+          ref: ${{ env.PROXY_SOURCE_SHA }}
+          path: proxy
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Verify route and build exact wheels
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet build PyYAML==6.0.3
+          (cd dc && python -m unittest discover -s .github/tests -p test_fleet_native_route.py -v)
+          test "$(git -C dc rev-parse HEAD)" = "$DC_SOURCE_SHA"
+          test "$(git -C proxy rev-parse HEAD)" = "$PROXY_SOURCE_SHA"
+          mkdir -p "$RUNNER_TEMP/fleet-native-wheels" "$RUNNER_TEMP/fleet-native-evidence"
+          python -m build dc --wheel --outdir "$RUNNER_TEMP/fleet-native-wheels"
+          python -m build proxy --wheel --outdir "$RUNNER_TEMP/fleet-native-wheels"
+          sudo -n install -d -m 0755 -o "$(id -u)" -g "$(id -g)" /opt/fleet-native-qa
+          python -m venv /opt/fleet-native-qa/venv
+          /opt/fleet-native-qa/venv/bin/pip install "$RUNNER_TEMP"/fleet-native-wheels/*.whl
+          sudo -n chown -R root:root /opt/fleet-native-qa
+        env:
+          DC_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+      - name: Run real disposable guest flow
+        id: qa
+        run: |
+          set -euo pipefail
+          sudo -n env GITHUB_ACTIONS=true FLEET_NATIVE_REPOSITORY_ID=1133295682 \
+            FLEET_NATIVE_RUN_ID="$GITHUB_RUN_ID" FLEET_NATIVE_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            /opt/fleet-native-qa/venv/bin/python dc/scripts/verify_fleet_release_native.py \
+              --dc-source "$GITHUB_WORKSPACE/dc" --dc-sha "$DC_SOURCE_SHA" \
+              --proxy-source "$GITHUB_WORKSPACE/proxy" --proxy-sha "$PROXY_SOURCE_SHA" \
+              --wheel-dir "$RUNNER_TEMP/fleet-native-wheels" \
+              --evidence-dir "$RUNNER_TEMP/fleet-native-evidence"
+        env:
+          DC_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+      - name: Upload sanitized native evidence
+        if: always() && steps.qa.outcome != 'skipped'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: fleet-native-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/fleet-native-evidence/
+          if-no-files-found: error
+          retention-days: 7

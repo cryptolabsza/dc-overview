@@ -1,3 +1,4 @@
+# TRACEWEAVER: file-role=release-owner; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001; ver=VER-FLEETUPDATE-001
 """Use Fleet's durable updater from the host CLI without a second lifecycle owner."""
 import json
 import re
@@ -283,7 +284,7 @@ def commit_release(config, plan, *, selection_only=False, precommit=None, _locke
                 raise RuntimeError('public configuration changed after release preflight')
             if (selection_path.read_bytes() if selection_path.exists() else None) != current:
                 raise RuntimeError('release selection changed after preflight')
-        store.begin_publication(plan, previous)
+        store.begin_publication(plan, previous, operation_id=getattr(config, '_release_operation_id', None))
         prior_reference = copy.deepcopy(config.release_selection)
         try:
             store.commit(plan)
@@ -462,8 +463,10 @@ def _scoped_runtime(config, plan, components, source_images, proxy_id=None):
     return proxy, identities, local_only
 
 
+# TRACEWEAVER: entrypoint=select_release_components; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001; ver=VER-FLEETUPDATE-001
 def select_release_components(config, manifest_path, components, *, record_cli=False,
-                              adopt_existing_selection=False, source_images=(), platform=None):
+                              adopt_existing_selection=False, source_images=(), platform=None,
+                              expected_selection_id=None, expected_selection_sha256=None, operation_id=None):
     """Select explicit installed roles, preserving all other roles and intent."""
     from .controller_adoption import ensure_mutation_allowed
     from .release_catalog import COMPONENTS, Manifest, artifact_identity, _require_root
@@ -519,10 +522,22 @@ def select_release_components(config, manifest_path, components, *, record_cli=F
             previous = store.load(platform=platform,
                                   expected_id=None if adopting else selected.selection_id,
                                   expected_sha256=None if adopting else selected.selection_sha256)
+            if ((expected_selection_id is not None and previous.selection['selection_id'] != expected_selection_id)
+                    or (expected_selection_sha256 is not None and previous.selection_sha256 != expected_selection_sha256)):
+                raise RuntimeError('selection changed after release preview')
             if not adopting and selected.components != previous.selection['components']:
                 raise RuntimeError('public configuration/selection snapshot is stale')
             manifest = Manifest.from_bytes(Path(manifest_path).read_bytes())
+            if manifest.data['selection_contract'] == 2:
+                from cryptolabs_proxy.updates import get_capabilities
+                for capability in (get_capabilities(), proxy_capabilities(container_id=current_proxy['Id'])):
+                    if 2 not in capability.get('supported_selection_contracts', []):
+                        raise RuntimeError('installed and live owner selection contract 2 required')
             old = previous.manifest.data['components']; new = manifest.data['components']
+            before_channels = previous.manifest.data.get('component_channels', {})
+            after_channels = manifest.data.get('component_channels', {})
+            if any(before_channels.get(name) != after_channels.get(name) for name in old if name not in components):
+                raise ValueError('unscoped component channels must remain unchanged')
             if set(old) - set(new):
                 raise ValueError('scoped selection cannot remove existing catalog roles')
             if 'dc-overview-cli' in new and 'dc-overview-cli' not in old and not record_cli:
@@ -570,6 +585,7 @@ def select_release_components(config, manifest_path, components, *, record_cli=F
                     raise RuntimeError('scoped runtime changed during selection')
                 if cli_target is not None:
                     verify_running_cli(cli_target)
+            config._release_operation_id = operation_id
             commit_release(config, plan, selection_only=True, precommit=precommit, _locked=True)
     return {'state': 'pending-deployment', 'scope': list(components), 'tooling_recorded': bool(record_cli),
             'reference_adopted': adopting, 'local_only_sources': local_only,
@@ -677,3 +693,22 @@ def observe_component(name, target):
                 'matches':identity == target['reference'] if identity else None}
     except (OSError, ValueError, TypeError, subprocess.TimeoutExpired):
         return {'identity':None, 'state':'unknown', 'matches':None}
+
+
+def reconcile_release_operation(config, operation_id):
+    """Resolve only this broker's existing publication under the original lock order."""
+    from .release_catalog import _json, _check_root_path, _require_root
+    _require_root()
+    store = release_store(config)
+    journal = store.root/'.lifecycle-publication.json'
+    if not journal.exists():
+        return
+    proxy = _scoped_proxy(config)
+    directory = _scoped_updater_directory(proxy)
+    with config.lifecycle_lock():
+        with _scoped_updater_guard(directory) as check_idle:
+            _check_root_path(journal)
+            if _json(journal.read_bytes()).get('operation_id') != operation_id:
+                raise RuntimeError('publication belongs to another operation; recovery required')
+            check_idle()
+            store.recover_publication(config.config_dir/'fleet-config.yaml')
