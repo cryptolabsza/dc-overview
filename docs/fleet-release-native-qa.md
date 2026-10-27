@@ -26,15 +26,53 @@ peer credentials, updater helpers, adoption owners, Docker Engine and HTTP remai
 the real implementations.
 
 The test registry listens only on guest loopback. Its temporary TLS certificate,
-guest hosts entry and Docker trust directory exist only in that VM. The fixture
-accepts an existing root-owned, nonsymlink registry CA directory with no group or
-other write access. It exclusively creates one uniquely named fixture `.crt`,
-preserves all existing entries and directory ownership/mode, and removes only its
-own certificate. It removes the directory only if it created it and it is empty;
-it never replaces `ca.crt` or recursively deletes the baseline CA directory.
-Early preflight failures still write sanitized failed evidence and skip fixture
-cleanup over unowned paths. The run remains failed and external VM destruction
-is still required.
+guest hosts entry and trust augmentation exist only in that VM. Before any fixture
+trust, DNS or registry change, the script requires the guest's local rootful Docker
+Engine **29.1.3**, the `io.containerd.snapshotter.v1` image store, and the exact
+`/etc/docker/certs.d/ghcr.io/hosts.toml` SHA256
+`5b44770a4caca465e8991cbbaaa6a50eae52bc5d349700f4ca2c240ca0458629`.
+The file and its complete parent directory chain must be root-owned, nonsymlink
+and have no group/other write access. The bounded regular file must have one
+link and no extended attributes; unsupported metadata fails closed. The context
+event exports only fixed version/store/rootless enums, the bounded-file hash,
+and fixed outcomes. Unknown image or configuration changes require review.
+
+All original public pulls and image builds finish with the original trust file.
+The fixture then exclusively creates one unique public `.crt` and inserts only a
+root-level `ca = ["<owned fixture certificate>"]` before the first TOML table.
+The default server, existing pull/resolve mirror, its CA, and all original bytes
+remain unchanged. Docker29.1.3's vendored containerd2.2.0 uses this explicit
+default-server CA together with system roots; valid `hosts.toml` bypasses sibling
+certificate scanning. This source mechanism explains the conditional adapter;
+it does not establish the failed earlier guest's exact configuration or cause.
+TLS verification stays enabled. The adapter changes no daemon configuration,
+BuildKit configuration, mirror capability, source, installed image or pool setting
+and performs no daemon restart.
+
+The original inode is retained in a private root-owned guest directory. Ownership
+state is registered before partial writes or renames can fail. Cleanup first
+quiesces fixture consumers, then checks parent identities, owned replacement
+inode/content/metadata and the protected preimage before renaming the original
+inode back. Exact original bytes, uid/gid/mode and atime/mtime are restored and
+checked; original **ctime cannot be restored**. Only after trust restoration may
+cleanup remove the owned fixture CA. Baseline CA files are never written or
+deleted. If observed custody drifts or restoration fails, cleanup does not
+overwrite the unknown file or delete a potentially referenced CA; it retains the
+private preimage for required external guest destruction. Independent owned
+cleanup still runs. A cleanup failure emits terminal failed/held evidence and
+fails the job even after a passed native-flow event. Arbitrary exception text,
+configuration bytes and private paths are suppressed from evidence and chained
+exceptions. Failed `native-flow` events retain only a fixed phase label:
+`preflight`, `images`, `units_install`, `fixture`, `service_update`, `proxy_adopt`,
+`rollback`, `interrupted_adoption`, `reset_fixture`, or `cleanup`. The script sets
+these literals before their steps; phase labels never come from exception text,
+arguments or callable names.
+
+These compare-before-rename guards rely on exclusive use of a fresh single-job
+guest. They are not atomic compare-and-swap against a concurrent root writer or
+a credential boundary. Early preflight failures emit sanitized failed evidence
+and skip cleanup over unowned paths. Script cleanup never certifies external VM
+destruction, whose separate receipt remains required.
 
 If a fixture registry push fails, its diagnostic event contains only
 `case=fixture-registry-push`, one of the five literal fixture keys, `result=failed`,

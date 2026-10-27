@@ -17,6 +17,7 @@ import stat
 import subprocess
 import sys
 import time
+import tomllib
 import uuid
 from pathlib import Path
 
@@ -29,6 +30,7 @@ CONFIG = Path("/etc/dc-overview")
 PROXY_CONFIG = Path("/etc/cryptolabs-proxy")
 POLICY = CONFIG / "releases/broker-policy.json"
 REGISTRY_CA_DIR = Path("/etc/docker/certs.d/ghcr.io")
+REGISTRY_HOSTS_SHA256 = "5b44770a4caca465e8991cbbaaa6a50eae52bc5d349700f4ca2c240ca0458629"
 SOCKET = "/run/dc-overview-release-broker.sock"
 SERVICE = "dc-overview-release-broker.service"
 SOCKET_UNIT = "dc-overview-release-broker.socket"
@@ -74,6 +76,77 @@ def encoded(value):
 
 def digest(value):
     return hashlib.sha256(value).hexdigest()
+
+
+def fixture_hosts_bytes(original, certificate_path):
+    """Add only default-server CA trust to the exact approved external recipe."""
+    if digest(original) != REGISTRY_HOSTS_SHA256:
+        raise RuntimeError("unsupported registry trust baseline; native gate held")
+    parsed = tomllib.loads(original.decode())
+    expected = {
+        "server": "https://ghcr.io",
+        "host": {
+            "https://192.168.1.101:5444": {
+                "capabilities": ["pull", "resolve"],
+                "ca": "/etc/docker/certs.d/192.168.1.101:5444/ca.crt",
+            }
+        },
+    }
+    if parsed != expected:
+        raise RuntimeError("unsupported registry trust semantics; native gate held")
+    field = b"ca = [" + json.dumps(str(certificate_path)).encode() + b"]\n"
+    offset = original.index(b"[host.")
+    augmented = original[:offset] + field + original[offset:]
+    after = tomllib.loads(augmented.decode())
+    if after.pop("ca") != [str(certificate_path)] or after != parsed:
+        raise RuntimeError("fixture trust augmentation is invalid; native gate held")
+    if augmented[:offset] + augmented[offset + len(field) :] != original:
+        raise RuntimeError("fixture trust preimage differs; native gate held")
+    return augmented
+
+
+def trust_identity(info):
+    return info.st_dev, info.st_ino
+
+
+def trust_metadata(info):
+    return info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode), info.st_mtime_ns
+
+
+def trust_directories(path):
+    """Compare-before-rename guards assume one exclusive fresh single-job guest."""
+    identities = []
+    for directory in (*reversed(path.parents), path):
+        info = directory.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise RuntimeError("registry trust directory custody is invalid; native gate held")
+        identities.append((str(directory), trust_identity(info)))
+    return identities
+
+
+def trust_read(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NOATIME", 0))
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != 0
+            or info.st_mode & 0o022
+            or info.st_nlink != 1
+            or info.st_size > 16384
+            or os.listxattr(path, follow_symlinks=False)
+        ):
+            raise RuntimeError("registry trust file custody is invalid; native gate held")
+        content = stream.read(16385)
+        after = os.fstat(stream.fileno())
+        if (
+            len(content) > 16384
+            or trust_identity(path.lstat()) != trust_identity(info)
+            or trust_metadata(after) != trust_metadata(info)
+            or after.st_size != info.st_size
+        ):
+            raise RuntimeError("registry trust file changed; native gate held")
+    return content, info
 
 
 def write(path, value, mode=0o600):
@@ -291,6 +364,193 @@ class NativeQA:
         self.registry_ca_file = None
         self.registry_ca_identity = None
         self.registry_ca_created = False
+        self.registry_baseline = None
+        self.registry_trust = None
+        self.fixture_owned = False
+
+    def attest_registry_trust(self, engine):
+        version = "29.1.3" if engine.get("ServerVersion") == "29.1.3" else "unsupported"
+        store = (
+            "containerd-snapshotter"
+            if isinstance(engine.get("DriverStatus"), list)
+            and ["driver-type", "io.containerd.snapshotter.v1"] in engine["DriverStatus"]
+            else "unsupported"
+        )
+        security = engine.get("SecurityOptions")
+        rootless = (
+            "rootful"
+            if isinstance(security, list)
+            and all(isinstance(value, str) for value in security)
+            and not any(value.split(",")[0] == "name=rootless" for value in security)
+            else "unsupported"
+        )
+        observed = None
+        try:
+            if version != "29.1.3" or store != "containerd-snapshotter" or rootless != "rootful":
+                raise RuntimeError("unsupported guest trust context")
+            parents = trust_directories(REGISTRY_CA_DIR)
+            content, info = trust_read(REGISTRY_CA_DIR / "hosts.toml")
+            observed = digest(content)
+            fixture_hosts_bytes(content, "/unused-public-fixture.crt")
+            self.registry_baseline = (content, info, parents)
+        except Exception:
+            self.record(
+                "fixture-registry-trust-context",
+                result="failed",
+                reason="unsupported-context-or-custody",
+                engine_version=version,
+                image_store=store,
+                rootless=rootless,
+                hosts_sha256=observed,
+            )
+            raise RuntimeError("unsupported guest registry trust; native gate held") from None
+        self.record(
+            "fixture-registry-trust-context",
+            result="passed",
+            engine_version=version,
+            image_store=store,
+            rootless=rootless,
+            hosts_sha256=observed,
+        )
+
+    def install_registry_trust(self):
+        try:
+            original, info, parents = self.registry_baseline
+            path = REGISTRY_CA_DIR / "hosts.toml"
+            current, current_info = trust_read(path)
+            if (
+                trust_directories(REGISTRY_CA_DIR) != parents
+                or current != original
+                or trust_identity(current_info) != trust_identity(info)
+                or trust_metadata(current_info) != trust_metadata(info)
+            ):
+                raise RuntimeError("registry trust preimage drift")
+            ca_info = self.registry_ca_file.lstat()
+            if trust_identity(ca_info) != self.registry_ca_identity or not stat.S_ISREG(
+                ca_info.st_mode
+            ):
+                raise RuntimeError("fixture CA custody drift")
+            augmented = fixture_hosts_bytes(original, self.registry_ca_file)
+            custody = ROOT / "registry-trust"
+            custody.mkdir(mode=0o700)
+            state = {
+                "parents": parents,
+                "custody": custody,
+                "custody_identity": trust_identity(custody.lstat()),
+                "custody_parents": trust_directories(custody),
+                "backup": custody / "original",
+                "temporary": REGISTRY_CA_DIR / (".native-fleet-qa-" + uuid.uuid4().hex),
+                "replacement_identity": None,
+                "replacement_metadata": None,
+                "replacement_sha256": digest(augmented),
+            }
+            # Register before any owned partial write or baseline rename can fail.
+            self.registry_trust = state
+            descriptor = os.open(
+                state["temporary"], os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
+            )
+            state["replacement_identity"] = trust_identity(os.fstat(descriptor))
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(augmented)
+                stream.flush()
+                os.fsync(stream.fileno())
+                if (os.fstat(stream.fileno()).st_uid, os.fstat(stream.fileno()).st_gid) != (
+                    info.st_uid,
+                    info.st_gid,
+                ):
+                    os.fchown(stream.fileno(), info.st_uid, info.st_gid)
+                os.fchmod(stream.fileno(), stat.S_IMODE(info.st_mode))
+                state["replacement_metadata"] = trust_metadata(os.fstat(stream.fileno()))
+            current, current_info = trust_read(path)
+            if (
+                trust_directories(REGISTRY_CA_DIR) != parents
+                or trust_directories(state["custody"]) != state["custody_parents"]
+                or current != original
+                or trust_identity(current_info) != trust_identity(info)
+                or trust_metadata(current_info) != trust_metadata(info)
+            ):
+                raise RuntimeError("registry trust preimage drift")
+            # Retain the actual original inode; userspace cannot preserve its ctime.
+            os.rename(path, state["backup"])
+            os.replace(state["temporary"], path)
+            self.record("fixture-registry-trust", result="installed", hosts_sha256=digest(original))
+        except Exception:
+            raise RuntimeError(
+                "fixture registry trust preparation failed; native gate held"
+            ) from None
+
+    def restore_registry_trust(self):
+        state = self.registry_trust
+        if state is None:
+            return
+        try:
+            original, info, parents = self.registry_baseline
+            path = REGISTRY_CA_DIR / "hosts.toml"
+            if (
+                trust_directories(REGISTRY_CA_DIR) != parents
+                or trust_identity(state["custody"].lstat()) != state["custody_identity"]
+                or stat.S_IMODE(state["custody"].lstat().st_mode) != 0o700
+                or state["custody"].lstat().st_uid != 0
+            ):
+                raise RuntimeError("registry trust directory drift")
+            backup_exists = state["backup"].exists() or state["backup"].is_symlink()
+            if backup_exists:
+                saved, saved_info = trust_read(state["backup"])
+                if (
+                    saved != original
+                    or trust_identity(saved_info) != trust_identity(info)
+                    or trust_metadata(saved_info) != trust_metadata(info)
+                ):
+                    raise RuntimeError("registry trust preimage custody drift")
+                if path.exists() or path.is_symlink():
+                    changed, changed_info = trust_read(path)
+                    if (
+                        trust_identity(changed_info) != state["replacement_identity"]
+                        or trust_metadata(changed_info) != state["replacement_metadata"]
+                        or digest(changed) != state["replacement_sha256"]
+                    ):
+                        raise RuntimeError("registry trust replacement custody drift")
+                elif trust_identity(state["temporary"].lstat()) != state["replacement_identity"]:
+                    raise RuntimeError("registry trust replacement missing")
+                os.utime(state["backup"], ns=(info.st_atime_ns, info.st_mtime_ns))
+                os.replace(state["backup"], path)
+            restored, restored_info = trust_read(path)
+            if (
+                restored != original
+                or trust_identity(restored_info) != trust_identity(info)
+                or trust_metadata(restored_info) != trust_metadata(info)
+            ):
+                raise RuntimeError("registry trust restoration differs")
+            # NOATIME preserves timestamps on Linux; reset after read for local checks too.
+            os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns))
+            final_info = path.lstat()
+            if (
+                trust_identity(final_info) != trust_identity(info)
+                or trust_metadata(final_info) != trust_metadata(info)
+                or final_info.st_atime_ns != info.st_atime_ns
+            ):
+                raise RuntimeError("registry trust restored metadata differs")
+            if state["temporary"].exists() or state["temporary"].is_symlink():
+                temporary_info = state["temporary"].lstat()
+                if trust_identity(temporary_info) != state[
+                    "replacement_identity"
+                ] or not stat.S_ISREG(temporary_info.st_mode):
+                    raise RuntimeError("registry trust temporary custody drift")
+                state["temporary"].unlink()
+            state["custody"].rmdir()
+            self.registry_trust = None
+            self.record(
+                "fixture-registry-trust",
+                result="restored",
+                hosts_sha256=digest(original),
+                original_inode=True,
+                ctime_restored=False,
+            )
+        except Exception:
+            self.record("fixture-registry-trust", result="held", reason="cleanup-custody-held")
+            raise RuntimeError(
+                "fixture registry trust restoration held; native gate held"
+            ) from None
 
     def verify_registry_ca_directory(self):
         info = REGISTRY_CA_DIR.lstat()
@@ -298,6 +558,16 @@ class NativeQA:
             raise RuntimeError("registry CA directory custody is invalid; native gate held")
 
     def install_registry_ca(self, certificate_path):
+        if self.registry_baseline is not None:
+            original, info, parents = self.registry_baseline
+            current, observed = trust_read(REGISTRY_CA_DIR / "hosts.toml")
+            if (
+                current != original
+                or trust_identity(observed) != trust_identity(info)
+                or trust_metadata(observed) != trust_metadata(info)
+                or trust_directories(REGISTRY_CA_DIR) != parents
+            ):
+                raise RuntimeError("registry trust preimage drift; native gate held")
         try:
             REGISTRY_CA_DIR.lstat()
         except FileNotFoundError:
@@ -390,6 +660,7 @@ class NativeQA:
             raise RuntimeError(
                 "guest registry fixture requires an Engine without an outbound proxy"
             )
+        self.attest_registry_trust(engine)
         for source, expected, product in (
             (self.args.dc_source, self.args.dc_sha, "dc"),
             (self.args.proxy_source, self.args.proxy_sha, "proxy"),
@@ -425,6 +696,7 @@ class NativeQA:
             if docker("inspect", name, check=False).returncode == 0:
                 raise RuntimeError("fixture container name already occupied")
         ROOT.mkdir(mode=0o700)
+        self.fixture_owned = True
         (ROOT / "docker-client").mkdir(mode=0o700)
         os.environ["DOCKER_CONFIG"] = str(ROOT / "docker-client")
         write(ROOT / "docker-client/config.json", {"auths": {}})
@@ -519,6 +791,7 @@ class NativeQA:
         )
         certificate(ROOT / "registry-certs", "ghcr.io")
         self.install_registry_ca(ROOT / "registry-certs/server.crt")
+        self.install_registry_trust()
         self.hosts = Path("/etc/hosts").read_bytes()
         Path("/etc/hosts").write_bytes(self.hosts + b"\n127.0.0.1 ghcr.io\n")
         if any(
@@ -1376,42 +1649,100 @@ class NativeQA:
         run("systemctl", "daemon-reload", check=False)
 
     def cleanup(self):
-        try:
-            self.reset_fixture()
-        finally:
+        failed = False
+        quiesced = True
+
+        def stop_registry():
+            if docker("ps", "-aq", "--filter", "name=^/native-fleet-registry$").stdout.strip():
+                docker("rm", "-f", "native-fleet-registry")
+
+        def verify_quiesced():
+            if docker("ps", "-aq", "--filter", "label=" + self.label).stdout.strip():
+                raise RuntimeError("fixture consumers remain; cleanup held")
+            if self.units:
+                for name in (SERVICE, SOCKET_UNIT):
+                    if run("systemctl", "is-active", name, check=False).stdout.strip() not in (
+                        b"inactive",
+                        b"failed",
+                        b"unknown",
+                    ):
+                        raise RuntimeError("fixture units remain; cleanup held")
+
+        for operation in (
+            self.reset_fixture,
+            stop_registry,
+            verify_quiesced,
+        ):
             try:
-                docker("rm", "-f", "native-fleet-registry", check=False)
-            finally:
-                if self.hosts is not None:
-                    Path("/etc/hosts").write_bytes(self.hosts)
+                operation()
+            except Exception:
+                failed = True
+                quiesced = False
+        try:
+            if self.hosts is not None:
+                Path("/etc/hosts").write_bytes(self.hosts)
+        except Exception:
+            failed = True
+        trust_restored = False
+        if quiesced:
+            try:
+                self.restore_registry_trust()
+                trust_restored = True
                 self.remove_registry_ca()
-                for unit in self.units:
-                    unit.unlink(missing_ok=True)
-                link = Path("/usr/local/bin/dc-overview")
-                if (
-                    link.is_symlink()
-                    and link.resolve() == Path(sys.executable).parent / "dc-overview"
-                ):
-                    link.unlink()
-                run("systemctl", "daemon-reload", check=False)
+            except Exception:
+                failed = True
+        else:
+            failed = True
+        # Independent fixture cleanup continues. Preserve private custody and referenced
+        # CA on uncertainty, pending the separately required external VM destruction.
+        for unit in self.units:
+            try:
+                unit.unlink(missing_ok=True)
+            except Exception:
+                failed = True
+        try:
+            link = Path("/usr/local/bin/dc-overview")
+            if link.is_symlink() and link.resolve() == Path(sys.executable).parent / "dc-overview":
+                link.unlink()
+            run("systemctl", "daemon-reload")
+        except Exception:
+            failed = True
+        if trust_restored and self.registry_ca_file is None:
+            try:
                 if ROOT.exists():
                     shutil.rmtree(ROOT)
+            except Exception:
+                failed = True
+        if failed:
+            raise RuntimeError("fixture cleanup held; native gate held") from None
+        self.record("native-cleanup", result="passed", external_vm_destruction="unverified")
 
     def execute(self):
         prepared = False
+        failed = False
+        message = "native verification failed; native gate held"
+        phase = "preflight"
         try:
             self.preflight()
             prepared = True
+            phase = "images"
             self.images()
+            phase = "units_install"
             self.units_install()
             for layout in ("named-volume", "bind"):
+                phase = "fixture"
                 self.fixture(layout)
+                phase = "service_update"
                 self.service_update()
+                phase = "proxy_adopt"
                 self.proxy_adopt()
                 if layout == "named-volume":
+                    phase = "rollback"
                     self.rollback()
                 else:
+                    phase = "interrupted_adoption"
                     self.interrupted_adoption()
+                phase = "reset_fixture"
                 self.reset_fixture()
             self.record(
                 "native-flow",
@@ -1420,20 +1751,35 @@ class NativeQA:
                 external_vm_cleanup="parent must independently retain coordinator destruction receipt",
             )
         except Exception as error:
+            failed = True
+            if isinstance(error, RuntimeError) and str(error) in (
+                "native command timed out; native gate held",
+                "fixture registry push timed out; native gate held",
+            ):
+                message = str(error)
             self.record(
                 "native-flow",
                 result="failed",
-                error_type=type(error).__name__,
-                message=(
-                    str(error)
-                    if isinstance(error, RuntimeError)
-                    else "observable assertion or guest capability failed; gate held"
-                ),
+                phase=phase,
+                reason="observable-native-gate-failed",
+                message=message,
             )
-            raise
         finally:
-            if prepared:
-                self.cleanup()
+            if prepared or self.fixture_owned:
+                try:
+                    self.cleanup()
+                except Exception:
+                    failed = True
+                    message = "fixture cleanup held; native gate held"
+                    self.record("native-cleanup", result="failed", reason="cleanup-custody-held")
+                    self.record(
+                        "native-flow",
+                        result="failed",
+                        phase="cleanup",
+                        reason="cleanup-custody-held",
+                    )
+        if failed:
+            raise RuntimeError(message) from None
 
 
 def inspect_volume(name):

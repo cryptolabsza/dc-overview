@@ -3,10 +3,14 @@
 """Bounded security contract for the explicit native QA route; no guest execution."""
 
 import importlib.util
+import json
+import os
 import subprocess
 import tempfile
+import tomllib
 import traceback
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -16,6 +20,13 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/fleet-release-native-qa.yml"
 SCRIPT = ROOT / "scripts/verify_fleet_release_native.py"
+# Frozen external contract: runner_caches.py at 912762eb4b16f0fb956a3b4247f98dfedd96fa3f,
+# independently retained promotion recipe SHA256 f4ab2dbc2108c13306443fbbb5b5d1dfa3ee727c1e06f5c6609055226b655738.
+GUEST_HOSTS = (
+    b'server = "https://ghcr.io"\n\n[host."https://192.168.1.101:5444"]\n'
+    b'  capabilities = ["pull", "resolve"]\n'
+    b'  ca = "/etc/docker/certs.d/192.168.1.101:5444/ca.crt"\n'
+)
 
 
 class FleetNativeRouteTest(unittest.TestCase):
@@ -78,6 +89,18 @@ class FleetNativeRouteTest(unittest.TestCase):
         # Narrow command/file boundary regressions, not an Engine integration claim.
         with tempfile.TemporaryDirectory() as directory:
             instance = module.NativeQA(SimpleNamespace(evidence_dir=Path(directory)))
+            with self.subTest("known guest default-server trust external contract"):
+                self.assertEqual(
+                    module.digest(GUEST_HOSTS),
+                    "5b44770a4caca465e8991cbbaaa6a50eae52bc5d349700f4ca2c240ca0458629",
+                )
+                fixture_ca = "/etc/docker/certs.d/ghcr.io/native-fleet-qa-" + "a" * 32 + ".crt"
+                changed = module.fixture_hosts_bytes(GUEST_HOSTS, fixture_ca)
+                before = tomllib.loads(GUEST_HOSTS.decode())
+                after = tomllib.loads(changed.decode())
+                self.assertEqual(after.pop("ca"), [fixture_ca])
+                self.assertEqual(after, before)
+                self.assertTrue(changed.endswith(GUEST_HOSTS[GUEST_HOSTS.index(b"[host.") :]))
             with self.subTest("missing Docker Health requires the real fixed application probe"):
                 container = {"State": {"Running": True}}
 
@@ -182,6 +205,7 @@ class FleetNativeRouteTest(unittest.TestCase):
                 self.assertNotIn("TimeoutExpired", visible)
                 self.assertIn("timed out", visible)
                 instance.cleanup.assert_called_once()
+                self.assertEqual(instance.events[-1].get("phase"), "images")
                 self.assertIn('"result":"failed"', (Path(directory) / "results.json").read_text())
             # A failed fixture push must retain useful fixed signals without captured data.
             private = (
@@ -330,6 +354,289 @@ class FleetNativeRouteTest(unittest.TestCase):
                     (ca.stat().st_mode, ca.stat().st_uid, ca.stat().st_gid),
                     (directory_before.st_mode, directory_before.st_uid, directory_before.st_gid),
                 )
+            engine = {
+                "ServerVersion": "29.1.3",
+                "DriverStatus": [["driver-type", "io.containerd.snapshotter.v1"]],
+                "SecurityOptions": ["name=seccomp,profile=builtin"],
+            }
+
+            @contextmanager
+            def trust_fixture(name):
+                base = Path(directory) / name
+                base.mkdir(mode=0o700)
+                ca = base / "certs"
+                ca.mkdir(mode=0o755)
+                hosts = ca / "hosts.toml"
+                hosts.write_bytes(GUEST_HOSTS)
+                hosts.chmod(0o640)
+                os.utime(hosts, ns=(1700000000000000000, 1700000001000000000))
+                root = base / "fixture"
+                root.mkdir(mode=0o700)
+                source = base / "public.crt"
+                source.write_bytes(b"synthetic public fixture CA")
+                original_lstat, original_fstat = module.Path.lstat, module.os.fstat
+
+                def as_root(info, *, ancestor=False):
+                    # Simulate only the privileged ownership boundary on macOS. All
+                    # file reads, writes, inode changes and restoration remain real.
+                    values = {key: getattr(info, key) for key in dir(info) if key.startswith("st_")}
+                    values["st_uid"] = 0
+                    if ancestor:
+                        values["st_mode"] = module.stat.S_IFDIR | 0o755
+                    return SimpleNamespace(**values)
+
+                def root_lstat(path, *args, **kwargs):
+                    return as_root(
+                        original_lstat(path, *args, **kwargs),
+                        ancestor=path in base.parents,
+                    )
+
+                guest = module.NativeQA(SimpleNamespace(evidence_dir=base / "evidence"))
+                with (
+                    patch.object(module, "ROOT", root),
+                    patch.object(module, "REGISTRY_CA_DIR", ca),
+                    patch.object(module.Path, "lstat", root_lstat),
+                    patch.object(
+                        module.os, "fstat", side_effect=lambda fd: as_root(original_fstat(fd))
+                    ),
+                    patch.object(module.os, "listxattr", return_value=[], create=True),
+                ):
+                    yield guest, hosts, source, root
+
+            unsupported = (
+                {**engine, "ServerVersion": "99.0 SYNTHETIC_PRIVATE_VERSION"},
+                {**engine, "DriverStatus": None},
+                {**engine, "DriverStatus": [["driver-type", "overlay2"]]},
+                {**engine, "SecurityOptions": ["name=rootless"]},
+                {**engine, "SecurityOptions": None},
+            )
+            for number, context in enumerate(unsupported):
+                with self.subTest("unsupported context before any fixture mutation", number=number):
+                    with trust_fixture("context-" + str(number)) as (guest, hosts, source, root):
+                        guest.preflight = lambda context=context: guest.attest_registry_trust(
+                            context
+                        )
+                        guest.images = unittest.mock.Mock()
+                        guest.cleanup = unittest.mock.Mock()
+                        with self.assertRaisesRegex(RuntimeError, "native gate held"):
+                            guest.execute()
+                        guest.images.assert_not_called()
+                        guest.cleanup.assert_not_called()
+                        self.assertEqual(set(hosts.parent.iterdir()), {hosts})
+                        self.assertEqual(guest.events[0]["result"], "failed")
+                        self.assertNotIn("SYNTHETIC_PRIVATE", json.dumps(guest.events))
+            for unsafe in (
+                "hash",
+                "symlink",
+                "parent-symlink",
+                "mode",
+                "directory",
+                "hardlink",
+                "xattr",
+            ):
+                with self.subTest("unsafe baseline refused before mutation", unsafe=unsafe):
+                    with trust_fixture("unsafe-" + unsafe) as (guest, hosts, source, root):
+                        if unsafe == "hash":
+                            hosts.write_bytes(b"SYNTHETIC_PRIVATE_CONFIG")
+                        elif unsafe == "symlink":
+                            hosts.unlink()
+                            hosts.symlink_to(source)
+                        elif unsafe == "mode":
+                            hosts.chmod(0o666)
+                        elif unsafe == "parent-symlink":
+                            moved = hosts.parent.with_name("moved-certs")
+                            hosts.parent.rename(moved)
+                            hosts.parent.symlink_to(moved, target_is_directory=True)
+                        elif unsafe == "directory":
+                            hosts.parent.chmod(0o777)
+                        elif unsafe == "hardlink":
+                            os.link(hosts, hosts.with_name("other"))
+                        with patch.object(
+                            module.os,
+                            "listxattr",
+                            return_value=["unsupported"] if unsafe == "xattr" else [],
+                        ):
+                            with self.assertRaisesRegex(
+                                RuntimeError, "unsupported guest registry trust"
+                            ):
+                                guest.attest_registry_trust(engine)
+                        self.assertIsNone(guest.registry_ca_file)
+                        self.assertIsNone(guest.registry_trust)
+                        self.assertNotIn("SYNTHETIC_PRIVATE", json.dumps(guest.events))
+            with self.subTest(
+                "original inode bytes metadata and baseline CA survive trust round trip"
+            ):
+                with trust_fixture("roundtrip") as (guest, hosts, source, root):
+                    original_info = hosts.stat()
+                    baseline_ca = hosts.with_name("ca.crt")
+                    baseline_ca.write_bytes(b"existing mirror CA bytes")
+                    baseline_info = baseline_ca.stat()
+                    guest.attest_registry_trust(engine)
+                    guest.install_registry_ca(source)
+                    fixture_ca = guest.registry_ca_file
+                    guest.install_registry_trust()
+                    changed = tomllib.loads(hosts.read_text())
+                    self.assertEqual(changed.pop("ca"), [str(fixture_ca)])
+                    self.assertEqual(changed, tomllib.loads(GUEST_HOSTS.decode()))
+                    self.assertEqual(
+                        guest.registry_trust["backup"].stat().st_ino, original_info.st_ino
+                    )
+                    guest.restore_registry_trust()
+                    restored_info = hosts.stat()
+                    self.assertEqual(
+                        (
+                            restored_info.st_ino,
+                            restored_info.st_uid,
+                            restored_info.st_gid,
+                            restored_info.st_mode,
+                            restored_info.st_atime_ns,
+                            restored_info.st_mtime_ns,
+                        ),
+                        (
+                            original_info.st_ino,
+                            original_info.st_uid,
+                            original_info.st_gid,
+                            original_info.st_mode,
+                            original_info.st_atime_ns,
+                            original_info.st_mtime_ns,
+                        ),
+                    )
+                    self.assertEqual(hosts.read_bytes(), GUEST_HOSTS)
+                    self.assertTrue(fixture_ca.exists())  # Config restored before CA removal.
+                    guest.remove_registry_ca()
+                    self.assertEqual(baseline_ca.stat(), baseline_info)
+                    self.assertEqual(baseline_ca.read_bytes(), b"existing mirror CA bytes")
+                    self.assertEqual(guest.events[-1]["result"], "restored")
+                    self.assertFalse(guest.events[-1]["ctime_restored"])
+            for partial in ("write", "rename"):
+                with self.subTest("partial preparation reaches restoration", partial=partial):
+                    with trust_fixture("partial-" + partial) as (guest, hosts, source, root):
+                        guest.attest_registry_trust(engine)
+                        original_replace = module.os.replace
+
+                        def replace(source_path, destination, original_replace=original_replace):
+                            if Path(source_path).name.startswith(".native-fleet-qa-"):
+                                raise OSError("SYNTHETIC_PRIVATE_RENAME")
+                            return original_replace(source_path, destination)
+
+                        def prepare(
+                            partial=partial, original_replace=original_replace, replace=replace
+                        ):
+                            guest.install_registry_ca(source)
+                            with (
+                                patch.object(
+                                    module.os,
+                                    "replace",
+                                    side_effect=(
+                                        replace if partial == "rename" else original_replace
+                                    ),
+                                ),
+                                patch.object(
+                                    module.os,
+                                    "fsync",
+                                    side_effect=(
+                                        OSError("SYNTHETIC_PRIVATE_WRITE")
+                                        if partial == "write"
+                                        else None
+                                    ),
+                                ),
+                            ):
+                                guest.install_registry_trust()
+
+                        guest.preflight = lambda: None
+                        guest.images = prepare
+                        guest.reset_fixture = lambda: None
+                        with (
+                            patch.object(
+                                module, "docker", return_value=SimpleNamespace(stdout=b"")
+                            ),
+                            patch.object(module, "run"),
+                        ):
+                            with self.assertRaisesRegex(RuntimeError, "native verification failed"):
+                                guest.execute()
+                        self.assertEqual(hosts.read_bytes(), GUEST_HOSTS)
+                        self.assertIsNone(guest.registry_trust)
+                        self.assertIsNone(guest.registry_ca_file)
+                        self.assertNotIn("SYNTHETIC_PRIVATE", json.dumps(guest.events))
+            for drift in ("replacement", "content", "restore-failure", "consumer-active"):
+                with self.subTest("cleanup custody failure is terminal and private", drift=drift):
+                    with trust_fixture("drift-" + drift) as (guest, hosts, source, root):
+                        guest.attest_registry_trust(engine)
+                        guest.install_registry_ca(source)
+                        guest.install_registry_trust()
+                        fixture_ca = guest.registry_ca_file
+                        private = "SYNTHETIC_PRIVATE_CONFIG_HEADER_KEY_PATH"
+                        if drift == "replacement":
+                            replacement = hosts.with_name("foreign")
+                            replacement.write_bytes(hosts.read_bytes())
+                            os.replace(replacement, hosts)
+                        elif drift == "content":
+                            hosts.write_text(private)
+                        untouched = hosts.read_bytes()
+                        original_replace = module.os.replace
+
+                        def restore_failure(
+                            source_path,
+                            destination,
+                            private=private,
+                            original_replace=original_replace,
+                        ):
+                            if Path(source_path).name == "original":
+                                raise OSError(private)
+                            return original_replace(source_path, destination)
+
+                        for method in (
+                            "preflight",
+                            "images",
+                            "units_install",
+                            "fixture",
+                            "service_update",
+                            "proxy_adopt",
+                            "rollback",
+                            "interrupted_adoption",
+                            "reset_fixture",
+                        ):
+                            setattr(guest, method, lambda *args: None)
+
+                        def consumers(*args, drift=drift):
+                            return SimpleNamespace(
+                                stdout=(
+                                    b"owned-consumer"
+                                    if drift == "consumer-active"
+                                    and args[-1] == "label=" + guest.label
+                                    else b""
+                                )
+                            )
+
+                        with (
+                            patch.object(module, "docker", side_effect=consumers),
+                            patch.object(module, "run"),
+                            patch.object(
+                                module.os,
+                                "replace",
+                                side_effect=(
+                                    restore_failure
+                                    if drift == "restore-failure"
+                                    else original_replace
+                                ),
+                            ),
+                        ):
+                            try:
+                                guest.execute()
+                            except RuntimeError:
+                                visible = traceback.format_exc()
+                            else:
+                                self.fail("cleanup failure must fail after a passed native flow")
+                        self.assertEqual(hosts.read_bytes(), untouched)
+                        self.assertTrue(fixture_ca.exists())
+                        self.assertTrue(guest.registry_trust["backup"].exists())
+                        self.assertTrue(root.exists())
+                        flow = [event for event in guest.events if event["case"] == "native-flow"]
+                        self.assertEqual([event["result"] for event in flow], ["passed", "failed"])
+                        self.assertEqual(flow[-1].get("phase"), "cleanup")
+                        retained = (guest.evidence / "results.json").read_text()
+                        self.assertNotIn(private, visible + retained)
+                        self.assertNotIn(str(root), visible + retained)
             with self.subTest("early preflight failure emits red evidence without fixture cleanup"):
                 early = module.NativeQA(SimpleNamespace(evidence_dir=Path(directory) / "early"))
                 early.preflight = unittest.mock.Mock(
@@ -337,13 +644,18 @@ class FleetNativeRouteTest(unittest.TestCase):
                 )
                 early.cleanup = unittest.mock.Mock()
                 early.images = unittest.mock.Mock()
-                with self.assertRaisesRegex(RuntimeError, "occupied fixture"):
+                with self.assertRaisesRegex(RuntimeError, "native verification failed"):
                     early.execute()
                 early.images.assert_not_called()
                 early.cleanup.assert_not_called()
                 result = (early.evidence / "results.json").read_text()
                 self.assertIn('"result":"failed"', result)
-                self.assertIn("occupied fixture path", result)
+                self.assertNotIn("occupied fixture path", result)
+                self.assertEqual(early.events[-1].get("phase"), "preflight")
+                early.fixture_owned = True  # Fresh ROOT acquired before the prepared flag.
+                with self.assertRaisesRegex(RuntimeError, "native verification failed"):
+                    early.execute()
+                early.cleanup.assert_called_once()
 
 
 if __name__ == "__main__":
