@@ -11,7 +11,7 @@ import tempfile
 import tomllib
 import traceback
 import unittest
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -700,6 +700,12 @@ class FleetNativeRouteTest(unittest.TestCase):
                         flow = [event for event in guest.events if event["case"] == "native-flow"]
                         self.assertEqual([event["result"] for event in flow], ["passed", "failed"])
                         self.assertEqual(flow[-1].get("phase"), "cleanup")
+                        self.assertIs(type(flow[-1].get("source_line")), int)
+                        self.assertIn(
+                            flow[-1].get("source_line"),
+                            {line for _, _, line in module.NativeQA.cleanup.__code__.co_lines()},
+                        )
+                        self.assertEqual(flow[-1].get("error_kind"), "runtime-error")
                         retained = (guest.evidence / "results.json").read_text()
                         self.assertNotIn(private, visible + retained)
                         self.assertNotIn(str(root), visible + retained)
@@ -722,6 +728,81 @@ class FleetNativeRouteTest(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "native verification failed"):
                     early.execute()
                 early.cleanup.assert_called_once()
+
+            original_service_update = module.NativeQA.service_update
+            private = "SYNTHETIC_PRIVATE_SERVICE_UPDATE_KEY_PATH"
+            for foreign, collector_fails in ((False, False), (True, False), (False, True)):
+                with self.subTest(
+                    "service update diagnostics", foreign=foreign, collector_fails=collector_fails
+                ):
+                    guest = module.NativeQA(
+                        SimpleNamespace(
+                            evidence_dir=Path(directory) / f"service-{foreign}-{collector_fails}"
+                        )
+                    )
+                    guest.preflight = lambda: None
+                    guest.images = lambda: None
+                    guest.units_install = lambda: None
+                    guest.fixture = lambda layout: None
+                    guest.cleanup = unittest.mock.Mock()
+                    cause = RuntimeError(private)
+
+                    # A same-name, same-filename replacement still has foreign code identity.
+                    def service_update(self, cause=cause):
+                        self.issuer = private
+                        raise cause
+
+                    service_update.__code__ = service_update.__code__.replace(
+                        co_filename=str(SCRIPT)
+                    )
+                    with (
+                        patch.object(
+                            module.NativeQA,
+                            "service_update",
+                            service_update if foreign else original_service_update,
+                        ),
+                        patch.object(module, "inspect", side_effect=cause) as boundary,
+                        patch.object(
+                            module,
+                            "native_phase_failure_metadata",
+                            side_effect=RuntimeError(private),
+                            create=True,
+                        ) if collector_fails else nullcontext(),
+                    ):
+                        try:
+                            guest.execute()
+                        except RuntimeError:
+                            visible = traceback.format_exc()
+                        else:
+                            self.fail("phase diagnostics must preserve the original failure")
+                    guest.cleanup.assert_called_once()
+                    if foreign:
+                        boundary.assert_not_called()
+                    else:
+                        boundary.assert_called_once_with("cryptolabs-proxy")
+                    retained = (guest.evidence / "results.json").read_text()
+                    self.assertNotIn(private, visible + retained)
+                    self.assertNotIn(str(guest.evidence), visible + retained)
+                    flow = guest.events[-1]
+                    self.assertEqual((flow["result"], flow["phase"]), ("failed", "service_update"))
+                    lines = []
+                    frame = cause.__traceback__
+                    while frame is not None:
+                        if frame.tb_frame.f_code is original_service_update.__code__:
+                            lines.append(frame.tb_lineno)
+                        frame = frame.tb_next
+                    expected = None if foreign or collector_fails else lines[-1]
+                    self.assertIn("source_line", flow)
+                    self.assertEqual(flow["source_line"], expected)
+                    self.assertEqual(
+                        flow.get("error_kind"), "runtime-error" if expected is not None else "unknown"
+                    )
+                    if expected is not None:
+                        for phase in ("proxy_adopt", "foreign-phase"):
+                            self.assertEqual(
+                                module.native_phase_failure_metadata(cause, phase),
+                                {"source_line": None, "error_kind": "unknown"},
+                            )
 
             original_fixture = module.NativeQA.fixture
             private = "SYNTHETIC_PRIVATE_FIXTURE_KEY_PATH"
@@ -819,6 +900,9 @@ class FleetNativeRouteTest(unittest.TestCase):
                     self.assertEqual(flow.get("fixture_line"), expected)
                     self.assertIn("fixture_line", flow)
                     self.assertEqual(flow.get("fixture_error_kind"), kind)
+                    self.assertEqual(flow.get("source_line"), expected)
+                    self.assertIn("source_line", flow)
+                    self.assertEqual(flow.get("error_kind"), kind)
                     if expected is not None:
                         self.assertIn(
                             expected, {line for _, _, line in original_fixture.__code__.co_lines()}

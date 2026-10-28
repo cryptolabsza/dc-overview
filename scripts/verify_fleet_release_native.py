@@ -1757,13 +1757,16 @@ class NativeQA:
                 "fixture registry push timed out; native gate held",
             ):
                 message = str(error)
-            diagnostics = {}
+            diagnostics = {"source_line": None, "error_kind": "unknown"}
+            try:
+                diagnostics = native_phase_failure_metadata(error, phase)
+            except Exception:
+                pass  # Diagnostic collection must preserve the original failure and cleanup.
             if phase == "fixture":
-                diagnostics = {"fixture_line": None, "fixture_error_kind": "unknown"}
-                try:
-                    diagnostics = fixture_failure_metadata(error)
-                except Exception:
-                    pass  # Diagnostic collection must preserve the original failure and cleanup.
+                diagnostics.update(
+                    fixture_line=diagnostics["source_line"],
+                    fixture_error_kind=diagnostics["error_kind"],
+                )
             self.record(
                 "native-flow",
                 result="failed",
@@ -1776,15 +1779,21 @@ class NativeQA:
             if prepared or self.fixture_owned:
                 try:
                     self.cleanup()
-                except Exception:
+                except Exception as error:
                     failed = True
                     message = "fixture cleanup held; native gate held"
+                    diagnostics = {"source_line": None, "error_kind": "unknown"}
+                    try:
+                        diagnostics = native_phase_failure_metadata(error, "cleanup")
+                    except Exception:
+                        pass  # A diagnostic error must not replace terminal cleanup failure.
                     self.record("native-cleanup", result="failed", reason="cleanup-custody-held")
                     self.record(
                         "native-flow",
                         result="failed",
                         phase="cleanup",
                         reason="cleanup-custody-held",
+                        **diagnostics,
                     )
         if failed:
             raise RuntimeError(message) from None
@@ -1811,6 +1820,30 @@ def fixture_failure_metadata(error, fixture_code=NativeQA.fixture.__code__):
             kind = label
             break
     return {"fixture_line": line, "fixture_error_kind": kind}
+
+
+def native_phase_failure_metadata(
+    error,
+    phase,
+    phase_codes=(
+        ("preflight", NativeQA.preflight.__code__),
+        ("images", NativeQA.images.__code__),
+        ("units_install", NativeQA.units_install.__code__),
+        ("fixture", NativeQA.fixture.__code__),
+        ("service_update", NativeQA.service_update.__code__),
+        ("proxy_adopt", NativeQA.proxy_adopt.__code__),
+        ("rollback", NativeQA.rollback.__code__),
+        ("interrupted_adoption", NativeQA.interrupted_adoption.__code__),
+        ("reset_fixture", NativeQA.reset_fixture.__code__),
+        ("cleanup", NativeQA.cleanup.__code__),
+    ),
+):
+    # Capture original code objects at module load; runtime names/files grant no identity.
+    code = next((code for name, code in phase_codes if name == phase), None)
+    if code is None:
+        return {"source_line": None, "error_kind": "unknown"}
+    metadata = fixture_failure_metadata(error, fixture_code=code)
+    return {"source_line": metadata["fixture_line"], "error_kind": metadata["fixture_error_kind"]}
 
 
 def inspect_volume(name):
