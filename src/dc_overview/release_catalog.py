@@ -1,3 +1,4 @@
+# TRACEWEAVER: file-role=release-owner; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001; ver=VER-FLEETUPDATE-001
 """Post-build release vectors. Policy is data, never remotely supplied commands."""
 from dataclasses import dataclass
 import hashlib
@@ -49,7 +50,8 @@ def _json(raw):
     if len(raw) > 1024 * 1024:
         raise ValueError('release document too large')
     try:
-        return json.loads(raw, object_pairs_hook=_object_pairs)
+        return json.loads(raw.decode('utf-8') if isinstance(raw, bytes) else raw, object_pairs_hook=_object_pairs,
+                          parse_constant=lambda value: (_ for _ in ()).throw(ValueError('invalid JSON constant')))
     except (UnicodeError, json.JSONDecodeError) as error:
         raise ValueError('invalid release JSON') from error
 
@@ -72,15 +74,20 @@ class Manifest:
     @classmethod
     def from_bytes(cls, raw):
         data = _json(raw)
-        _keys(data, {'schema_version', 'baseline_id', 'selection_contract', 'components'})
-        if type(data['schema_version']) is not int or data['schema_version'] != 1:
+        _keys(data, {'schema_version', 'baseline_id', 'selection_contract', 'components'}, {'component_channels'})
+        if type(data['schema_version']) is not int or data['schema_version'] not in (1, 2):
             raise ValueError('unsupported manifest schema')
-        if type(data['selection_contract']) is not int or data['selection_contract'] != SELECTION_CONTRACT:
+        if type(data['selection_contract']) is not int or data['selection_contract'] != data['schema_version']:
             raise ValueError('unsupported selection contract')
         if not isinstance(data['baseline_id'], str) or not IDENTIFIER.fullmatch(data['baseline_id']):
             raise ValueError('invalid baseline ID')
         if not isinstance(data['components'], dict) or not data['components']:
             raise ValueError('missing manifest components')
+        channels = data.get('component_channels', {})
+        if (not isinstance(channels, dict) or set(channels) - set(data['components'])
+                or any(type(value) is not str or value not in ('main', 'dev') for value in channels.values())
+                or (data['schema_version'] == 1 and 'component_channels' in data)):
+            raise ValueError('invalid component channels')
         for name, component in data['components'].items():
             if name not in COMPONENTS:
                 raise ValueError('unknown component')
@@ -119,6 +126,7 @@ class Manifest:
         return cls(bytes(raw), hashlib.sha256(raw).hexdigest(), data)
 
 
+# TRACEWEAVER: entrypoint=resolve; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001; ver=VER-FLEETUPDATE-001
 def resolve(manifest, selection, platform, *, required_components=()):
     _keys(selection, {'schema_version', 'selection_id', 'manifest_sha256', 'components'})
     if type(selection['schema_version']) is not int or selection['schema_version'] != 1:
@@ -282,7 +290,7 @@ class ReleaseStore:
             _atomic_write(selection_path, prior_selection)
         journal.unlink()
 
-    def begin_publication(self, prepared, before_public):
+    def begin_publication(self, prepared, before_public, *, operation_id=None):
         import base64
         _require_root()
         self.root.mkdir(parents=True, exist_ok=True, mode=0o755)
@@ -291,7 +299,7 @@ class ReleaseStore:
         if path.exists():
             _check_root_path(path)
         prior = path.read_bytes() if path.exists() else None
-        value = {'before_public':base64.b64encode(before_public).decode(),
+        value = {'operation_id':operation_id, 'before_public':base64.b64encode(before_public).decode(),
                  'before_selection':None if prior is None else base64.b64encode(prior).decode(),
                  'candidate_selection':base64.b64encode(prepared.selection_raw).decode()}
         _atomic_write(self.root / '.lifecycle-publication.json', (json.dumps(value)+'\n').encode())

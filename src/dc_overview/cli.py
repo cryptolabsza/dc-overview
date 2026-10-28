@@ -1,3 +1,4 @@
+# TRACEWEAVER: file-role=release-owner; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001; ver=VER-FLEETUPDATE-001
 """
 DC Overview CLI - Command line interface with setup wizard
 """
@@ -81,6 +82,7 @@ def release():
 @click.option('--record-cli', is_flag=True, help='Explicitly record the verified installed host wheel without enabling a new role.')
 @click.option('--adopt-existing-selection', is_flag=True, help='Bind a trusted canonical existing selection only when the public reference is entirely absent.')
 @click.option('--source-image', 'source_images', multiple=True, help='Expected local source image for a scoped container without RepoDigests: COMPONENT=sha256:IMAGE_ID.')
+# TRACEWEAVER: entrypoint=release_select; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001; ver=VER-FLEETUPDATE-001
 def release_select(release_manifest, components, record_cli, adopt_existing_selection, source_images):
     """Select installed component artifacts; print JSON with deployment pending."""
     import json
@@ -92,6 +94,72 @@ def release_select(release_manifest, components, record_cli, adopt_existing_sele
     except (OSError, ValueError, RuntimeError) as error:
         raise click.ClickException(str(error)) from None
     click.echo(json.dumps(result, sort_keys=True))
+
+def _release_request(action, params):
+    import json
+    from .release_broker_service import request
+    try:
+        click.echo(json.dumps(request(action, params), sort_keys=True))
+    except (ValueError, RuntimeError, OSError) as error:
+        raise click.ClickException(str(error)) from None
+
+
+@release.command('broker-serve')
+def release_broker_serve():
+    """Serve the fixed systemd socket with the installed root policy."""
+    from .release_broker import ReleaseBroker, load_policy
+    from .release_broker_service import serve
+    try:
+        serve(ReleaseBroker(FleetConfig.load(DOCKER_CONFIG_DIR), load_policy(), policy_loader=load_policy))
+    except (ValueError, RuntimeError, OSError) as error:
+        raise click.ClickException(str(error)) from None
+
+
+@release.command('candidates')
+@click.option('--channel', type=click.Choice(['main', 'dev']), default='main')
+def release_candidates(channel):
+    """List freshly admitted candidates through the installed owner."""
+    _release_request('list', {'channel': channel})
+
+
+@release.command('preview')
+@click.option('--candidate', 'candidate_ids', multiple=True, required=True)
+@click.option('--component', 'components', multiple=True, required=True)
+@click.option('--expected-selection-id', required=True)
+@click.option('--expected-selection-sha256', required=True)
+@click.option('--operation-kind', type=click.Choice(['services-update', 'proxy-adopt']), required=True)
+def release_preview(candidate_ids, components, expected_selection_id, expected_selection_sha256, operation_kind):
+    """Review an exact scoped release against an observed selection."""
+    _release_request('preview', {'candidate_ids': list(candidate_ids), 'components': list(components),
+        'expected_selection_id': expected_selection_id, 'expected_selection_sha256': expected_selection_sha256,
+        'operation_kind': operation_kind})
+
+
+@release.command('apply')
+@click.option('--operation-id', required=True)
+@click.option('--preview-id', required=True)
+@click.option('--preview-sha256', required=True)
+@click.option('--expected-selection-id', required=True)
+@click.option('--expected-selection-sha256', required=True)
+def release_apply(operation_id, preview_id, preview_sha256, expected_selection_id, expected_selection_sha256):
+    """Apply one retained preview; replay the same operation UUID after lost reply."""
+    _release_request('apply', dict(operation_id=operation_id, preview_id=preview_id, preview_sha256=preview_sha256,
+        expected_selection_id=expected_selection_id, expected_selection_sha256=expected_selection_sha256))
+
+
+@release.command('status')
+@click.argument('operation_id')
+def release_operation_status(operation_id):
+    """Read the retained operation identity, including terminal results."""
+    _release_request('status', {'operation_id': operation_id})
+
+
+@release.command('recover')
+@click.argument('operation_id')
+def release_operation_recover(operation_id):
+    """Reconcile only an existing operation through its installed owner."""
+    _release_request('recover', {'operation_id': operation_id})
+
 
 @click.command("install-exporters")
 @click.option("--node-exporter/--no-node-exporter", default=True, help="Install node_exporter")

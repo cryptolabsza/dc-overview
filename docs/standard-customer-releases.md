@@ -500,3 +500,114 @@ startup/import overrides remain preservation holds. Normal compiler-cache proof
 uses the pinned image compiler with bounded argument chunks and archive metadata;
 host Python version equality is not required. See the monitoring contract for the
 explicit supported schema and runtime limits.
+
+## Fleet release owner (disabled until operator acceptance)
+
+The installed DC wheel includes a fixed host broker and socket units. Installation
+of a wheel does not install or enable these units. An operator must verify the
+published DC wheel, proxy host wheel and proxy image, retain prior direct-URL
+wheel provenance and the exact contract-1 selection/configuration, and install
+both units from `dc_overview/templates/systemd/` through the reviewed host route.
+The service executes `/usr/local/bin/dc-overview release broker-serve`; verify that
+this executable belongs to the exact reviewed wheel before enabling the socket.
+No product installation script enables release writes.
+
+The socket is `/run/dc-overview-release-broker.sock`, root:root mode 0600.
+The installed broker reads only `/etc/dc-overview/releases/broker-policy.json`
+(root-owned mode 0600; parent directories must have trusted custody). Start with
+`writes_enabled: false`. Configure an explicit `allowed_uids` list only after
+verifying the actual Linux peer UID. Socket permission and Linux SO_PEERCRED
+checks both apply. An existing root or Docker-capable proxy already has powerful
+host authority; the socket does not provide credential isolation from that peer.
+Mount only this exact socket into the proxy using its installed owner declaration.
+Do not replace a container by running a source-image helper.
+
+The policy must supply reviewed `public_key_hex` (an Ed25519 public key),
+`allowed_producer` with the exact numeric `repository_id` 1133295682, `workflow`
+and protected `ref`, positive `max_validity_seconds`, and an explicit positive
+`minimum_generation`. There are no production key, workflow, generation,
+validity or development-channel defaults. Missing trust means unavailable.
+The root policy also supplies the absolute `declaration_path` and
+`proxy_config_dir` for the installed recoverable proxy owner. Requests cannot
+supply any of these paths, a URL, commands or declaration contents.
+
+Discovery reads the fixed numeric DC GitHub repository and only these release
+asset names: `suite-release.json`, `suite-admission.json`, `suite-admission.sig`,
+`admission-index.json`, `admission-index.sig`. Detached signatures are 64 raw
+Ed25519 signature bytes over the exact corresponding JSON bytes. Asset presence
+and checksums alone do not establish admission. Download redirects are restricted
+to HTTPS GitHub API and GitHub release-asset hosts, with bounded bytes and time.
+
+The signed envelope has exactly `schema_version: 1`, `manifest_sha256`,
+`component_admissions`, `producer`, `owner_approval_receipt`, `generation`,
+`issued_at`, and `expires_at`. Timestamps use RFC3339 UTC. Producer fields are
+`repository_id`, `workflow`, `ref`, `source_sha` (40 lowercase hex), positive
+`run_id` and `attempt`. Each component admission has `component`, `channel`
+(`main` or `dev`), `platform`, immutable `identity`, `required_capabilities`
+(a name-to-positive-integer mapping), `independently_replaceable` (boolean), and
+`dependency_group` (explicit component names). The platform identity must match
+the exact manifest. A candidate ID is the SHA256 of its exact envelope bytes.
+
+The signed current index has exactly `schema_version: 1`, `generation`,
+`issued_at`, `expires_at`, `candidates` (candidate ID to admission SHA256), and
+`revoked` (candidate IDs). One newest valid signed index governs all discovered
+candidates, including older still-valid envelopes. The broker persists the
+highest index generation and exact index hash before exposing candidates; an
+all-revoked index also advances this protection. Equal-generation index changes,
+rollback, expiry, incompatible capabilities and incomplete groups fail closed.
+Offline discovery leaves the running selection operational. It prevents new
+selection and submission; retained owner outcomes remain inspectable.
+
+Manifest schema 1/contract 1 retains implicit main channels. Schema 2/contract 2
+adds only top-level `component_channels`; omitted entries mean main. Selection
+JSON remains schema 1. Composition copies every unscoped component object,
+policy, pin and channel entry unchanged. Both installed and running updater
+packages must prove support for contract 2 before publication. The legacy
+`selection_contract: 1` capability remains additive-compatible. Restore a proven
+contract-1 selection before downgrading either reader.
+
+Administrators preview exact explicit managed components, then apply a retained
+preview with a canonical operation UUID and expected selection hashes. One job
+updates exactly the requested services. `cryptolabs-proxy` is a separate
+`proxy-adopt` operation and must be independently replaceable by itself. No
+implicit `all`, cross-owner expansion, floating-tag fallback or atomic group
+splitting occurs. New host-tool requirements are owner-maintenance holds.
+
+The broker stores private, fsynced previews and operations under the existing
+release store's `broker/` directory before selection publication. The lifecycle
+journal carries the operation UUID. Reconciliation uses the existing lifecycle
+and updater lock order. A changed selection or updater-store identity holds the
+operation; it is never overwritten or redirected to another job store.
+Updater submission retains the UUID and immutable request fingerprint, including
+terminal mappings. Replaying an ID with changed content is a conflict.
+
+Proxy previews bind the installed owner's source, configuration, declaration,
+selection and plan identities. Apply persists that plan before calling the fixed
+installed `StandardAdoption.adopt` API. A lost adoption reply or broker restart
+calls only `recover_adoption(plan_id)` against the owner's retained private
+records. Uncertain evidence stays `recovery-required`; it never blindly repeats
+adoption. Keep the prior auth/configuration/runtime and owner recovery snapshots.
+Disable writes before any rollback, reconcile the operation, and restore prior
+wheel and compatible selection records together through the reviewed owner route.
+
+The CLI uses the same socket dispatcher as Fleet Manager:
+
+```text
+dc-overview release candidates --channel main
+dc-overview release preview --candidate CANDIDATE_ID --component COMPONENT \
+  --operation-kind services-update --expected-selection-id SELECTION_ID \
+  --expected-selection-sha256 SELECTION_SHA256
+dc-overview release apply --operation-id UUID --preview-id PREVIEW_ID \
+  --preview-sha256 PREVIEW_SHA256 --expected-selection-id SELECTION_ID \
+  --expected-selection-sha256 SELECTION_SHA256
+dc-overview release status UUID
+dc-overview release recover UUID
+```
+
+Before enabling normal writes, retain actual Linux packaged socket/peer and
+installed-owner evidence, a real current publisher admission, one scoped service
+update, failed-health rollback, and a genuine Fleet Manager self-adoption with
+session continuity through browser disconnect/reconnect. Verify other owners,
+pins, settings, mounts and credentials remain unchanged. Local fixture tests do
+not establish these production acceptance results. No production enablement is
+claimed by this implementation.
