@@ -48,16 +48,17 @@ FROZEN_PRODUCT_HASHES = {
         "src/dc_overview/templates/systemd/dc-overview-release-broker.socket": "67994e4c1d4b2ac9fa4b44de9e8ba60db2b087424993fce77656c0618272c559",
     },
     "proxy": {
+        "src/cryptolabs_proxy/account_link.py": "c9f921e25ee0341c3b191064f1a57c94919310d5d4e08ec2c2c3030b964ea634",
         "landing-page/index.html": "20061e8140c5132b68f0bdc5a7ebfd48023534cf6f1ea7f2921ea6d04530ff37",
-        "nginx/nginx.conf": "7993c9adc7b90f9c79cc569470008a124bb31763ecbc3cf12105cd906c930fbb",
+        "nginx/nginx.conf": "5a6f8bbd6c9121fb0b1a2fd4884205b996f52c332ae2e0ea9b026fc5a748ed7d",
         "scripts/health-api.py": "cc70687058e964b1afce202fed0117f8fee511cdece637f853eee2f25684e6d3",
-        "src/cryptolabs_proxy/auth.py": "b37585f4356459e69d0e3aabf79b3cf093a99ab0bb50a0212373934ca579ec72",
+        "src/cryptolabs_proxy/auth.py": "e9bda16030012f4045364ea4fa6929c6d42e6da5d4e1392259298fbcff3fb679",
         "src/cryptolabs_proxy/config.py": "cb921e11d4cf316df013c53bd36c7de89b0a8e5cb66df6dd3131f7425d15cf3f",
         "src/cryptolabs_proxy/release_client.py": "d3ed1dd31ea3a54f07a17772fefdbbb1bc9105880ab7b0d563f17d73a4332c25",
         "src/cryptolabs_proxy/release_selection.py": "b56a4dac88c8ef0c03500430ab1054bcf142e4bfaeef7edce67fce0f27f5b5d4",
-        "src/cryptolabs_proxy/standard_adoption.py": "1d608c6b25b41a1f2eca4c0b3e6034eb567db48c7212b00c72c1028e36ad6f17",
+        "src/cryptolabs_proxy/standard_adoption.py": "46f7bd6d889d00d41f632e6246f9269ea9a1833626482383acbfd30454d079a2",
         "src/cryptolabs_proxy/templates/docker-compose.yml.j2": "ec923fb17e99c649bb0aacd95eb8aeee465cfc9dbc6c65b721461cbf094a8856",
-        "src/cryptolabs_proxy/templates/nginx.conf.j2": "6b40f203f6331d6610e558e7a42655f8917fa87ce8ada5edc6f844ffab274377",
+        "src/cryptolabs_proxy/templates/nginx.conf.j2": "d14273f48d5370f480870068b8bcf1ebb2a84a868979079ff97549ef8fcdd7ed",
         "src/cryptolabs_proxy/templates/previous-standard-nginx-444d7c0.conf.j2": "f12e2b9800cbaa0e49e685506cfaad38eb7e568fa6d239fa15277af59073d8de",
         "src/cryptolabs_proxy/updates.py": "cdb0958893eb6a11dc2764c4384ea784bf4b9632418a0871c3cee35bde3d00b6",
     },
@@ -271,13 +272,90 @@ def raw_request(action="list", params=None, *, actor=None, payload=None):
     return json.loads(data)
 
 
+# TRACEWEAVER: diagnostic-boundary=broker-child; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001; ver=VER-FLEETUPDATE-001
+BROKER_CODE_LABELS = (
+    "broker-serve", "broker-connection", "broker-response", "broker-init",
+    "broker-policy", "broker-dispatch", "broker-reconcile", "broker-operation",
+)
+ERROR_KINDS = (
+    "assertion-error", "file-not-found", "permission-error", "os-error", "runtime-error", "unknown",
+)
+SERVICE_ENUMS = {
+    "ActiveState": ("active", "reloading", "inactive", "failed", "activating", "deactivating", "maintenance", "refreshing"),
+    "SubState": ("dead", "condition", "start-pre", "start", "start-post", "running", "exited", "reload", "reload-signal", "reload-notify", "stop", "stop-watchdog", "stop-sigterm", "stop-sigkill", "stop-post", "final-watchdog", "final-sigterm", "final-sigkill", "failed", "auto-restart", "auto-restart-queued", "cleaning"),
+    "Result": ("success", "resources", "protocol", "timeout", "exit-code", "signal", "core-dump", "watchdog", "start-limit-hit", "oom-kill", "exec-condition"),
+}
+
+
+def service_state(raw):
+    """Project only a closed set of systemd properties; never copy unknown output."""
+    result = {**dict.fromkeys(SERVICE_ENUMS, "unknown"), "MainPID": None, "ExecMainStatus": None}
+    if not isinstance(raw, bytes) or len(raw) > 4096:
+        return result
+    fields = {}
+    for line in raw.splitlines():
+        key, _, value = line.partition(b"=")
+        fields.setdefault(key, []).append(value)
+    for key in result:
+        values = fields.get(key.encode(), [])
+        if len(values) != 1:
+            continue
+        value = values[0]
+        if key in SERVICE_ENUMS:
+            result[key] = next((item for item in SERVICE_ENUMS[key] if value == item.encode()), "unknown")
+        elif re.fullmatch(rb"[0-9]{1,10}", value):
+            number = int(value)
+            if number <= (4194304 if key == "MainPID" else 255):
+                result[key] = number
+    return result
+
+
+def broker_failure_metadata(error, code_objects):
+    result = {"code_label": None, "source_line": None, "error_kind": "unknown"}
+    frame = error.__traceback__
+    while frame is not None:
+        for label, code in code_objects:
+            if label in BROKER_CODE_LABELS and frame.tb_frame.f_code is code:
+                metadata = fixture_failure_metadata(error, fixture_code=code)
+                if metadata["fixture_line"] is not None:
+                    result = {"code_label": label, "source_line": metadata["fixture_line"],
+                              "error_kind": metadata["fixture_error_kind"]}
+        frame = frame.tb_next
+    return result
+
+
+def child_failure_file(flags):
+    """Only the fixture's private regular file; callers retain/check inode custody."""
+    parent = ROOT.lstat()
+    if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != os.geteuid()
+            or stat.S_IMODE(parent.st_mode) != 0o700):
+        raise RuntimeError("child diagnostic directory custody held")
+    descriptor = os.open(ROOT / "broker-child-failure.json", flags | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    try:
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1):
+            raise RuntimeError("child diagnostic file custody held")
+        return descriptor, info
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def write_broker_failure(value):
+    descriptor, _ = child_failure_file(os.O_WRONLY)
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(encoded(value))
+        stream.truncate()
+
+
 def broker_child():
     """Accepted test-input adapter: replace discovery data only, preserve installed owners."""
     if os.geteuid() or platform.system() != "Linux":
         raise RuntimeError("fixture broker child is only for the disposable Linux guest")
     from dc_overview.fleet_config import FleetConfig
     from dc_overview.release_broker import ReleaseBroker, load_policy
-    from dc_overview.release_broker_service import serve
+    from dc_overview.release_broker_service import response, serve, serve_connection
 
     def fixture_assets():
         assets = ROOT / "admission"
@@ -290,14 +368,28 @@ def broker_child():
         )
         return [{name: (assets / name).read_bytes() for name in names}]
 
-    serve(
-        ReleaseBroker(
-            FleetConfig.load(CONFIG),
-            load_policy(),
-            discovery=fixture_assets,
-            policy_loader=load_policy,
+    # Freeze original installed function identities before executing any owner code.
+    codes = tuple((label, function.__code__) for label, function in (
+        ("broker-serve", serve), ("broker-connection", serve_connection),
+        ("broker-response", response), ("broker-init", ReleaseBroker.__init__),
+        ("broker-policy", ReleaseBroker._reload_policy), ("broker-dispatch", ReleaseBroker.dispatch),
+        ("broker-reconcile", ReleaseBroker.reconcile), ("broker-operation", ReleaseBroker.run_operation),
+    ))
+    try:
+        serve(
+            ReleaseBroker(
+                FleetConfig.load(CONFIG),
+                load_policy(),
+                discovery=fixture_assets,
+                policy_loader=load_policy,
+            )
         )
-    )
+    except Exception as error:
+        try:
+            write_broker_failure(broker_failure_metadata(error, codes))
+        except Exception:
+            pass  # Preserve the original child failure even if collection fails.
+        raise
 
 
 def certificate(directory, hostname):
@@ -367,6 +459,80 @@ class NativeQA:
         self.registry_baseline = None
         self.registry_trust = None
         self.fixture_owned = False
+        self.child_failure_identity = None
+
+    def reset_child_failure(self):
+        try:
+            if self.child_failure_identity is None:
+                descriptor, info = child_failure_file(os.O_RDWR | os.O_CREAT | os.O_EXCL)
+            else:
+                descriptor, info = child_failure_file(os.O_RDWR)
+            with os.fdopen(descriptor, "r+b") as stream:
+                if self.child_failure_identity is not None and trust_identity(info) != self.child_failure_identity:
+                    raise RuntimeError("child diagnostic identity changed")
+                stream.truncate(0)
+                self.child_failure_identity = trust_identity(info)
+        except OSError:
+            raise RuntimeError("child diagnostic reset custody held") from None
+
+    def consume_child_failure(self):
+        if self.child_failure_identity is None:
+            return
+        try:
+            descriptor, info = child_failure_file(os.O_RDWR)
+            with os.fdopen(descriptor, "r+b") as stream:
+                if trust_identity(info) != self.child_failure_identity:
+                    return
+                raw = stream.read(4097)
+                stream.truncate(0)
+            if not raw or len(raw) > 4096:
+                return
+            value = json.loads(raw)
+            if (not isinstance(value, dict)
+                    or set(value) != {"code_label", "source_line", "error_kind"}
+                    or value["error_kind"] not in ERROR_KINDS):
+                return
+            if value["code_label"] is None:
+                if value != {"code_label": None, "source_line": None, "error_kind": "unknown"}:
+                    return
+            elif (value["code_label"] not in BROKER_CODE_LABELS
+                    or type(value["source_line"]) is not int
+                    or not 1 <= value["source_line"] <= 1000000):
+                return
+            if self.layout not in ("named-volume", "bind"):
+                return
+            self.record("broker-child-failure", layout=self.layout, failure=value)
+        except Exception:
+            pass  # Best effort only; never override lifecycle or cleanup failure.
+
+    # TRACEWEAVER: diagnostic-boundary=service-kill; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001; ver=VER-FLEETUPDATE-001
+    def kill_broker(self, phase):
+        if phase not in ("service_update", "interrupted_adoption"):
+            raise RuntimeError("unknown broker kill boundary")
+
+        def snapshot():
+            try:
+                result = run("systemctl", "show", "--property=ActiveState,SubState,Result,MainPID,ExecMainStatus", SERVICE, check=False, timeout=10)
+                return service_state(result.stdout if result.returncode == 0 else b"")
+            except Exception:
+                return service_state(b"")
+
+        before = snapshot()
+        result = None
+        try:
+            result = run("systemctl", "kill", "--signal=KILL", SERVICE, check=False)
+            if result.returncode:
+                raise RuntimeError(f"systemctl failed (exit {result.returncode}); native gate held")
+        finally:
+            try:
+                after = snapshot()
+                code = result.returncode if result is not None else None
+                code = code if type(code) is int and -255 <= code <= 255 else None
+                self.record("broker-kill", phase=phase,
+                            layout=self.layout if self.layout in ("named-volume", "bind") else "unknown",
+                            before=before, after=after, kill_exit_code=code)
+            except Exception:
+                pass  # Evidence failures must leave the original kill verdict intact.
 
     def attest_registry_trust(self, engine):
         version = "29.1.3" if engine.get("ServerVersion") == "29.1.3" else "unsupported"
@@ -1006,6 +1172,7 @@ class NativeQA:
             "proxy_config_dir": str(PROXY_CONFIG),
         }
         write(POLICY, self.policy)
+        self.reset_child_failure()
         run("systemctl", "start", SOCKET_UNIT)
         denied = raw_request()
         assert denied["ok"] is False and denied["error"]["status"] == 503
@@ -1434,7 +1601,7 @@ class NativeQA:
         job_id = mapped["job_id"]
         self.job_ids.add(job_id)
         continuation = self.wait_mapped_worker(mapped)
-        run("systemctl", "kill", "--signal=KILL", SERVICE)
+        self.kill_broker("service_update")
         run("systemctl", "start", SERVICE)
         final = self.finish(identity)
         replay = self.http("POST", "/api/releases/apply", body=body)
@@ -1589,7 +1756,7 @@ class NativeQA:
         before = wait(
             owner_started, timeout=120, message="actual adoption private plan was not retained"
         )
-        run("systemctl", "kill", "--signal=KILL", SERVICE)
+        self.kill_broker("interrupted_adoption")
         run("systemctl", "start", SERVICE)
         final = self.finish(identity, states=("completed", "failed-restored", "recovery-required"))
         first = self.status(identity)
@@ -1609,6 +1776,7 @@ class NativeQA:
         )
 
     def reset_fixture(self):
+        self.consume_child_failure()
         run("systemctl", "stop", SERVICE, check=False)
         run("systemctl", "stop", SOCKET_UNIT, check=False)
         # Only exact helpers created by this fixture's retained operation IDs.
@@ -1777,6 +1945,10 @@ class NativeQA:
                 **diagnostics,
             )
         finally:
+            try:
+                self.consume_child_failure()
+            except Exception:
+                pass  # A failed child collector must never skip existing cleanup.
             if prepared or self.fixture_owned:
                 try:
                     self.cleanup()

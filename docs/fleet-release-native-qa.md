@@ -1,3 +1,4 @@
+<!-- TRACEWEAVER: file-role=native-qa-documentation; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001; ver=VER-FLEETUPDATE-001 -->
 # Fleet release native verification
 
 The `Fleet release native verification` pull request workflow runs one sequential
@@ -5,7 +6,7 @@ integration flow in the existing `ci-build-public-ephemeral` Linux VM route for
 repository `1133295682`. It requires a same-repository PR into `dev`, a read-only
 job token, the exact DC PR head, and an explicitly reviewed, published proxy commit.
 The proxy input is the reviewed published commit
-`3b1ff8e4a71da0b0392c976c1fe8c5aa5bfbc002`, with frozen runtime hashes from the
+`5db15086c26095179f2af56bfa434c85426a6699`, with frozen runtime hashes from the
 accepted source manifest. The source guard rejects an unresolved placeholder
 before the proxy checkout or guest changes.
 
@@ -88,6 +89,39 @@ text, arbitrary type names, arguments, locals, private paths, raw traceback or
 command output is retained. The original failure and cleanup still run; this
 metadata adds no retry, probe or behavior repair. All remaining native and
 release acceptance limits below continue to apply.
+
+At each existing broker kill boundary (`service_update` and
+`interrupted_adoption`), the fixture records the auth layout, fixed phase,
+actual numeric kill exit code, and before/after `systemctl show` observations of
+only the fixed broker service. `ActiveState`, `SubState` and `Result` use closed
+literal allowlists; unfamiliar values become `unknown`. `MainPID` is bounded
+from zero through 4194304 and `ExecMainStatus` from zero through 255; invalid or
+duplicate fields become null. Each read-only snapshot has a ten-second command
+bound. Snapshot or evidence collection failure never replaces the kill verdict.
+A nonzero kill still immediately raises the original generic command failure;
+no subsequent start, lifecycle retry or successful normalization occurs.
+
+The test-only broker child freezes the original installed `serve`,
+`serve_connection`, `response`, and selected direct broker entrypoint code
+objects before invoking the installed owner. An escaping exception can retain
+only the innermost matching code label (`broker-serve`, `broker-connection`,
+`broker-response`, `broker-init`, `broker-policy`, `broker-dispatch`,
+`broker-reconcile`, or `broker-operation`), an integer from that original code
+object's line table, and the fixed error category described above. Missing
+trusted frames retain null/null/`unknown`. Same-name or same-filename foreign
+code confers no identity. This observes escaping Python exceptions only;
+SIGKILL, abrupt interpreter termination and handled exceptions may have no record.
+
+The record uses an exclusively created fixture-owned regular file with mode
+0600 in the private mode-0700 fixture root. It is reset before each layout's
+socket start, opened without following symlinks, checked for owner/mode/link
+custody, read with a 4096-byte bound and consumed before fixture cleanup.
+The parent also requires its retained inode identity and exact closed JSON
+schema before recording it. Original exceptions and cleanup remain in force
+if this best-effort collection fails. No exception text, journal, traceback,
+filename, argument, local, environment or credential enters these events.
+The reviewed Proxy pin also freezes the newly imported
+`src/cryptolabs_proxy/account_link.py` alongside the existing runtime files.
 
 These compare-before-rename guards rely on exclusive use of a fresh single-job
 guest. They are not atomic compare-and-swap against a concurrent root writer or

@@ -53,3 +53,5 @@ Native QA support authority is the same owner-approved step4, concretely bounded
 | scripts/verify_fleet_release_native.py | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | entrypoint | native-verification |
 | .github/tests/test_fleet_native_route.py | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | file-role | native-route-verification |
 | .github/tests/test_fleet_native_route.py | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | verifies | native-route-verification |
+| .github/workflows/fleet-release-native-qa.yml | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | file-role | native-route-workflow |
+| docs/fleet-release-native-qa.md | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | file-role | native-qa-documentation |

@@ -31,6 +31,169 @@ GUEST_HOSTS = (
 
 
 class FleetNativeRouteTest(unittest.TestCase):
+    def native_module(self):
+        spec = importlib.util.spec_from_file_location("fleet_native_diagnostics", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_service_snapshot_exports_only_closed_fields(self):
+        module = self.native_module()
+        valid = b"ActiveState=active\nSubState=running\nResult=success\nMainPID=123\nExecMainStatus=0\n"
+        self.assertEqual(module.service_state(valid), {
+            "ActiveState": "active", "SubState": "running", "Result": "success",
+            "MainPID": 123, "ExecMainStatus": 0,
+        })
+        hostile = (b"ActiveState=PRIVATE_TOKEN\nSubState=/private/key\nResult=arbitrary\n"
+                   b"MainPID=-1\nExecMainStatus=9999999999999\nEnvironment=SECRET\n")
+        self.assertEqual(module.service_state(hostile), {
+            "ActiveState": "unknown", "SubState": "unknown", "Result": "unknown",
+            "MainPID": None, "ExecMainStatus": None,
+        })
+        self.assertEqual(module.service_state(b"MainPID=1\nMainPID=2\n")["MainPID"], None)
+
+    def test_kill_records_numeric_failure_and_never_restarts_or_masks_it(self):
+        module = self.native_module()
+        for code, collector_fails in ((0, False), (1, False), (5, True)):
+            with self.subTest(code=code, collector_fails=collector_fails), tempfile.TemporaryDirectory() as d:
+                guest = module.NativeQA(SimpleNamespace(evidence_dir=Path(d)))
+                guest.layout = "bind"
+                calls = []
+                def command(*args, calls=calls, collector_fails=collector_fails, code=code, **kwargs):
+                    calls.append(args)
+                    if args[1] == "show":
+                        self.assertEqual(args[-1], module.SERVICE)
+                        self.assertEqual(kwargs, {"check": False, "timeout": 10})
+                        if collector_fails:
+                            raise RuntimeError("PRIVATE diagnostic failure")
+                        return SimpleNamespace(returncode=0, stdout=b"ActiveState=active\nMainPID=123\n")
+                    self.assertEqual(args, ("systemctl", "kill", "--signal=KILL", module.SERVICE))
+                    self.assertEqual(kwargs, {"check": False})
+                    return SimpleNamespace(returncode=code)
+                with patch.object(module, "run", side_effect=command):
+                    if code:
+                        with self.assertRaisesRegex(RuntimeError, rf"systemctl failed \(exit {code}\)"):
+                            guest.kill_broker("service_update")
+                    else:
+                        guest.kill_broker("service_update")
+                self.assertEqual([args[1] for args in calls], ["show", "kill", "show"])
+                event = guest.events[-1]
+                self.assertEqual(event["kill_exit_code"], code)
+                self.assertEqual(event["phase"], "service_update")
+                self.assertEqual(event["layout"], "bind")
+                self.assertNotIn("PRIVATE", json.dumps(event))
+                with patch.object(module, "run", side_effect=RuntimeError("original kill failure")):
+                    with self.assertRaisesRegex(RuntimeError, "original kill failure"):
+                        guest.kill_broker("interrupted_adoption")
+                # A broken evidence collector must also leave the kill failure intact.
+                with patch.object(module, "run", side_effect=command), patch.object(guest, "record", side_effect=ValueError("PRIVATE")):
+                    if code:
+                        with self.assertRaisesRegex(RuntimeError, f"exit {code}"):
+                            guest.kill_broker("service_update")
+                    else:
+                        guest.kill_broker("service_update")
+
+    def test_child_metadata_uses_original_code_identity_and_fixed_error_kind(self):
+        module = self.native_module()
+        private = "PRIVATE_KEY_ARGUMENT_PATH"
+        def trusted():
+            raise PermissionError(private)
+        def foreign():
+            raise RuntimeError(private)
+        foreign.__code__ = foreign.__code__.replace(co_filename=trusted.__code__.co_filename, co_name=trusted.__code__.co_name)
+        for function, label, kind in ((trusted, "broker-serve", "permission-error"), (foreign, None, "unknown")):
+            try:
+                function()
+            except Exception as error:
+                metadata = module.broker_failure_metadata(error, (("broker-serve", trusted.__code__),))
+            self.assertEqual(metadata["code_label"], label)
+            self.assertEqual(metadata["error_kind"], kind)
+            if label:
+                self.assertIn(metadata["source_line"], {line for _, _, line in trusted.__code__.co_lines()})
+            else:
+                self.assertIsNone(metadata["source_line"])
+            self.assertNotIn(private, json.dumps(metadata))
+
+    def test_broker_child_preserves_original_exception_when_collection_fails(self):
+        module = self.native_module()
+        cause = RuntimeError("PRIVATE_CHILD_EXCEPTION_ARGUMENT")
+        def serve(broker):
+            raise cause
+        class Broker:
+            def __init__(self, *args, **kwargs):
+                pass
+            def _reload_policy(self):
+                pass
+            def dispatch(self):
+                pass
+            def reconcile(self):
+                pass
+            def run_operation(self):
+                pass
+        modules = {
+            "dc_overview.fleet_config": SimpleNamespace(FleetConfig=SimpleNamespace(load=lambda path: None)),
+            "dc_overview.release_broker": SimpleNamespace(ReleaseBroker=Broker, load_policy=lambda: {}),
+            "dc_overview.release_broker_service": SimpleNamespace(serve=serve, serve_connection=lambda: None, response=lambda: None),
+        }
+        for collector_fails in (False, True):
+            with self.subTest(collector_fails=collector_fails), patch.dict(module.sys.modules, modules), patch.object(module.os, "geteuid", return_value=0), patch.object(module.platform, "system", return_value="Linux"), patch.object(module, "write_broker_failure", side_effect=ValueError("PRIVATE_COLLECTOR") if collector_fails else None) as collector:
+                try:
+                    module.broker_child()
+                except RuntimeError as caught:
+                    self.assertIs(caught, cause)
+                else:
+                    self.fail("the actual child exception must escape unchanged")
+                metadata = collector.call_args.args[0]
+                self.assertEqual(metadata["code_label"], "broker-serve")
+                self.assertEqual(metadata["error_kind"], "runtime-error")
+                self.assertIn(metadata["source_line"], {line for _, _, line in serve.__code__.co_lines()})
+                self.assertNotIn("PRIVATE", json.dumps(metadata))
+
+    def test_child_file_is_private_bounded_reset_and_consumed_before_cleanup(self):
+        module = self.native_module()
+        with tempfile.TemporaryDirectory() as d, patch.object(module, "ROOT", Path(d) / "fixture"):
+            module.ROOT.mkdir(mode=0o700)
+            guest = module.NativeQA(SimpleNamespace(evidence_dir=Path(d) / "evidence"))
+            guest.layout = "named-volume"
+            guest.reset_child_failure()
+            path = module.ROOT / "broker-child-failure.json"
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            value = {"code_label": "broker-serve", "source_line": 42, "error_kind": "runtime-error"}
+            module.write_broker_failure(value)
+            guest.consume_child_failure()
+            self.assertEqual(guest.events[-1]["failure"], value)
+            self.assertEqual(path.read_bytes(), b"")
+            module.write_broker_failure(value)
+            guest.layout = "bind"
+            guest.reset_child_failure()
+            self.assertEqual(path.read_bytes(), b"")
+            for data in (b"x" * 4097, module.encoded({**value, "private": "SECRET"}), module.encoded({**value, "source_line": True}), module.encoded({**value, "code_label": "SECRET"})):
+                path.write_bytes(data)
+                before = len(guest.events)
+                guest.consume_child_failure()
+                self.assertEqual(len(guest.events), before)
+                self.assertNotIn("SECRET", json.dumps(guest.events))
+            path.unlink()
+            outside = Path(d) / "outside"
+            outside.write_bytes(b"PRIVATE")
+            path.symlink_to(outside)
+            guest.consume_child_failure()
+            self.assertEqual(outside.read_bytes(), b"PRIVATE")
+            with self.assertRaises(RuntimeError):
+                guest.reset_child_failure()
+            path.unlink()
+            # Execute failure must consume while the fixture still exists and then clean up.
+            events = []
+            guest.preflight = lambda: None
+            guest.images = lambda: None
+            guest.units_install = lambda: None
+            guest.fixture = lambda layout: (_ for _ in ()).throw(RuntimeError("PRIVATE"))
+            guest.consume_child_failure = lambda: events.append("consume")
+            guest.cleanup = lambda: events.append("cleanup")
+            with self.assertRaisesRegex(RuntimeError, "native verification failed"):
+                guest.execute()
+            self.assertEqual(events, ["consume", "cleanup"])
+
     def test_lost_reply_keeps_request_connected_until_durable_acceptance(self):
         spec = importlib.util.spec_from_file_location("fleet_native_lost_reply", SCRIPT)
         module = importlib.util.module_from_spec(spec)
@@ -188,7 +351,7 @@ class FleetNativeRouteTest(unittest.TestCase):
         self.assertEqual(checkouts[0]["with"]["ref"], "${{ github.event.pull_request.head.sha }}")
         self.assertEqual(checkouts[1]["with"]["repository"], "cryptolabsza/cryptolabs-proxy")
         pin = data["env"]["PROXY_SOURCE_SHA"]
-        self.assertEqual(pin, "3b1ff8e4a71da0b0392c976c1fe8c5aa5bfbc002")
+        self.assertEqual(pin, "5db15086c26095179f2af56bfa434c85426a6699")
         preflight = next(
             i for i, s in enumerate(job["steps"]) if s.get("name") == "Reject unresolved source pin"
         )

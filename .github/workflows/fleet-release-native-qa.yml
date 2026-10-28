@@ -1,3 +1,4 @@
+# TRACEWEAVER: file-role=native-route-workflow; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001; ver=VER-FLEETUPDATE-001
 name: Fleet release native verification
 'on':
   pull_request:
@@ -5,7 +6,7 @@ name: Fleet release native verification
 permissions:
   contents: read
 env:
-  PROXY_SOURCE_SHA: 3b1ff8e4a71da0b0392c976c1fe8c5aa5bfbc002
+  PROXY_SOURCE_SHA: 5db15086c26095179f2af56bfa434c85426a6699
 jobs:
   native:
     if: >-
