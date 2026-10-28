@@ -59,39 +59,140 @@ class FleetNativeRouteTest(unittest.TestCase):
                 guest = module.NativeQA(SimpleNamespace(evidence_dir=Path(d)))
                 guest.layout = "bind"
                 calls = []
-                def command(*args, calls=calls, collector_fails=collector_fails, code=code, **kwargs):
+                def command(*args, calls=calls, code=code, collector_fails=collector_fails, **kwargs):
                     calls.append(args)
+                    if args[1] == "--help":
+                        self.assertEqual(kwargs, {"check": False, "timeout": 10})
+                        return SimpleNamespace(returncode=0, stdout=b" --kill-whom=WHO")
                     if args[1] == "show":
                         self.assertEqual(args[-1], module.SERVICE)
-                        self.assertEqual(kwargs, {"check": False, "timeout": 10})
-                        if collector_fails:
-                            raise RuntimeError("PRIVATE diagnostic failure")
-                        return SimpleNamespace(returncode=0, stdout=b"ActiveState=active\nMainPID=123\n")
-                    self.assertEqual(args, ("systemctl", "kill", "--signal=KILL", module.SERVICE))
+                        self.assertFalse(kwargs["check"])
+                        state = b"ActiveState=active\nSubState=running\nMainPID=123\n"
+                        if any(call[1] == "kill" for call in calls):
+                            if collector_fails:
+                                raise RuntimeError("PRIVATE diagnostic failure")
+                            state = b"ActiveState=inactive\nSubState=dead\nMainPID=0\n"
+                        return SimpleNamespace(returncode=0, stdout=state)
+                    self.assertEqual(args, ("systemctl", "kill", "--kill-whom=main", "--signal=KILL", module.SERVICE))
                     self.assertEqual(kwargs, {"check": False})
                     return SimpleNamespace(returncode=code)
-                with patch.object(module, "run", side_effect=command):
+                def identity(pid, calls=calls):
+                    return None if any(call[1] == "kill" for call in calls) else (77, "S")
+                with patch.object(module, "run", side_effect=command), patch.object(module, "process_identity", side_effect=identity, create=True):
                     if code:
                         with self.assertRaisesRegex(RuntimeError, rf"systemctl failed \(exit {code}\)"):
                             guest.kill_broker("service_update")
                     else:
-                        guest.kill_broker("service_update")
-                self.assertEqual([args[1] for args in calls], ["show", "kill", "show"])
+                        self.assertEqual(guest.kill_broker("service_update"), (123, 77))
+                self.assertEqual(sum(args[1] == "kill" for args in calls), 1)
+                self.assertNotIn("start", [args[1] for args in calls])
                 event = guest.events[-1]
                 self.assertEqual(event["kill_exit_code"], code)
                 self.assertEqual(event["phase"], "service_update")
                 self.assertEqual(event["layout"], "bind")
                 self.assertNotIn("PRIVATE", json.dumps(event))
-                with patch.object(module, "run", side_effect=RuntimeError("original kill failure")):
-                    with self.assertRaisesRegex(RuntimeError, "original kill failure"):
-                        guest.kill_broker("interrupted_adoption")
-                # A broken evidence collector must also leave the kill failure intact.
-                with patch.object(module, "run", side_effect=command), patch.object(guest, "record", side_effect=ValueError("PRIVATE")):
+                # Evidence failure must leave the actual nonzero kill verdict intact.
+                calls.clear()
+                with patch.object(module, "run", side_effect=command), patch.object(module, "process_identity", side_effect=identity, create=True), patch.object(guest, "record", side_effect=ValueError("PRIVATE")):
                     if code:
                         with self.assertRaisesRegex(RuntimeError, f"exit {code}"):
                             guest.kill_broker("service_update")
                     else:
                         guest.kill_broker("service_update")
+                original = RuntimeError("original kill failure")
+                active = module.service_state(b"ActiveState=active\nSubState=running\nMainPID=123\n")
+                with patch.object(guest, "broker_state", return_value=active), patch.object(module, "process_identity", return_value=(77, "S")), patch.object(module, "run", side_effect=[SimpleNamespace(returncode=0, stdout=b"--kill-whom=WHO"), original]):
+                    with self.assertRaisesRegex(RuntimeError, "original kill failure") as caught:
+                        guest.kill_broker("interrupted_adoption")
+                self.assertIs(caught.exception, original)
+
+    def test_main_crash_requires_old_identity_death_before_start_and_fresh_broker(self):
+        module = self.native_module()
+        native = next(node for node in ast.parse(SCRIPT.read_text()).body if isinstance(node, ast.ClassDef) and node.name == "NativeQA")
+        method = next(node for node in native.body if isinstance(node, ast.FunctionDef) and node.name == "service_update")
+        index = next(i for i, node in enumerate(method.body) if "kill_broker" in ast.unparse(node))
+        boundary = compile(ast.Module(body=method.body[index:index + 3], type_ignores=[]), str(SCRIPT), "exec")
+        for outcome in ("old-alive", "delayed-death", "auto-restart", "pid-change-old-alive", "zombie-transition", "zombie-no-transition", "auto-missing", "fresh-missing"):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as d:
+                guest = module.NativeQA(SimpleNamespace(evidence_dir=Path(d)))
+                guest.layout = "bind"
+                clock, calls = [0.0], []
+                guest.finish = lambda identity: "fixture recovery"
+                def command(*args, calls=calls, clock=clock, outcome=outcome, **kwargs):
+                    calls.append(args)
+                    if args[1] == "--help":
+                        return SimpleNamespace(returncode=0, stdout=b" --kill-whom=WHO")
+                    if args[1] in ("kill", "start"):
+                        return SimpleNamespace(returncode=0)
+                    pid = 123
+                    active, substate = "active", "running"
+                    if any(call[1] == "kill" for call in calls):
+                        if outcome in ("auto-restart", "pid-change-old-alive", "auto-missing"):
+                            pid = 456
+                        elif clock[0] >= 0.5 and outcome not in ("old-alive", "zombie-no-transition"):
+                            pid, active, substate = 0, "failed", "failed"
+                    if any(call[1] == "start" for call in calls):
+                        pid, active, substate = 456, "active", "running"
+                    return SimpleNamespace(returncode=0, stdout=f"ActiveState={active}\nSubState={substate}\nMainPID={pid}\n".encode())
+                def identity(pid, clock=clock, outcome=outcome, calls=calls):
+                    if pid == 456:
+                        return None if outcome in ("auto-missing", "fresh-missing") else (88, "S")
+                    if outcome in ("auto-restart", "auto-missing") and any(call[1] == "kill" for call in calls):
+                        return None
+                    if outcome == "zombie-no-transition" and any(call[1] == "kill" for call in calls):
+                        return (77, "Z")
+                    if clock[0] >= 0.5 and outcome in ("delayed-death", "zombie-transition", "fresh-missing"):
+                        return (77, "Z") if outcome == "zombie-transition" else None
+                    return (77, "S")
+                def advance(seconds, clock=clock):
+                    clock[0] += seconds
+                with patch.object(module, "run", side_effect=command), patch.object(module, "process_identity", side_effect=identity, create=True), patch.object(module.time, "monotonic", side_effect=lambda clock=clock: clock[0]), patch.object(module.time, "sleep", side_effect=advance):
+                    if outcome in ("old-alive", "pid-change-old-alive", "zombie-no-transition", "auto-missing"):
+                        with self.assertRaisesRegex(RuntimeError, "old broker death"):
+                            exec(boundary, {"self": guest, "run": module.run, "SERVICE": module.SERVICE, "identity": "fixture-operation"})
+                        self.assertFalse(any(call[1] == "start" for call in calls))
+                        self.assertLessEqual(clock[0], 30)
+                    elif outcome == "fresh-missing":
+                        with self.assertRaisesRegex(RuntimeError, "fresh broker identity"):
+                            exec(boundary, {"self": guest, "run": module.run, "SERVICE": module.SERVICE, "identity": "fixture-operation"})
+                        self.assertEqual(sum(call[1] == "start" for call in calls), 1)
+                        self.assertFalse(any(event.get("case") == "broker-fresh-running" for event in guest.events))
+                    else:
+                        exec(boundary, {"self": guest, "run": module.run, "SERVICE": module.SERVICE, "identity": "fixture-operation"})
+                        self.assertEqual(sum(call[1] == "kill" for call in calls), 1)
+                        self.assertEqual(sum(call[1] == "start" for call in calls), 1)
+                        self.assertTrue(any(event.get("old_main_retired") is True for event in guest.events))
+                        self.assertTrue(any(event.get("case") == "broker-fresh-running" for event in guest.events))
+                self.assertNotIn("PRIVATE", json.dumps(guest.events))
+
+    def test_main_crash_rejects_unsupported_or_invalid_live_identity(self):
+        module = self.native_module()
+        for capability, pid, identity in ((False, 123, (77, "S")), (True, 0, None), (True, None, None), (True, 123, None), (True, 123, (77, "Z"))):
+            with self.subTest(capability=capability, pid=pid, identity=identity), tempfile.TemporaryDirectory() as d:
+                guest = module.NativeQA(SimpleNamespace(evidence_dir=Path(d)))
+                guest.layout = "bind"
+                def command(*args, capability=capability, pid=pid, **kwargs):
+                    if args[1] == "--help":
+                        return SimpleNamespace(returncode=0, stdout=b"--kill-whom=WHO" if capability else b"PRIVATE unsupported")
+                    if args[1] == "show":
+                        return SimpleNamespace(returncode=0, stdout=f"ActiveState=active\nSubState=running\nMainPID={pid}\n".encode())
+                    self.fail("unsupported or invalid identity must never signal or start")
+                with patch.object(module, "run", side_effect=command), patch.object(module, "process_identity", return_value=identity, create=True):
+                    with self.assertRaises(RuntimeError):
+                        guest.kill_broker("service_update")
+                self.assertNotIn("PRIVATE", json.dumps(guest.events))
+
+    def test_process_stat_identity_is_bounded_and_validated(self):
+        module = self.native_module()
+        raw = b"123 (PRIVATE name) with parens)) S " + b"0 " * 18 + b"77\n"
+        self.assertEqual(module.parse_process_stat(raw, 123), (77, "S"))
+        for invalid in (raw.replace(b"123 (", b"124 (", 1), raw.replace(b"77\n", b"0\n"), raw.replace(b"77\n", b"18446744073709551616\n"), raw.replace(b" S ", b" INVALID "), b"PRIVATE", b"x" * 4097):
+            with self.subTest(raw=invalid[:20]):
+                with self.assertRaisesRegex(RuntimeError, "process identity unavailable"):
+                    module.parse_process_stat(invalid, 123)
+        for pid in (0, -1, None, True):
+            with self.subTest(pid=pid), self.assertRaises(RuntimeError):
+                module.process_identity(pid)
 
     def test_child_metadata_uses_original_code_identity_and_fixed_error_kind(self):
         module = self.native_module()

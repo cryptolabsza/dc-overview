@@ -101,6 +101,35 @@ bound. Snapshot or evidence collection failure never replaces the kill verdict.
 A nonzero kill still immediately raises the original generic command failure;
 no subsequent start, lifecycle retry or successful normalization occurs.
 
+The required injected fault is the main Python broker process, including its
+in-process ThreadPool worker. Before signalling, the harness observes actual
+guest `systemctl --help` support for `--kill-whom=` and records only a Boolean.
+Unsupported or failed capability checks hold the gate. It requires active/running
+service state, a valid nonzero MainPID, and a live kernel process identity.
+It sends exactly one `systemctl kill --kill-whom=main --signal=KILL` for the fixed
+broker service. A nonzero result still fails immediately; it is never retried or
+normalized. No service restart or cgroup policy is changed.
+
+The kernel identity uses PID plus `/proc/PID/stat` start-time ticks. A bounded
+4096-byte parser validates the PID, state and bounded numeric fields; the process
+name and raw stat text are never retained. Absence or a changed start time retires
+the old identity. A zombie/dead state requires a corroborating known systemd
+transition away from the old running main. MainPID change alone never establishes
+death. After a zero kill exit, the harness waits at most 30 seconds for retirement
+and that unit transition before the existing caller issues `start`. If automatic
+restart wins, this barrier also observes a distinct live running process identity.
+A subsequent separately bounded 30-second check after the existing `start`
+requires a distinct live active/running broker before recovery assertions proceed.
+Existing operation/recovery deadlines and all owner mapping, replay, adoption and
+rollback assertions stay unchanged. Kill evidence records only the fixed
+capability/retirement booleans and bounded PID/start-time numbers in addition to
+the existing closed service fields and numeric exit.
+
+These barriers establish observed main-process retirement and fresh broker
+availability only when the actual native run supplies the evidence. This change
+is not a proven cure for the earlier exit 1, whose cause remains unknown. It does
+not test whole-cgroup failure or establish an exact owner execution micro-window.
+
 The test-only broker child freezes the original installed `serve`,
 `serve_connection`, `response`, and selected direct broker entrypoint code
 objects before invoking the installed owner. An escaping exception can retain

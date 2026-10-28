@@ -310,6 +310,38 @@ def service_state(raw):
     return result
 
 
+def parse_process_stat(raw, pid):
+    """Read only kernel identity fields; the comm field is never exported."""
+    if not isinstance(raw, bytes) or len(raw) > 4096:
+        raise RuntimeError("process identity unavailable; native gate held")
+    prefix = str(pid).encode() + b" ("
+    close = raw.rfind(b") ")
+    fields = raw[close + 2:].split() if close >= len(prefix) else []
+    if (not raw.startswith(prefix) or not 20 <= len(fields) <= 64
+            or fields[0] not in (b"R", b"S", b"D", b"Z", b"T", b"t", b"X", b"x", b"K", b"W", b"P", b"I", b"N")
+            or any(not re.fullmatch(rb"-?[0-9]{1,20}", value) for value in fields[1:])
+            or not re.fullmatch(rb"[0-9]{1,20}", fields[19])):
+        raise RuntimeError("process identity unavailable; native gate held")
+    start = int(fields[19])
+    if not 1 <= start <= 18446744073709551615:
+        raise RuntimeError("process identity unavailable; native gate held")
+    return start, fields[0].decode("ascii")
+
+
+def process_identity(pid):
+    if type(pid) is not int or not 1 <= pid <= 4194304:
+        raise RuntimeError("process identity unavailable; native gate held")
+    try:
+        descriptor = os.open(f"/proc/{pid}/stat", os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        with os.fdopen(descriptor, "rb") as stream:
+            raw = stream.read(4097)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        raise RuntimeError("process identity unavailable; native gate held") from None
+    return parse_process_stat(raw, pid)
+
+
 def broker_failure_metadata(error, code_objects):
     result = {"code_label": None, "source_line": None, "error_kind": "unknown"}
     frame = error.__traceback__
@@ -505,32 +537,89 @@ class NativeQA:
         except Exception:
             pass  # Best effort only; never override lifecycle or cleanup failure.
 
+    def broker_state(self, timeout=10):
+        try:
+            result = run("systemctl", "show", "--property=ActiveState,SubState,Result,MainPID,ExecMainStatus", SERVICE, check=False, timeout=timeout)
+            return service_state(result.stdout if result.returncode == 0 else b"")
+        except Exception:
+            return service_state(b"")
+
+    def wait_broker_identity(self, old_main, *, fresh):
+        """At most 30 seconds for one observation barrier; never repeat the signal."""
+        deadline = time.monotonic() + 30
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                message = "fresh broker identity unavailable" if fresh else "old broker death unobserved"
+                raise RuntimeError(message + "; native gate held")
+            state = self.broker_state(timeout=min(1, remaining))
+            pid = state["MainPID"]
+            running = state["ActiveState"] == "active" and state["SubState"] == "running"
+            # Read the old PID even if MainPID changed. Manager metadata alone cannot prove death.
+            old = process_identity(old_main[0])
+            retired = old is None or old[0] != old_main[1] or old[1] in ("Z", "X", "x")
+            # Unknown fields cannot corroborate a transition or a zombie's retirement.
+            transition = (state["ActiveState"] != "unknown" and state["SubState"] != "unknown"
+                          and type(pid) is int and (pid != old_main[0] or not running))
+            if retired and transition:
+                if not running and not fresh:
+                    return state
+                if running and type(pid) is int and pid > 1:
+                    current = process_identity(pid)
+                    if (current is not None and current[1] not in ("Z", "X", "x")
+                            and (pid, current[0]) != old_main):
+                        return (pid, current[0]) if fresh else state
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(0.25, remaining))
+
+    def wait_fresh_broker(self, old_main):
+        fresh = self.wait_broker_identity(old_main, fresh=True)
+        try:
+            self.record("broker-fresh-running", layout=self.layout,
+                        old_main_retired=True, main_pid=fresh[0], main_starttime=fresh[1])
+        except Exception:
+            pass
+        return fresh
+
     # TRACEWEAVER: diagnostic-boundary=service-kill; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001; ver=VER-FLEETUPDATE-001
     def kill_broker(self, phase):
         if phase not in ("service_update", "interrupted_adoption"):
             raise RuntimeError("unknown broker kill boundary")
-
-        def snapshot():
-            try:
-                result = run("systemctl", "show", "--property=ActiveState,SubState,Result,MainPID,ExecMainStatus", SERVICE, check=False, timeout=10)
-                return service_state(result.stdout if result.returncode == 0 else b"")
-            except Exception:
-                return service_state(b"")
-
-        before = snapshot()
-        result = None
+        before = service_state(b"")
+        result, old_main, supported, retired = None, None, False, False
         try:
-            result = run("systemctl", "kill", "--signal=KILL", SERVICE, check=False)
+            capability = run("systemctl", "--help", check=False, timeout=10)
+            supported = (capability.returncode == 0 and len(capability.stdout) <= 65536
+                         and b"--kill-whom=" in capability.stdout)
+            if not supported:
+                raise RuntimeError("main-only systemctl capability unavailable; native gate held")
+            before = self.broker_state()
+            pid = before["MainPID"]
+            if (before["ActiveState"] != "active" or before["SubState"] != "running"
+                    or type(pid) is not int or pid <= 1):
+                raise RuntimeError("live broker identity unavailable; native gate held")
+            identity = process_identity(pid)
+            if identity is None or identity[1] in ("Z", "X", "x"):
+                raise RuntimeError("live broker identity unavailable; native gate held")
+            old_main = pid, identity[0]
+            result = run("systemctl", "kill", "--kill-whom=main", "--signal=KILL", SERVICE, check=False)
             if result.returncode:
                 raise RuntimeError(f"systemctl failed (exit {result.returncode}); native gate held")
+            self.wait_broker_identity(old_main, fresh=False)
+            retired = True
+            return old_main
         finally:
             try:
-                after = snapshot()
+                after = self.broker_state()
                 code = result.returncode if result is not None else None
                 code = code if type(code) is int and -255 <= code <= 255 else None
                 self.record("broker-kill", phase=phase,
                             layout=self.layout if self.layout in ("named-volume", "bind") else "unknown",
-                            before=before, after=after, kill_exit_code=code)
+                            before=before, after=after, kill_exit_code=code,
+                            main_scope_supported=supported, old_main_retired=retired,
+                            old_main_pid=old_main[0] if old_main else None,
+                            old_main_starttime=old_main[1] if old_main else None)
             except Exception:
                 pass  # Evidence failures must leave the original kill verdict intact.
 
@@ -1601,8 +1690,9 @@ class NativeQA:
         job_id = mapped["job_id"]
         self.job_ids.add(job_id)
         continuation = self.wait_mapped_worker(mapped)
-        self.kill_broker("service_update")
+        old_main = self.kill_broker("service_update")
         run("systemctl", "start", SERVICE)
+        self.wait_fresh_broker(old_main)
         final = self.finish(identity)
         replay = self.http("POST", "/api/releases/apply", body=body)
         assert replay.status_code == 200 and replay.json()["operation_id"] == identity
@@ -1756,8 +1846,9 @@ class NativeQA:
         before = wait(
             owner_started, timeout=120, message="actual adoption private plan was not retained"
         )
-        self.kill_broker("interrupted_adoption")
+        old_main = self.kill_broker("interrupted_adoption")
         run("systemctl", "start", SERVICE)
+        self.wait_fresh_broker(old_main)
         final = self.finish(identity, states=("completed", "failed-restored", "recovery-required"))
         first = self.status(identity)
         raw_request("recover", {"operation_id": identity})
