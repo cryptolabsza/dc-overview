@@ -1336,10 +1336,11 @@ class NativeQA:
             "expected_selection_id": params["expected_selection_id"],
             "expected_selection_sha256": params["expected_selection_sha256"],
         }
+        path = self.store.root / "broker/operations" / (identity + ".json")
         if lose_reply:
             import ssl
 
-            # Send real authenticated HTTPS request, close before reading any response.
+            # Observe durable acceptance before dropping the unread HTTPS reply.
             payload = encoded(body)
             cookie = "; ".join(k + "=" + v for k, v in self.session.cookies.items())
             request = (
@@ -1351,12 +1352,12 @@ class NativeQA:
             with socket.create_connection(("127.0.0.1", 18443), timeout=15) as raw:
                 with context.wrap_socket(raw, server_hostname="127.0.0.1") as connection:
                     connection.sendall(request)
+                    wait(path.exists, message="apply was not durably received")
         else:
             result = self.http("POST", "/api/releases/apply", body=body)
             if result.status_code != 200:
                 raise RuntimeError("real HTTP apply refused: " + str(result.status_code))
-        path = self.store.root / "broker/operations" / (identity + ".json")
-        wait(path.exists, message="apply was not durably received")
+            wait(path.exists, message="apply was not durably received")
         return identity, body
 
     def status(self, identity):

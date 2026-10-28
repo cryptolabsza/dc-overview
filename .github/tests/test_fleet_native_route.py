@@ -31,6 +31,124 @@ GUEST_HOSTS = (
 
 
 class FleetNativeRouteTest(unittest.TestCase):
+    def test_lost_reply_keeps_request_connected_until_durable_acceptance(self):
+        spec = importlib.util.spec_from_file_location("fleet_native_lost_reply", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        import ssl
+
+        def check_outcome(outcome):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                guest = module.NativeQA(SimpleNamespace(evidence_dir=root / "evidence"))
+                guest.data = root / "data"
+                guest.store = SimpleNamespace(root=root / "store")
+                guest.session = SimpleNamespace(cookies={"fleet_session": "fixture-cookie"})
+                guest.csrf = "fixture-csrf"
+                identity = "00000000-0000-4000-8000-000000000001"
+                operation = guest.store.root / "broker/operations" / (identity + ".json")
+                operation.parent.mkdir(parents=True)
+                params = {
+                    "expected_selection_id": "fixture-selection",
+                    "expected_selection_sha256": "a" * 64,
+                }
+                preview = {
+                    "preview_id": "fixture-preview",
+                    "preview_sha256": "b" * 64,
+                    "owner_plan": {"plan_id": "fixture-owner-plan"},
+                }
+                opened, events, requests = set(), [], []
+                clock = [0.0]
+
+                def sendall(request):
+                    self.assertEqual(opened, {"raw", "tls"})
+                    requests.append(request)
+                    events.append("sent")
+                    if outcome == "send-failure":
+                        raise OSError("fixture send failed")
+
+                def read_reply(*args, **kwargs):
+                    self.fail("lost-reply fixture must never read the HTTP response")
+
+                @contextmanager
+                def connected(kind):
+                    opened.add(kind)
+                    events.append(kind + "-open")
+                    try:
+                        yield SimpleNamespace(
+                            sendall=sendall, recv=read_reply, read=read_reply, makefile=read_reply
+                        )
+                    finally:
+                        opened.remove(kind)
+                        events.append(kind + "-close")
+
+                def acceptance_step(seconds):
+                    # Model asynchronous server acceptance while using the real bounded wait.
+                    self.assertEqual(seconds, 0.25)
+                    self.assertEqual(
+                        opened,
+                        {"raw", "tls"},
+                        "the client disconnected before durable request acceptance",
+                    )
+                    self.assertEqual(len(requests), 1)
+                    clock[0] += 61
+                    if outcome == "accepted":
+                        operation.write_bytes(module.encoded({"state": "prepared"}))
+                        events.append("durably-accepted")
+
+                tls = SimpleNamespace(wrap_socket=lambda *args, **kwargs: connected("tls"))
+                with (
+                    patch.object(module.uuid, "uuid4", return_value=identity),
+                    patch.object(
+                        module.socket,
+                        "create_connection",
+                        side_effect=lambda *a, **k: connected("raw"),
+                    ),
+                    patch.object(ssl, "create_default_context", return_value=tls),
+                    patch.object(module.time, "monotonic", side_effect=lambda: clock[0]),
+                    patch.object(module.time, "sleep", side_effect=acceptance_step) as sleep,
+                ):
+                    if outcome == "accepted":
+                        returned_id, body = guest.apply(params, preview, lose_reply=True)
+                        self.assertEqual(returned_id, identity)
+                        self.assertEqual(
+                            events,
+                            [
+                                "raw-open",
+                                "tls-open",
+                                "sent",
+                                "durably-accepted",
+                                "tls-close",
+                                "raw-close",
+                            ],
+                        )
+                        headers, payload = requests[0].split(b"\r\n\r\n", 1)
+                        self.assertIn(b"POST /api/releases/apply HTTP/1.1", headers)
+                        self.assertIn(b"Origin: " + module.ORIGIN.encode(), headers)
+                        self.assertIn(b"X-CSRF-Token: fixture-csrf", headers)
+                        self.assertIn(b"Cookie: fleet_session=fixture-cookie", headers)
+                        self.assertIn(f"Content-Length: {len(payload)}".encode(), headers)
+                        self.assertEqual(json.loads(payload), body)
+                        self.assertEqual(body["operation_id"], identity)
+                        self.assertEqual(guest.owner_plans, {"fixture-owner-plan"})
+                        self.assertTrue(operation.exists())
+                    elif outcome == "missing-record":
+                        with self.assertRaisesRegex(RuntimeError, "apply was not durably received"):
+                            guest.apply(params, preview, lose_reply=True)
+                        self.assertFalse(operation.exists())
+                        self.assertEqual(sleep.call_count, 3)
+                    else:
+                        with self.assertRaisesRegex(OSError, "fixture send failed"):
+                            guest.apply(params, preview, lose_reply=True)
+                        sleep.assert_not_called()
+                        self.assertFalse(operation.exists())
+                self.assertEqual(opened, set())
+                self.assertEqual(events[-2:], ["tls-close", "raw-close"])
+
+        for outcome in ("accepted", "missing-record", "send-failure"):
+            with self.subTest(outcome=outcome):
+                check_outcome(outcome)
+
     def test_route_is_exact_public_pr_and_never_inherits_authority(self):
         data = yaml.safe_load(WORKFLOW.read_text())
         self.assertEqual(set(data["on"]), {"pull_request"})

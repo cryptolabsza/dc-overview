@@ -128,6 +128,14 @@ For both a named auth volume and a bind-mounted auth directory, the flow checks:
    auth backing storage, normal cookie renewal, session reconnect without login,
    and the fixed installed adoption recovery call.
 
+The dropped-reply cases keep the authenticated HTTPS connection open until the
+broker's operation record for that request UUID exists, then close without reading
+the HTTP response. This observes accepted-request reply loss before exercising
+restart and replay. A missing operation record still fails the existing bounded
+wait; sending bytes alone does not establish acceptance. The earlier native timeout
+identified the apply call site, so its exact inner cause remains unconfirmed until
+a fresh native run observes the repaired fixture.
+
 The named-volume case also requires an unhealthy candidate to restore the actual
 original IPMI container and health. The approved IPMI images lack Docker health
 metadata, so their readiness requires a bounded real HTTP 200 response from
