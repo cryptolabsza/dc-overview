@@ -2,6 +2,7 @@
 # TRACEWEAVER: verifies=VER-FLEETUPDATE-001; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001
 """Bounded security contract for the explicit native QA route; no guest execution."""
 
+import ast
 import importlib.util
 import json
 import os
@@ -86,6 +87,71 @@ class FleetNativeRouteTest(unittest.TestCase):
         self.assertEqual(module.check_source_pin("a" * 40), "a" * 40)
         for image in (module.REGISTRY_IMAGE, module.NGINX_BASE, module.IPMI_OLD, module.IPMI_NEW):
             self.assertRegex(image, r"^[a-z0-9./_-]+@sha256:[0-9a-f]{64}$")
+        # Execute the real peer-denial probe and assertion without guest fixture setup.
+        native = next(
+            node
+            for node in ast.parse(SCRIPT.read_text()).body
+            if isinstance(node, ast.ClassDef) and node.name == "NativeQA"
+        )
+        fixture = next(
+            node
+            for node in native.body
+            if isinstance(node, ast.FunctionDef) and node.name == "fixture"
+        )
+        probe_index = next(
+            index
+            for index, node in enumerate(fixture.body)
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "peer_denied"
+                for target in node.targets
+            )
+        )
+        self.assertIsInstance(fixture.body[probe_index + 1], ast.Assert)
+        probe = compile(
+            ast.Module(body=fixture.body[probe_index : probe_index + 2], type_ignores=[]),
+            str(SCRIPT),
+            "exec",
+        )
+        denial = module.encoded(
+            {"schema_version": 1, "ok": False, "error": {"status": 403}}
+        )
+        responses = (
+            ("complete fragmented 403", [denial[:20], denial[20:], b""], None),
+            ("partial JSON", [denial[:20], b""], json.JSONDecodeError),
+            ("no response", [b""], json.JSONDecodeError),
+            ("reset before complete", [denial[:20], ConnectionResetError()], ConnectionResetError),
+            ("reset after complete", [denial, ConnectionResetError()], ConnectionResetError),
+            (
+                "wrong status",
+                [module.encoded({"ok": False, "error": {"status": 503}}), b""],
+                AssertionError,
+            ),
+            (
+                "not denied",
+                [module.encoded({"ok": True, "error": {"status": 403}}), b""],
+                AssertionError,
+            ),
+        )
+        for name, chunks, error in responses:
+            with self.subTest("receive-only excluded peer", response=name):
+                connection = unittest.mock.MagicMock()
+                connection.__enter__.return_value = connection
+                connection.recv.side_effect = chunks
+                scope = {"raw_request": module.raw_request}
+                with patch.object(module.socket, "socket", return_value=connection) as opened:
+                    if error is None:
+                        exec(probe, scope)
+                        self.assertEqual(scope["peer_denied"], json.loads(denial))
+                    else:
+                        with self.assertRaises(error):
+                            exec(probe, scope)
+                opened.assert_called_once_with(module.socket.AF_UNIX, module.socket.SOCK_STREAM)
+                connection.settimeout.assert_called_once_with(15)
+                connection.connect.assert_called_once_with(module.SOCKET)
+                connection.sendall.assert_called_once_with(b"")
+                connection.shutdown.assert_called_once_with(module.socket.SHUT_WR)
+                self.assertEqual(connection.recv.call_count, len(chunks))
         # Narrow command/file boundary regressions, not an Engine integration claim.
         with tempfile.TemporaryDirectory() as directory:
             instance = module.NativeQA(SimpleNamespace(evidence_dir=Path(directory)))

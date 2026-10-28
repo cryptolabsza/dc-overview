@@ -1011,7 +1011,7 @@ class NativeQA:
         assert denied["ok"] is False and denied["error"]["status"] == 503
         self.policy["allowed_uids"] = [65534]
         write(POLICY, self.policy)
-        peer_denied = raw_request()
+        peer_denied = raw_request(payload=b"")
         assert peer_denied["ok"] is False and peer_denied["error"]["status"] == 403
         self.policy["allowed_uids"] = [0]
         write(POLICY, self.policy)
