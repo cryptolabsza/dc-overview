@@ -8,3 +8,27 @@ verification: VER-FLEETUPDATE-001
 validation: VAL-FLEETUPDATE-001
 publication: held
 production_writes: disabled
+discovery_completeness_projection:
+  historical_superseded_by: discovery_atomic_pack_projection
+  date: 2026-10-29
+  authority_plan: ../../artifacts/ipmi-readiness-20261026/release/fleet-manager-build-20261027/ready-to-deploy-20261028/approved-execution-20261029/dc-discovery-source/plan.json
+  architecture_sha256: 8d0939d95e5aa9877491dcfe74b2d446d87130ce7fa2c32b3875691ea1e84459
+  requirement: REQ-FLEETUPDATE-001
+  trace: TRACE-FLEETUPDATE-001
+  verification: VER-FLEETUPDATE-001
+  validation: VAL-FLEETUPDATE-001
+  source_only: true
+  native_acceptance: held
+  publisher_enforcement: held
+discovery_atomic_pack_projection:
+  date: 2026-10-29
+  authority_plan: ../../artifacts/ipmi-readiness-20261026/release/fleet-manager-build-20261027/ready-to-deploy-20261028/approved-execution-20261029/discovery-consistency-definition/plan.json
+  plan_sha256: fe9516156bba64d995438a1459edfb80204aa2975e794dacbe6a8bb0af329f33
+  workflow_profile_sha256: 261f95af4fac1ff23a9d2cdc0c1255767471202e9c055f0b7706b3bc6e6faee0
+  requirement: REQ-FLEETUPDATE-001
+  trace: TRACE-FLEETUPDATE-001
+  verification: VER-FLEETUPDATE-001
+  validation: VAL-FLEETUPDATE-001
+  source_only: true
+  native_acceptance: held
+  publisher_enforcement: held
