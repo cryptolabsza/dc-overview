@@ -1,17 +1,28 @@
 # TRACEWEAVER: file-role=release-owner; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001; ver=VER-FLEETUPDATE-001
 """Verify exact publisher bytes against installed trust; discovery confers no trust."""
 
+import base64
+import binascii
 import hashlib
+import json
 import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from urllib.parse import urlsplit
+from email.utils import parsedate_to_datetime
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-from .release_catalog import COMPONENTS, HEX, Manifest, _json, _keys, artifact_identity
+from .release_catalog import (
+    COMPONENTS,
+    HEX,
+    Manifest,
+    _json,
+    _keys,
+    _object_pairs,
+    artifact_identity,
+)
 
 REPOSITORY_ID = 1133295682
 ASSETS = (
@@ -22,6 +33,14 @@ ASSETS = (
     "admission-index.sig",
 )
 MAX_BYTES = 1024 * 1024
+PACK_URL = (
+    "https://api.github.com/repositories/1133295682/contents/current-pack.json"
+    "?ref=fleet-suite-current"
+)
+PACK_MAX_BYTES = 8 * MAX_BYTES
+PACK_MAX_DECODED_BYTES = 5 * MAX_BYTES
+DISCOVERY_MAX_SUITE_ENVELOPES = 32
+DISCOVERY_TIMEOUT_SECONDS = 10
 
 
 @dataclass(frozen=True)
@@ -270,97 +289,155 @@ def require_compatible(candidates, components, capabilities, platform, operation
 
 
 class GitHubDiscovery:
-    """Only numeric fixed repository and exact release asset family may be fetched."""
+    """Read one bounded public pack; the wrapper is never signing authority."""
 
     def __init__(self, session=None):
         import requests
 
-        self.session = session or requests.Session()
+        if session is None:
+            session = requests.Session()
+            session.trust_env = False
+            session.auth = None
+            session.headers.pop("Authorization", None)
+        self.session = session
+        self._next_allowed = 0.0
 
-    def _get(self, url, *, api=False):
-        deadline = getattr(self, "_deadline", time.monotonic() + 10)
-        for _redirect in range(4):
-            parsed = urlsplit(url)
-            if (
-                parsed.scheme != "https"
-                or parsed.hostname
-                not in (
-                    "api.github.com",
-                    "release-assets.githubusercontent.com",
-                    "objects.githubusercontent.com",
-                )
-                or parsed.username
-                or parsed.password
-                or parsed.port not in (None, 443)
-                or parsed.fragment
-            ):
-                raise ValueError("release discovery redirect is outside fixed GitHub hosts")
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise RuntimeError("release discovery timed out")
-            response = self.session.get(
-                url,
-                timeout=(min(3, remaining), remaining),
-                stream=True,
-                allow_redirects=False,
-                headers={
-                    "Accept": "application/vnd.github+json" if api else "application/octet-stream"
-                },
-            )
+    @staticmethod
+    def _retry_delay(headers):
+        retry = headers.get("Retry-After")
+        if retry is not None:
             try:
-                response.raise_for_status()
-                if response.status_code in (301, 302, 303, 307, 308):
-                    url = response.headers.get("Location", "")
-                    continue
-                if response.status_code != 200:
-                    raise RuntimeError("release discovery unavailable")
-                parts = []
-                size = 0
-                for part in response.iter_content(65536):
-                    size += len(part)
-                    if size > MAX_BYTES:
-                        raise ValueError("release discovery document too large")
-                    if time.monotonic() > deadline:
-                        raise RuntimeError("release discovery timed out")
-                    parts.append(part)
-                return b"".join(parts)
-            finally:
-                response.close()
-        raise RuntimeError("release discovery redirect limit exceeded")
+                delay = int(retry)
+                if delay >= 0:
+                    return min(delay, 3600)
+            except (TypeError, ValueError):
+                try:
+                    reset_at = parsedate_to_datetime(retry)
+                    delay = (reset_at - datetime.now(timezone.utc)).total_seconds()
+                    return min(3600, max(0, delay))
+                except (TypeError, ValueError, OverflowError):
+                    pass
+        reset = headers.get("X-RateLimit-Reset")
+        if reset is not None:
+            try:
+                return min(3600, max(0, int(reset) - time.time()))
+            except (TypeError, ValueError, OverflowError):
+                pass
+        return 60
 
-    def discover(self):
-        self._deadline = time.monotonic() + 10
-        values = _json(
-            self._get(
-                f"https://api.github.com/repositories/{REPOSITORY_ID}/releases?per_page=10",
-                api=True,
-            )
+    def _get_pack(self, deadline):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("release discovery timed out")
+        response = self.session.get(
+            PACK_URL,
+            timeout=(min(3, remaining), remaining),
+            stream=True,
+            allow_redirects=False,
+            headers={
+                "Accept": "application/vnd.github.raw+json",
+                "Cache-Control": "no-cache, no-store",
+                "Pragma": "no-cache",
+            },
         )
-        if not isinstance(values, list) or len(values) > 10:
-            raise ValueError("invalid release discovery list")
+        try:
+            if response.status_code in (403, 429):
+                self._next_allowed = time.monotonic() + self._retry_delay(response.headers)
+            if response.status_code != 200:
+                raise RuntimeError("release discovery unavailable")
+            parts = []
+            size = 0
+            for part in response.iter_content(65536):
+                if not isinstance(part, (bytes, bytearray)):
+                    raise ValueError("invalid pack response chunk")
+                size += len(part)
+                if size > PACK_MAX_BYTES:
+                    raise ValueError("release pack exceeds body limit")
+                if time.monotonic() > deadline:
+                    raise RuntimeError("release discovery timed out")
+                parts.append(part)
+            if time.monotonic() > deadline:
+                raise RuntimeError("release discovery timed out")
+            return b"".join(parts)
+        finally:
+            response.close()
+
+    @staticmethod
+    def _parse_pack(body):
+        try:
+            pack = json.loads(
+                body.decode("utf-8"),
+                object_pairs_hook=_object_pairs,
+                parse_constant=lambda _: (_ for _ in ()).throw(ValueError("invalid JSON constant")),
+            )
+        except (UnicodeError, json.JSONDecodeError):
+            raise ValueError("invalid release pack JSON") from None
+        _keys(
+            pack,
+            {"schema_version", "admission_index_b64", "admission_index_signature_b64", "families"},
+        )
+        if type(pack["schema_version"]) is not int or pack["schema_version"] != 1:
+            raise ValueError("invalid release pack schema")
+        families = pack["families"]
+        if (
+            not isinstance(families, list)
+            or not 1 <= len(families) <= DISCOVERY_MAX_SUITE_ENVELOPES
+        ):
+            raise ValueError("invalid release pack family count")
+
+        total_decoded = 0
+
+        def decode(value, limit):
+            nonlocal total_decoded
+            if type(value) is not str or not 1 <= len(value) <= 4 * ((limit + 2) // 3):
+                raise ValueError("invalid release pack base64 length")
+            try:
+                decoded = base64.b64decode(value.encode("ascii"), validate=True)
+            except (UnicodeError, binascii.Error, ValueError):
+                raise ValueError("invalid release pack base64") from None
+            if len(decoded) > limit or base64.b64encode(decoded).decode("ascii") != value:
+                raise ValueError("invalid release pack canonical base64")
+            total_decoded += len(decoded)
+            if total_decoded > PACK_MAX_DECODED_BYTES:
+                raise ValueError("release pack decoded byte limit exceeded")
+            return decoded
+
+        index = decode(pack["admission_index_b64"], MAX_BYTES)
+        index_signature = decode(pack["admission_index_signature_b64"], 64)
+        if len(index_signature) != 64:
+            raise ValueError("invalid release pack index signature length")
         bundles = []
-        for release in values:
-            if not isinstance(release, dict) or release.get("draft") is not False:
-                continue
-            assets = release.get("assets", [])
-            if not isinstance(assets, list):
-                raise ValueError("invalid release assets")
-            chosen = {}
-            for asset in assets:
-                if not isinstance(asset, dict) or asset.get("name") not in ASSETS:
-                    continue
-                name = asset["name"]
-                url = asset.get("url", "")
-                if (
-                    name in chosen
-                    or not isinstance(url, str)
-                    or not re.fullmatch(
-                        r"https://api\.github\.com/repos/cryptolabsza/dc-overview/releases/assets/[1-9][0-9]*",
-                        url,
-                    )
-                ):
-                    raise ValueError("invalid fixed release asset URL")
-                chosen[name] = url
-            if set(chosen) == set(ASSETS):
-                bundles.append({name: self._get(url) for name, url in chosen.items()})
+        seen = set()
+        for family in families:
+            _keys(family, {"manifest_b64", "admission_b64", "admission_signature_b64"})
+            manifest = decode(family["manifest_b64"], MAX_BYTES)
+            admission = decode(family["admission_b64"], MAX_BYTES)
+            signature = decode(family["admission_signature_b64"], 64)
+            if len(signature) != 64:
+                raise ValueError("invalid release pack admission signature length")
+            identity = hashlib.sha256(admission).digest()
+            if identity in seen:
+                raise ValueError("duplicate release pack admission")
+            seen.add(identity)
+            bundles.append({
+                "suite-release.json": manifest,
+                "suite-admission.json": admission,
+                "suite-admission.sig": signature,
+                "admission-index.json": index,
+                "admission-index.sig": index_signature,
+            })
         return bundles
+
+    # TRACEWEAVER: entrypoint=discover; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001; ver=VER-FLEETUPDATE-001
+    def discover(self):
+        try:
+            if time.monotonic() < self._next_allowed:
+                raise RuntimeError("release discovery cooldown")
+            deadline = time.monotonic() + DISCOVERY_TIMEOUT_SECONDS
+            body = self._get_pack(deadline)
+            bundles = self._parse_pack(body)
+            if time.monotonic() > deadline:
+                raise RuntimeError("release discovery timed out")
+            return bundles
+        except (ValueError, OSError, RuntimeError, TypeError, KeyError):
+            raise RuntimeError("release discovery unavailable") from None
