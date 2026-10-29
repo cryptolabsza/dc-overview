@@ -32,3 +32,15 @@ discovery_atomic_pack_projection:
   source_only: true
   native_acceptance: held
   publisher_enforcement: held
+native_fixture_pin_repair:
+  date: 2026-10-29
+  authority_plan: ../../artifacts/ipmi-readiness-20261026/release/fleet-manager-build-20261027/ready-to-deploy-20261028/approved-execution-20261029/discovery-consistency-definition/native-failure/root-repair-plan.json
+  workflow_profile_sha256: d974471ff3e2e052b9da1218f463ceb6a5c7ee0026f2affc2229bae45ce9d47a
+  requirement: REQ-FLEETUPDATE-001
+  trace: TRACE-FLEETUPDATE-001
+  verification: VER-FLEETUPDATE-001
+  validation: VAL-FLEETUPDATE-001
+  source_pin_sha256: bf8bd9145005901817cb4bbaa24726dbee20e7555e782e7383722e24df1d41a3
+  automatic_native_recheck: pending
+  native_acceptance: held
+  publisher_enforcement: held

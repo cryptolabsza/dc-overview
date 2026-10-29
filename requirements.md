@@ -29,3 +29,17 @@ The v2 release listing, published_at locator and asset fanout above are failed
 historical evidence. The v3 source note is `docs/fleet-suite-authority.md`.
 Native route, protected publisher, ten-second timing and rollout acceptance
 remain held.
+
+## 29 October 2026 native fixture pin repair
+
+The automatic native QA run for PR 33 failed in frozen-source preflight because
+the verifier retained the superseded v2 hash for `release_candidates.py`.
+The exact parser pin now records the reviewed v3 source hash
+`bf8bd9145005901817cb4bbaa24726dbee20e7555e782e7383722e24df1d41a3`.
+This mechanical correction is bounded by the root-reviewed repair plan in
+`../artifacts/ipmi-readiness-20261026/release/fleet-manager-build-20261027/ready-to-deploy-20261028/approved-execution-20261029/discovery-consistency-definition/native-failure/root-repair-plan.json`
+and frozen `profile-v4.json` (SHA256
+`d974471ff3e2e052b9da1218f463ceb6a5c7ee0026f2affc2229bae45ce9d47a`).
+The parser, tests and source authority note retain their reviewed bytes.
+Native acceptance awaits the automatic check on the updated PR head; no manual
+native dispatch or production acceptance follows from this source repair.

@@ -42,7 +42,7 @@ FROZEN_PRODUCT_HASHES = {
         "src/dc_overview/fleet_upgrade.py": "5f4504f38f64c59d00ca90b13cf94eb905c5fe3fe5ebd3fa49b28561f0d8cc14",
         "src/dc_overview/release_broker.py": "137c990c00ba4d59ade7c8490b9fd9b574709f73c0d072466bbc41e253fbb33b",
         "src/dc_overview/release_broker_service.py": "92dbdf0d83c2aa3ef74a518947599102077c58ee85a95589690087052d115d08",
-        "src/dc_overview/release_candidates.py": "1dd829c1441d7bfb703122ac1ada4e6ecf40568df449ebb442cf597458b756bd",
+        "src/dc_overview/release_candidates.py": "bf8bd9145005901817cb4bbaa24726dbee20e7555e782e7383722e24df1d41a3",
         "src/dc_overview/release_catalog.py": "21d4cf4731226c4ca9498cd4999bec1ec90bb9d3628faa615e13f20ccd9a29f6",
         "src/dc_overview/templates/systemd/dc-overview-release-broker.service": "6128bf4553bd87458c680377e1b4490fc157b6f092072271bc77bd21b18c4612",
         "src/dc_overview/templates/systemd/dc-overview-release-broker.socket": "67994e4c1d4b2ac9fa4b44de9e8ba60db2b087424993fce77656c0618272c559",
