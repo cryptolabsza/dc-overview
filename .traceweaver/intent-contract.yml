@@ -44,3 +44,20 @@ native_fixture_pin_repair:
   automatic_native_recheck: pending
   native_acceptance: held
   publisher_enforcement: held
+
+service_recovery_amendment_projection:
+  date: 2026-11-02
+  authority_plan: ../../artifacts/ipmi-readiness-20261026/fleet-ui-20261102/architecture/continuation-amendment.json
+  plan_sha256: 159af8421e4dde61e4ecc4f47849a1ddd7f07cd6fb158d247256f0bb36ed316e
+  owner_approval: ../../artifacts/ipmi-readiness-20261026/fleet-ui-20261102/owner-approval.json
+  implementation_contract_sha256: 91b873c548da7d10a113c8fbb74f09540559ba51339514c738e081d0dc75cf01
+  authority_gate: ../../artifacts/ipmi-readiness-20261026/fleet-ui-20261102/execution/go/recovery-source-go.json
+  reviewed_vv: ../../artifacts/ipmi-readiness-20261026/fleet-ui-20261102/execution/go/recovery-vv-root-reviewed.json
+  requirement: REQ-FLEETUPDATE-001
+  trace: TRACE-FLEETUPDATE-001
+  verification: VER-FLEETUPDATE-001
+  validation: VAL-FLEETUPDATE-001
+  source_only: true
+  native_acceptance: held
+  production_writes: disabled
+  publication: held

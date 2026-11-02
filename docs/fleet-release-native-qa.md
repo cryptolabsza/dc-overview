@@ -5,20 +5,23 @@ The `Fleet release native verification` pull request workflow runs one sequentia
 integration flow in the existing `ci-build-public-ephemeral` Linux VM route for
 repository `1133295682`. It requires a same-repository PR into `dev`, a read-only
 job token, the exact DC PR head, and an explicitly reviewed, published proxy commit.
-The proxy input is the reviewed published commit
-`5db15086c26095179f2af56bfa434c85426a6699`, with frozen runtime hashes from the
-accepted source manifest. The source guard rejects an unresolved placeholder
-before the proxy checkout or guest changes.
+Root binds the recovery input to the exact reviewed protected `dev` merge
+commit, refreshes every changed runtime hash in `FROZEN_PRODUCT_HASHES`, and
+sets `RECOVERY_INPUTS_FROZEN = True` only after exact source review. The workflow
+uses that immutable commit as `PROXY_SOURCE_SHA`. The source pin and recovery
+input guards reject unresolved inputs before the proxy checkout or guest changes. This test integration is not
+execution or publication approval.
 
-The four public image inputs in `scripts/verify_fleet_release_native.py` are
+The five public image inputs in `scripts/verify_fleet_release_native.py` are
 immutable digests. Registry and Nginx use pinned official Linux amd64 manifests;
 IPMI uses the previously approved old and new public releases. The retained
 primary registry metadata readback accompanies the implementation evidence.
 No registry login or publishing credential is needed.
 
-Inside that individual fresh guest, the workflow builds and installs both wheels,
-checks installed package bytes against the frozen product hashes, and builds two
-proxy images from the same reviewed application source with different metadata.
+Inside that individual fresh guest, the workflow builds and installs both
+compatible wheels, checks installed bytes against frozen source hashes, and
+builds two compatible proxy images from the same reviewed application source
+with different metadata. These images do not stand in for legacy-runtime proof.
 It first checks the vanilla packaged systemd unit with writes disabled and no
 trust fixture. It then adds an explicit test-only systemd discovery adapter. The
 adapter supplies locally signed synthetic admission assets to the installed
@@ -181,7 +184,10 @@ endpoint. Root commands, the Docker socket, systemd units and `/etc` changes are
 confined to the disposable guest. The proxy uses isolated external ports 18080
 and 18443, preserving those bindings through adoption.
 
-For both a named auth volume and a bind-mounted auth directory, the flow checks:
+The new recovery/bootstrap check uses a named auth volume. After that sequence
+adopts the compatible proxy, the retained flow checks the cases below. The
+existing separate bind-layout compatible fixture and its interruption checks
+also remain in the same sequential job; they do not stand in for legacy proof.
 
 1. Real peer rejection, malformed framing, root-policy reload and native CLI use.
 2. A scoped IPMI update, a dropped HTTPS reply and broker restart, durable owner
@@ -209,11 +215,79 @@ mapped job must have a terminal result. A prelaunch mapping alone cannot satisfy
 that observation. Subprocess timeouts fail with a generic error and suppressed
 exception chaining, while retaining the failed outcome and cleanup.
 
-The bind case interrupts a real adoption
-after the owner has retained its plan, restarts the broker and records the
-observed terminal or visibly held recovery state. Timing is observed rather than
-claimed to hit an exact instruction boundary. No fake Engine substitutes or
-forced successful operation states are used.
+The bind case interrupts real compatible proxy adoption after the owner retains
+its plan and observes recovery after broker restart. It does not constitute a
+second legacy bootstrap check. No exact Engine crash instruction boundary or
+lost Engine reply is claimed.
+
+## Packaged legacy recovery before selection and adoption
+
+The workflow downloads the actual released DC1.8.0 and proxy1.5.4 wheels through
+their immutable public HTTPS release URLs, bounds each download to 120 seconds,
+and checks these SHA256 values before use:
+
+- DC1.8.0: `72fcf2fde1d765cdfebfd2e4071261e3ff28d202f7ffb1975340e9d362969304`.
+- Proxy1.5.4: `5e64f0ae59d38ebcf4885d8aa60822bc3187d5a63f9abb8bdd11927d1ffd2b47`.
+
+It installs/imports the old pair in one guest host-tool venv, invokes old DC
+release help, and creates synthetic auth data through the old proxy package.
+It starts the actual serving legacy proxy image
+`ghcr.io/cryptolabsza/cryptolabs-proxy@sha256:bff38744e774875287e60e1e14995b19c7eb3afbe531d07f5921d06d9b76a1fd`
+without a broker socket mount. The image's stale OCI version strings are not
+version proof. Actual updater module bytes must match the exact old wheel;
+actual live capabilities must lack the new broker/recovery capabilities.
+DC1.8.0 here is the host CLI/package plane; a separate old DC service OCI
+container is not started or certified by this fixture.
+
+The original IPMI service uses real 1.3.1 image
+`sha256:738f11f7b432c4d9d8409154c9ca3f531a1e069999eb639a9d86433e84ac279d`.
+The selected failed target is real 1.3.2 image
+`sha256:dfa8a56159aab545d128b14bfb7d91cad17cac7de4f706307de508086fc56db9`.
+The later successful scoped target is real 1.3.3 image
+`sha256:1d616479a3842f5101615b6d97552f732de73fd424fcb844a9c643e92abc8bb1`.
+
+The verification-only selected-state producer in
+`scripts/fixtures/legacy-selected-state-protection.py` retains the bounded
+selected-table/config roundtrip algorithms and records their source provenance.
+All historical site PINS, customer identity values and the operational CLI
+entrypoint are removed. It requires an explicit synthetic binding and creates
+only a synthetic guest continuity bundle. Sync stays OFF; a deliberately
+synthetic health timestamp exercises the freshness predicate. This does not
+prove a real collector, customer data continuity or whole-database disaster
+recovery. No production DB snapshot is taken.
+
+The failed native record is constructed by actual old `submit_job`, using real
+read-only Engine observations and the real selected snapshot/targets/sources.
+Only helper create/start are intercepted during this seed step, so no seeded
+update runs. The resulting job is explicitly marked failed/recovery_required as
+synthetic setup. No historical ID or missing phase-success evidence is supplied,
+and no incident cause or incident reproduction is claimed.
+
+The exact compatible built wheels then replace the old pair in that same
+host-tool venv. To exercise real pip provenance and the production GitHub HTTPS
+origin contract, the fixture temporarily serves those exact bytes through a TLS
+guest-loopback wheel mirror at 127.0.0.2:443 for `github.com`. It uses a generated
+fixture certificate and genuine pip download/installation; it never edits
+`direct_url.json`. This synthetic transport proves no public release or issuer
+acceptance. The owned listener and exact hosts preimage are cleaned up within
+the existing isolated VM; no external GitHub endpoint is changed.
+
+With the old proxy still serving, production `InstalledOwner.capabilities`
+must reject its legacy capabilities. The actual fixed host CLI then runs
+`release reconcile-service --service ipmi-monitor --job <synthetic-native-id>`.
+The receipt must be the only new updater-store entry; every previous file's
+bytes/inode, failed job, active pointer, selection and public configuration must
+remain unchanged. Receipt job/active hashes bind actual raw bytes. Discarding
+the first CLI reply and repeating must retain identical receipt bytes.
+
+Only afterward does the actual host CLI perform scoped proxy selection with
+`--record-cli`. Normal `StandardAdoption` must replace the proxy and add the
+existing root0600 broker socket while customer writes remain disabled. The
+failed native history survives. The subsequent real signed-fixture scoped
+update must bind `recovery_predecessor` to that old job and receipt; the retained
+one-helper mapping, dropped HTTPS response, broker main kill/restart and real
+failed-health rollback assertions still run. The real worker is not replaced by
+the seed adapter. A passing run accepts only these observed fixture boundaries.
 
 Local checks, which do not execute the guest flow:
 

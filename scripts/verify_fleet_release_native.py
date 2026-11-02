@@ -23,8 +23,8 @@ from pathlib import Path
 
 REGISTRY_IMAGE = "registry@sha256:1290056e2357eceb0c047cb60ae9abb370305a218e2df650eb8d3ea021b1c151"
 NGINX_BASE = "nginx@sha256:2db7d28517d1fba17c2da3210395f7be11a11b419246ad0da2edf782af72f367"
-IPMI_OLD = "ghcr.io/cryptolabsza/ipmi-monitor@sha256:14774a0784787d95b32a6c94e28de84accc88f0c28f17e3b30e984f2c2f17fa5"
-IPMI_NEW = "ghcr.io/cryptolabsza/ipmi-monitor@sha256:84563cf838bd34c12cc83239c06c44f9a69c01b9dfff570e35ca913ef1825dac"
+IPMI_OLD = "ghcr.io/cryptolabsza/ipmi-monitor@sha256:738f11f7b432c4d9d8409154c9ca3f531a1e069999eb639a9d86433e84ac279d"
+IPMI_NEW = "ghcr.io/cryptolabsza/ipmi-monitor@sha256:1d616479a3842f5101615b6d97552f732de73fd424fcb844a9c643e92abc8bb1"
 ROOT = Path("/var/lib/fleet-native-qa")
 CONFIG = Path("/etc/dc-overview")
 PROXY_CONFIG = Path("/etc/cryptolabs-proxy")
@@ -38,8 +38,8 @@ ORIGIN = "https://127.0.0.1:18443"
 # Filled from the accepted frozen source manifests, never from an untrusted runtime response.
 FROZEN_PRODUCT_HASHES = {
     "dc": {
-        "src/dc_overview/cli.py": "39ec1edbf04d91293eed13a63f7fd8cc7d6f1a3f2d4f83017829cfe3b7c83b7f",
-        "src/dc_overview/fleet_upgrade.py": "5f4504f38f64c59d00ca90b13cf94eb905c5fe3fe5ebd3fa49b28561f0d8cc14",
+        "src/dc_overview/cli.py": "89490e41d09233df8ed05a67b2248377a8907a7bca3913a9138ab60b9431b71a",
+        "src/dc_overview/fleet_upgrade.py": "c5a462957d94aae2fcc28634d046460c7bc7107b67369979cedc2dddfda0b48d",
         "src/dc_overview/release_broker.py": "137c990c00ba4d59ade7c8490b9fd9b574709f73c0d072466bbc41e253fbb33b",
         "src/dc_overview/release_broker_service.py": "92dbdf0d83c2aa3ef74a518947599102077c58ee85a95589690087052d115d08",
         "src/dc_overview/release_candidates.py": "bf8bd9145005901817cb4bbaa24726dbee20e7555e782e7383722e24df1d41a3",
@@ -48,6 +48,7 @@ FROZEN_PRODUCT_HASHES = {
         "src/dc_overview/templates/systemd/dc-overview-release-broker.socket": "67994e4c1d4b2ac9fa4b44de9e8ba60db2b087424993fce77656c0618272c559",
     },
     "proxy": {
+        "src/cryptolabs_proxy/update_recovery.py": "0063848821dd41d8f600e936a432bee10c80f9851ce0b99a00aea8aa43f29316",
         "src/cryptolabs_proxy/account_link.py": "c9f921e25ee0341c3b191064f1a57c94919310d5d4e08ec2c2c3030b964ea634",
         "landing-page/index.html": "20061e8140c5132b68f0bdc5a7ebfd48023534cf6f1ea7f2921ea6d04530ff37",
         "nginx/nginx.conf": "5a6f8bbd6c9121fb0b1a2fd4884205b996f52c332ae2e0ea9b026fc5a748ed7d",
@@ -56,11 +57,12 @@ FROZEN_PRODUCT_HASHES = {
         "src/cryptolabs_proxy/config.py": "cb921e11d4cf316df013c53bd36c7de89b0a8e5cb66df6dd3131f7425d15cf3f",
         "src/cryptolabs_proxy/release_client.py": "d3ed1dd31ea3a54f07a17772fefdbbb1bc9105880ab7b0d563f17d73a4332c25",
         "src/cryptolabs_proxy/release_selection.py": "b56a4dac88c8ef0c03500430ab1054bcf142e4bfaeef7edce67fce0f27f5b5d4",
-        "src/cryptolabs_proxy/standard_adoption.py": "46f7bd6d889d00d41f632e6246f9269ea9a1833626482383acbfd30454d079a2",
+        "src/cryptolabs_proxy/standard_adoption.py": "db2d257341c186fd8fc74c6a141854c9c46d19640964aa34b8799e0820971511",
         "src/cryptolabs_proxy/templates/docker-compose.yml.j2": "ec923fb17e99c649bb0aacd95eb8aeee465cfc9dbc6c65b721461cbf094a8856",
         "src/cryptolabs_proxy/templates/nginx.conf.j2": "d14273f48d5370f480870068b8bcf1ebb2a84a868979079ff97549ef8fcdd7ed",
         "src/cryptolabs_proxy/templates/previous-standard-nginx-444d7c0.conf.j2": "f12e2b9800cbaa0e49e685506cfaad38eb7e568fa6d239fa15277af59073d8de",
-        "src/cryptolabs_proxy/updates.py": "cdb0958893eb6a11dc2764c4384ea784bf4b9632418a0871c3cee35bde3d00b6",
+        "src/cryptolabs_proxy/templates/previous-standard-nginx-8e2b421.conf.j2": "05828b78143c5d6cd7cbe60700cfc54b627cb4efff9a7af43439fdb56e25edab",
+        "src/cryptolabs_proxy/updates.py": "34735d28a4c9a91dbb33386060b2e0f5721c295a92951b9298e29fb1c9287bc9",
     },
 }
 
@@ -465,6 +467,412 @@ def certificate(directory, hostname):
     )
 
 
+
+"""Guest-only additions to the retained NativeQA lane. Never a host installer.
+
+This file is composed into a COPY of the exact retained verifier. It does not
+import source checkouts as product code and never edits package provenance.
+"""
+import contextlib
+import http.server
+import io
+import ssl
+import threading
+import zipfile
+
+LEGACY_PROXY = "ghcr.io/cryptolabsza/cryptolabs-proxy@sha256:bff38744e774875287e60e1e14995b19c7eb3afbe531d07f5921d06d9b76a1fd"
+LEGACY_DESIRED = "ghcr.io/cryptolabsza/ipmi-monitor@sha256:dfa8a56159aab545d128b14bfb7d91cad17cac7de4f706307de508086fc56db9"
+LEGACY_WHEELS = {
+    "dc-overview": ("1.8.0", "72fcf2fde1d765cdfebfd2e4071261e3ff28d202f7ffb1975340e9d362969304"),
+    "cryptolabs-proxy": ("1.5.4", "5e64f0ae59d38ebcf4885d8aa60822bc3187d5a63f9abb8bdd11927d1ffd2b47"),
+}
+PROTECTION_SHA = "c1bb469da0e7eaa1d733c6904f685e82aa9f33a5fd2cb7df947af67198697102"
+RECOVERY_INPUTS_FROZEN = True  # root fills only after final exact source/pin review
+
+
+def check_recovery_inputs(proxy_sha):
+    check_source_pin(proxy_sha)
+    if RECOVERY_INPUTS_FROZEN is not True:
+        raise RuntimeError('reviewed final recovery inputs are unresolved; native gate held')
+
+
+def recovery_store_snapshot(directory):
+    return {path.name: (path.read_bytes(), path.stat().st_ino)
+            for path in directory.iterdir() if path.is_file()}
+
+
+def verify_recovery_store(directory, before, job_id, original_id):
+    receipt_name = 'service-recovery-' + job_id + '.json'
+    assert {p.name for p in directory.iterdir()} == set(before) | {receipt_name}
+    for name, (raw, inode) in before.items():
+        path = directory / name
+        assert path.read_bytes() == raw and path.stat().st_ino == inode
+    receipt_path = directory / receipt_name
+    info = receipt_path.lstat()
+    assert stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o600
+    assert info.st_uid == os.geteuid() and info.st_nlink == 1
+    receipt = receipt_path.read_bytes()
+    assert len(receipt) <= 16384
+    parsed = json.loads(receipt)
+    assert parsed['job_sha256'] == digest(before[job_id + '.json'][0])
+    assert parsed['active_sha256'] == digest(before['active.json'][0])
+    assert parsed['original_container_id'] == original_id
+    return receipt
+
+
+def wheel_info(path):
+    from email.parser import BytesParser
+    with zipfile.ZipFile(path) as archive:
+        names = [n for n in archive.namelist() if n.endswith('.dist-info/METADATA')]
+        if len(names) != 1:
+            raise RuntimeError('wheel metadata ambiguity')
+        info = BytesParser().parsebytes(archive.read(names[0]))
+        return info['Name'].replace('_', '-'), info['Version']
+
+
+class LegacyRecoveryFixture:
+    def __init__(self, qa):
+        self.qa = qa
+        self.server = None
+        self.thread = None
+        self.github_hosts = None
+        self.host_env = ROOT / 'legacy-host-venv'
+        self.backup_root = Path('/var/backups/cryptolabs/ipmi132')
+        self.backup_root_identity = None
+        self.backups = []
+        self.legacy = {}
+        self.current = {}
+
+    def validate_inputs(self):
+        for directory, destination in ((self.qa.args.legacy_wheel_dir, self.legacy),
+                                       (self.qa.args.wheel_dir, self.current)):
+            for path in directory.glob('*.whl'):
+                name, version = wheel_info(path)
+                if name not in LEGACY_WHEELS:
+                    continue
+                if name in destination:
+                    raise RuntimeError('duplicate fixture product wheel')
+                destination[name] = (path.resolve(), version, digest(path.read_bytes()))
+        if set(self.legacy) != set(LEGACY_WHEELS) or set(self.current) != set(LEGACY_WHEELS):
+            raise RuntimeError('exact legacy and compatible wheel pairs required')
+        for name, (version, checksum) in LEGACY_WHEELS.items():
+            if self.legacy[name][1:] != (version, checksum):
+                raise RuntimeError('legacy immutable wheel differs')
+        if digest(self.qa.args.protection_helper.read_bytes()) != PROTECTION_SHA:
+            raise RuntimeError('retained synthetic protection helper differs')
+        for path in (self.host_env, self.backup_root):
+            if path.exists() or path.is_symlink():
+                raise RuntimeError('fresh disposable guest fixture path occupied')
+
+    def install_old_host(self):
+        self.validate_inputs()
+        run(sys.executable, '-m', 'venv', '--system-site-packages', self.host_env)
+        run(self.host_env / 'bin/python', '-m', 'pip', 'install', '--disable-pip-version-check',
+            *[str(value[0]) for value in self.legacy.values()], timeout=300)
+        self.assert_host_versions({name: v[0] for name, v in LEGACY_WHEELS.items()})
+        help_text = run(self.host_env / 'bin/dc-overview', 'release', '--help').stdout
+        assert b'reconcile-service' not in help_text
+        run(self.host_env / 'bin/python', '-I', '-c',
+            'import dc_overview, cryptolabs_proxy; from cryptolabs_proxy.updates import submit_job')
+        self.qa.record('actual-legacy-host-pair', result='passed',
+                       installed_versions={name: v[0] for name, v in LEGACY_WHEELS.items()},
+                       wheel_sha256={name: value[2] for name, value in self.legacy.items()})
+
+    def assert_host_versions(self, expected):
+        source = 'import importlib.metadata as m,json;print(json.dumps({n:m.version(n) for n in ' + repr(list(expected)) + '}))'
+        found = json.loads(run(self.host_env / 'bin/python', '-I', '-c', source).stdout)
+        assert found == expected
+
+    def wheel_mirror(self):
+        """Actual pip HTTPS provenance in the isolated guest; no dist-info editing.
+
+        github.com is guest-loopback only, as ghcr.io already is in this lane.
+        This is explicitly synthetic transport, never public release acceptance.
+        """
+        certificate(ROOT / 'wheel-certs', 'github.com')
+        routes = {}
+        self.urls = {}
+        for name, (path, version, checksum) in self.current.items():
+            route = '/cryptolabsza/' + name + '/releases/download/native-fixture/' + path.name
+            routes[route] = path.read_bytes()
+            self.urls[name] = 'https://github.com' + route
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                payload = routes.get(self.path)
+                if payload is None:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+            def log_message(self, *args):
+                pass
+        hosts = Path('/etc/hosts').read_bytes()
+        if any('github.com' in line.split('#')[0].split()[1:] for line in hosts.decode().splitlines()):
+            raise RuntimeError('github fixture host mapping occupied')
+        self.server = http.server.ThreadingHTTPServer(('127.0.0.2', 443), Handler)
+        tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls.load_cert_chain(ROOT / 'wheel-certs/server.crt', ROOT / 'wheel-certs/server.key')
+        self.server.socket = tls.wrap_socket(self.server.socket, server_side=True)
+        self.github_hosts = hosts
+        Path('/etc/hosts').write_bytes(self.github_hosts + b'\n127.0.0.2 github.com # fleet-native-owned-wheel-mirror\n')
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def install_compatible_host(self):
+        self.wheel_mirror()
+        env = {k: v for k, v in os.environ.items() if k not in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY',
+               'http_proxy', 'https_proxy', 'all_proxy', 'PIP_INDEX_URL', 'PIP_EXTRA_INDEX_URL')}
+        env['NO_PROXY'] = 'github.com,127.0.0.2'
+        run(self.host_env / 'bin/python', '-m', 'pip', 'install', '--no-deps', '--force-reinstall',
+            '--cert', ROOT / 'wheel-certs/server.crt',
+            *[self.urls[name] + '#sha256=' + value[2] for name, value in self.current.items()],
+            env=env, timeout=180)
+        self.assert_host_versions({name: value[1] for name, value in self.current.items()})
+        # Full import checks the actual proxy __init__/setup/Jinja2 dependency closure.
+        run(self.host_env / 'bin/python', '-I', '-c',
+            'import dc_overview, cryptolabs_proxy; from dc_overview.fleet_upgrade import reconcile_service')
+        link = Path('/usr/local/bin/dc-overview')
+        assert link.is_symlink() and link.resolve() == Path(sys.executable).parent / 'dc-overview'
+        link.unlink()
+        link.symlink_to(self.host_env / 'bin/dc-overview')
+
+    def seed_synthetic_selected_state(self):
+        """Only owned synthetic DB. No network credentials or real collection claim."""
+        qa = self.qa
+        original = inspect('ipmi-monitor')
+        mounts = [m for m in original['Mounts'] if m['Destination'] == '/app/data']
+        assert len(mounts) == 1
+        assert mounts[0]['Type'] == 'volume' and mounts[0].get('Name') in qa.volumes
+        database = Path(mounts[0]['Source']) / 'ipmi_events.db'
+        import sqlite3
+        from datetime import datetime, timezone
+        with sqlite3.connect(database) as db:
+            credential = 'SYNTHETIC-NONSECRET-NOT-A-CREDENTIAL'
+            fields = {'ai_link_email': 'fixture@example.invalid', 'ai_link_user_id': 'fixture-user',
+                      'ai_link_customer_id': 'fixture-customer', 'ai_link_linked_at': '2026-11-02T00:00:00Z',
+                      'ai_link_key_digest': digest(credential.encode())}
+            for key, value in fields.items():
+                db.execute('DELETE FROM system_settings WHERE key=?', (key,))
+                db.execute('INSERT INTO system_settings(key,value) VALUES (?,?)', (key, value))
+            count = db.execute('SELECT count(*) FROM cloud_sync').fetchone()[0]
+            assert count <= 1
+            if not count:
+                db.execute('INSERT INTO cloud_sync(id) VALUES (1)')
+            db.execute('UPDATE cloud_sync SET license_key=?,sync_enabled=0,subscription_valid=1', (credential,))
+            sampled_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            db.execute("INSERT OR REPLACE INTO server_status(bmc_ip,server_name,last_check) VALUES ('192.0.2.254','SYNTHETIC-no-collector',?)", (sampled_at,))
+        # Import only retained verification code, never product checkout modules.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('synthetic_protection', qa.args.protection_helper)
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        deadline = time.monotonic() + 30
+        ro = helper.open_ro(database, deadline)
+        try:
+            names = {row[0] for row in ro.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            state = helper.table_snapshot(ro, names & set(helper.SELECTED))
+            baseline = helper.state_aggregate(state, 'ltx')
+            schema = helper.fingerprint(ro.execute('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').fetchall())
+        finally:
+            ro.close()
+        declared = {}
+        for name in ('/app/config/servers.yaml', '/app/data/servers.json'):
+            path = (Path(next(m['Source'] for m in original['Mounts'] if m['Destination'] == name))
+                    if name.endswith('servers.yaml') else database.parent / 'servers.json')
+            declared[name] = {'present': path.exists()}
+            if path.exists():
+                declared[name]['sha256'] = digest(path.read_bytes())
+        with database.open('rb') as file:
+            header = list(file.read(20)[18:20])
+        helper.PINS = {'ltx': {'synthetic_fixture_only': True, 'data_volume_name': mounts[0]['Name'],
+            'hostname': socket.gethostname(), 'container_id': original['Id'],
+            'image_id': original['Image'], 'mounts': original['Mounts'],
+            'database_device': database.stat().st_dev, 'database_inode': database.stat().st_ino,
+            'journal_header_bytes': header, 'table_names': sorted(names), 'secret_mount_metadata': [],
+            'declared_config': declared,
+            'link_baseline': {key: baseline[key] for key in ('saved_identity_sha256', 'saved_identity_field_count',
+                'saved_identity_complete', 'identity_mode', 'credential_present', 'credential_sha256',
+                'stored_key_digest_matches', 'expected_email_matches', 'sync_enabled')},
+            'schema_sha256': schema,
+            'protection_baseline': {key: baseline[key] for key in ('stable_cloud_sha256', 'settings_sha256',
+                 'stable_inventory_sha256', 'cached_subscription_valid')},
+            'selected_count_bounds': {key: [value, value] for key, value in baseline['counts'].items()}}}
+        capture = io.StringIO()
+        self.backup_root.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        helper.safe_chain(self.backup_root.parent)
+        self.claim_backup_root()
+        with contextlib.redirect_stdout(capture):
+            helper.main('ltx')
+        result = json.loads(capture.getvalue())
+        self.backups.append(Path(result['operation_dir']))
+        qa.record('synthetic-continuity-baseline', result='passed',
+                  receipt_sha256=result['receipt']['sha256'],
+                  synthetic_health_timestamp=True, actual_collector_acceptance=False,
+                  full_database_snapshot=False)
+
+    def seed_failed_job(self):
+        """Use real old submit constructor, intercept helper launch only.
+
+        The terminal result is intentional fixture state; no historical phases
+        are supplied, no real update is claimed to have failed in this setup.
+        """
+        code = '''
+import json
+from pathlib import Path
+from cryptolabs_proxy import updates as u
+class SeedEngine(u.UpdateEngine):
+    def create(self, name, request):
+        assert name.startswith('cryptolabs-update-')
+        assert request['Config']['Image'] == self.inspect('cryptolabs-proxy')['Image']
+    def start(self, name):
+        assert name.startswith('cryptolabs-update-')
+d=Path('/data/auth/update-jobs')
+j=u.submit_job('ipmi-monitor','main','update',directory=d,engine=SeedEngine(),selection_directory='/etc/cryptolabs/releases')
+assert {'id','helper','sources','targets','selection_snapshot','selection_sha256','manifest_sha256'} <= set(j)
+j.update(state='failed',success=False,results={'ipmi-monitor':{'state':'recovery_required','success':False,'reason':'replacement_failed','desired':j['targets']['ipmi-monitor']['reference'],'observed':None,'owner':'proxy-updater','origin':j['targets']['ipmi-monitor']['origin'],'rollback_container':'ipmi-monitor'}})
+u.write_job(d,j)
+print(json.dumps({'id':j['id']}))
+'''
+        result = docker('exec', 'cryptolabs-proxy', 'python3', '-c', code)
+        return json.loads(result.stdout)['id']
+
+    def bootstrap(self):
+        qa = self.qa
+        old_proxy = inspect('cryptolabs-proxy')
+        assert old_proxy['Image'] == inspect(LEGACY_PROXY, image=True)['Id']
+        # Released images copy source; their stale OCI/__version__ strings are
+        # not installed wheel metadata. Compare real updater bytes to old wheel.
+        with zipfile.ZipFile(self.legacy['cryptolabs-proxy'][0]) as archive:
+            expected_updater = digest(archive.read('cryptolabs_proxy/updates.py'))
+        observed_updater = docker('exec', 'cryptolabs-proxy', 'python3', '-c',
+            'import hashlib,pathlib;from cryptolabs_proxy import updates;print(hashlib.sha256(pathlib.Path(updates.__file__).read_bytes()).hexdigest())').stdout.decode().strip()
+        assert observed_updater == expected_updater
+        caps = json.loads(docker('exec', 'cryptolabs-proxy', 'python3', '-m',
+                                'cryptolabs_proxy.updates', 'capabilities').stdout)
+        assert caps.get('release_components') != 1 and caps.get('native_service_recovery') != 1
+        self.seed_synthetic_selected_state()
+        job_id = self.seed_failed_job()
+        qa.legacy_job_id = job_id
+        before = recovery_store_snapshot(qa.jobs)
+        self.failed_job_raw = before[job_id + '.json'][0]
+        selected_before = (qa.store.root / 'selection.json').read_bytes()
+        public_before = (CONFIG / 'fleet-config.yaml').read_bytes()
+        self.install_compatible_host()
+        assert (qa.store.root / 'selection.json').read_bytes() == selected_before
+        assert (CONFIG / 'fleet-config.yaml').read_bytes() == public_before
+        # New broker owner must refuse actual legacy capabilities, even with
+        # compatible host packages and valid synthetic admission installed.
+        from dc_overview.release_broker import InstalledOwner
+        from dc_overview.fleet_config import FleetConfig
+        try:
+            InstalledOwner(FleetConfig.load(CONFIG), qa.policy).capabilities(1)
+        except Exception as error:
+            assert getattr(error, 'code', None) == 'owner-maintenance'
+        else:
+            raise AssertionError('legacy live owner unexpectedly accepted')
+        cli = self.host_env / 'bin/dc-overview'
+        arguments = ('release', 'reconcile-service', '--service', 'ipmi-monitor', '--job', job_id)
+        first = run(cli, *arguments, timeout=130)
+        reply = json.loads(first.stdout)
+        assert set(reply) == {'job_id', 'service', 'outcome', 'resolution_available', 'reason'}
+        assert reply['job_id'] == job_id and reply['service'] == 'ipmi-monitor'
+        assert reply['outcome'] == 'original_restored'
+        receipt_name = 'service-recovery-' + job_id + '.json'
+        receipt = verify_recovery_store(qa.jobs, before, job_id, inspect('ipmi-monitor')['Id'])
+        parsed = json.loads(receipt)
+        assert inspect('cryptolabs-proxy')['Id'] == old_proxy['Id']
+        # Simulated lost CLI acknowledgement: disregard first reply, retry
+        # the actual command; exact durable receipt and timestamp must survive.
+        run(cli, *arguments, timeout=130)
+        assert verify_recovery_store(qa.jobs, before, job_id, parsed['original_container_id']) == receipt
+        assert (qa.store.root / 'selection.json').read_bytes() == selected_before
+        assert (CONFIG / 'fleet-config.yaml').read_bytes() == public_before
+        qa.record('legacy-reconcile-before-selection', result='passed', job_id=job_id,
+                  proxy_image=LEGACY_PROXY, failed_job_sha256=parsed['job_sha256'],
+                  active_sha256=parsed['active_sha256'], receipt_sha256=digest(receipt),
+                  only_new_durable_file=receipt_name, lost_cli_ack_replay='same receipt bytes',
+                  historical_phase_evidence='not fabricated')
+        manifest = json.loads(qa.store.load(platform='linux/amd64').manifest.raw)
+        manifest['baseline_id'] = 'native-compatible-bootstrap'
+        manifest['components']['cryptolabs-proxy'] = qa.component('proxy-a')
+        path, version, checksum = self.current['dc-overview']
+        manifest['components']['dc-overview-cli'] = {'owner': 'host-cli', 'release': version,
+            'artifacts': {'any': {'kind': 'wheel', 'url': self.urls['dc-overview'], 'sha256': checksum}}}
+        candidate = qa.data / 'compatible-bootstrap.json'
+        write(candidate, manifest)
+        run(cli, 'release', 'select', '--release-manifest', candidate,
+            '--component', 'cryptolabs-proxy', '--record-cli')
+        assert (qa.jobs / (job_id + '.json')).read_bytes() == self.failed_job_raw
+        assert (qa.jobs / 'active.json').read_bytes() == before['active.json'][0]
+        from cryptolabs_proxy.standard_adoption import StandardAdoption
+        owner = StandardAdoption(PROXY_CONFIG)
+        plan = owner.plan(qa.declaration)
+        qa.owner_plans.add(plan['plan_id'])
+        result = owner.adopt(qa.declaration, plan['plan_id'])
+        assert result['state'] == 'adopted'
+        assert inspect('cryptolabs-proxy')['Id'] != old_proxy['Id']
+        assert inspect('cryptolabs-proxy')['Image'] == inspect(qa.refs['proxy-a'], image=True)['Id']
+        assert (qa.jobs / (job_id + '.json')).read_bytes() == self.failed_job_raw
+        assert (qa.jobs / 'active.json').read_bytes() == before['active.json'][0]
+        assert any(m['Destination'] == SOCKET and not m['RW'] for m in inspect('cryptolabs-proxy')['Mounts'])
+        assert qa.policy['writes_enabled'] is False
+        qa.wait_healthy('cryptolabs-proxy')
+        qa.record('legacy-host-select-socket-adopt', result='passed', old_proxy_id=old_proxy['Id'],
+                  new_proxy_id=inspect('cryptolabs-proxy')['Id'], writes_enabled=False,
+                  old_job_still_failed=True, new_durable_receipt_retained=True)
+
+    def verify_successor(self, job_id):
+        qa = self.qa
+        successor = json.loads((qa.jobs / (job_id + '.json')).read_bytes())
+        predecessor = successor['recovery_predecessor']
+        assert predecessor['job_id'] == qa.legacy_job_id
+        assert (qa.jobs / (qa.legacy_job_id + '.json')).read_bytes() == self.failed_job_raw
+        receipt = (qa.jobs / ('service-recovery-' + qa.legacy_job_id + '.json')).read_bytes()
+        assert predecessor['receipt_sha256'] == digest(receipt)
+        qa.record('legacy-recovery-scoped-successor', result='passed', job_id=job_id,
+                  predecessor_id=qa.legacy_job_id, original_failed_history_retained=True)
+
+    def claim_backup_root(self):
+        parent = self.backup_root.parent.lstat()
+        assert stat.S_ISDIR(parent.st_mode) and parent.st_uid == os.geteuid() and not parent.st_mode & 0o022
+        self.backup_root.mkdir(mode=0o700)  # exclusive; never adopt a preexisting root
+        info = self.backup_root.lstat()
+        assert stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o700 and info.st_uid == os.geteuid()
+        self.backup_root_identity = (info.st_dev, info.st_ino, info.st_uid)
+
+    def reset(self):
+        # Called after normal owned containers quiesce; retain on custody doubt.
+        if self.backup_root_identity is not None:
+            info = self.backup_root.lstat()
+            assert stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o700
+            assert (info.st_dev, info.st_ino, info.st_uid) == self.backup_root_identity and info.st_uid == os.geteuid()
+            for directory in self.backups:
+                assert directory.parent == self.backup_root and directory.is_dir() and not directory.is_symlink()
+                shutil.rmtree(directory)
+            self.backups.clear()
+            self.backup_root.rmdir()
+            self.backup_root_identity = None
+        else:
+            assert not self.backups
+        if self.server is not None:
+            self.server.shutdown()
+            self.server.server_close()
+            self.thread.join(timeout=5)
+            assert not self.thread.is_alive()
+            self.server = None
+        if self.github_hosts is not None:
+            expected = self.github_hosts + b'\n127.0.0.2 github.com # fleet-native-owned-wheel-mirror\n'
+            assert Path('/etc/hosts').read_bytes() == expected
+            Path('/etc/hosts').write_bytes(self.github_hosts)
+            self.github_hosts = None
+        link = Path('/usr/local/bin/dc-overview')
+        if link.is_symlink() and link.resolve() == self.host_env / 'bin/dc-overview':
+            link.unlink()
+            link.symlink_to(Path(sys.executable).parent / 'dc-overview')
+
+
 class NativeQA:
     def __init__(self, args):
         self.args = args
@@ -492,6 +900,7 @@ class NativeQA:
         self.registry_trust = None
         self.fixture_owned = False
         self.child_failure_identity = None
+        self.recovery = LegacyRecoveryFixture(self)
 
     def reset_child_failure(self):
         try:
@@ -883,6 +1292,7 @@ class NativeQA:
         )
 
     def preflight(self):
+        check_recovery_inputs(self.args.proxy_sha)
         check_source_pin(self.args.proxy_sha)
         if not re.fullmatch("[0-9a-f]{40}", self.args.dc_sha or ""):
             raise RuntimeError("exact reviewed DC event head required")
@@ -952,6 +1362,7 @@ class NativeQA:
                 raise RuntimeError("fixture container name already occupied")
         ROOT.mkdir(mode=0o700)
         self.fixture_owned = True
+        self.recovery.install_old_host()
         (ROOT / "docker-client").mkdir(mode=0o700)
         os.environ["DOCKER_CONFIG"] = str(ROOT / "docker-client")
         write(ROOT / "docker-client/config.json", {"auths": {}})
@@ -997,6 +1408,8 @@ class NativeQA:
         return result
 
     def images(self):
+        docker("pull", "--platform", "linux/amd64", LEGACY_PROXY, timeout=900)
+        assert LEGACY_PROXY in inspect(LEGACY_PROXY, image=True)["RepoDigests"]
         for ref in (REGISTRY_IMAGE, NGINX_BASE, IPMI_OLD, IPMI_NEW):
             docker("pull", "--platform", "linux/amd64", ref, timeout=900)
             data = inspect(ref, image=True)
@@ -1149,6 +1562,7 @@ class NativeQA:
 
         self.layout = layout
         CONFIG.mkdir(mode=0o755)
+        write(CONFIG / ".lifecycle-config.lock", b"")
         PROXY_CONFIG.mkdir(mode=0o700)
         network = "native-fleet-" + layout + "-" + os.environ["FLEET_NATIVE_RUN_ID"]
         docker("network", "create", "--label", self.label, network)
@@ -1181,7 +1595,7 @@ class NativeQA:
             "QA_USER_PASS": self.password,
         }
         run(
-            sys.executable,
+            self.recovery.host_env / 'bin/python' if layout == 'named-volume' else sys.executable,
             "-c",
             "from cryptolabs_proxy.auth import create_user; import os; assert create_user('native-admin',os.environ['QA_USER_PASS'],'admin')",
             env=env,
@@ -1191,8 +1605,8 @@ class NativeQA:
             "selection_contract": 1,
             "baseline_id": "native-baseline",
             "components": {
-                "cryptolabs-proxy": self.component("proxy-a"),
-                "ipmi-monitor": self.component("ipmi-old"),
+                "cryptolabs-proxy": ({"owner": "proxy-updater", "release": "1.5.4", "artifacts": {"linux/amd64": {"kind": "oci", "reference": LEGACY_PROXY}}} if layout == 'named-volume' else self.component("proxy-a")),
+                "ipmi-monitor": ({"owner": "proxy-updater", "release": "1.3.2", "artifacts": {"linux/amd64": {"kind": "oci", "reference": LEGACY_DESIRED}}} if layout == 'named-volume' else self.component("ipmi-old")),
                 "grafana": {
                     "owner": "proxy-updater",
                     "release": "untouched-pin",
@@ -1333,6 +1747,7 @@ class NativeQA:
             f"type=bind,src={empty},dst=/app/config/servers.yaml,readonly",
             self.refs["ipmi-old"],
         )
+        socket_mount = ("--mount", f"type=bind,src={SOCKET},dst={SOCKET},readonly") if layout == 'bind' else ()
         docker(
             "run",
             "-d",
@@ -1354,8 +1769,7 @@ class NativeQA:
             f"type=bind,src={self.data}/ssl,dst=/etc/nginx/ssl,readonly",
             "--mount",
             f"type=bind,src={self.store.root},dst=/etc/cryptolabs/releases,readonly",
-            "--mount",
-            f"type=bind,src={SOCKET},dst={SOCKET},readonly",
+            *socket_mount,
             "--mount",
             "type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock",
             "-e",
@@ -1366,10 +1780,12 @@ class NativeQA:
             "FLEET_PUBLIC_ORIGIN=" + ORIGIN,
             "-e",
             "RELEASE_SELECTION_REQUIRED=true",
-            self.refs["proxy-a"],
+            LEGACY_PROXY if layout == 'named-volume' else self.refs["proxy-a"],
         )
         self.wait_healthy("ipmi-monitor")
         self.wait_healthy("cryptolabs-proxy")
+        if layout == 'named-volume':
+            self.recovery.bootstrap()
         for name in ("ipmi-monitor", "cryptolabs-proxy"):
             for mount in inspect(name).get("Mounts", []):
                 if mount.get("Type") == "volume" and mount.get("Name") not in self.volumes:
@@ -1694,6 +2110,8 @@ class NativeQA:
         run("systemctl", "start", SERVICE)
         self.wait_fresh_broker(old_main)
         final = self.finish(identity)
+        if self.layout == 'named-volume':
+            self.recovery.verify_successor(job_id)
         replay = self.http("POST", "/api/releases/apply", body=body)
         assert replay.status_code == 200 and replay.json()["operation_id"] == identity
         after = json.loads(mapping.read_bytes())
@@ -1903,6 +2321,7 @@ class NativeQA:
         for name in self.networks:
             docker("network", "rm", name, check=False)
         self.networks = []
+        self.recovery.reset()
         shutil.rmtree(CONFIG, ignore_errors=True)
         shutil.rmtree(PROXY_CONFIG, ignore_errors=True)
         shutil.rmtree(Path("/etc/systemd/system") / (SERVICE + ".d"), ignore_errors=True)
@@ -2007,6 +2426,10 @@ class NativeQA:
             self.record(
                 "native-flow",
                 result="passed",
+                legacy_bootstrap_layout="named-volume",
+                old_dc_service_oci=False,
+                actual_collector_proof=False,
+                engine_reply_loss_proof=False,
                 production_enablement=False,
                 external_vm_cleanup="parent must independently retain coordinator destruction receipt",
             )
@@ -2124,6 +2547,8 @@ def main():
     parser.add_argument("--proxy-source", type=Path)
     parser.add_argument("--proxy-sha")
     parser.add_argument("--wheel-dir", type=Path)
+    parser.add_argument("--legacy-wheel-dir", type=Path)
+    parser.add_argument("--protection-helper", type=Path)
     parser.add_argument("--evidence-dir", type=Path)
     args = parser.parse_args()
     if args.broker_child:
@@ -2131,10 +2556,11 @@ def main():
         return
     check_source_pin(args.proxy_sha)
     if args.check_inputs_only:
+        check_recovery_inputs(args.proxy_sha)
         return
     if any(
         getattr(args, key) is None
-        for key in ("dc_source", "dc_sha", "proxy_source", "wheel_dir", "evidence_dir")
+        for key in ("dc_source", "dc_sha", "proxy_source", "wheel_dir", "evidence_dir", "legacy_wheel_dir", "protection_helper")
     ):
         parser.error("exact sources, SHAs, wheel and evidence directories are required")
     NativeQA(args).execute()

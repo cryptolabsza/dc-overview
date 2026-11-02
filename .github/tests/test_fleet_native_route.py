@@ -4,6 +4,7 @@
 
 import ast
 import importlib.util
+import hashlib
 import json
 import os
 import subprocess
@@ -11,6 +12,8 @@ import tempfile
 import tomllib
 import traceback
 import unittest
+import sqlite3
+import zipfile
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -36,6 +39,156 @@ class FleetNativeRouteTest(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
+
+    def test_synthetic_seed_generated_volume_reaches_helper_filesystem_guard(self):
+        module = self.native_module()
+        helper_path = ROOT / "scripts/fixtures/legacy-selected-state-protection.py"
+        class SeedCaptured(Exception):
+            pass
+        class FilesystemGuardReached(Exception):
+            pass
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data = root / "data"; data.mkdir()
+            config = root / "servers.yaml"; config.write_text("servers: []\n")
+            with sqlite3.connect(data / "ipmi_events.db") as db:
+                for sql in (
+                    "CREATE TABLE system_settings(key TEXT PRIMARY KEY,value TEXT)",
+                    "CREATE TABLE cloud_sync(id INTEGER PRIMARY KEY,license_key TEXT,sync_enabled INTEGER,subscription_valid INTEGER)",
+                    "CREATE TABLE server(id INTEGER PRIMARY KEY,bmc_ip TEXT,server_name TEXT,status TEXT,updated_at TEXT)",
+                    "CREATE TABLE server_status(bmc_ip TEXT PRIMARY KEY,server_name TEXT,last_check TEXT)",
+                ):
+                    db.execute(sql)
+            volume = "native-fleet-named-volume-123-data"
+            observed = {"Id": "a" * 64, "Image": "sha256:" + "b" * 64,
+                        "State": {"Running": True}, "Config": {"Labels": {"io.cryptolabs.native-qa.run": "123"}},
+                        "Mounts": [{"Destination": "/app/data", "Type": "volume", "Name": volume, "Source": str(data)},
+                                   {"Destination": "/app/config/servers.yaml", "Type": "bind", "Source": str(config)}]}
+            qa = module.NativeQA(SimpleNamespace(evidence_dir=root / "evidence", protection_helper=helper_path))
+            qa.recovery.backup_root = root / "owned-backup-root"
+            qa.volumes = [volume]
+            qa.network = "native-fleet-named-volume-123"
+            qa.label = "io.cryptolabs.native-qa.run=123"
+            captured = {}
+            original_spec = importlib.util.spec_from_file_location
+            def capture_spec(name, path):
+                spec = original_spec(name, path)
+                execute = spec.loader.exec_module
+                def load(helper):
+                    execute(helper)
+                    # Native root-chain custody is not a macOS test capability;
+                    # constrain this pre-creation boundary to our temporary FS.
+                    helper.safe_chain = lambda path: path.stat()
+                    captured["helper"] = helper
+                    def stop(site):
+                        captured["pin"] = helper.PINS[site]
+                        raise SeedCaptured()
+                    captured["main"] = helper.main
+                    helper.main = stop
+                spec.loader.exec_module = load
+                return spec
+            with patch.object(module, "inspect", return_value=observed), patch.object(module, "docker", side_effect=AssertionError("Engine mutation forbidden")), patch.object(importlib.util, "spec_from_file_location", side_effect=capture_spec):
+                with self.assertRaises(SeedCaptured):
+                    qa.recovery.seed_synthetic_selected_state()
+            helper = captured["helper"]
+            self.assertEqual(captured["pin"]["mounts"], observed["Mounts"])
+            self.assertEqual(captured["pin"]["container_id"], observed["Id"])
+            # The producer and runtime identity checks remain real. Stop the
+            # actual helper exactly at its first filesystem guard after mounts.
+            with patch.object(helper.os, "geteuid", return_value=0), patch.object(helper.os, "umask"), patch.object(helper.signal, "signal"), patch.object(helper.signal, "alarm"), patch.object(helper.subprocess, "check_output", return_value=json.dumps([observed]).encode()), patch.object(helper, "safe_chain", side_effect=FilesystemGuardReached):
+                foreign = json.loads(json.dumps(observed))
+                foreign["Mounts"][0]["Name"] = "foreign-unowned-volume"
+                with patch.object(helper.subprocess, "check_output", return_value=json.dumps([foreign]).encode()):
+                    with self.assertRaisesRegex(RuntimeError, "runtime-full-mount-records"):
+                        captured["main"]("ltx")
+                with self.assertRaises(FilesystemGuardReached):
+                    captured["main"]("ltx")
+                with patch.dict(captured["pin"], {"data_volume_name": None}):
+                    with self.assertRaisesRegex(RuntimeError, "data-mount"):
+                        captured["main"]("ltx")
+
+    def test_rejected_preexisting_backup_root_survives_actual_reset(self):
+        module = self.native_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            wheels = root / "wheels"; wheels.mkdir()
+            expected = {}
+            for name, version in (("dc-overview", "1.8.0"), ("cryptolabs-proxy", "1.5.4")):
+                path = wheels / (name + ".whl")
+                with zipfile.ZipFile(path, "w") as archive:
+                    archive.writestr(name.replace("-", "_") + ".dist-info/METADATA", "Name: " + name + "\nVersion: " + version + "\n")
+                expected[name] = (version, hashlib.sha256(path.read_bytes()).hexdigest())
+            qa = module.NativeQA(SimpleNamespace(evidence_dir=root / "evidence", legacy_wheel_dir=wheels, wheel_dir=wheels,
+                                                protection_helper=ROOT / "scripts/fixtures/legacy-selected-state-protection.py"))
+            recovery = qa.recovery
+            recovery.host_env = root / "unoccupied-host-env"
+            recovery.backup_root = root / "preexisting-empty-backup"
+            recovery.backup_root.mkdir()
+            before = recovery.backup_root.stat().st_ino
+            # Only the unrelated package input digest boundary is substituted;
+            # occupied-path validation and reset execute their actual code.
+            with patch.object(module, "LEGACY_WHEELS", expected), patch.object(module, "run", side_effect=AssertionError("runtime forbidden")):
+                with self.assertRaisesRegex(RuntimeError, "fresh disposable guest fixture path occupied"):
+                    recovery.validate_inputs()
+                def local_path(value):
+                    return root / "unoccupied-cli-link" if str(value) == "/usr/local/bin/dc-overview" else Path(value)
+                with patch.object(module, "Path", side_effect=local_path):
+                    recovery.reset()
+            self.assertTrue(recovery.backup_root.is_dir(), "rejected foreign root must survive cleanup")
+            self.assertEqual(recovery.backup_root.stat().st_ino, before)
+            recovery.backup_root = root / "owned-positive"
+            with patch.object(module, "Path", side_effect=local_path):
+                recovery.claim_backup_root()
+                recovery.reset()
+            self.assertFalse(recovery.backup_root.exists())
+            recovery.backup_root = root / "owned-before-replacement"
+            recovery.claim_backup_root()
+            retained = root / "retained-owned-root"
+            recovery.backup_root.rename(retained)
+            recovery.backup_root.mkdir(mode=0o700)
+            replacement_inode = recovery.backup_root.stat().st_ino
+            with patch.object(module, "Path", side_effect=local_path):
+                with self.assertRaises(AssertionError):
+                    recovery.reset()
+            self.assertEqual(recovery.backup_root.stat().st_ino, replacement_inode)
+            self.assertTrue(retained.is_dir())
+
+    def test_recovery_rejects_unfrozen_inputs_before_guest_commands(self):
+        module = self.native_module()
+        with patch.object(module, "RECOVERY_INPUTS_FROZEN", False), patch.object(module, "run", side_effect=AssertionError("guest command forbidden")):
+            with self.assertRaisesRegex(RuntimeError, "recovery inputs"):
+                module.check_recovery_inputs("a" * 40)
+        with patch.object(module, "RECOVERY_INPUTS_FROZEN", True):
+            module.check_recovery_inputs("a" * 40)
+            with self.assertRaisesRegex(RuntimeError, "published reviewed proxy"):
+                module.check_recovery_inputs("ROOT_MUST_SET_REVIEWED_RECOVERY_PROXY_SHA")
+
+    def test_reconcile_fixture_requires_only_receipt_and_unchanged_native_history(self):
+        module = self.native_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            identity = "a" * 32
+            job = json.dumps({"id": identity, "state": "failed"}).encode()
+            active = json.dumps({"id": identity}).encode()
+            for name, raw in ((identity + ".json", job), ("active.json", active), ("dispatch.lock", b""), ("operation.lock", b"")):
+                (root / name).write_bytes(raw)
+            before = module.recovery_store_snapshot(root)
+            receipt = {"job_sha256": hashlib.sha256(job).hexdigest(), "active_sha256": hashlib.sha256(active).hexdigest(), "original_container_id": "b" * 64}
+            receipt_path = root / ("service-recovery-" + identity + ".json")
+            receipt_path.write_text(json.dumps(receipt))
+            receipt_path.chmod(0o600)
+            self.assertEqual(module.verify_recovery_store(root, before, identity, "b" * 64), receipt_path.read_bytes())
+            receipt_path.chmod(0o644)
+            with self.assertRaises(AssertionError):
+                module.verify_recovery_store(root, before, identity, "b" * 64)
+            receipt_path.chmod(0o600)
+            (root / "active.json").write_bytes(b"{}")
+            with self.assertRaises(AssertionError):
+                module.verify_recovery_store(root, before, identity, "b" * 64)
+            (root / "active.json").write_bytes(active)
+            (root / "unexpected.json").write_bytes(b"{}")
+            with self.assertRaises(AssertionError):
+                module.verify_recovery_store(root, before, identity, "b" * 64)
 
     def test_service_snapshot_exports_only_closed_fields(self):
         module = self.native_module()
@@ -452,13 +605,22 @@ class FleetNativeRouteTest(unittest.TestCase):
         self.assertEqual(checkouts[0]["with"]["ref"], "${{ github.event.pull_request.head.sha }}")
         self.assertEqual(checkouts[1]["with"]["repository"], "cryptolabsza/cryptolabs-proxy")
         pin = data["env"]["PROXY_SOURCE_SHA"]
-        self.assertEqual(pin, "5db15086c26095179f2af56bfa434c85426a6699")
+        if pin != "ROOT_MUST_SET_REVIEWED_RECOVERY_PROXY_SHA":
+            self.assertRegex(pin, r"^[a-f0-9]{40}$")
         preflight = next(
             i for i, s in enumerate(job["steps"]) if s.get("name") == "Reject unresolved source pin"
         )
         self.assertLess(preflight, job["steps"].index(checkouts[1]))
         self.assertIn("--check-inputs-only", job["steps"][preflight]["run"])
         self.assertEqual(checkouts[1]["with"]["ref"], "${{ env.PROXY_SOURCE_SHA }}")
+        build = next(step["run"] for step in job["steps"] if step.get("name") == "Verify route and build exact wheels")
+        for version, checksum in (("dc_overview-1.8.0", "72fcf2fde1d765cdfebfd2e4071261e3ff28d202f7ffb1975340e9d362969304"),
+                                  ("cryptolabs_proxy-1.5.4", "5e64f0ae59d38ebcf4885d8aa60822bc3187d5a63f9abb8bdd11927d1ffd2b47")):
+            self.assertIn(version + "-py3-none-any.whl", build)
+            self.assertIn(checksum, build)
+        execution = next(step["run"] for step in job["steps"] if step.get("id") == "qa")
+        self.assertIn("--legacy-wheel-dir", execution)
+        self.assertIn("--protection-helper", execution)
 
     def test_placeholder_fails_before_guest_commands(self):
         spec = importlib.util.spec_from_file_location("fleet_native_qa", SCRIPT)

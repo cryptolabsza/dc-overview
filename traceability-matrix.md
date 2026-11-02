@@ -23,6 +23,17 @@ Canonical reviewed authority and frozen profile: ../artifacts/ipmi-readiness-202
 | TRACE-FLEETUPDATE-001 | REQ-FLEETUPDATE-001 | `.github/tests/test_fleet_native_route.py` | VER-FLEETUPDATE-001 | VAL-FLEETUPDATE-001 | approved |
 | TRACE-FLEETUPDATE-001 | REQ-FLEETUPDATE-001 | `scripts/verify_fleet_release_native.py` | VER-FLEETUPDATE-001 | VAL-FLEETUPDATE-001 | v3 source pin corrected; automatic native recheck pending |
 | TRACE-FLEETUPDATE-001 | REQ-FLEETUPDATE-001 | `docs/fleet-release-native-qa.md` | VER-FLEETUPDATE-001 | VAL-FLEETUPDATE-001 | approved |
+| TRACE-FLEETUPDATE-001 | REQ-FLEETUPDATE-001 | `tests/test_scoped_release_selection.py` | VER-FLEETUPDATE-001 | VAL-FLEETUPDATE-001 | Approved recovery source scope; actual native/site acceptance held |
+| TRACE-FLEETUPDATE-001 | REQ-FLEETUPDATE-001 | `docs/native-service-recovery.md` | VER-FLEETUPDATE-001 | VAL-FLEETUPDATE-001 | Approved recovery operations documentation |
+| TRACE-FLEETUPDATE-001 | REQ-FLEETUPDATE-001 | `scripts/fixtures/legacy-selected-state-protection.py` | VER-FLEETUPDATE-001 | VAL-FLEETUPDATE-001 | approved source authority |
+
+The synthetic native fixture helper row projects only the approved source scope
+under amendment `159af842…` and the root-reviewed native test integration GO.
+Local15-check verification and independent frozen-body reviews are retained in
+`../artifacts/ipmi-readiness-20261026/fleet-ui-20261102/execution/native-fixture/repair2/`.
+Actual native execution, collector proof, public admission, customer/site
+acceptance, external VM destruction and publication remain held; the source
+authority status does not certify those outcomes.
 
 ## Unsupported format evidence
 
@@ -61,3 +72,16 @@ The root-reviewed native preflight repair is limited to the `release_candidates.
 | .github/workflows/fleet-release-native-qa.yml | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | file-role | native-route-workflow |
 | docs/fleet-release-native-qa.md | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | file-role | native-qa-documentation |
 | docs/fleet-suite-authority.md | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | file-role | release-operations-documentation |
+| tests/test_scoped_release_selection.py | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | verifies | release-verification |
+| docs/native-service-recovery.md | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | file-role | recovery-operations-documentation |
+| scripts/fixtures/legacy-selected-state-protection.py | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | verifies | native-verification |
+
+
+## Recovery amendment source evidence (2 November 2026)
+
+Authority is the exact approved amendment `159af842…` and frozen contract
+`91b873c5…` linked from requirements.md. Focused RED/GREEN and candidate
+hashes are retained at `../artifacts/ipmi-readiness-20261026/fleet-ui-20261102/execution/build/manifest.json`.
+Shared pre-code V&V is `../artifacts/ipmi-readiness-20261026/fleet-ui-20261102/execution/go/recovery-vv-root-reviewed.json`.
+Native installed-wheel bootstrap, source publication, production reconciliation,
+site continuity, signed admission and UI acceptance remain held.
