@@ -3,6 +3,9 @@
 """One sequential, guest-only integration proof. This is never a production installer."""
 
 import argparse
+import contextlib
+import selectors
+import threading
 import dis
 import hashlib
 import importlib
@@ -323,6 +326,9 @@ def raw_request(action="list", params=None, *, actor=None, payload=None):
 BROKER_CODE_LABELS = (
     "broker-serve", "broker-connection", "broker-response", "broker-init",
     "broker-policy", "broker-dispatch", "broker-reconcile", "broker-operation",
+    "installed-owner-capabilities", "installed-owner-identity", "installed-owner-submit", "installed-owner-status",
+    "proxy-submit-job", "proxy-submit-locked", "proxy-helper-request", "proxy-write-json",
+    "proxy-installed-selection", "proxy-selection-plan", "proxy-require-selected-updater",
 )
 ERROR_KINDS = (
     "assertion-error", "file-not-found", "permission-error", "os-error", "runtime-error", "unknown",
@@ -428,8 +434,279 @@ def write_broker_failure(value):
         stream.truncate()
 
 
+def inspect_owner_mounts_bounded():
+    """One owned pipe, 1 MiB capture, four-second capture/five-second cleanup budget."""
+    child = selector = None
+    data = bytearray()
+    captured = cleaned = False
+    start = time.monotonic()
+    try:
+        child = subprocess.Popen(
+            ["docker", "inspect", "cryptolabs-proxy"], shell=False,
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            bufsize=0, close_fds=True,
+        )
+        descriptor = child.stdout.fileno()
+        os.set_blocking(descriptor, False)
+        selector = selectors.DefaultSelector()
+        selector.register(child.stdout, selectors.EVENT_READ)
+        while len(data) <= 1048576:
+            remaining = start + 4 - time.monotonic()
+            if remaining <= 0:
+                break
+            if not selector.select(remaining):
+                continue
+            if time.monotonic() >= start + 4:
+                break
+            try:
+                chunk = os.read(descriptor, min(65536, 1048577 - len(data)))
+            except BlockingIOError:
+                continue
+            data.extend(chunk)
+            if len(data) > 1048576:
+                break
+            if not chunk:
+                remaining = start + 4 - time.monotonic()
+                if remaining > 0:
+                    captured = child.wait(timeout=remaining) == 0
+                break
+    except Exception:
+        captured = False
+    finally:
+        resources_closed = True
+        if selector is not None:
+            try:
+                if child is not None:
+                    selector.unregister(child.stdout)
+            except Exception:
+                pass
+            try:
+                selector.close()
+            except Exception:
+                resources_closed = False
+        if child is not None:
+            try:
+                child.stdout.close()
+            except Exception:
+                resources_closed = False
+            try:
+                if child.poll() is None:
+                    child.kill()
+                remaining = start + 5 - time.monotonic()
+                if remaining > 0:
+                    child.wait(timeout=remaining)
+                    cleaned = resources_closed
+            except Exception:
+                cleaned = False
+    if captured and cleaned:
+        try:
+            return json.loads(data)
+        except Exception:
+            pass
+    return None
+
+
+def observation_uuid(value):
+    return type(value) is str and str(uuid.UUID(value)) == value
+
+
+def observation_directories(path, *, private=True):
+    """No-follow ancestry plus exact producer custody at the selected directory."""
+    path = Path(path)
+    if not path.is_absolute() or '..' in path.parts:
+        raise ValueError()
+    identities = []
+    for parent in (*reversed(path.parents), path):
+        info = parent.lstat()
+        # macOS exposes its OS-owned temporary tree through this fixed alias.
+        # This portable fixture accommodation is never active in the Linux lane.
+        if (platform.system() == 'Darwin' and parent == Path('/var')
+                and stat.S_ISLNK(info.st_mode) and info.st_uid == 0
+                and os.readlink(parent) == 'private/var'):
+            info = Path('/private/var').lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid not in (0, os.geteuid()):
+            raise ValueError()
+        # Portable local tests use the OS temporary ancestor. The native Linux
+        # fixture never allows writable ancestry, including sticky directories.
+        if info.st_mode & 0o022 and not (platform.system() != 'Linux' and info.st_mode & stat.S_ISVTX):
+            raise ValueError()
+        identities.append((parent, trust_identity(info)))
+    info = path.lstat()
+    if private and (info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o700):
+        raise ValueError()
+    return identities
+
+
+class ObservationAbsent(FileNotFoundError):
+    """Initial open found no file under the same verified parent directories."""
+
+
+def observation_read(path, limit, *, identity=None):
+    """At most limit+1 returned bytes; reject replacement rather than infer absence."""
+    path = Path(path)
+    parents = observation_directories(path.parent)
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        if observation_directories(path.parent) != parents:
+            raise ValueError() from None
+        raise ObservationAbsent() from None
+    try:
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1
+                or info.st_size > limit or (identity is not None and trust_identity(info) != identity)
+                or trust_identity(path.lstat()) != trust_identity(info)):
+            raise ValueError()
+        raw = bytearray()
+        while len(raw) <= limit:
+            chunk = os.read(descriptor, min(65536, limit + 1 - len(raw)))
+            raw.extend(chunk)
+            if not chunk or len(raw) > limit:
+                break
+        after = os.fstat(descriptor)
+        if (len(raw) > limit or trust_identity(path.lstat()) != trust_identity(info)
+                or trust_metadata(after) != trust_metadata(info) or after.st_size != info.st_size
+                or observation_directories(path.parent) != parents):
+            raise ValueError()
+        return json.loads(raw)
+    except FileNotFoundError:
+        # Once opened, a lost pathname or ancestor is a custody race, not absence.
+        raise ValueError() from None
+    finally:
+        os.close(descriptor)
+
+
+def observation_failure_valid(value):
+    if (type(value) is not dict or set(value) != {'code_label', 'source_line', 'error_kind'}
+            or type(value['error_kind']) is not str or value['error_kind'] not in ERROR_KINDS):
+        return False
+    if value['code_label'] is None:
+        return value == {'code_label': None, 'source_line': None, 'error_kind': 'unknown'}
+    return (type(value['code_label']) is str and value['code_label'] in BROKER_CODE_LABELS
+            and type(value['source_line']) is int and 1 <= value['source_line'] <= 1000000)
+
+
+_owner_observation_lock = threading.Lock()
+_owner_observation_identity = None
+
+
+def owner_observation_file(flags):
+    observation_directories(ROOT)
+    path = ROOT / 'broker-owner-observation.json'
+    descriptor = os.open(path, flags | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    try:
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1
+                or trust_identity(path.lstat()) != trust_identity(info)):
+            raise ValueError()
+        return descriptor, info
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def write_owner_observation(operation_id, failure):
+    if not _owner_observation_lock.acquire(blocking=False):
+        return
+    try:
+        if not observation_uuid(operation_id) or not observation_failure_valid(failure):
+            return
+        raw = encoded({'schema_version': 1, 'operation_id': operation_id, 'failure': failure})
+        if len(raw) > 4096 or _owner_observation_identity is None:
+            return
+        descriptor, info = owner_observation_file(os.O_WRONLY)
+        try:
+            if trust_identity(info) != _owner_observation_identity:
+                return
+            # A partial/interrupted diagnostic is unavailable; no journal/fsync.
+            os.ftruncate(descriptor, 0)
+            if os.write(descriptor, raw) != len(raw):
+                return
+        finally:
+            os.close(descriptor)
+    except Exception:
+        pass
+    finally:
+        _owner_observation_lock.release()
+
+
+def naturally_loaded_proxy_codes():
+    """Only the naturally loaded, installed pinned module; no import or discovery."""
+    module = sys.modules.get('cryptolabs_proxy.updates')
+    if type(module) is not types.ModuleType:
+        return ()
+    path = Path(module.__file__)
+    if (not path.is_relative_to(Path(sys.prefix)) or path.parts[-2:] != ('cryptolabs_proxy', 'updates.py')):
+        return ()
+    observation_directories(path.parent, private=False)
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_mode & 0o022 or info.st_size > 1048576:
+            return ()
+        raw = bytearray()
+        while len(raw) <= 1048576:
+            chunk = os.read(descriptor, min(65536, 1048577 - len(raw)))
+            raw.extend(chunk)
+            if not chunk or len(raw) > 1048576:
+                break
+        if (len(raw) > 1048576 or trust_identity(path.lstat()) != trust_identity(info)
+                or trust_metadata(os.fstat(descriptor)) != trust_metadata(info)
+                or digest(raw) != FROZEN_PRODUCT_HASHES['proxy']['src/cryptolabs_proxy/updates.py']):
+            return ()
+    finally:
+        os.close(descriptor)
+    return tuple((label, function.__code__) for label, function in (
+        ('proxy-submit-job', module.submit_job), ('proxy-submit-locked', module._submit_job_locked),
+        ('proxy-helper-request', module.helper_request), ('proxy-write-json', module._write_json),
+        ('proxy-installed-selection', module.installed_selection), ('proxy-selection-plan', module._selection_plan),
+        ('proxy-require-selected-updater', module._require_selected_updater),
+    ) if type(function) is types.FunctionType)
+
+
+@contextlib.contextmanager
+def observe_broker_owner_failures(broker_module, operation_root, code_objects):
+    original = broker_module.private_write
+    codes = tuple(code_objects)
+    proxy_codes = None
+    def observed(*args, **kwargs):
+        nonlocal proxy_codes
+        result = original(*args, **kwargs)
+        # Nothing diagnostic executes before a successful original write.
+        try:
+            error = sys.exception()
+            if error is None or not args or type(args[0]) is not type(Path()):
+                return result
+            path = args[0]
+            identity = path.stem
+            if path != Path(operation_root) / (identity + '.json') or not observation_uuid(identity):
+                return result
+            frame = error.__traceback__
+            eligible = False
+            while frame is not None:
+                if any(label == 'broker-operation' and frame.tb_frame.f_code is code for label, code in codes):
+                    eligible = True
+                frame = frame.tb_next
+            if eligible:
+                if proxy_codes is None:
+                    found = naturally_loaded_proxy_codes()
+                    if found:
+                        proxy_codes = found
+                write_owner_observation(identity, broker_failure_metadata(error, codes + (proxy_codes or ())))
+        except Exception:
+            pass
+        return result
+    broker_module.private_write = observed
+    try:
+        yield
+    finally:
+        broker_module.private_write = original
+
+
 def broker_child():
-    """Accepted test-input adapter: replace discovery data only, preserve installed owners."""
+    """Test discovery adapter plus handled-save observation; installed source bytes retained."""
     if os.geteuid() or platform.system() != "Linux":
         raise RuntimeError("fixture broker child is only for the disposable Linux guest")
     from dc_overview.fleet_config import FleetConfig
@@ -454,15 +731,32 @@ def broker_child():
         ("broker-policy", ReleaseBroker._reload_policy), ("broker-dispatch", ReleaseBroker.dispatch),
         ("broker-reconcile", ReleaseBroker.reconcile), ("broker-operation", ReleaseBroker.run_operation),
     ))
+    broker_module = sys.modules['dc_overview.release_broker']
+    observer = contextlib.nullcontext()
+    if type(broker_module) is types.ModuleType:
+        owner = broker_module.InstalledOwner
+        codes += tuple((label, function.__code__) for label, function in (
+            ('installed-owner-capabilities', owner.capabilities), ('installed-owner-identity', owner.identity),
+            ('installed-owner-submit', owner.submit), ('installed-owner-status', owner.status),
+        ))
+        try:
+            global _owner_observation_identity
+            descriptor, info = owner_observation_file(os.O_WRONLY)
+            _owner_observation_identity = trust_identity(info)
+            os.close(descriptor)
+        except Exception:
+            pass
+        observer = observe_broker_owner_failures(broker_module, CONFIG / 'releases/broker/operations', codes)
     try:
-        serve(
-            ReleaseBroker(
-                FleetConfig.load(CONFIG),
-                load_policy(),
-                discovery=fixture_assets,
-                policy_loader=load_policy,
+        with observer:
+            serve(
+                ReleaseBroker(
+                    FleetConfig.load(CONFIG),
+                    load_policy(),
+                    discovery=fixture_assets,
+                    policy_loader=load_policy,
+                )
             )
-        )
     except Exception as error:
         try:
             write_broker_failure(broker_failure_metadata(error, codes))
@@ -971,7 +1265,132 @@ class NativeQA:
         self.registry_trust = None
         self.fixture_owned = False
         self.child_failure_identity = None
+        self.owner_observation_identity = None
         self.recovery = LegacyRecoveryFixture(self)
+
+    def reset_owner_observation(self):
+        global _owner_observation_identity
+        flags = os.O_RDWR
+        if self.owner_observation_identity is None:
+            flags |= os.O_CREAT | os.O_EXCL
+        descriptor, info = owner_observation_file(flags)
+        try:
+            if (self.owner_observation_identity is not None
+                    and trust_identity(info) != self.owner_observation_identity):
+                raise ValueError('owner observation custody held')
+            os.ftruncate(descriptor, 0)
+            self.owner_observation_identity = trust_identity(info)
+            _owner_observation_identity = self.owner_observation_identity
+        finally:
+            os.close(descriptor)
+
+    def read_owner_observation(self, operation_id):
+        try:
+            if self.owner_observation_identity is None or not observation_uuid(operation_id):
+                return None
+            value = observation_read(ROOT / 'broker-owner-observation.json', 4096,
+                                     identity=self.owner_observation_identity)
+            if (type(value) is dict and set(value) == {'schema_version', 'operation_id', 'failure'}
+                    and type(value['schema_version']) is int and value['schema_version'] == 1
+                    and value['operation_id'] == operation_id and observation_failure_valid(value['failure'])):
+                return value['failure']
+        except Exception:
+            pass
+        return None
+
+    def owner_mapping_observation(self, operation_id):
+        unknown = {'observation': 'unknown', 'job_id_present': None}
+        result = {'operation': {**unknown, 'state': 'unknown', 'phase': 'unknown', 'reason_category': 'unknown'},
+                  'fixture_mapping': dict(unknown), 'current_mapping': dict(unknown),
+                  'owner_store': {'observation': 'unknown', 'mount_type': 'unknown',
+                                  'auth_equal': None, 'jobs_equal': None}, 'failure': None}
+        try:
+            if not observation_uuid(operation_id):
+                return result
+        except Exception:
+            return result
+
+        try:
+            result['failure'] = self.read_owner_observation(operation_id)
+        except Exception:
+            pass
+
+        def project(directory, operation=False):
+            value = dict(result['operation'] if operation else unknown)
+            try:
+                observation_directories(directory)
+                try:
+                    record = observation_read(directory / (operation_id + '.json'), 1048576)
+                except ObservationAbsent:
+                    # Absence only follows a trusted, still present parent lookup.
+                    observation_directories(directory)
+                    value['observation'] = 'absent'
+                    return value
+                if type(record) is not dict or record.get('operation_id') != operation_id:
+                    return value
+                if operation and (type(record.get('schema_version')) is not int or record['schema_version'] != 1):
+                    return value
+                value['observation'] = 'present'
+                job = record.get('job_id')
+                value['job_id_present'] = (False if 'job_id' not in record else
+                    True if type(job) is str and re.fullmatch('[0-9a-f]{32}', job) else None)
+                if operation:
+                    states = ('prepared', 'selecting', 'pending-submit', 'updating', 'adopting',
+                              'recovery-required', 'selection-conflict', 'completed', 'failed-restored')
+                    state, phase = record.get('state'), record.get('phase')
+                    value['state'] = state if type(state) is str and state in states else 'unknown'
+                    value['phase'] = phase if type(phase) is str and phase in ('selection', 'owner') else 'unknown'
+                    reasons = {
+                        'Owner operation interrupted; reconcile retained operation before retry': 'owner-interrupted',
+                        'Owner update did not verify; inspect retained owner result': 'owner-unverified',
+                        'Installed owner recovery verification required': 'owner-recovery-required',
+                        'Selected release changed before owner dispatch': 'selection-conflict',
+                        'Resulting selection differs from preview': 'selection-conflict',
+                    }
+                    reason = record.get('reason')
+                    value['reason_category'] = reasons.get(reason, 'unknown') if type(reason) is str else 'unknown'
+                return value
+            except Exception:
+                return value
+
+        try:
+            result['operation'] = project(self.store.root / 'broker/operations', operation=True)
+            # Verify the independently constructed fixture store before using any
+            # mount-derived source. Never authorize a new path from inspect alone.
+            fixture_auth = observation_directories(self.auth)
+            fixture_jobs = observation_directories(self.jobs)
+            if self.jobs != self.auth / 'update-jobs':
+                return result
+            result['fixture_mapping'] = project(self.jobs / 'operations')
+            inspected = inspect_owner_mounts_bounded()
+            if type(inspected) is not list or len(inspected) != 1 or type(inspected[0]) is not dict:
+                return result
+            mounts = inspected[0].get('Mounts')
+            if type(mounts) is not list or any(type(m) is not dict for m in mounts):
+                return result
+            auth = [m for m in mounts if m.get('Destination') == '/data/auth']
+            if (len(auth) != 1 or auth[0].get('RW') is not True
+                    or auth[0].get('Type') not in ('bind', 'volume')
+                    or any(type(m.get('Destination')) is not str or m['Destination'].startswith('/data/auth/') for m in mounts)):
+                return result
+            mount = auth[0]
+            if type(mount.get('Source')) is not str:
+                return result
+            source = Path(mount['Source'])
+            if not source.is_absolute() or '..' in source.parts or source != self.auth:
+                result['owner_store']['observation'] = 'foreign'
+                return result
+            if observation_directories(self.auth) != fixture_auth or observation_directories(self.jobs) != fixture_jobs:
+                return result
+            auth_info, jobs_info = self.auth.lstat(), self.jobs.lstat()
+            result['owner_store'] = {'observation': 'same', 'mount_type': mount['Type'],
+                                     'auth_equal': True, 'jobs_equal': True,
+                                     'auth_device': auth_info.st_dev, 'auth_inode': auth_info.st_ino,
+                                     'jobs_device': jobs_info.st_dev, 'jobs_inode': jobs_info.st_ino}
+            result['current_mapping'] = dict(result['fixture_mapping'])
+        except Exception:
+            pass
+        return result
 
     def reset_child_failure(self):
         try:
@@ -1747,6 +2166,7 @@ class NativeQA:
         }
         write(POLICY, self.policy)
         self.reset_child_failure()
+        self.reset_owner_observation()
         run("systemctl", "start", SOCKET_UNIT)
         denied = raw_request()
         assert denied["ok"] is False and denied["error"]["status"] == 503
@@ -2174,7 +2594,15 @@ class NativeQA:
         params, p = self.preview("ipmi-new")
         identity, body = self.apply(params, p, lose_reply=True)
         mapping = self.jobs / "operations" / (identity + ".json")
-        wait(mapping.exists, timeout=90, message="actual owner mapping was not created")
+        try:
+            wait(mapping.exists, timeout=90, message="actual owner mapping was not created")
+        except Exception:
+            try:
+                self.record('owner-mapping-observation', layout=self.layout,
+                            operation_id=identity, **self.owner_mapping_observation(identity))
+            except Exception:
+                pass
+            raise
         mapped = json.loads(mapping.read_bytes())
         job_id = mapped["job_id"]
         self.job_ids.add(job_id)

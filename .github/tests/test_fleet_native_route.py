@@ -7,6 +7,7 @@ import importlib.util
 import hashlib
 import json
 import os
+import selectors
 import subprocess
 import tempfile
 import tomllib
@@ -31,6 +32,106 @@ GUEST_HOSTS = (
     b'  capabilities = ["pull", "resolve"]\n'
     b'  ca = "/etc/docker/certs.d/192.168.1.101:5444/ca.crt"\n'
 )
+
+
+@contextmanager
+def owner_file_read_audit(module, limits, *, grow=None):
+    """Observe real descriptor reads; short reads/growth defeat stat-only bounds."""
+    opened, attempts = {}, []
+    original_open, original_read, original_stat, original_loads = os.open, os.read, os.fstat, json.loads
+    grown = set()
+    def opening(name, *args, **kwargs):
+        descriptor = original_open(name, *args, **kwargs)
+        opened.pop(descriptor, None)  # Descriptor numbers can be reused for another record.
+        if isinstance(name, (str, bytes, os.PathLike)) and Path(name) in limits:
+            item = {"path": Path(name), "limit": limits[Path(name)], "total": 0, "requests": []}
+            attempts.append(item); opened[descriptor] = item
+        return descriptor
+    def stating(descriptor):
+        info = original_stat(descriptor)
+        item = opened.get(descriptor)
+        if item and item["path"] == grow and grow not in grown:
+            with open(grow, "ab") as stream:
+                stream.write(b" ")
+            grown.add(grow)
+        return info
+    def reading(descriptor, count):
+        item = opened.get(descriptor)
+        if item:
+            assert type(count) is int and 0 < count <= item["limit"] + 1 - item["total"]
+            item["requests"].append(count)
+        raw = original_read(descriptor, min(count, 8191) if item else count)
+        if item:
+            item["total"] += len(raw)
+            assert item["total"] <= item["limit"] + 1
+        return raw
+    def parsing(raw, *args, **kwargs):
+        assert len(raw) <= max(limits.values()), "overflow must be rejected before JSON parsing"
+        return original_loads(raw, *args, **kwargs)
+    with patch.object(module.os, "open", side_effect=opening), patch.object(module.os, "read", side_effect=reading), patch.object(module.os, "fstat", side_effect=stating), patch.object(module.json, "loads", side_effect=parsing):
+        yield attempts
+
+
+@contextmanager
+def owner_inspect_boundary(module, payload, mode="ok"):
+    """Only low-level child/clock/selector/read substitutes; no process is launched."""
+    clock = [100.0]
+    audit = {"requests": [], "total": 0, "waits": [], "events": []}
+    stdout = SimpleNamespace(fileno=lambda: 77, close=unittest.mock.Mock())
+    exited = [False]
+    def waiting(timeout):
+        assert type(timeout) in (int, float) and 0 < timeout <= (105 if audit["killed"] or exited[0] else 104) - clock[0]
+        audit["waits"].append((clock[0], timeout))
+        if mode == "cleanup-timeout" or (mode == "eof-live" and not audit["killed"]):
+            clock[0] += timeout
+            raise subprocess.TimeoutExpired("PRIVATE", timeout)
+        exited[0] = True
+        return 17 if mode == "nonzero" else 0
+    audit["killed"] = False
+    def killing():
+        audit["killed"] = True
+    child = SimpleNamespace(stdout=stdout, poll=lambda: (0 if exited[0] else None), wait=unittest.mock.Mock(side_effect=waiting), kill=unittest.mock.Mock(side_effect=killing))
+    def spawning(argv, **kwargs):
+        self_expected = {"shell": False, "stdin": subprocess.DEVNULL, "stdout": subprocess.PIPE,
+                         "stderr": subprocess.DEVNULL, "bufsize": 0, "close_fds": True}
+        assert argv == ["docker", "inspect", "cryptolabs-proxy"] and kwargs == self_expected
+        clock[0] += 0.25  # Spawn time belongs to the same absolute deadline.
+        if mode == "spawn-error":
+            raise OSError("PRIVATE_SPAWN")
+        return child
+    def selecting(timeout):
+        assert 0 < timeout <= 104 - clock[0]
+        audit["events"].append(("select", clock[0], timeout))
+        if mode == "timeout":
+            clock[0] += timeout
+            return []
+        clock[0] += 0.00001
+        return [(SimpleNamespace(fd=77, fileobj=stdout), selectors.EVENT_READ)]
+    selector = SimpleNamespace(register=unittest.mock.Mock(), unregister=unittest.mock.Mock(), close=unittest.mock.Mock(), select=unittest.mock.Mock(side_effect=selecting))
+    def reading(descriptor, count):
+        assert descriptor == 77
+        assert count == min(65536, 1048577 - audit["total"]) and count > 0
+        audit["requests"].append(count)
+        if mode == "read-error":
+            raise OSError("PRIVATE_READ")
+        if mode == "short" and len(audit["requests"]) == 1:
+            raise BlockingIOError()
+        raw = payload[audit["total"]:audit["total"] + min(count, 8191)]
+        audit["total"] += len(raw)
+        assert audit["total"] <= 1048577
+        return raw
+    setup = OSError("PRIVATE_SELECTOR") if mode == "setup-error" else None
+    forbidden = AssertionError("unbounded/general command runner forbidden")
+    with patch.object(module.subprocess, "Popen", side_effect=spawning) as spawn, patch.object(selectors, "DefaultSelector", side_effect=setup, return_value=selector), patch.object(module, "selectors", selectors, create=True), patch.object(module.os, "read", side_effect=reading), patch.object(module.os, "set_blocking", side_effect=lambda fd, enabled: (_ for _ in ()).throw(AssertionError("must be own nonblocking descriptor")) if (fd, enabled) != (77, False) else None), patch.object(module.time, "monotonic", side_effect=lambda: clock[0]), patch.object(module, "run", side_effect=forbidden), patch.object(module, "docker", side_effect=forbidden), patch.object(module, "inspect", side_effect=forbidden):
+        yield audit
+    assert spawn.call_count == 1
+    if mode != "spawn-error":
+        assert stdout.close.called
+        assert child.wait.called
+        if mode != "setup-error":
+            assert selector.close.called
+    assert clock[0] <= 105
+    audit["child"] = child
 
 
 class FleetNativeRouteTest(unittest.TestCase):
@@ -624,6 +725,266 @@ class FleetNativeRouteTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "native verification failed"):
                 guest.execute()
             self.assertEqual(events, ["consume", "cleanup"])
+
+    def test_owner_observation_slot_requires_private_retained_inode_exact_uuid_and_closed_shape(self):
+        module = self.native_module()
+        identity = "00000000-0000-4000-8000-000000000001"
+        other = "00000000-0000-4000-8000-000000000002"
+        failure = {"code_label": "broker-operation", "source_line": 924, "error_kind": "os-error"}
+        with tempfile.TemporaryDirectory() as d, patch.object(module, "ROOT", Path(d) / "fixture"):
+            module.ROOT.mkdir(mode=0o700)
+            qa = module.NativeQA(SimpleNamespace(evidence_dir=Path(d) / "evidence"))
+            qa.layout = "bind"
+            qa.reset_owner_observation()
+            path = module.ROOT / "broker-owner-observation.json"
+            inode = path.stat().st_ino
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            module.write_owner_observation(identity, failure)
+            raw = path.read_bytes()
+            self.assertLessEqual(len(raw), 4096)
+            self.assertEqual(qa.read_owner_observation(identity), failure)
+            self.assertEqual(path.read_bytes(), raw, "projection must not consume/reset the slot")
+            self.assertIsNone(qa.read_owner_observation(other))
+            value = json.loads(raw)
+            self.assertEqual(set(value), {"schema_version", "operation_id", "failure"})
+            for overflow, grows in ((False, False), (True, False), (True, True)):
+                content = raw.ljust(4096 + int(overflow and not grows), b" ")
+                path.write_bytes(content)
+                with owner_file_read_audit(module, {path: 4096}, grow=path if grows else None) as reads:
+                    result = qa.read_owner_observation(identity)
+                self.assertEqual(result, None if overflow else failure)
+                if not overflow or grows:
+                    self.assertEqual(len(reads), 1)
+                    self.assertEqual(reads[0]["total"], 4096 + int(overflow))
+                    self.assertTrue(reads[0]["requests"])
+                self.assertEqual(path.read_bytes(), content + (b" " if grows else b""))
+            invalid = [b"{", b"x" * 4097, module.encoded({**value, "operation_id": other}),
+                       module.encoded({**value, "schema_version": True}),
+                       module.encoded({**value, "failure": {**failure, "source_line": True}}),
+                       module.encoded({**value, "failure": {**failure, "code_label": "PRIVATE"}}),
+                       module.encoded({**value, "private": "PRIVATE"})]
+            for data in invalid:
+                with self.subTest(data=data[:20]):
+                    path.write_bytes(data)
+                    self.assertIsNone(qa.read_owner_observation(identity))
+                    self.assertEqual(path.read_bytes(), data)
+            path.write_bytes(raw)
+            alias = module.ROOT / "alias"
+            os.link(path, alias)
+            self.assertIsNone(qa.read_owner_observation(identity))
+            alias.unlink()
+            path.chmod(0o644)
+            self.assertIsNone(qa.read_owner_observation(identity))
+            path.chmod(0o600)
+            path.rename(alias)
+            path.write_bytes(raw)
+            path.chmod(0o600)
+            self.assertNotEqual(path.stat().st_ino, inode)
+            self.assertIsNone(qa.read_owner_observation(identity))
+            path.unlink()
+            path.symlink_to(alias)
+            self.assertIsNone(qa.read_owner_observation(identity))
+            self.assertEqual(alias.read_bytes(), raw)
+            self.assertNotIn("PRIVATE", json.dumps(qa.events))
+
+    def test_owner_mapping_projection_reads_only_fixed_private_files_without_owner_calls(self):
+        module = self.native_module()
+        from dc_overview import release_broker
+        identity = "00000000-0000-4000-8000-000000000001"
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            qa = module.NativeQA(SimpleNamespace(evidence_dir=root / "evidence"))
+            qa.layout = "bind"
+            qa.store = SimpleNamespace(root=root / "releases")
+            qa.data = root / "bind"
+            qa.auth = qa.data / "auth"
+            qa.jobs = qa.auth / "update-jobs"
+            operations = qa.store.root / "broker" / "operations"
+            mapping = qa.jobs / "operations"
+            for directory in (qa.store.root, qa.store.root / "broker", operations, qa.data, qa.auth, qa.jobs, mapping):
+                directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            path = operations / (identity + ".json")
+            operation = {"schema_version": 1, "operation_id": identity, "state": "recovery-required", "phase": "owner",
+                         "reason": "Owner operation interrupted; reconcile retained operation before retry",
+                         "manifest": "PRIVATE_MANIFEST", "request": {"private": "PRIVATE_REQUEST"}}
+            path.write_bytes(module.encoded(operation)); path.chmod(0o600)
+            mapped = mapping / (identity + ".json")
+            mapped.write_bytes(module.encoded({"operation_id": identity, "job_id": "f" * 32})); mapped.chmod(0o600)
+            inspected = [{"Mounts": [{"Source": str(qa.auth), "Destination": "/data/auth", "Type": "bind", "RW": True}],
+                          "Config": {"Env": ["PRIVATE_INSPECT"]}}]
+            commands = []
+            def fixed_inspect():
+                commands.append(True)
+                return inspected
+            forbidden = AssertionError("passive projection called a functional API")
+            with patch.object(module, "inspect_owner_mounts_bounded", side_effect=fixed_inspect), patch.object(module, "run", side_effect=forbidden), patch.object(module, "docker", side_effect=forbidden), patch.object(module, "inspect", side_effect=forbidden), patch.object(qa, "status", side_effect=forbidden), patch.multiple(release_broker.InstalledOwner, **{name: unittest.mock.Mock(side_effect=forbidden) for name in ("capabilities", "identity", "submit", "status", "recover", "adopt")}), patch.object(release_broker.ReleaseBroker, "dispatch", side_effect=forbidden), patch.object(release_broker.ReleaseBroker, "run_operation", side_effect=forbidden):
+                before = {p: p.read_bytes() for p in (path, mapped)}
+                value = qa.owner_mapping_observation(identity)
+                self.assertEqual(value["operation"], {"observation": "present", "state": "recovery-required", "phase": "owner", "reason_category": "owner-interrupted", "job_id_present": False})
+                self.assertEqual(value["fixture_mapping"], {"observation": "present", "job_id_present": True})
+                self.assertEqual(value["current_mapping"], value["fixture_mapping"])
+                self.assertEqual(value["owner_store"]["observation"], "same")
+                self.assertIs(value["owner_store"]["auth_equal"], True)
+                self.assertIs(value["owner_store"]["jobs_equal"], True)
+                self.assertEqual(len(commands), 1)
+                raw = module.encoded(value)
+                for private in (b"PRIVATE", str(root).encode(), b"f" * 32):
+                    self.assertNotIn(private, raw)
+                self.assertEqual({p: p.read_bytes() for p in before}, before)
+                for target, field, valid in ((path, "operation", module.encoded(operation)), (mapped, "fixture_mapping", mapped.read_bytes())):
+                    for overflow, grows in ((False, False), (True, False), (True, True)):
+                        content = valid.ljust(1048576 + int(overflow and not grows), b" ")
+                        target.write_bytes(content)
+                        with owner_file_read_audit(module, {target: 1048576}, grow=target if grows else None) as reads:
+                            projected = qa.owner_mapping_observation(identity)
+                        self.assertEqual(projected[field]["observation"], "unknown" if overflow else "present")
+                        self.assertLessEqual(len(reads), 1, "equal owner directories must be read once")
+                        if not overflow or grows:
+                            self.assertEqual(len(reads), 1)
+                            self.assertEqual(reads[0]["total"], 1048576 + int(overflow))
+                            self.assertGreater(len(reads[0]["requests"]), 1)
+                        self.assertNotIn("PRIVATE", module.encoded(projected).decode())
+                        self.assertEqual(target.read_bytes(), content + (b" " if grows else b""))
+                        target.write_bytes(valid)
+                mapped.unlink()
+                self.assertEqual(qa.owner_mapping_observation(identity)["fixture_mapping"]["observation"], "absent")
+                for content in (b"{", b"x" * 1048577, module.encoded({**operation, "operation_id": "00000000-0000-4000-8000-000000000002"})):
+                    path.write_bytes(content)
+                    self.assertEqual(qa.owner_mapping_observation(identity)["operation"]["observation"], "unknown")
+                    self.assertEqual(path.read_bytes(), content)
+                path.write_bytes(module.encoded({**operation, "state": "PRIVATE_STATE", "phase": "PRIVATE_PHASE", "reason": "PRIVATE_REASON"}))
+                unknown = qa.owner_mapping_observation(identity)["operation"]
+                self.assertEqual((unknown["state"], unknown["phase"], unknown["reason_category"]), ("unknown", "unknown", "unknown"))
+                path.write_bytes(module.encoded(operation))
+                original_open = module.os.open
+                replaced = []
+                def replace_after_open(name, *args, **kwargs):
+                    descriptor = original_open(name, *args, **kwargs)
+                    if Path(name) == path and not replaced:
+                        path.rename(operations / "replaced-original")
+                        path.write_bytes(module.encoded(operation)); path.chmod(0o600)
+                        replaced.append(True)
+                    return descriptor
+                with patch.object(module.os, "open", side_effect=replace_after_open):
+                    raced = qa.owner_mapping_observation(identity)
+                self.assertEqual(replaced, [True])
+                self.assertEqual(raced["operation"]["observation"], "unknown")
+                # Initial absence and losing an already-open basename are different observations.
+                retained = operations / "retained-after-rename"
+                original_raw = path.read_bytes()
+                path.rename(retained)
+                initially_absent = qa.owner_mapping_observation(identity)
+                self.assertEqual(initially_absent["operation"]["observation"], "absent")
+                self.assertEqual(retained.read_bytes(), original_raw)
+                retained.rename(path)
+                opened = []
+                def rename_away_after_open(name, *args, **kwargs):
+                    descriptor = original_open(name, *args, **kwargs)
+                    opened.append(Path(name))
+                    if Path(name) == path:
+                        path.rename(retained)
+                    return descriptor
+                with patch.object(module.os, "open", side_effect=rename_away_after_open):
+                    lost_path = qa.owner_mapping_observation(identity)
+                self.assertFalse(path.exists())
+                self.assertEqual(retained.read_bytes(), original_raw)
+                self.assertEqual(opened.count(path), 1)
+                self.assertLessEqual(set(opened), {path, mapped})
+                with self.subTest(case="post-open-rename-away-is-unknown"):
+                    self.assertEqual(lost_path["operation"]["observation"], "unknown")
+                retained.rename(path)
+                for mode in (0o644, 0o600):
+                    path.chmod(mode)
+                    if mode == 0o644:
+                        self.assertEqual(qa.owner_mapping_observation(identity)["operation"]["observation"], "unknown")
+                alias = operations / "alias"
+                os.link(path, alias)
+                self.assertEqual(qa.owner_mapping_observation(identity)["operation"]["observation"], "unknown")
+                alias.unlink(); path.rename(alias); path.symlink_to(alias)
+                self.assertEqual(qa.owner_mapping_observation(identity)["operation"]["observation"], "unknown")
+                # A foreign inspect source never licenses reading another directory.
+                inspected[0]["Mounts"][0]["Source"] = str(root / "foreign")
+                foreign = qa.owner_mapping_observation(identity)
+                self.assertEqual(foreign["owner_store"]["observation"], "foreign")
+                self.assertEqual(foreign["current_mapping"]["observation"], "unknown")
+                self.assertFalse((root / "foreign").exists())
+                with patch.object(module, "inspect_owner_mounts_bounded", return_value=None):
+                    timed_out = qa.owner_mapping_observation(identity)
+                self.assertEqual(timed_out["owner_store"]["observation"], "unknown")
+                # A valid correlated failure is independent of unavailable mount metadata.
+                failure = {"code_label": "broker-operation", "source_line": 944, "error_kind": "os-error"}
+                with patch.object(module, "ROOT", root):
+                    qa.reset_owner_observation()
+                    module.write_owner_observation(identity, failure)
+                    slot = root / "broker-owner-observation.json"
+                    original_slot = slot.read_bytes()
+                    self.assertEqual(qa.read_owner_observation(identity), failure)
+                    foreign_inspect = [{"Mounts": [{"Source": str(root / "foreign"), "Destination": "/data/auth", "Type": "bind", "RW": True}]}]
+                    for case, unavailable, store_state in (("inspect-unavailable", None, "unknown"),
+                                                            ("foreign-mount", foreign_inspect, "foreign"),
+                                                            ("malformed-mounts", [{"Mounts": "PRIVATE_MALFORMED"}], "unknown")):
+                        with self.subTest(case=case), patch.object(module, "inspect_owner_mounts_bounded", return_value=unavailable):
+                            observed = qa.owner_mapping_observation(identity)
+                            self.assertEqual(slot.read_bytes(), original_slot)
+                            self.assertEqual(observed["owner_store"]["observation"], store_state)
+                            self.assertEqual(observed["current_mapping"]["observation"], "unknown")
+                            self.assertNotIn("PRIVATE", module.encoded(observed).decode())
+                            self.assertEqual(observed["failure"], failure)
+
+    def test_owner_inspect_capture_accepts_exact_limit_short_reads_and_requires_zero_exit(self):
+        module = self.native_module()
+        data = [{"Mounts": [], "Config": {"Env": ["PRIVATE_INSPECT"]}}]
+        raw = json.dumps(data).encode()
+        for payload, mode in ((raw, "ok"), (raw.ljust(1048576, b" "), "short"), (raw, "nonzero"), (raw, "spawn-error")):
+            with owner_inspect_boundary(module, payload, mode) as audit:
+                result = module.inspect_owner_mounts_bounded()
+            self.assertEqual(result, data if mode in ("ok", "short") else None)
+            if mode in ("ok", "short"):
+                self.assertEqual(audit["total"], len(payload))
+                self.assertFalse(audit["killed"])
+
+    def test_owner_inspect_capture_stops_at_overflow_without_parse_and_reaps_exact_child(self):
+        module = self.native_module()
+        with owner_inspect_boundary(module, b"x" * 1052672) as audit, patch.object(module.json, "loads", side_effect=AssertionError("overflow must not parse")):
+            result = module.inspect_owner_mounts_bounded()
+        self.assertIsNone(result)
+        self.assertEqual(audit["total"], 1048577)
+        self.assertTrue(audit["killed"])
+        self.assertEqual(audit["child"].kill.call_count, 1)
+
+    def test_owner_inspect_capture_deadline_setup_and_read_failures_close_owned_resources(self):
+        module = self.native_module()
+        for mode in ("timeout", "eof-live", "setup-error", "read-error", "cleanup-timeout"):
+            with owner_inspect_boundary(module, b"", mode) as audit:
+                result = module.inspect_owner_mounts_bounded()
+            self.assertIsNone(result)
+            self.assertTrue(audit["killed"])
+            self.assertEqual(audit["child"].kill.call_count, 1)
+
+    def test_mapping_wait_failure_observes_once_and_preserves_original_gate(self):
+        module = self.native_module()
+        identity = "00000000-0000-4000-8000-000000000001"
+        for collector_fails in (False, True):
+            with tempfile.TemporaryDirectory() as directory:
+                qa = module.NativeQA(SimpleNamespace(evidence_dir=Path(directory) / "evidence"))
+                qa.jobs = Path(directory) / "update-jobs"
+                qa.policy = {"writes_enabled": False}
+                qa.layout = "bind"
+                original = RuntimeError("actual owner mapping was not created")
+                observed = []
+                def collect(operation_id):
+                    observed.append(operation_id)
+                    if collector_fails:
+                        raise OSError("PRIVATE_DIAGNOSTIC")
+                    return {"operation": {"observation": "unknown"}}
+                with patch.object(module, "inspect", return_value={"Id": "b" * 64}), patch.object(module, "write"), patch.object(qa, "selection", return_value={}), patch.object(qa, "preview", return_value=({}, {})), patch.object(qa, "apply", return_value=(identity, {})), patch.object(qa, "owner_mapping_observation", side_effect=collect), patch.object(module, "wait", side_effect=original) as waiting, patch.object(qa, "status", side_effect=AssertionError("passive failure cannot call status")):
+                    with self.assertRaises(RuntimeError) as caught:
+                        qa.service_update()
+                self.assertIs(caught.exception, original)
+                self.assertEqual(observed, [identity])
+                self.assertEqual(waiting.call_count, 1)
+                self.assertEqual(waiting.call_args.kwargs, {"timeout": 90, "message": "actual owner mapping was not created"})
+                self.assertNotIn("PRIVATE", json.dumps(qa.events))
 
     def test_lost_reply_keeps_request_connected_until_durable_acceptance(self):
         spec = importlib.util.spec_from_file_location("fleet_native_lost_reply", SCRIPT)

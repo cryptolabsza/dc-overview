@@ -356,3 +356,30 @@ issuer authority, real current admissions and live GitHub discovery, a genuine
 future-version migration, unobserved crash windows, desktop/mobile browser
 acceptance and the remaining release gates stay held. The synthetic producer key
 and the same-source A/B images do not establish those claims.
+
+
+The broker child also installs a test-only observation wrapper around the original
+`release_broker.private_write`. It calls the original once with unchanged arguments,
+returns its exact result, and observes only after a successful handled save. The
+original exception and functional failure remain unchanged. Product source and
+wheel bytes remain pinned, but the test process binding, timing and bounded
+diagnostic I/O change: this is the original behavior under an observation wrapper,
+not an unmodified runtime or a discovery-only adapter.
+
+If the existing 90-second mapping wait fails, one passive
+`owner-mapping-observation` event is attempted before normal cleanup and the same
+failure is raised. It projects only closed operation/mapping states, checked store
+identity/equality, and an optional exact-UUID correlated three-field failure
+coordinate. It never calls status to observe progression. The private retained-inode
+4096-byte slot is reset at fixture lifecycle setup; stale, partial, contended or
+unavailable observations remain unknown. Captures are not guaranteed.
+
+The fixed inspect command captures at most 1 MiB plus one overflow byte, with
+four seconds for capture and the fifth second reserved for the exact child's
+kill/reap, including spawn elapsed time. Regular files have explicit bounded reads;
+regular-file I/O and kernel process operations have no unconditional real-time
+guarantee. Raw inspect data, paths, record contents and exception strings are never
+retained. A coordinate can identify only a recognized caller boundary; the actual
+cause of the previous failure remains unproven. This local source work grants no
+native attempt: the original two of three attempts remain spent, with one held
+for separate root authorization and all existing functional gates.
