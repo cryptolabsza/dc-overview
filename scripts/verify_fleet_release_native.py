@@ -3,6 +3,7 @@
 """One sequential, guest-only integration proof. This is never a production installer."""
 
 import argparse
+import dis
 import hashlib
 import importlib
 import importlib.metadata
@@ -18,6 +19,7 @@ import subprocess
 import sys
 import time
 import tomllib
+import types
 import uuid
 from pathlib import Path
 
@@ -161,18 +163,61 @@ def write(path, value, mode=0o600):
     os.replace(temporary, path)
 
 
+class NativeCommandFailure(RuntimeError):
+    """Owned, bounded command facts; never retain arguments or captured output."""
+    __slots__ = ("_command_outcome", "_command_returncode")
+
+    def __init__(self, outcome, returncode=None):
+        if hasattr(self, "_command_outcome") or hasattr(self, "_command_returncode"):
+            raise AttributeError("command diagnostics are immutable")
+        outcomes = {"nonzero-exit": "nonzero-exit", "timeout": "timeout", "spawn-error": "spawn-error"}
+        outcome = outcomes.get(outcome, "unknown") if type(outcome) is str else "unknown"
+        returncode = returncode if type(returncode) is int and -255 <= returncode <= 255 else None
+        object.__setattr__(self, "_command_outcome", outcome)
+        object.__setattr__(self, "_command_returncode", returncode)
+        message = "native command timed out; native gate held" if outcome == "timeout" else "native command failed; native gate held"
+        RuntimeError.__init__(self, message)
+
+    def __setattr__(self, name, value):
+        if name in ("_command_outcome", "_command_returncode"):
+            raise AttributeError("command diagnostics are immutable")
+        # Exception propagation/context managers must still manage traceback
+        # and chaining attributes. Only the owned numeric facts are immutable.
+        BaseException.__setattr__(self, name, value)
+
+    def __delattr__(self, name):
+        if name in ("_command_outcome", "_command_returncode"):
+            raise AttributeError("command diagnostics are immutable")
+        BaseException.__delattr__(self, name)
+
+
+def command_failure_facts(
+    error,
+    command_type=NativeCommandFailure,
+    outcome_slot=NativeCommandFailure.__dict__["_command_outcome"],
+    returncode_slot=NativeCommandFailure.__dict__["_command_returncode"],
+):
+    if type(error) is not command_type:
+        return "unknown", None
+    outcome = outcome_slot.__get__(error, command_type)
+    returncode = returncode_slot.__get__(error, command_type)
+    outcomes = {"nonzero-exit": "nonzero-exit", "timeout": "timeout", "spawn-error": "spawn-error"}
+    return (outcomes.get(outcome, "unknown") if type(outcome) is str else "unknown",
+            returncode if type(returncode) is int and -255 <= returncode <= 255 else None)
+
+
 def run(*args, input_bytes=None, timeout=180, check=True, env=None):
     try:
         result = subprocess.run(
             [str(a) for a in args], input=input_bytes, capture_output=True, timeout=timeout, env=env
         )
     except subprocess.TimeoutExpired:
-        raise RuntimeError("native command timed out; native gate held") from None
+        raise NativeCommandFailure("timeout") from None
+    except OSError:
+        raise NativeCommandFailure("spawn-error") from None
     if check and result.returncode:
         # Never expose inspected environments, auth files, command arguments or private snapshots.
-        raise RuntimeError(
-            f"{Path(str(args[0])).name} failed (exit {result.returncode}); native gate held"
-        )
+        raise NativeCommandFailure("nonzero-exit", result.returncode) from None
     return result
 
 
@@ -640,6 +685,7 @@ class LegacyRecoveryFixture:
 
     def seed_synthetic_selected_state(self):
         """Only owned synthetic DB. No network credentials or real collection claim."""
+        _bootstrap_step = "synthetic-runtime-inspect"
         qa = self.qa
         original = inspect('ipmi-monitor')
         mounts = [m for m in original['Mounts'] if m['Destination'] == '/app/data']
@@ -648,6 +694,7 @@ class LegacyRecoveryFixture:
         database = Path(mounts[0]['Source']) / 'ipmi_events.db'
         import sqlite3
         from datetime import datetime, timezone
+        _bootstrap_step = "synthetic-db-seed"
         with sqlite3.connect(database) as db:
             credential = 'SYNTHETIC-NONSECRET-NOT-A-CREDENTIAL'
             fields = {'ai_link_email': 'fixture@example.invalid', 'ai_link_user_id': 'fixture-user',
@@ -664,10 +711,19 @@ class LegacyRecoveryFixture:
             sampled_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
             db.execute("INSERT OR REPLACE INTO server_status(bmc_ip,server_name,last_check) VALUES ('192.0.2.254','SYNTHETIC-no-collector',?)", (sampled_at,))
         # Import only retained verification code, never product checkout modules.
+        _bootstrap_step = "synthetic-read-aggregate"
         import importlib.util
         spec = importlib.util.spec_from_file_location('synthetic_protection', qa.args.protection_helper)
         helper = importlib.util.module_from_spec(spec)
+        try:
+            helper_source = qa.args.protection_helper.read_bytes()
+        except Exception:
+            helper_source = None  # Diagnostics never add a new bootstrap gate.
         spec.loader.exec_module(helper)
+        try:
+            capture_helper_diagnostics(helper, helper_source, str(qa.args.protection_helper))
+        except Exception:
+            pass  # Unavailable diagnostic identity must not alter the helper.
         deadline = time.monotonic() + 30
         ro = helper.open_ro(database, deadline)
         try:
@@ -700,9 +756,11 @@ class LegacyRecoveryFixture:
                  'stable_inventory_sha256', 'cached_subscription_valid')},
             'selected_count_bounds': {key: [value, value] for key, value in baseline['counts'].items()}}}
         capture = io.StringIO()
+        _bootstrap_step = "synthetic-root-custody"
         self.backup_root.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         helper.safe_chain(self.backup_root.parent)
         self.claim_backup_root()
+        _bootstrap_step = "synthetic-protection-helper"
         with contextlib.redirect_stdout(capture):
             helper.main('ltx')
         result = json.loads(capture.getvalue())
@@ -739,31 +797,38 @@ print(json.dumps({'id':j['id']}))
         return json.loads(result.stdout)['id']
 
     def bootstrap(self):
+        _bootstrap_step = "legacy-runtime-inspect"
         qa = self.qa
         old_proxy = inspect('cryptolabs-proxy')
         assert old_proxy['Image'] == inspect(LEGACY_PROXY, image=True)['Id']
         # Released images copy source; their stale OCI/__version__ strings are
         # not installed wheel metadata. Compare real updater bytes to old wheel.
+        _bootstrap_step = "legacy-updater-probe"
         with zipfile.ZipFile(self.legacy['cryptolabs-proxy'][0]) as archive:
             expected_updater = digest(archive.read('cryptolabs_proxy/updates.py'))
         observed_updater = docker('exec', 'cryptolabs-proxy', 'python3', '-c',
             'import hashlib,pathlib;from cryptolabs_proxy import updates;print(hashlib.sha256(pathlib.Path(updates.__file__).read_bytes()).hexdigest())').stdout.decode().strip()
         assert observed_updater == expected_updater
+        _bootstrap_step = "legacy-capabilities-probe"
         caps = json.loads(docker('exec', 'cryptolabs-proxy', 'python3', '-m',
                                 'cryptolabs_proxy.updates', 'capabilities').stdout)
         assert caps.get('release_components') != 1 and caps.get('native_service_recovery') != 1
+        _bootstrap_step = "synthetic-runtime-inspect"
         self.seed_synthetic_selected_state()
+        _bootstrap_step = "legacy-job-seed"
         job_id = self.seed_failed_job()
         qa.legacy_job_id = job_id
         before = recovery_store_snapshot(qa.jobs)
         self.failed_job_raw = before[job_id + '.json'][0]
         selected_before = (qa.store.root / 'selection.json').read_bytes()
         public_before = (CONFIG / 'fleet-config.yaml').read_bytes()
+        _bootstrap_step = "compatible-wheel-install"
         self.install_compatible_host()
         assert (qa.store.root / 'selection.json').read_bytes() == selected_before
         assert (CONFIG / 'fleet-config.yaml').read_bytes() == public_before
         # New broker owner must refuse actual legacy capabilities, even with
         # compatible host packages and valid synthetic admission installed.
+        _bootstrap_step = "legacy-owner-rejection"
         from dc_overview.release_broker import InstalledOwner
         from dc_overview.fleet_config import FleetConfig
         try:
@@ -774,6 +839,7 @@ print(json.dumps({'id':j['id']}))
             raise AssertionError('legacy live owner unexpectedly accepted')
         cli = self.host_env / 'bin/dc-overview'
         arguments = ('release', 'reconcile-service', '--service', 'ipmi-monitor', '--job', job_id)
+        _bootstrap_step = "legacy-reconcile"
         first = run(cli, *arguments, timeout=130)
         reply = json.loads(first.stdout)
         assert set(reply) == {'job_id', 'service', 'outcome', 'resolution_available', 'reason'}
@@ -785,6 +851,7 @@ print(json.dumps({'id':j['id']}))
         assert inspect('cryptolabs-proxy')['Id'] == old_proxy['Id']
         # Simulated lost CLI acknowledgement: disregard first reply, retry
         # the actual command; exact durable receipt and timestamp must survive.
+        _bootstrap_step = "legacy-reconcile-replay"
         run(cli, *arguments, timeout=130)
         assert verify_recovery_store(qa.jobs, before, job_id, parsed['original_container_id']) == receipt
         assert (qa.store.root / 'selection.json').read_bytes() == selected_before
@@ -794,6 +861,7 @@ print(json.dumps({'id':j['id']}))
                   active_sha256=parsed['active_sha256'], receipt_sha256=digest(receipt),
                   only_new_durable_file=receipt_name, lost_cli_ack_replay='same receipt bytes',
                   historical_phase_evidence='not fabricated')
+        _bootstrap_step = "scoped-select"
         manifest = json.loads(qa.store.load(platform='linux/amd64').manifest.raw)
         manifest['baseline_id'] = 'native-compatible-bootstrap'
         manifest['components']['cryptolabs-proxy'] = qa.component('proxy-a')
@@ -806,10 +874,12 @@ print(json.dumps({'id':j['id']}))
             '--component', 'cryptolabs-proxy', '--record-cli')
         assert (qa.jobs / (job_id + '.json')).read_bytes() == self.failed_job_raw
         assert (qa.jobs / 'active.json').read_bytes() == before['active.json'][0]
+        _bootstrap_step = "proxy-plan"
         from cryptolabs_proxy.standard_adoption import StandardAdoption
         owner = StandardAdoption(PROXY_CONFIG)
         plan = owner.plan(qa.declaration)
         qa.owner_plans.add(plan['plan_id'])
+        _bootstrap_step = "proxy-adopt"
         result = owner.adopt(qa.declaration, plan['plan_id'])
         assert result['state'] == 'adopted'
         assert inspect('cryptolabs-proxy')['Id'] != old_proxy['Id']
@@ -818,6 +888,7 @@ print(json.dumps({'id':j['id']}))
         assert (qa.jobs / 'active.json').read_bytes() == before['active.json'][0]
         assert any(m['Destination'] == SOCKET and not m['RW'] for m in inspect('cryptolabs-proxy')['Mounts'])
         assert qa.policy['writes_enabled'] is False
+        _bootstrap_step = "proxy-health"
         qa.wait_healthy('cryptolabs-proxy')
         qa.record('legacy-host-select-socket-adopt', result='passed', old_proxy_id=old_proxy['Id'],
                   new_proxy_id=inspect('cryptolabs-proxy')['Id'], writes_enabled=False,
@@ -2435,11 +2506,21 @@ class NativeQA:
             )
         except Exception as error:
             failed = True
-            if isinstance(error, RuntimeError) and str(error) in (
-                "native command timed out; native gate held",
-                "fixture registry push timed out; native gate held",
-            ):
-                message = str(error)
+            # Only owned numeric command facts or exact builtin fixed messages;
+            # arbitrary exceptions must never supply text or properties here.
+            try:
+                command_outcome, _ = command_failure_facts(error)
+            except Exception:
+                command_outcome = "unknown"
+            if command_outcome == "timeout":
+                message = "native command timed out; native gate held"
+            elif type(error) is RuntimeError:
+                arguments = BaseException.args.__get__(error, type(error))
+                if (len(arguments) == 1 and type(arguments[0]) is str and arguments[0] in (
+                    "native command timed out; native gate held",
+                    "fixture registry push timed out; native gate held",
+                )):
+                    message = arguments[0]
             diagnostics = {"source_line": None, "error_kind": "unknown"}
             try:
                 diagnostics = native_phase_failure_metadata(error, phase)
@@ -2509,6 +2590,132 @@ def fixture_failure_metadata(error, fixture_code=NativeQA.fixture.__code__):
     return {"fixture_line": line, "fixture_error_kind": kind}
 
 
+BOOTSTRAP_STEPS = (
+    "legacy-runtime-inspect", "legacy-updater-probe", "legacy-capabilities-probe",
+    "synthetic-runtime-inspect", "synthetic-db-seed", "synthetic-read-aggregate",
+    "synthetic-root-custody", "synthetic-protection-helper", "legacy-job-seed",
+    "compatible-wheel-install", "legacy-owner-rejection", "legacy-reconcile",
+    "legacy-reconcile-replay", "scoped-select", "proxy-plan", "proxy-adopt", "proxy-health",
+)
+HELPER_DIAGNOSTIC_CODES = ()
+
+
+def bootstrap_step_offsets(code):
+    """Read fixed lexical markers from original bytecode, never frame locals."""
+    markers = []
+    previous = None
+    for instruction in dis.get_instructions(code):
+        if (instruction.opname == "STORE_FAST" and instruction.argval == "_bootstrap_step"
+                and previous is not None and previous.opname == "LOAD_CONST"
+                and type(previous.argval) is str and previous.argval in BOOTSTRAP_STEPS):
+            markers.append((instruction.offset, previous.argval))
+        previous = instruction
+    return tuple(markers)
+
+
+def helper_code_matches(actual, expected):
+    if type(actual) is not types.CodeType or type(expected) is not types.CodeType:
+        return False
+    for field in ("co_argcount", "co_posonlyargcount", "co_kwonlyargcount", "co_nlocals",
+                  "co_stacksize", "co_flags", "co_code", "co_names", "co_varnames",
+                  "co_filename", "co_name", "co_qualname", "co_firstlineno", "co_linetable",
+                  "co_exceptiontable", "co_freevars", "co_cellvars"):
+        if getattr(actual, field) != getattr(expected, field):
+            return False
+    if len(actual.co_consts) != len(expected.co_consts):
+        return False
+    for observed, wanted in zip(actual.co_consts, expected.co_consts):
+        if type(wanted) is types.CodeType:
+            if not helper_code_matches(observed, wanted):
+                return False
+        elif type(observed) is not type(wanted) or observed != wanted:
+            return False
+    return True
+
+
+def capture_helper_diagnostics(helper, source, filename):
+    """Bind loaded helper code to the exact retained bytes before trusting it."""
+    global HELPER_DIAGNOSTIC_CODES
+    if type(source) is not bytes or digest(source) != PROTECTION_SHA:
+        return
+    expected = compile(source, filename, "exec")
+    entries = []
+    def capture(code, need=False):
+        entries.append((code, need))
+        for constant in code.co_consts:
+            if type(constant) is types.CodeType:
+                capture(constant)
+    for code in expected.co_consts:
+        if type(code) is not types.CodeType:
+            continue
+        function = vars(helper).get(code.co_name)
+        if type(function) is types.FunctionType:
+            actual = function.__code__
+            # Full compiled structure, including nested bodies and coordinates;
+            # after capture every traceback comparison uses exact `is`.
+            if helper_code_matches(actual, code):
+                capture(actual, code.co_name == "need")
+    HELPER_DIAGNOSTIC_CODES = (*HELPER_DIAGNOSTIC_CODES, *entries)[-128:]
+
+
+def bootstrap_failure_metadata(
+    error,
+    codes=tuple(
+        (function.__code__, label, bootstrap_step_offsets(function.__code__))
+        for function, label in (
+            (LegacyRecoveryFixture.bootstrap, "legacy-bootstrap"),
+            (LegacyRecoveryFixture.seed_synthetic_selected_state, "synthetic-seed"),
+            (LegacyRecoveryFixture.seed_failed_job, "legacy-bootstrap"),
+            (LegacyRecoveryFixture.install_compatible_host, "legacy-bootstrap"),
+            (LegacyRecoveryFixture.wheel_mirror, "legacy-bootstrap"),
+            (LegacyRecoveryFixture.assert_host_versions, "legacy-bootstrap"),
+            (run, "native-command"), (docker, "native-command"), (inspect, "native-command"),
+        )
+    ),
+    bootstrap_codes=(LegacyRecoveryFixture.bootstrap.__code__, LegacyRecoveryFixture.seed_synthetic_selected_state.__code__),
+    command_code=run.__code__,
+    command_type=NativeCommandFailure,
+):
+    result = {"bootstrap_step": "unknown", "code_label": "unknown", "source_line": None,
+              "guard_line": None, "error_kind": "unknown", "command_outcome": "unknown", "command_returncode": None}
+    frames = []
+    frame = BaseException.__traceback__.__get__(error, type(error))
+    while frame is not None:
+        frames.append(frame)
+        frame = frame.tb_next
+    if not any(any(frame.tb_frame.f_code is code for code in bootstrap_codes) for frame in frames):
+        return result
+    result["command_outcome"] = "none"
+    helper_line = None
+    need_seen = False
+    for frame in frames:
+        code = frame.tb_frame.f_code
+        line = frame.tb_lineno
+        if type(line) is not int or line not in {value for _, _, value in code.co_lines()}:
+            continue
+        trusted = next((entry for entry in codes if code is entry[0]), None)
+        helper = next((entry for entry in HELPER_DIAGNOSTIC_CODES if code is entry[0]), None)
+        if trusted is not None:
+            _, label, markers = trusted
+            for offset, step in markers:
+                if offset <= frame.tb_lasti:
+                    result["bootstrap_step"] = step
+            result.update(code_label=label, source_line=line,
+                          error_kind=fixture_failure_metadata(error, code)["fixture_error_kind"])
+        elif helper is not None:
+            if helper[1]:
+                need_seen = True  # Skip need() trampoline; retain its trusted caller.
+                continue
+            helper_line = line
+            result.update(code_label="synthetic-helper", source_line=line,
+                          error_kind=fixture_failure_metadata(error, code)["fixture_error_kind"])
+    if need_seen:
+        result["guard_line"] = helper_line
+    if type(error) is command_type and any(frame.tb_frame.f_code is command_code for frame in frames):
+        result["command_outcome"], result["command_returncode"] = command_failure_facts(error)
+    return result
+
+
 def native_phase_failure_metadata(
     error,
     phase,
@@ -2530,7 +2737,13 @@ def native_phase_failure_metadata(
     if code is None:
         return {"source_line": None, "error_kind": "unknown"}
     metadata = fixture_failure_metadata(error, fixture_code=code)
-    return {"source_line": metadata["fixture_line"], "error_kind": metadata["fixture_error_kind"]}
+    result = {"source_line": metadata["fixture_line"], "error_kind": metadata["fixture_error_kind"]}
+    if phase == "fixture":
+        try:
+            result["bootstrap_failure"] = bootstrap_failure_metadata(error)
+        except Exception:
+            pass  # Keep original phase evidence and lifecycle even without inner facts.
+    return result
 
 
 def inspect_volume(name):

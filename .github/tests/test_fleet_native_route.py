@@ -34,6 +34,30 @@ GUEST_HOSTS = (
 
 
 class FleetNativeRouteTest(unittest.TestCase):
+    def assert_bootstrap_failure_shape(self, metadata):
+        failure = metadata.get("bootstrap_failure")
+        self.assertIsInstance(failure, dict, "inner bootstrap diagnostics must survive the existing collector")
+        self.assertEqual(set(failure), {"bootstrap_step", "code_label", "source_line", "guard_line",
+                                        "error_kind", "command_outcome", "command_returncode"})
+        self.assertIn(failure["bootstrap_step"], {
+            "legacy-runtime-inspect", "legacy-updater-probe", "legacy-capabilities-probe",
+            "synthetic-runtime-inspect", "synthetic-db-seed", "synthetic-read-aggregate",
+            "synthetic-root-custody", "synthetic-protection-helper", "legacy-job-seed",
+            "compatible-wheel-install", "legacy-owner-rejection", "legacy-reconcile",
+            "legacy-reconcile-replay", "scoped-select", "proxy-plan", "proxy-adopt", "proxy-health", "unknown",
+        })
+        self.assertIn(failure["code_label"], {"legacy-bootstrap", "synthetic-seed", "synthetic-helper", "native-command", "unknown"})
+        self.assertIn(failure["error_kind"], {"assertion-error", "file-not-found", "permission-error", "os-error", "runtime-error", "unknown"})
+        self.assertIn(failure["command_outcome"], {"nonzero-exit", "timeout", "spawn-error", "none", "unknown"})
+        for field in ("source_line", "guard_line"):
+            if failure[field] is not None:
+                self.assertIs(type(failure[field]), int)
+                self.assertGreater(failure[field], 0)
+        if failure["command_returncode"] is not None:
+            self.assertIs(type(failure["command_returncode"]), int)
+            self.assertTrue(-255 <= failure["command_returncode"] <= 255)
+        return failure
+
     def native_module(self):
         spec = importlib.util.spec_from_file_location("fleet_native_diagnostics", SCRIPT)
         module = importlib.util.module_from_spec(spec)
@@ -106,6 +130,28 @@ class FleetNativeRouteTest(unittest.TestCase):
                 with patch.dict(captured["pin"], {"data_volume_name": None}):
                     with self.assertRaisesRegex(RuntimeError, "data-mount"):
                         captured["main"]("ltx")
+            # Run the actual seed/read-only helper up to its custody guard.
+            # Temporary ancestry is not root-private; no privileged paths or
+            # helper main entrypoint are reached and no helper code is replaced.
+            qa.recovery.backup_root = root / "diagnostic-parent" / "backup"
+            def fixture_boundary():
+                qa.recovery.seed_synthetic_selected_state()
+            with patch.object(module, "inspect", return_value=observed), patch.object(module, "docker", side_effect=AssertionError("Engine mutation forbidden")):
+                try:
+                    fixture_boundary()
+                except RuntimeError as error:
+                    metadata = module.native_phase_failure_metadata(error, "fixture", (("fixture", fixture_boundary.__code__),))
+                else:
+                    self.fail("the real helper custody predicate must reject temporary ancestry")
+            failure = self.assert_bootstrap_failure_shape(metadata)
+            self.assertEqual(failure["bootstrap_step"], "synthetic-root-custody")
+            self.assertEqual(failure["code_label"], "synthetic-helper")
+            self.assertEqual(failure["error_kind"], "runtime-error")
+            helper_tree = ast.parse(helper_path.read_text())
+            custody = next(n for n in helper_tree.body if isinstance(n, ast.FunctionDef) and n.name == "safe_chain")
+            self.assertIn(failure["guard_line"], range(custody.lineno, custody.end_lineno + 1))
+            self.assertEqual(failure["command_outcome"], "none")
+            self.assertIsNone(failure["command_returncode"])
 
     def test_rejected_preexisting_backup_root_survives_actual_reset(self):
         module = self.native_module()
@@ -368,6 +414,121 @@ class FleetNativeRouteTest(unittest.TestCase):
                 self.assertIsNone(metadata["source_line"])
             self.assertNotIn(private, json.dumps(metadata))
 
+        with tempfile.TemporaryDirectory() as directory:
+            qa = module.NativeQA(SimpleNamespace(evidence_dir=Path(directory)))
+            def fixture_boundary():
+                qa.recovery.bootstrap()
+            # Actual bootstrap -> inspect -> docker -> run, with only the
+            # subprocess boundary substituted. No old product is simulated.
+            for returncode in (17, -9, True, 256):
+                with self.subTest(returncode=returncode), patch.object(module.subprocess, "run", return_value=SimpleNamespace(returncode=returncode, stdout=private.encode(), stderr=private.encode())):
+                    try:
+                        fixture_boundary()
+                    except RuntimeError as error:
+                        metadata = module.native_phase_failure_metadata(error, "fixture", (("fixture", fixture_boundary.__code__),))
+                    else:
+                        self.fail("checked subprocess failure must escape")
+                    self.assertIn(metadata["source_line"], {line for _, _, line in fixture_boundary.__code__.co_lines()})
+                    self.assertEqual(metadata["error_kind"], "runtime-error")
+                    failure = self.assert_bootstrap_failure_shape(metadata)
+                    self.assertEqual(failure["bootstrap_step"], "legacy-runtime-inspect")
+                    self.assertIn(failure["code_label"], {"legacy-bootstrap", "native-command"})
+                    trusted_lines = {line for code in (module.LegacyRecoveryFixture.bootstrap.__code__, module.run.__code__) for _, _, line in code.co_lines()}
+                    self.assertIn(failure["source_line"], trusted_lines)
+                    self.assertEqual(failure["command_outcome"], "nonzero-exit")
+                    self.assertEqual(failure["command_returncode"], returncode if type(returncode) is int and -255 <= returncode <= 255 else None)
+                    self.assertNotIn(private, json.dumps(metadata))
+
+            # Reproduce the reviewed constructed API witness through the real
+            # run/bootstrap frames. Current run-created outcomes are literals;
+            # this protects the closed contract, not a claimed native leak.
+            class EqualString(str):
+                def __eq__(self, other):
+                    return True
+            with self.subTest("constructed hostile outcome"):
+                error = module.NativeCommandFailure(EqualString(private), 17)
+                with patch.object(module.subprocess, "run", side_effect=error):
+                    try:
+                        fixture_boundary()
+                    except RuntimeError as caught:
+                        metadata = module.native_phase_failure_metadata(caught, "fixture", (("fixture", fixture_boundary.__code__),))
+                    else:
+                        self.fail("the original owned exception must preserve failure")
+                self.assertNotIn(private, json.dumps(metadata))
+                outcome, _ = module.command_failure_facts(error)
+                self.assertIs(type(outcome), str)
+                self.assertEqual(outcome, "unknown")
+                self.assertEqual(metadata["bootstrap_failure"]["command_outcome"], "unknown")
+            for supplied, expected in (("nonzero-exit", "nonzero-exit"), ("timeout", "timeout"), ("spawn-error", "spawn-error"), (None, "unknown")):
+                with self.subTest(canonical_outcome=supplied):
+                    outcome, _ = module.command_failure_facts(module.NativeCommandFailure(supplied, 17))
+                    self.assertIs(type(outcome), str)
+                    self.assertEqual(outcome, expected)
+
+            # Judge immutability through public facts after ordinary mutation
+            # attempts; arbitrary reflection/object.__setattr__ is out of scope.
+            mutations = (
+                ("set", lambda error: setattr(error, "_command_returncode", 23)),
+                ("delete returncode", lambda error: delattr(error, "_command_returncode")),
+                ("delete outcome", lambda error: delattr(error, "_command_outcome")),
+                ("reinitialize", lambda error: error.__init__("timeout")),
+            )
+            for name, mutate in mutations:
+                with self.subTest(ordinary_mutation=name):
+                    error = module.NativeCommandFailure("nonzero-exit", 17)
+                    before = module.command_failure_facts(error)
+                    try:
+                        mutate(error)
+                    except (AttributeError, TypeError):
+                        pass
+                    try:
+                        after = module.command_failure_facts(error)
+                    except AttributeError:
+                        after = None
+                    self.assertEqual(after, before)
+
+            @contextmanager
+            def propagation_boundary():
+                try:
+                    yield
+                finally:
+                    propagated.append(True)
+            propagated = []
+            error = module.NativeCommandFailure("nonzero-exit", 17)
+            cause = ValueError(private)
+            try:
+                with propagation_boundary():
+                    raise error from cause
+            except module.NativeCommandFailure as caught:
+                self.assertIs(caught, error)
+                self.assertIs(caught.__cause__, cause)
+                caught.__traceback__ = caught.__traceback__
+                caught.__context__ = cause
+                caught.__suppress_context__ = True
+                self.assertIs(caught.__context__, cause)
+                self.assertEqual(module.command_failure_facts(caught), ("nonzero-exit", 17))
+            self.assertEqual(propagated, [True])
+
+            class UntrustedError(RuntimeError):
+                @property
+                def returncode(self):
+                    raise AssertionError("untrusted exception property inspected")
+                def __str__(self):
+                    raise AssertionError("untrusted exception text inspected")
+            def replacement(self):
+                raise UntrustedError(private)
+            original = module.LegacyRecoveryFixture.bootstrap.__code__
+            replacement.__code__ = replacement.__code__.replace(co_filename=original.co_filename, co_name=original.co_name)
+            with patch.object(module.LegacyRecoveryFixture, "bootstrap", replacement):
+                try:
+                    fixture_boundary()
+                except RuntimeError as error:
+                    metadata = module.native_phase_failure_metadata(error, "fixture", (("fixture", fixture_boundary.__code__),))
+                failure = self.assert_bootstrap_failure_shape(metadata)
+                self.assertEqual(failure, {"bootstrap_step": "unknown", "code_label": "unknown", "source_line": None,
+                                           "guard_line": None, "error_kind": "unknown", "command_outcome": "unknown", "command_returncode": None})
+                self.assertNotIn(private, json.dumps(metadata))
+
     def test_broker_child_preserves_original_exception_when_collection_fails(self):
         module = self.native_module()
         cause = RuntimeError("PRIVATE_CHILD_EXCEPTION_ARGUMENT")
@@ -402,6 +563,22 @@ class FleetNativeRouteTest(unittest.TestCase):
                 self.assertEqual(metadata["error_kind"], "runtime-error")
                 self.assertIn(metadata["source_line"], {line for _, _, line in serve.__code__.co_lines()})
                 self.assertNotIn("PRIVATE", json.dumps(metadata))
+
+        # Existing execute/cleanup orchestration must survive a diagnostic
+        # collector failure. Only whole phase boundaries are substituted.
+        with tempfile.TemporaryDirectory() as directory:
+            qa = module.NativeQA(SimpleNamespace(evidence_dir=Path(directory)))
+            cleaned = []
+            def failed_fixture(layout):
+                raise RuntimeError("PRIVATE_BOOTSTRAP_FAILURE")
+            with patch.object(qa, "preflight"), patch.object(qa, "images"), patch.object(qa, "units_install"), patch.object(qa, "fixture", side_effect=failed_fixture), patch.object(qa, "cleanup", side_effect=lambda: cleaned.append(True)), patch.object(module, "native_phase_failure_metadata", side_effect=RuntimeError("PRIVATE_COLLECTOR_FAILURE")):
+                with self.assertRaisesRegex(RuntimeError, "^native verification failed; native gate held$"):
+                    qa.execute()
+            self.assertEqual(cleaned, [True])
+            event = next(event for event in qa.events if event["case"] == "native-flow")
+            self.assertEqual(event["result"], "failed")
+            self.assertEqual(event["phase"], "fixture")
+            self.assertNotIn("PRIVATE", json.dumps(qa.events))
 
     def test_child_file_is_private_bounded_reset_and_consumed_before_cleanup(self):
         module = self.native_module()

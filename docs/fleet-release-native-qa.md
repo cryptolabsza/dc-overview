@@ -93,6 +93,49 @@ command output is retained. The original failure and cleanup still run; this
 metadata adds no retry, probe or behavior repair. All remaining native and
 release acceptance limits below continue to apply.
 
+For a failed `fixture` phase, `bootstrap_failure` adds one bounded object while
+the outer line, kind and fixture aliases retain their existing meaning. Its
+only fields are `bootstrap_step`, `code_label`, `source_line`, `guard_line`,
+`error_kind`, `command_outcome` and `command_returncode`. The step comes from
+fixed lexical markers in the original bootstrap/seed bytecode, selected by the
+trusted traceback instruction offset. The collector does not read frame locals.
+Steps distinguish the existing legacy inspect/updater/capabilities probes,
+synthetic seed/read/custody/protection, failed-job seed, compatible installation,
+owner refusal, reconciliation/replay, selection, proxy plan/adoption and health.
+Untrusted or missing boundaries retain `unknown` and null values.
+
+The code labels are `legacy-bootstrap`, `synthetic-seed`, `synthetic-helper`,
+`native-command` or `unknown`. Module load captures original verifier code
+objects. The helper remains byte-for-byte pinned by `PROTECTION_SHA`; its
+diagnostic registration first verifies those exact bytes and complete loaded
+callable code before capturing the actual callable and nested code identities.
+Every traceback lookup uses exact code-object identity. A matching filename or
+callable name grants no identity. The inner source line must occur in that
+original code object's line table. A helper `need()` failure retains the numeric
+trusted caller line as `guard_line`, rather than exporting its error text.
+Interpret verifier coordinates against the exact preflight source head, and
+helper coordinates against the unchanged retained helper hash.
+
+The checked command wrapper owns an immutable pair of bounded diagnostic facts.
+`command_outcome` is `nonzero-exit`, `timeout`, `spawn-error`, `none` or `unknown`;
+`command_returncode` is an exact integer from -255 through 255, or null. Booleans
+and out-of-range values are rejected. Only the original owned exception type
+with an original command-wrapper traceback can supply command facts to the
+inner object; arbitrary exception properties cannot. Command failure messages
+are fixed literals, with no executable name derived from arguments. Exception
+propagation and chaining remain available; only the owned facts are immutable.
+Construction and collection accept exact built-in strings and return fixed
+canonical outcomes; string subclasses become `unknown`. Ordinary assignment,
+deletion and constructor reinitialization cannot change the owned facts.
+Arbitrary Python reflection is outside this immutability promise.
+
+No exception string or representation, argv, captured output, environment,
+configuration, database content or helper private receipt is exported by this
+object. Collection is best effort and cannot replace the original failed gate
+or skip cleanup. These coordinates locate an observed failure boundary; they
+do not prove a root cause, repair bootstrap behavior, add a retry or authorize
+another native run. Full native, release and customer-site gates remain held.
+
 At each existing broker kill boundary (`service_update` and
 `interrupted_adoption`), the fixture records the auth layout, fixed phase,
 actual numeric kill exit code, and before/after `systemctl show` observations of
