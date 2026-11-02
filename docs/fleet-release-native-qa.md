@@ -277,7 +277,10 @@ release help, and creates synthetic auth data through the old proxy package.
 It starts the actual serving legacy proxy image
 `ghcr.io/cryptolabsza/cryptolabs-proxy@sha256:bff38744e774875287e60e1e14995b19c7eb3afbe531d07f5921d06d9b76a1fd`
 without a broker socket mount. The image's stale OCI version strings are not
-version proof. Actual updater module bytes must match the exact old wheel;
+version proof. Both proxy fixture layouts set `PYTHONPATH=/app/src`, the copied
+application source path required by their Python module probes. The pinned legacy
+image does not declare that environment setting itself.
+Actual updater module bytes must match the exact old wheel;
 actual live capabilities must lack the new broker/recovery capabilities.
 DC1.8.0 here is the host CLI/package plane; a separate old DC service OCI
 container is not started or certified by this fixture.

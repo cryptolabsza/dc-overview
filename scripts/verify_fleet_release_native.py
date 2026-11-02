@@ -1848,6 +1848,8 @@ class NativeQA:
             "-e",
             "FLEET_ADMIN_PASS=",
             "-e",
+            "PYTHONPATH=/app/src",
+            "-e",
             "FLEET_PUBLIC_ORIGIN=" + ORIGIN,
             "-e",
             "RELEASE_SELECTION_REQUIRED=true",
