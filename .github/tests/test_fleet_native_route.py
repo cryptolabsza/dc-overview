@@ -9,13 +9,14 @@ import json
 import os
 import selectors
 import subprocess
+import sys
 import tempfile
 import tomllib
 import traceback
 import unittest
 import sqlite3
 import zipfile
-from contextlib import contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -32,6 +33,20 @@ GUEST_HOSTS = (
     b'  capabilities = ["pull", "resolve"]\n'
     b'  ca = "/etc/docker/certs.d/192.168.1.101:5444/ca.crt"\n'
 )
+
+
+@contextmanager
+def private_owner_temp(module):
+    """Use a private fixture with ancestry accepted by the real custody policy."""
+    parent = None
+    if module.platform.system() == "Linux":
+        parent = Path.home()
+        if parent.lstat().st_uid != os.geteuid():
+            raise ValueError("observation fixture home must belong to the current user")
+        module.observation_directories(parent, private=False)
+    with tempfile.TemporaryDirectory(dir=parent) as directory:
+        module.observation_directories(Path(directory))
+        yield directory
 
 
 @contextmanager
@@ -731,7 +746,7 @@ class FleetNativeRouteTest(unittest.TestCase):
         identity = "00000000-0000-4000-8000-000000000001"
         other = "00000000-0000-4000-8000-000000000002"
         failure = {"code_label": "broker-operation", "source_line": 924, "error_kind": "os-error"}
-        with tempfile.TemporaryDirectory() as d, patch.object(module, "ROOT", Path(d) / "fixture"):
+        with private_owner_temp(module) as d, patch.object(module, "ROOT", Path(d) / "fixture"):
             module.ROOT.mkdir(mode=0o700)
             qa = module.NativeQA(SimpleNamespace(evidence_dir=Path(d) / "evidence"))
             qa.layout = "bind"
@@ -789,9 +804,12 @@ class FleetNativeRouteTest(unittest.TestCase):
 
     def test_owner_mapping_projection_reads_only_fixed_private_files_without_owner_calls(self):
         module = self.native_module()
-        from dc_overview import release_broker
+        product_modules = {name: value for name, value in sys.modules.items()
+                           if name in ("dc_overview", "cryptolabs_proxy")
+                           or name.startswith(("dc_overview.", "cryptolabs_proxy."))}
+        release_broker = product_modules.get("dc_overview.release_broker")
         identity = "00000000-0000-4000-8000-000000000001"
-        with tempfile.TemporaryDirectory() as d:
+        with private_owner_temp(module) as d:
             root = Path(d)
             qa = module.NativeQA(SimpleNamespace(evidence_dir=root / "evidence"))
             qa.layout = "bind"
@@ -817,7 +835,11 @@ class FleetNativeRouteTest(unittest.TestCase):
                 commands.append(True)
                 return inspected
             forbidden = AssertionError("passive projection called a functional API")
-            with patch.object(module, "inspect_owner_mounts_bounded", side_effect=fixed_inspect), patch.object(module, "run", side_effect=forbidden), patch.object(module, "docker", side_effect=forbidden), patch.object(module, "inspect", side_effect=forbidden), patch.object(qa, "status", side_effect=forbidden), patch.multiple(release_broker.InstalledOwner, **{name: unittest.mock.Mock(side_effect=forbidden) for name in ("capabilities", "identity", "submit", "status", "recover", "adopt")}), patch.object(release_broker.ReleaseBroker, "dispatch", side_effect=forbidden), patch.object(release_broker.ReleaseBroker, "run_operation", side_effect=forbidden):
+            with ExitStack() as guards, patch.object(module, "inspect_owner_mounts_bounded", side_effect=fixed_inspect), patch.object(module, "run", side_effect=forbidden), patch.object(module, "docker", side_effect=forbidden), patch.object(module, "inspect", side_effect=forbidden), patch.object(qa, "status", side_effect=forbidden):
+                if release_broker is not None:
+                    guards.enter_context(patch.multiple(release_broker.InstalledOwner, **{name: unittest.mock.Mock(side_effect=forbidden) for name in ("capabilities", "identity", "submit", "status", "recover", "adopt")}))
+                    guards.enter_context(patch.object(release_broker.ReleaseBroker, "dispatch", side_effect=forbidden))
+                    guards.enter_context(patch.object(release_broker.ReleaseBroker, "run_operation", side_effect=forbidden))
                 before = {p: p.read_bytes() for p in (path, mapped)}
                 value = qa.owner_mapping_observation(identity)
                 self.assertEqual(value["operation"], {"observation": "present", "state": "recovery-required", "phase": "owner", "reason_category": "owner-interrupted", "job_id_present": False})
@@ -930,6 +952,11 @@ class FleetNativeRouteTest(unittest.TestCase):
                             self.assertEqual(observed["current_mapping"]["observation"], "unknown")
                             self.assertNotIn("PRIVATE", module.encoded(observed).decode())
                             self.assertEqual(observed["failure"], failure)
+            after_modules = {name: value for name, value in sys.modules.items()
+                             if name in ("dc_overview", "cryptolabs_proxy")
+                             or name.startswith(("dc_overview.", "cryptolabs_proxy."))}
+            self.assertEqual(set(after_modules), set(product_modules))
+            self.assertTrue(all(after_modules[name] is value for name, value in product_modules.items()))
 
     def test_owner_inspect_capture_accepts_exact_limit_short_reads_and_requires_zero_exit(self):
         module = self.native_module()
