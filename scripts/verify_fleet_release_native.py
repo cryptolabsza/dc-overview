@@ -166,11 +166,45 @@ def write(path, value, mode=0o600):
     os.replace(temporary, path)
 
 
+# Whole child-output observations only; repeated literals never identify an executed guard.
+SCOPED_SELECT_MESSAGES = (
+    (b'Error: requires_cli_upgrade: install the verified exact wheel from the selected manifest using the documented package-manager step, then rerun this command\n', 'cli-provenance-rejected'),
+    (b'Error: native_service_recovery_required\n', 'recovery-required'),
+    (b'Error: updater is busy; retry scoped selection after it finishes\n', 'updater-busy'),
+    (b'Error: updater custody changed during scoped selection\n', 'updater-custody-changed'),
+    (b'Error: updater store changed during scoped selection\n', 'updater-store-changed'),
+    (b'Error: updater lock changed during scoped selection\n', 'updater-lock-changed'),
+    (b'Error: public configuration/selection snapshot is stale\n', 'public-reference-stale'),
+    (b'Error: public configuration changed after release preflight\n', 'public-reference-changed'),
+    (b'Error: running proxy identity is required for scoped selection\n', 'proxy-identity-required'),
+    (b'Error: proxy changed during scoped selection\n', 'proxy-identity-changed'),
+    (b'Error: proxy read-only release mount prerequisite\n', 'proxy-release-mount-required'),
+    (b'Error: updater mount changed during scoped selection\n', 'updater-mount-changed'),
+    (b'Error: manifest changed during scoped preparation\n', 'manifest-changed'),
+    (b'Error: scoped runtime changed during selection\n', 'runtime-changed'),
+    (b'Error: Proxy updater authority prerequisite: install the compatible published cryptolabs-proxy package, then use cryptolabs-proxy configuration plan and cryptolabs-proxy configuration adopt to migrate the existing proxy before retrying. The running updater must advertise selection contract 1 and proxy_replacement_policy=host-adoption-required-v1; no update was submitted or release changes applied.\n', 'proxy-authority-required'),
+)
+
+
+def scoped_select_category(value, categories=tuple(category for _, category in SCOPED_SELECT_MESSAGES)):
+    if type(value) is not str:
+        return "unknown"
+    return next((category for category in categories if value == category), "unknown")
+
+
+def classify_scoped_select_output(returncode, stdout, stderr, messages=SCOPED_SELECT_MESSAGES):
+    """Project exact bounded built-in buffers into one fixed public category."""
+    if (type(returncode) is not int or returncode != 1 or type(stdout) is not bytes
+            or stdout != b"" or type(stderr) is not bytes or len(stderr) > 512):
+        return "unknown"
+    return next((category for literal, category in messages if stderr == literal), "unknown")
+
+
 class NativeCommandFailure(RuntimeError):
     """Owned, bounded command facts; never retain arguments or captured output."""
-    __slots__ = ("_command_outcome", "_command_returncode")
+    __slots__ = ("_command_outcome", "_command_returncode", "_scoped_select_diagnostic")
 
-    def __init__(self, outcome, returncode=None):
+    def __init__(self, outcome, returncode=None, scoped_select_diagnostic="unknown"):
         if hasattr(self, "_command_outcome") or hasattr(self, "_command_returncode"):
             raise AttributeError("command diagnostics are immutable")
         outcomes = {"nonzero-exit": "nonzero-exit", "timeout": "timeout", "spawn-error": "spawn-error"}
@@ -178,18 +212,19 @@ class NativeCommandFailure(RuntimeError):
         returncode = returncode if type(returncode) is int and -255 <= returncode <= 255 else None
         object.__setattr__(self, "_command_outcome", outcome)
         object.__setattr__(self, "_command_returncode", returncode)
+        object.__setattr__(self, "_scoped_select_diagnostic", scoped_select_category(scoped_select_diagnostic))
         message = "native command timed out; native gate held" if outcome == "timeout" else "native command failed; native gate held"
         RuntimeError.__init__(self, message)
 
     def __setattr__(self, name, value):
-        if name in ("_command_outcome", "_command_returncode"):
+        if name in ("_command_outcome", "_command_returncode", "_scoped_select_diagnostic"):
             raise AttributeError("command diagnostics are immutable")
         # Exception propagation/context managers must still manage traceback
-        # and chaining attributes. Only the owned numeric facts are immutable.
+        # and chaining attributes. Only the owned command facts are immutable.
         BaseException.__setattr__(self, name, value)
 
     def __delattr__(self, name):
-        if name in ("_command_outcome", "_command_returncode"):
+        if name in ("_command_outcome", "_command_returncode", "_scoped_select_diagnostic"):
             raise AttributeError("command diagnostics are immutable")
         BaseException.__delattr__(self, name)
 
@@ -209,7 +244,20 @@ def command_failure_facts(
             returncode if type(returncode) is int and -255 <= returncode <= 255 else None)
 
 
-def run(*args, input_bytes=None, timeout=180, check=True, env=None):
+def scoped_select_failure_fact(
+    error,
+    command_type=NativeCommandFailure,
+    diagnostic_slot=NativeCommandFailure.__dict__["_scoped_select_diagnostic"],
+):
+    if type(error) is not command_type:
+        return "unknown"
+    try:
+        return scoped_select_category(diagnostic_slot.__get__(error, command_type))
+    except AttributeError:
+        return "unknown"
+
+
+def run(*args, input_bytes=None, timeout=180, check=True, env=None, scoped_select_diagnostic=False):
     try:
         result = subprocess.run(
             [str(a) for a in args], input=input_bytes, capture_output=True, timeout=timeout, env=env
@@ -220,7 +268,13 @@ def run(*args, input_bytes=None, timeout=180, check=True, env=None):
         raise NativeCommandFailure("spawn-error") from None
     if check and result.returncode:
         # Never expose inspected environments, auth files, command arguments or private snapshots.
-        raise NativeCommandFailure("nonzero-exit", result.returncode) from None
+        diagnostic = "unknown"
+        if scoped_select_diagnostic is True:
+            try:
+                diagnostic = classify_scoped_select_output(result.returncode, result.stdout, result.stderr)
+            except Exception:
+                pass  # Collection must never replace the original checked command failure.
+        raise NativeCommandFailure("nonzero-exit", result.returncode, diagnostic) from None
     return result
 
 
@@ -1165,7 +1219,7 @@ print(json.dumps({'id':j['id']}))
         candidate = qa.data / 'compatible-bootstrap.json'
         write(candidate, manifest)
         run(cli, 'release', 'select', '--release-manifest', candidate,
-            '--component', 'cryptolabs-proxy', '--record-cli')
+            '--component', 'cryptolabs-proxy', '--record-cli', scoped_select_diagnostic=True)
         assert (qa.jobs / (job_id + '.json')).read_bytes() == self.failed_job_raw
         assert (qa.jobs / 'active.json').read_bytes() == before['active.json'][0]
         _bootstrap_step = "proxy-plan"
@@ -3107,7 +3161,8 @@ def bootstrap_failure_metadata(
     command_type=NativeCommandFailure,
 ):
     result = {"bootstrap_step": "unknown", "code_label": "unknown", "source_line": None,
-              "guard_line": None, "error_kind": "unknown", "command_outcome": "unknown", "command_returncode": None}
+              "guard_line": None, "error_kind": "unknown", "command_outcome": "unknown", "command_returncode": None,
+              "scoped_select_diagnostic": "unknown"}
     frames = []
     frame = BaseException.__traceback__.__get__(error, type(error))
     while frame is not None:
@@ -3143,6 +3198,8 @@ def bootstrap_failure_metadata(
         result["guard_line"] = helper_line
     if type(error) is command_type and any(frame.tb_frame.f_code is command_code for frame in frames):
         result["command_outcome"], result["command_returncode"] = command_failure_facts(error)
+        if result["bootstrap_step"] == "scoped-select":
+            result["scoped_select_diagnostic"] = scoped_select_failure_fact(error)
     return result
 
 

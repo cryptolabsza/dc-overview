@@ -380,6 +380,44 @@ kill/reap, including spawn elapsed time. Regular files have explicit bounded rea
 regular-file I/O and kernel process operations have no unconditional real-time
 guarantee. Raw inspect data, paths, record contents and exception strings are never
 retained. A coordinate can identify only a recognized caller boundary; the actual
-cause of the previous failure remains unproven. This local source work grants no
-native attempt: the original two of three attempts remain spent, with one held
-for separate root authorization and all existing functional gates.
+cause of the previous failure remains unproven. This local source work granted no
+native attempt. The preceding observation's two-of-three-spent, one-held account
+is historical: the original initial allowance of one and original additional
+allowance of three are now fully spent. The separate current continuation cap is
+described below; historical counters are unchanged.
+
+### Scoped selection output observation
+
+The existing bootstrap `release select` command opts into a bounded diagnostic.
+If that same checked subprocess fails, `bootstrap_failure.scoped_select_diagnostic`
+contains one of fifteen fixed output categories or `unknown`. Classification
+requires an exact built-in integer exit code of 1, empty built-in bytes stdout,
+and built-in bytes stderr of at most 512 bytes matching one complete reviewed
+message, including its prefix and newline. Other output, types, line endings,
+extra text and private stdout remain `unknown`. No captured output is attached to
+the diagnostic slots or emitted metadata; existing subprocess capture behavior is
+unchanged. Other command calls default to `unknown`; success,
+unchecked calls, timeout and spawn outcomes retain their previous behavior.
+
+The category describes observed child output. It does not identify an executed
+product guard or establish a root cause. For example, `cli-provenance-rejected`
+combines version and provenance checks, `recovery-required` occurs at several
+sites, and the public-reference categories have repeated raise sites. Capability
+refusal also combines checks. Unknown messages, import failures, tracebacks and
+transitive failures may remain `unknown`; useful classification is not guaranteed.
+Existing `source_line` and `guard_line` keep their caller-coordinate meanings;
+this observation adds no child guard coordinate.
+
+Projection requires the original command exception and run code frame within a
+trusted scoped-select bootstrap step. The immutable slot exports only a canonical
+category. Collector errors fall back to `unknown` and preserve the original
+command failure and cleanup. No retry, extra subprocess, owner/status request or
+product-state change is added.
+
+The 3 November observation preparation authorizes zero native or publication
+actions. Run 41573017934 attempt 1 failed at scoped selection with exit 1; its
+cause remains undetermined and this change cannot diagnose that terminated run
+retroactively. The current continuation cap is three, with one spent and two
+unused slots held by the unknown-cause stop condition. Historical counters stay
+unchanged. Observation preparation is not a diagnosed compatibility repair, and
+local source tests do not establish native, release, security or client acceptance.

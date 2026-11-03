@@ -154,7 +154,8 @@ class FleetNativeRouteTest(unittest.TestCase):
         failure = metadata.get("bootstrap_failure")
         self.assertIsInstance(failure, dict, "inner bootstrap diagnostics must survive the existing collector")
         self.assertEqual(set(failure), {"bootstrap_step", "code_label", "source_line", "guard_line",
-                                        "error_kind", "command_outcome", "command_returncode"})
+                                        "error_kind", "command_outcome", "command_returncode", "scoped_select_diagnostic"})
+        self.assertIs(type(failure["scoped_select_diagnostic"]), str)
         self.assertIn(failure["bootstrap_step"], {
             "legacy-runtime-inspect", "legacy-updater-probe", "legacy-capabilities-probe",
             "synthetic-runtime-inspect", "synthetic-db-seed", "synthetic-read-aggregate",
@@ -642,8 +643,248 @@ class FleetNativeRouteTest(unittest.TestCase):
                     metadata = module.native_phase_failure_metadata(error, "fixture", (("fixture", fixture_boundary.__code__),))
                 failure = self.assert_bootstrap_failure_shape(metadata)
                 self.assertEqual(failure, {"bootstrap_step": "unknown", "code_label": "unknown", "source_line": None,
-                                           "guard_line": None, "error_kind": "unknown", "command_outcome": "unknown", "command_returncode": None})
+                                           "guard_line": None, "error_kind": "unknown", "command_outcome": "unknown", "command_returncode": None,
+                                           "scoped_select_diagnostic": "unknown"})
                 self.assertNotIn(private, json.dumps(metadata))
+
+    def test_scoped_select_closed_observation_and_transport(self):
+        native = self.native_module()
+        PRIVATE = "PRIVATE_SCOPED_ARGUMENT_PATH_OUTPUT"
+        product_modules = {name: value for name, value in sys.modules.items() if name == "dc_overview" or name.startswith("dc_overview.") or name == "cryptolabs_proxy" or name.startswith("cryptolabs_proxy.")}
+        messages = [
+            {
+                "category": "cli-provenance-rejected",
+                "stderr_utf8_exact": "Error: requires_cli_upgrade: install the verified exact wheel from the selected manifest using the documented package-manager step, then rerun this command\n"
+            },
+            {
+                "category": "recovery-required",
+                "stderr_utf8_exact": "Error: native_service_recovery_required\n"
+            },
+            {
+                "category": "updater-busy",
+                "stderr_utf8_exact": "Error: updater is busy; retry scoped selection after it finishes\n"
+            },
+            {
+                "category": "updater-custody-changed",
+                "stderr_utf8_exact": "Error: updater custody changed during scoped selection\n"
+            },
+            {
+                "category": "updater-store-changed",
+                "stderr_utf8_exact": "Error: updater store changed during scoped selection\n"
+            },
+            {
+                "category": "updater-lock-changed",
+                "stderr_utf8_exact": "Error: updater lock changed during scoped selection\n"
+            },
+            {
+                "category": "public-reference-stale",
+                "stderr_utf8_exact": "Error: public configuration/selection snapshot is stale\n"
+            },
+            {
+                "category": "public-reference-changed",
+                "stderr_utf8_exact": "Error: public configuration changed after release preflight\n"
+            },
+            {
+                "category": "proxy-identity-required",
+                "stderr_utf8_exact": "Error: running proxy identity is required for scoped selection\n"
+            },
+            {
+                "category": "proxy-identity-changed",
+                "stderr_utf8_exact": "Error: proxy changed during scoped selection\n"
+            },
+            {
+                "category": "proxy-release-mount-required",
+                "stderr_utf8_exact": "Error: proxy read-only release mount prerequisite\n"
+            },
+            {
+                "category": "updater-mount-changed",
+                "stderr_utf8_exact": "Error: updater mount changed during scoped selection\n"
+            },
+            {
+                "category": "manifest-changed",
+                "stderr_utf8_exact": "Error: manifest changed during scoped preparation\n"
+            },
+            {
+                "category": "runtime-changed",
+                "stderr_utf8_exact": "Error: scoped runtime changed during selection\n"
+            },
+            {
+                "category": "proxy-authority-required",
+                "stderr_utf8_exact": "Error: Proxy updater authority prerequisite: install the compatible published cryptolabs-proxy package, then use cryptolabs-proxy configuration plan and cryptolabs-proxy configuration adopt to migrate the existing proxy before retrying. The running updater must advertise selection contract 1 and proxy_replacement_policy=host-adoption-required-v1; no update was submitted or release changes applied.\n"
+            }
+        ]
+        # Baseline privacy is already present and must survive this extension.
+        with patch.object(native.subprocess, 'run', return_value=SimpleNamespace(returncode=1, stdout=PRIVATE.encode(), stderr=PRIVATE.encode())) as child:
+            with self.assertRaises(native.NativeCommandFailure) as raised:
+                native.run('fixed-cli', PRIVATE)
+        self.assertEqual(native.command_failure_facts(raised.exception), ('nonzero-exit', 1))
+        self.assertNotIn(PRIVATE, str(raised.exception) + repr(raised.exception) + repr(raised.exception.args))
+        self.assertEqual(child.call_count, 1)
+
+        def boundary(flag):
+            _bootstrap_step = 'scoped-select'
+            native.run('fixed-cli', 'release', 'select', PRIVATE, input_bytes=b'fixed-input', timeout=37,
+                       env={'PUBLIC_FIXED': '1'}, scoped_select_diagnostic=flag)
+
+        codes = ((boundary.__code__, 'legacy-bootstrap', native.bootstrap_step_offsets(boundary.__code__)),
+                 (native.run.__code__, 'native-command', ()))
+
+        def observation(result, flag=True, step='scoped-select'):
+            with patch.object(native.subprocess, 'run', return_value=result) as child:
+                try:
+                    boundary(flag)
+                except native.NativeCommandFailure as error:
+                    saved_error = error
+                    value = native.bootstrap_failure_metadata(error, codes=codes, bootstrap_codes=(boundary.__code__,))
+                except TypeError:
+                    self.fail('MISSING_NEW_DIAGNOSTIC: real run wrapper rejects scoped_select_diagnostic=True; baseline RED, not native cause reproduction')
+                else:
+                    self.fail('original checked command failure was lost')
+            self.assertEqual(child.call_count, 1)
+            error = saved_error
+            self.assertEqual(child.call_args.args, (['fixed-cli', 'release', 'select', PRIVATE],))
+            self.assertEqual(child.call_args.kwargs, dict(input=b'fixed-input', capture_output=True, timeout=37, env={'PUBLIC_FIXED': '1'}))
+            self.assertEqual(native.command_failure_facts(error), ('nonzero-exit', result.returncode if type(result.returncode) is int and -255 <= result.returncode <= 255 else None))
+            self.assertIsNone(value['guard_line'])
+            self.assertNotIn(PRIVATE, json.dumps(value) + str(error) + repr(error) + repr(error.args))
+            self.assertIn('scoped_select_diagnostic', value)
+            self.assertIs(type(value['scoped_select_diagnostic']), str)
+            # Untrusted/non-bootstrap frame projections stay unknown.
+            self.assertEqual(native.bootstrap_failure_metadata(error, codes=codes, bootstrap_codes=())['scoped_select_diagnostic'], 'unknown')
+            return value['scoped_select_diagnostic'], error
+
+        # Fail once at the first absent observable contract before the wider
+        # GREEN matrix; avoid redundant baseline failures for the same gap.
+        first = messages[0]
+        self.assertEqual(observation(SimpleNamespace(returncode=1, stdout=b'', stderr=first['stderr_utf8_exact'].encode()))[0], first['category'])
+        for entry in messages:
+            raw = entry['stderr_utf8_exact'].encode()
+            with self.subTest(category=entry['category']):
+                category, error = observation(SimpleNamespace(returncode=1, stdout=b'', stderr=raw))
+                self.assertEqual(category, entry['category'])
+                # Discover owned diagnostic slot without prescribing its private name.
+                new_slots = set(native.NativeCommandFailure.__slots__) - {'_command_outcome', '_command_returncode'}
+                self.assertEqual(len(new_slots), 1)
+                slot = next(iter(new_slots))
+                self.assertEqual(type(getattr(error, slot)), str)
+                for mutation in (lambda: setattr(error, slot, PRIVATE), lambda: delattr(error, slot), lambda: error.__init__('timeout')):
+                    with self.assertRaises((AttributeError, TypeError)):
+                        mutation()
+                self.assertEqual(getattr(error, slot), entry['category'])
+
+        raw = messages[0]['stderr_utf8_exact'].encode()
+        class BytesSubclass(bytes):
+            pass
+        class StringTrap:
+            def __str__(self):
+                raise AssertionError('must not coerce arbitrary output')
+        cases = [
+            (1, b'', b'prefix ' + raw), (1, b'', raw + b'\n'), (1, b'', raw[:-1]),
+            (1, b'', raw + messages[1]['stderr_utf8_exact'].encode()),
+            (1, PRIVATE.encode(), raw), (1, b'', b'x' * 513), (1, b'', b'\xff'),
+            (1, b'', 'text'), (1, b'', BytesSubclass(raw)), (1, BytesSubclass(b''), raw),
+            (1, b'', StringTrap()), (1, b'', b'Error: unknown\n'), (17, b'', raw),
+            (-1, b'', raw), (True, b'', raw), (1, None, raw), (1, b'', None),
+        ]
+        for index, (code, stdout, stderr) in enumerate(cases):
+            with self.subTest(negative=index):
+                self.assertEqual(observation(SimpleNamespace(returncode=code, stdout=stdout, stderr=stderr))[0], 'unknown')
+        for flag in (False, 1, 'True', None):
+            with self.subTest(default_off=repr(flag)):
+                self.assertEqual(observation(SimpleNamespace(returncode=1, stdout=b'', stderr=raw), flag=flag)[0], 'unknown')
+        def nonscoped_boundary():
+            _bootstrap_step = 'legacy-runtime-inspect'
+            native.run('fixed-cli', scoped_select_diagnostic=True)
+        nonscoped_codes = ((nonscoped_boundary.__code__, 'legacy-bootstrap', native.bootstrap_step_offsets(nonscoped_boundary.__code__)),
+                           (native.run.__code__, 'native-command', ()))
+        with patch.object(native.subprocess, 'run', return_value=SimpleNamespace(returncode=1, stdout=b'', stderr=raw)):
+            with self.assertRaises(native.NativeCommandFailure) as caught:
+                nonscoped_boundary()
+        self.assertEqual(native.bootstrap_failure_metadata(caught.exception, codes=nonscoped_codes, bootstrap_codes=(nonscoped_boundary.__code__,))['scoped_select_diagnostic'], 'unknown')
+        # Projection rejects subclasses and malformed stored categories without coercion.
+        class ForeignFailure(native.NativeCommandFailure):
+            pass
+        malformed = native.NativeCommandFailure('nonzero-exit', 1)
+        object.__setattr__(malformed, slot, StringTrap())
+        for supplied in (ForeignFailure('nonzero-exit', 1), malformed):
+            with patch.object(native.subprocess, 'run', side_effect=supplied):
+                with self.assertRaises(native.NativeCommandFailure) as caught:
+                    boundary(True)
+            value = native.bootstrap_failure_metadata(caught.exception, codes=codes, bootstrap_codes=(boundary.__code__,))
+            self.assertEqual(value['scoped_select_diagnostic'], 'unknown')
+        # Unchecked/success and system exceptions preserve previous transport outcomes.
+        for code, check in ((0, True), (1, False)):
+            result = SimpleNamespace(returncode=code, stdout=b'', stderr=raw)
+            with patch.object(native.subprocess, 'run', return_value=result) as child:
+                self.assertIs(native.run('fixed-cli', check=check, scoped_select_diagnostic=True), result)
+                self.assertEqual(child.call_count, 1)
+        for side_effect, facts in ((native.subprocess.TimeoutExpired('fixed', 1), ('timeout', None)), (OSError(PRIVATE), ('spawn-error', None))):
+            with patch.object(native.subprocess, 'run', side_effect=side_effect) as child:
+                with self.assertRaises(native.NativeCommandFailure) as caught:
+                    native.run('fixed-cli', scoped_select_diagnostic=True)
+                self.assertEqual(native.command_failure_facts(caught.exception), facts)
+                self.assertNotIn(PRIVATE, str(caught.exception) + repr(caught.exception.args))
+                self.assertEqual(child.call_count, 1)
+        self.assertEqual({name: value for name, value in sys.modules.items() if name == 'dc_overview' or name.startswith('dc_overview.') or name == 'cryptolabs_proxy' or name.startswith('cryptolabs_proxy.')}, product_modules)
+        # Default-off means the keyword can be omitted, even in a scoped frame.
+        def default_boundary():
+            _bootstrap_step = 'scoped-select'
+            native.run('fixed-cli')
+        default_codes = ((default_boundary.__code__, 'legacy-bootstrap', native.bootstrap_step_offsets(default_boundary.__code__)),
+                         (native.run.__code__, 'native-command', ()))
+        with patch.object(native.subprocess, 'run', return_value=SimpleNamespace(returncode=1, stdout=b'', stderr=raw)):
+            with self.assertRaises(native.NativeCommandFailure) as caught:
+                default_boundary()
+        self.assertEqual(native.bootstrap_failure_metadata(caught.exception, codes=default_codes, bootstrap_codes=(default_boundary.__code__,))['scoped_select_diagnostic'], 'unknown')
+        for size in (511, 512, 513):
+            self.assertEqual(observation(SimpleNamespace(returncode=1, stdout=b'', stderr=b'x' * size))[0], 'unknown')
+        for stderr in (raw.replace(b'\n', b'\r\n'), raw.rstrip(b'\n'), raw + b' '):
+            self.assertEqual(observation(SimpleNamespace(returncode=1, stdout=b'', stderr=stderr))[0], 'unknown')
+        for code, stdout in ((1.0, b''), ('1', b''), (1, ''), (1, bytearray())):
+            self.assertEqual(observation(SimpleNamespace(returncode=code, stdout=stdout, stderr=raw))[0], 'unknown')
+
+        # A collection fault never substitutes its private exception or loses cleanup.
+        cleaned = []
+        @contextmanager
+        def cleanup_boundary():
+            try:
+                yield
+            finally:
+                cleaned.append(True)
+        with patch.object(native, 'classify_scoped_select_output', side_effect=RuntimeError(PRIVATE)):
+            with cleanup_boundary():
+                category, error = observation(SimpleNamespace(returncode=1, stdout=b'', stderr=raw))
+        self.assertEqual(category, 'unknown')
+        self.assertEqual(native.command_failure_facts(error), ('nonzero-exit', 1))
+        self.assertEqual(cleaned, [True])
+        self.assertNotIn(PRIVATE, str(error) + repr(error) + repr(error.args))
+
+        # Same filename/name grants no frame identity; missing/hostile slots stay unknown.
+        def foreign_boundary(flag):
+            _bootstrap_step = 'scoped-select'
+            native.run('fixed-cli', scoped_select_diagnostic=flag)
+        foreign_boundary.__code__ = foreign_boundary.__code__.replace(co_filename=boundary.__code__.co_filename, co_name=boundary.__code__.co_name)
+        with patch.object(native.subprocess, 'run', return_value=SimpleNamespace(returncode=1, stdout=b'', stderr=raw)):
+            with self.assertRaises(native.NativeCommandFailure) as caught:
+                foreign_boundary(True)
+        self.assertEqual(native.bootstrap_failure_metadata(caught.exception, codes=codes, bootstrap_codes=(boundary.__code__,))['scoped_select_diagnostic'], 'unknown')
+        class EqualString(str):
+            def __eq__(self, other):
+                raise AssertionError('must reject subclasses before equality')
+        for category in (PRIVATE, EqualString(PRIVATE), StringTrap()):
+            malformed = native.NativeCommandFailure('nonzero-exit', 1)
+            object.__setattr__(malformed, slot, category)
+            with patch.object(native.subprocess, 'run', side_effect=malformed):
+                with self.assertRaises(native.NativeCommandFailure) as caught:
+                    boundary(True)
+            self.assertEqual(native.bootstrap_failure_metadata(caught.exception, codes=codes, bootstrap_codes=(boundary.__code__,))['scoped_select_diagnostic'], 'unknown')
+        missing = native.NativeCommandFailure('nonzero-exit', 1)
+        object.__delattr__(missing, slot)
+        with patch.object(native.subprocess, 'run', side_effect=missing):
+            with self.assertRaises(native.NativeCommandFailure) as caught:
+                boundary(True)
+        self.assertEqual(native.bootstrap_failure_metadata(caught.exception, codes=codes, bootstrap_codes=(boundary.__code__,))['scoped_select_diagnostic'], 'unknown')
+
 
     def test_broker_child_preserves_original_exception_when_collection_fails(self):
         module = self.native_module()
