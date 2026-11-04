@@ -61,3 +61,25 @@ service_recovery_amendment_projection:
   native_acceptance: held
   production_writes: disabled
   publication: held
+
+central_telemetry_monitoring_policy:
+  contract_id: TW-IC-MON-20261104-001
+  baseline_id: REQ-BASELINE-MON-20261104-001
+  authority_record: requirements.md#central-telemetry-monitoring-policy--approved-4-november-2026
+  traceability_record: traceability-matrix.md#central-telemetry-monitoring-policy-mapping
+  owner: Hannes Zietsman
+  approval_date: 2026-11-04
+  approved_plan_sha256: 1ca52d740bc7e1a2933a26ed11ca1412ceb1669219f00a2a588c3899b384d50a
+  source_baseline: 1756de876bd5a72687f0b6d6047f975f5cea6ce8
+  approved_requirements: [REQ-MON-001, REQ-MON-002, REQ-MON-003]
+  traces: [TRACE-MON-001, TRACE-MON-002, TRACE-MON-003]
+  verification: [VER-MON-001, VER-MON-002, VER-MON-003]
+  validation: [VAL-MON-001, VAL-MON-002, VAL-MON-003]
+  stakeholder_intent: Explicit monitoring disables control corresponding missing-data expectations while unexpected outages remain alertable.
+  site_rule_requirement: REQ-MON-004 remains outside the application repository.
+  local_verification: passed
+  representative_local_validation: passed
+  publication_request: owner_authorized_normal_release_process
+  publication_gate: current_root_capsule_required
+  production_acceptance: pending
+  held_claims: [production_deployment, notification_delivery, unrelated_fleet_acceptance]

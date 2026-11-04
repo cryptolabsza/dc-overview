@@ -1,3 +1,4 @@
+# TRACEWEAVER: file-role=application-metrics-scrape; req=REQ-MON-003; trace=TRACE-MON-003; ver=VER-MON-003
 """
 DC Overview Fleet Manager
 Orchestrates deployment using collected configuration.
@@ -1141,6 +1142,7 @@ networks:
     external: true
 """
     
+# TRACEWEAVER: entrypoint=_generate_prometheus_config; req=REQ-MON-003; trace=TRACE-MON-003; ver=VER-MON-003
     def _generate_prometheus_config(self) -> str:
         """Generate initial prometheus.yml."""
         # Use host.docker.internal for master since Prometheus runs in Docker
@@ -1159,6 +1161,11 @@ scrape_configs:
     metrics_path: /prometheus/metrics
     static_configs:
       - targets: ['prometheus:9090']
+
+  - job_name: 'dc-overview'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['dc-overview:5001']
 
   - job_name: 'master'
     static_configs:
@@ -1676,6 +1683,7 @@ echo "node_exporter installed successfully"
         except (OSError, ValueError, RuntimeError, urllib.error.URLError):
             return False
 
+# TRACEWEAVER: entrypoint=_product_prometheus_config; req=REQ-MON-003; trace=TRACE-MON-003; ver=VER-MON-003
     def _product_prometheus_config(self):
         """Update Prometheus with all scrape targets."""
         
@@ -1683,6 +1691,8 @@ echo "node_exporter installed successfully"
         scrape_configs = [
             {"job_name": "prometheus", "metrics_path": "/prometheus/metrics",
              "static_configs": [{"targets": ["prometheus:9090"]}]},
+            {"job_name": "dc-overview", "metrics_path": "/metrics",
+             "static_configs": [{"targets": ["dc-overview:5001"]}]},
             {"job_name": "dc-managed", "http_sd_configs": [
                 {"url": "http://dc-overview:5001/api/prometheus/discovery", "refresh_interval": "30s"}
             ]},
