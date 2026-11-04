@@ -41,6 +41,7 @@ class TelemetryMonitoringCollector:
             metric.add_metric([name, 'filesystem'], int(bool(server.node_exporter_enabled)))
             metric.add_metric([name, 'gpu'], int(bool(
                 server.dc_exporter_enabled or server.dcgm_exporter_enabled)))
+            metric.add_metric([name, 'dc_exporter'], int(bool(server.dc_exporter_enabled)))
         yield metric
 
 

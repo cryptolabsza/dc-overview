@@ -1,0 +1,12 @@
+{
+  "status": "Proceed",
+  "authority": "requirements.md + current explicit owner approval",
+  "baseline_hash": "27be830b5b676b9335c560594d08bdf80410f61ea2fb5c0c9341b48b339a4584",
+  "scope": [
+    "REQ-GPUALERT-001",
+    "REQ-GPUALERT-002",
+    "REQ-GPUALERT-003"
+  ],
+  "publication_gate": "held_network_and_fresh_remote",
+  "approval_reask_needed": false
+}
