@@ -1,3 +1,5 @@
+# TRACEWEAVER: file-role=monitoring-intent-regression; req=REQ-MON-001; trace=TRACE-MON-001; ver=VER-MON-001
+# TRACEWEAVER: verifies=VER-MON-001; req=REQ-MON-001; trace=TRACE-MON-001
 """Tests for separate Install vs Toggle exporter UX.
 
 Install uses POST /api/servers/<id>/install-exporters with a list of exporters.
@@ -7,8 +9,10 @@ The background live check must correctly reflect installed/enabled state.
 """
 
 import json
+from contextlib import ExitStack
 from unittest.mock import patch, MagicMock
 
+import pytest
 from dc_overview.app import db, Server
 
 
@@ -107,8 +111,8 @@ class TestLiveCheckInstalledState:
         "dcgm_exporter": {"installed": False, "active": False},
     }
 
-    def test_no_service_on_device_clears_installed(self, app, client, auth_headers, sample_server):
-        """When systemctl says service doesn't exist, installed must be False."""
+    def test_failed_service_read_preserves_confirmed_installation(self, app, client, auth_headers, sample_server):
+        """An unavailable/unknown service read cannot erase provisioning state."""
         with app.app_context():
             server = db.session.get(Server, sample_server)
             server.node_exporter_installed = True
@@ -123,11 +127,11 @@ class TestLiveCheckInstalledState:
                             _do_live_exporter_check(sample_server)
 
             db.session.refresh(server)
-            assert server.node_exporter_installed is False
-            assert server.node_exporter_enabled is False
+            assert server.node_exporter_installed is True
+            assert server.node_exporter_enabled is True
 
     def test_service_exists_but_stopped(self, app, client, auth_headers, sample_server):
-        """When systemctl knows the service but it's inactive: installed=True, enabled=False."""
+        """A stopped service is installed without cancelling monitoring intent."""
         with app.app_context():
             server = db.session.get(Server, sample_server)
             db.session.commit()
@@ -150,7 +154,7 @@ class TestLiveCheckInstalledState:
 
             db.session.refresh(server)
             assert server.node_exporter_installed is True
-            assert server.node_exporter_enabled is False
+            assert server.node_exporter_enabled is True
             assert server.node_exporter_version == "1.10.2"
 
     def test_service_active_and_port_open(self, app, client, auth_headers, sample_server):
@@ -195,3 +199,62 @@ class TestLiveCheckInstalledState:
                                 from dc_overview.app import _do_live_exporter_check
                                 _do_live_exporter_check(sample_server)
                                 mock_versions.assert_not_called()
+
+
+@pytest.mark.parametrize('writer', ['check', 'live', 'watchdog-status', 'watchdog-sync'])
+@pytest.mark.parametrize('enabled,healthy', [(True, False), (False, True)])
+def test_health_reads_preserve_monitoring_intent_and_discovery(
+        app, client, auth_headers, sample_server, writer, enabled, healthy):
+    """Outages must stay discoverable; healthy reads must respect manual disable."""
+    from dc_overview.app import _do_live_exporter_check, _sync_watchdog_status_from_api
+
+    fields = ('node_exporter', 'dc_exporter', 'dcgm_exporter', 'watchdog_agent')
+    server = db.session.get(Server, sample_server)
+    for field in fields:
+        setattr(server, field + '_installed', True)
+        setattr(server, field + '_enabled', enabled)
+    db.session.commit()
+    watchdog = {'source': 'ssh', 'installed': healthy, 'running': healthy}
+    services = {field: {'installed': healthy, 'active': healthy} for field in fields[:3]}
+    with ExitStack() as mocks:
+        for target, value in {
+            'dc_overview.app.check_ssh_connection': {'connected': healthy},
+            'dc_overview.app.check_exporter': {'running': healthy},
+            'dc_overview.app.check_watchdog_agent': watchdog,
+            'dc_overview.app.check_services_installed': services,
+            'dc_overview.app.get_gpu_count_from_exporter': None,
+            'dc_overview.app.check_and_apply_auto_updates': {},
+            'dc_overview.exporters.get_exporter_version': None,
+            'dc_overview.exporters.get_all_exporter_versions': {},
+            'dc_overview.exporters.check_for_updates': {},
+            'dc_overview.app.get_watchdog_agents_from_api': {
+                server.name.lower(): {'online': healthy}},
+        }.items():
+            mocks.enter_context(patch(target, return_value=value))
+        if writer == 'check':
+            assert client.get(f'/api/servers/{sample_server}/check', headers=auth_headers).status_code == 200
+        elif writer == 'live':
+            _do_live_exporter_check(sample_server)
+        elif writer == 'watchdog-status':
+            assert client.get(f'/api/servers/{sample_server}/watchdog/status', headers=auth_headers).status_code == 200
+        else:
+            assert _sync_watchdog_status_from_api() == 1
+
+    db.session.refresh(server)
+    assert {field: (getattr(server, field + '_installed'), getattr(server, field + '_enabled'))
+            for field in fields} == {field: (True, enabled) for field in fields}
+    targets = client.get('/api/prometheus/discovery').json
+    assert {target['labels']['exporter'] for target in targets} == (
+        {'node', 'dc', 'dcgm', 'watchdog'} if enabled else set())
+
+
+@pytest.mark.parametrize('installed,enabled', [(True, False), (False, True)])
+def test_cached_installed_response_uses_provisioning_state(app, sample_server, installed, enabled):
+    from dc_overview.app import _build_exporter_response
+    server = db.session.get(Server, sample_server)
+    server.node_exporter_installed = installed
+    server.node_exporter_enabled = enabled
+    db.session.commit()
+    response = _build_exporter_response(server)
+    assert response['installed']['node_exporter'] is installed
+    assert response['enabled']['node_exporter'] is enabled
