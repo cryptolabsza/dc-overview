@@ -12,5 +12,6 @@
   "Vast_panel35_extension": "2 expected failing tests before edit;19 real PromQL/occupancy/state tests passed after edit",
   "main_selective_full": "1950 passed before mechanical Vast extension",
   "main_release_verification": "1950 Overview tests +19 post-extension checks passed",
-  "release_acceptance": "pending official CI/artifacts/native rollout"
+  "release_acceptance": "pending official CI/artifacts/native rollout",
+  "CI_guard_followup": "Original five preservation hashes unchanged; approved panel35 fields restored only; 36 focused tests pass; full final suite logged in release packet."
 }
