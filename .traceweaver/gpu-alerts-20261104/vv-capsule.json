@@ -1,0 +1,66 @@
+{
+  "schema_version": "tw-vv-capsule/1",
+  "workflow_profile": "L3",
+  "work_item_id": "GPUALERT-20261104",
+  "plan_ref": "plan.md",
+  "high_risk_controls": {
+    "rollback": "Retain exact predeployment image/source/provisioning/dashboard and receiver baselines. Restore only touched roles/configs through native path; do not change GPUs, rentals, credentials or other service policies.",
+    "owner_decision": "Owner explicitly: Approve and deploy to both sights. No new external TEST sends or hardware operations."
+  },
+  "requirements": [
+    {
+      "req_id": "REQ-GPUALERT-001",
+      "trace_id": "TRACE-GPUALERT-001",
+      "ver_id": "VER-GPUALERT-001",
+      "val_id": "VAL-GPUALERT-001",
+      "verification_artifact": "dc-watchdog/tests/test_gpu_telegram_text.py",
+      "red_evidence": "evidence/watchdog-red.txt",
+      "validation_artifact": "validation.md",
+      "matrix_row_ref": "traceability-matrix.md",
+      "reviews": [
+        {
+          "gate": "tw-doc-review",
+          "id": "GPUALERT-PREFLIGHT-20261104",
+          "status": "passed",
+          "evidence_path": "evidence/preflight-review.md"
+        }
+      ]
+    },
+    {
+      "req_id": "REQ-GPUALERT-002",
+      "trace_id": "TRACE-GPUALERT-002",
+      "ver_id": "VER-GPUALERT-002",
+      "val_id": "VAL-GPUALERT-002",
+      "verification_artifact": "dc-overview/tests/test_gpu_collector_alerts.py",
+      "red_evidence": "evidence/overview-red.txt",
+      "validation_artifact": "validation.md",
+      "matrix_row_ref": "traceability-matrix.md",
+      "reviews": [
+        {
+          "gate": "tw-doc-review",
+          "id": "GPUALERT-PREFLIGHT-20261104",
+          "status": "passed",
+          "evidence_path": "evidence/preflight-review.md"
+        }
+      ]
+    },
+    {
+      "req_id": "REQ-GPUALERT-003",
+      "trace_id": "TRACE-GPUALERT-003",
+      "ver_id": "VER-GPUALERT-003",
+      "val_id": "VAL-GPUALERT-003",
+      "verification_artifact": "dc-overview/tests/test_gpu_collector_dashboard.py",
+      "red_evidence": "evidence/overview-red.txt",
+      "validation_artifact": "validation.md",
+      "matrix_row_ref": "traceability-matrix.md",
+      "reviews": [
+        {
+          "gate": "tw-doc-review",
+          "id": "GPUALERT-PREFLIGHT-20261104",
+          "status": "passed",
+          "evidence_path": "evidence/preflight-review.md"
+        }
+      ]
+    }
+  ]
+}

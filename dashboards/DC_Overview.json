@@ -3765,7 +3765,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Current error state for GPU (0=Unknown, 1=No Error, 2=Error, 3=VM Passthrough)",
+      "description": "GPU state by source evidence. Telemetry unavailable means synthetic DRIVER-ERROR collection records; it does not establish a physical GPU failure.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -3845,6 +3845,18 @@
                 "to": 4
               },
               "type": "range"
+            },
+            {
+              "type": "range",
+              "options": {
+                "from": 6,
+                "to": 6,
+                "result": {
+                  "color": "orange",
+                  "index": 5,
+                  "text": "Telemetry unavailable"
+                }
+              }
             }
           ],
           "thresholds": {
@@ -3910,7 +3922,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"0\"}",
+          "expr": "((GPU_ERROR_STATE{gpu=\"0\"}) unless on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) + 0 or on(instance, gpu) (((GPU_ERROR_STATE{gpu=\"0\"}) and on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) * 0 + 6)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3923,7 +3935,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"1\"}",
+          "expr": "((GPU_ERROR_STATE{gpu=\"1\"}) unless on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) + 0 or on(instance, gpu) (((GPU_ERROR_STATE{gpu=\"1\"}) and on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) * 0 + 6)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3936,7 +3948,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"2\"}",
+          "expr": "((GPU_ERROR_STATE{gpu=\"2\"}) unless on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) + 0 or on(instance, gpu) (((GPU_ERROR_STATE{gpu=\"2\"}) and on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) * 0 + 6)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3949,7 +3961,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"3\"}",
+          "expr": "((GPU_ERROR_STATE{gpu=\"3\"}) unless on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) + 0 or on(instance, gpu) (((GPU_ERROR_STATE{gpu=\"3\"}) and on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) * 0 + 6)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3962,7 +3974,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"4\"} ",
+          "expr": "((GPU_ERROR_STATE{gpu=\"4\"}) unless on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) + 0 or on(instance, gpu) (((GPU_ERROR_STATE{gpu=\"4\"}) and on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) * 0 + 6)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3975,7 +3987,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"5\"}",
+          "expr": "((GPU_ERROR_STATE{gpu=\"5\"}) unless on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) + 0 or on(instance, gpu) (((GPU_ERROR_STATE{gpu=\"5\"}) and on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) * 0 + 6)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -3988,7 +4000,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"6\"}",
+          "expr": "((GPU_ERROR_STATE{gpu=\"6\"}) unless on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) + 0 or on(instance, gpu) (((GPU_ERROR_STATE{gpu=\"6\"}) and on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) * 0 + 6)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -4001,7 +4013,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"7\"}",
+          "expr": "((GPU_ERROR_STATE{gpu=\"7\"}) unless on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) + 0 or on(instance, gpu) (((GPU_ERROR_STATE{gpu=\"7\"}) and on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) * 0 + 6)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",

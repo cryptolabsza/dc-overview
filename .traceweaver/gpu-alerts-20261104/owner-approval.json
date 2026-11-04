@@ -1,0 +1,15 @@
+{
+  "date": "2026-11-04",
+  "owner": "Hannes Zietsman",
+  "instruction": "Approve and deploy to both sights",
+  "reaffirmations": [
+    "Approve",
+    "Tray again"
+  ],
+  "sites": [
+    "LTX",
+    "Charlotte"
+  ],
+  "scope": "approved concise alerts, source-quality/dashboard distinction and normal release/native rollout",
+  "no_external_synthetic_sends": true
+}

@@ -17,6 +17,18 @@ FAST = 'job:cpu_busy:ratio5m * $CPU_Max_Power + sum by (job) (gpu:power_usage:wa
 RAW = '(sum by (job) (rate(node_cpu_seconds_total{mode!="idle"}[$__rate_interval])) / sum by (job) (rate(node_cpu_seconds_total[$__rate_interval]))) * $CPU_Max_Power + sum by (job) (DCGM_FI_DEV_POWER_USAGE) + $BasePower'
 
 
+def restore_pre_collector_state(dashboard, path):
+    """Project only approved panel35 fields back to their immutable baseline."""
+    before = json.loads((ROOT / "tests/fixtures/gpu-state-pre-collector.json").read_text())[path]
+    state = next(p for p in dashboard["panels"] if p["id"] == 35)
+    state["description"] = before["description"]
+    state["fieldConfig"]["defaults"]["mappings"] = before["mappings"]
+    assert len(state["targets"]) == len(before["expressions"])
+    for target, expression in zip(state["targets"], before["expressions"], strict=True):
+        target["expr"] = expression
+    return dashboard
+
+
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
@@ -55,6 +67,7 @@ def test_only_power_panel_changes_and_history_is_explicit(path):
     assert 'no backfill' in power['description']
     # Gaps must remain visible at rule activation and missing-source periods.
     assert power['fieldConfig']['defaults']['custom']['spanNulls'] is False
+    restore_pre_collector_state(dashboard, path)
     dashboard['panels'] = [p for p in dashboard['panels'] if p['id'] != 26]
     assert digest(dashboard) == '9da6d9671eab2afae54603b6126a5401cc269eee921e1f6ad8e3f4fac2f1c8f5'
 
