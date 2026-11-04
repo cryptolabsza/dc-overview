@@ -13,6 +13,7 @@ import re
 import shlex
 import subprocess
 import time
+import threading
 from collections.abc import Mapping
 
 import yaml
@@ -42,6 +43,7 @@ def watchdog_update_prerequisites():
 '''
 
 # Cache for watchdog API results (avoid hammering the API)
+_watchdog_api_cache_lock = threading.RLock()
 _watchdog_api_cache = {'ts': 0, 'data': None}
 _WATCHDOG_CACHE_TTL = 30  # seconds
 
@@ -142,42 +144,76 @@ def get_site_id(config=None) -> str:
     return socket.gethostname()
 
 
+def _gpu_availability_view(value, now):
+    """Keep source freshness separate from endpoint/heartbeat freshness."""
+    import math
+    if not isinstance(value, dict):
+        return {'coverage': 'unknown', 'active': None}
+    allowed = ('active', 'classification', 'expected', 'last_received', 'observation', 'delivery', 'generation', 'severity', 'hardware_active', 'hardware_diagnostic', 'hardware_clear_verified')
+    result = {k: value[k] for k in allowed if k in value}
+    observed = value.get('observation') or {}
+    received = value.get('last_received')
+    age = observed.get('source_age_bound') if isinstance(observed, dict) else None
+    numeric = lambda v: type(v) in (int, float) and math.isfinite(v)
+    if numeric(age) and age >= 0 and numeric(received) and received <= now:
+        result['source_age_seconds'] = age + max(0, now - received)
+        result['coverage'] = (value.get('coverage') if value.get('coverage') not in (None, 'available')
+                              else ('available' if result['source_age_seconds'] <= 75 else 'stale'))
+    else:
+        result['coverage'] = 'unknown'
+    return result
+
+
 def get_watchdog_agents_from_api() -> dict:
-    """Fetch per-agent status from the dc-watchdog server API.
-    
-    Returns a dict keyed by worker_id (lowercase) with agent info,
-    or empty dict if unavailable. Uses cached results for 30s.
-    """
+    with _watchdog_api_cache_lock:
+        return _get_watchdog_agents_from_api_locked()
+
+
+def _get_watchdog_agents_from_api_locked() -> dict:
+    """Fetch tenant-bound status; a stale heartbeat cache cannot certify GPU health."""
+    import hashlib
     now = time.time()
-    
-    if _watchdog_api_cache['data'] is not None and (now - _watchdog_api_cache['ts']) < _WATCHDOG_CACHE_TTL:
-        return _watchdog_api_cache['data']
-    
     api_key = get_watchdog_api_key()
     if not api_key:
+        _watchdog_api_cache.clear()
         return {}
-    
-    try:
-        resp = http_requests.get(
-            f'{WATCHDOG_URL}/api/agents/status',
-            params={'api_key': api_key},
-            timeout=5
-        )
-        if resp.ok:
-            data = resp.json()
-            agents_map = {}
-            for agent in data.get('agents', []):
-                wid = (agent.get('worker_id') or '').lower()
-                if wid:
-                    agents_map[wid] = agent
-            
-            _watchdog_api_cache['ts'] = now
-            _watchdog_api_cache['data'] = agents_map
-            return agents_map
-    except Exception as e:
-        logger.debug('Could not fetch watchdog agent status (%s)', type(e).__name__)
-    
-    return _watchdog_api_cache.get('data') or {}
+    context = (WATCHDOG_URL.rstrip('/'), hashlib.sha256(api_key.encode()).digest())
+    if _watchdog_api_cache.get('context') != context:
+        _watchdog_api_cache.clear()
+        _watchdog_api_cache.update(context=context, ts=0, data=None)
+    cached = _watchdog_api_cache.get('data')
+    age = now - _watchdog_api_cache.get('ts', 0)
+    if cached is None or not 0 <= age < _WATCHDOG_CACHE_TTL:
+        try:
+            resp = http_requests.get(f'{WATCHDOG_URL}/api/agents/status',
+                                     params={'api_key': api_key}, timeout=5)
+            current_key = get_watchdog_api_key()
+            current_context = (WATCHDOG_URL.rstrip('/'), hashlib.sha256(current_key.encode()).digest()) if current_key else None
+            if current_context != context:
+                return {}
+            if resp.ok:
+                body = resp.json()
+                agents = body.get('agents')
+                if not isinstance(agents, list) or len(agents) > 10000:
+                    raise ValueError('invalid bounded agent response')
+                cached = {}
+                for agent in agents:
+                    if not isinstance(agent, dict):
+                        continue
+                    wid = agent.get('worker_id')
+                    if isinstance(wid, str) and wid:
+                        cached[wid.lower()] = agent
+                _watchdog_api_cache.update(ts=now, data=cached)
+                age = 0
+        except Exception as error:
+            logger.debug('Could not fetch watchdog status (%s)', type(error).__name__)
+    current_key = get_watchdog_api_key()
+    if not current_key or (WATCHDOG_URL.rstrip('/'), hashlib.sha256(current_key.encode()).digest()) != context:
+        return {}
+    if cached is None or not 0 <= age <= 75:
+        return {}
+    return {wid: {**agent, 'gpu_availability': _gpu_availability_view(agent.get('gpu_availability'), now)}
+            for wid, agent in cached.items()}
 
 
 def check_watchdog_health_port(ip, port=9878):
@@ -235,7 +271,8 @@ def check_watchdog_agent(server):
                     'status': 'running',
                     'version': version,
                     'last_seen': last_seen,
-                    'source': 'watchdog_api'
+                    'source': 'watchdog_api',
+                    'gpu_availability': agent_info.get('gpu_availability', {'coverage': 'unknown', 'active': None})
                 }
             # Agent is offline on the watchdog server - don't trust as "installed"
             # because it may have been removed locally. Fall through to health port
@@ -244,7 +281,7 @@ def check_watchdog_agent(server):
     # Method 2: Probe the agent's local health port
     health_result = check_watchdog_health_port(server.server_ip)
     if health_result:
-        return health_result
+        return {**health_result, 'gpu_availability': {'coverage': 'unknown', 'active': None}}
     
     # Check TCP port to distinguish "not listening" from "not reachable"
     port_check = check_exporter(server.server_ip, 9878)
@@ -254,14 +291,15 @@ def check_watchdog_agent(server):
             'installed': True,
             'status': 'running',
             'version': None,
-            'source': 'health_port_tcp'
+            'source': 'health_port_tcp',
+            'gpu_availability': {'coverage': 'unknown', 'active': None}
         }
     
     # An unreachable health port cannot establish that the service was removed.
     return {'running': bool(getattr(server, 'watchdog_agent_enabled', False)),
             'installed': bool(getattr(server, 'watchdog_agent_installed', False)),
             'status': 'unknown', 'version': getattr(server, 'watchdog_agent_version', None),
-            'source': 'database'}
+            'source': 'database', 'gpu_availability': {'coverage': 'unknown', 'active': None}}
 
 
 def toggle_watchdog_service(server, enabled: bool) -> bool:
@@ -414,6 +452,9 @@ MODE={shlex.quote(mode)}
 
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/dc-watchdog"
+PROBE_DROPIN_DIR="/etc/systemd/system/dc-watchdog-agent.service.d"
+PROBE_DROPIN="$PROBE_DROPIN_DIR/40-cryptolabs-gpu-probe-state.conf"
+probe_dropin_dir_created=0
 GITHUB_REPO="{GITHUB_REPO}"
 
 echo "[+] Installing DC-Watchdog Agent (Go binary)..."
@@ -430,13 +471,14 @@ finish() {{
     if [ "$status" != 0 ] && [ "$changed" = 1 ]; then
         recovery_failed=0
         systemctl stop dc-watchdog-agent >/dev/null 2>&1 || true
-        files=("$INSTALL_DIR/dc-watchdog-agent")
+        files=("$INSTALL_DIR/dc-watchdog-agent" "$PROBE_DROPIN")
         if [ "$MODE" = install ]; then files+=("$CONFIG_DIR/agent.yaml" /etc/systemd/system/dc-watchdog-agent.service); fi
         for file in "${{files[@]}}"; do
             name=$(basename "$file")
             rm -f "$file" || recovery_failed=1
             if [ -e "$STAGE/$name.old" ] || [ -L "$STAGE/$name.old" ]; then cp -a "$STAGE/$name.old" "$file" || recovery_failed=1; fi
         done
+        if [ "$probe_dropin_dir_created" = 1 ]; then rmdir "$PROBE_DROPIN_DIR" 2>/dev/null || true; fi
         systemctl daemon-reload || recovery_failed=1
         if [ "$MODE" = install ]; then
             case "$enabled_state" in
@@ -458,7 +500,7 @@ state=$(systemctl is-active dc-watchdog-agent) || [ "$state" = inactive ] || [ "
 state=$(systemctl is-enabled dc-watchdog-agent) || [ "$state" = disabled ] || [ "$state" = not-found ] || [ "$state" = masked ] || [ "$state" = masked-runtime ]
 enabled_state=$state
 [ "$state" != enabled ] || was_enabled=1
-for file in "$INSTALL_DIR/dc-watchdog-agent" "$CONFIG_DIR/agent.yaml" /etc/systemd/system/dc-watchdog-agent.service; do
+for file in "$INSTALL_DIR/dc-watchdog-agent" "$CONFIG_DIR/agent.yaml" /etc/systemd/system/dc-watchdog-agent.service "$PROBE_DROPIN"; do
     if [ -e "$file" ] || [ -L "$file" ]; then cp -a "$file" "$STAGE/$(basename "$file").old"; fi
 done
 if [ "$MODE" = update ]; then
@@ -530,22 +572,16 @@ mkdir -p "$CONFIG_DIR"
 cp "$STAGE/candidate" "$INSTALL_DIR/dc-watchdog-agent"
 chmod 755 "$INSTALL_DIR/dc-watchdog-agent"
 
-# Detect GPU availability
-HAS_GPU=false
-if command -v nvidia-smi &> /dev/null; then
-    if timeout 5 nvidia-smi -L &> /dev/null; then
-        HAS_GPU=true
-    fi
-fi
-
-if [ "$HAS_GPU" = "true" ]; then
-    MONITOR_LEVEL="standard"
-else
-    MONITOR_LEVEL="basic"
-fi
-
-# Create YAML configuration for Go agent
+# Configuration discovery reads PCI identity only, never invokes the GPU driver.
 if [ "$MODE" = install ]; then
+HAS_GPU=false
+for device in /sys/bus/pci/devices/*; do
+    [ -r "$device/vendor" ] && [ -r "$device/class" ] || continue
+    read -r vendor < "$device/vendor"
+    read -r class < "$device/class"
+    case "$vendor:$class" in 0x10de:0x03*) HAS_GPU=true;; esac
+done
+if [ "$HAS_GPU" = true ]; then MONITOR_LEVEL=standard; else MONITOR_LEVEL=basic; fi
 echo "[+] Creating configuration..."
 printf '%s' {serialized_settings} > "$CONFIG_DIR/agent.yaml"
 cat >> "$CONFIG_DIR/agent.yaml" << YAMLEOF
@@ -598,6 +634,16 @@ WantedBy=multi-user.target
 SVCEOF
 fi
 
+# Add only the feature-owned drop-in; preserve existing unit and customer settings.
+if [ ! -d "$PROBE_DROPIN_DIR" ]; then probe_dropin_dir_created=1; fi
+mkdir -p "$PROBE_DROPIN_DIR"
+cat > "$PROBE_DROPIN" << 'PROBESTATE'
+[Service]
+StateDirectory=dc-watchdog
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/dc-watchdog
+PROBESTATE
+chmod 644 "$PROBE_DROPIN"
 systemctl daemon-reload
 if [ "$MODE" = install ]; then
     systemctl enable dc-watchdog-agent
