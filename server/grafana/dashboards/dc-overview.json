@@ -58,7 +58,7 @@
         "type": "prometheus",
         "uid": "PBFA97CFB590B2093"
       },
-      "description": "Current error state for GPU (2 for error, 1 for no error, 0 unknown state)",
+      "description": "GPU state by source evidence. Telemetry unavailable means synthetic DRIVER-ERROR collection records; it does not establish a physical GPU failure.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -111,6 +111,18 @@
                 "to": 2
               },
               "type": "range"
+            },
+            {
+              "type": "range",
+              "options": {
+                "from": 6,
+                "to": 6,
+                "result": {
+                  "color": "orange",
+                  "index": 5,
+                  "text": "Telemetry unavailable"
+                }
+              }
             }
           ],
           "thresholds": {
@@ -154,7 +166,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"0\"}",
+          "expr": "((GPU_ERROR_STATE{gpu=\"0\"}) unless on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) + 0 or on(instance, gpu) (((GPU_ERROR_STATE{gpu=\"0\"}) and on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) * 0 + 6)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -167,7 +179,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"1\"}",
+          "expr": "((GPU_ERROR_STATE{gpu=\"1\"}) unless on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) + 0 or on(instance, gpu) (((GPU_ERROR_STATE{gpu=\"1\"}) and on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) * 0 + 6)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -180,7 +192,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"2\"}",
+          "expr": "((GPU_ERROR_STATE{gpu=\"2\"}) unless on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) + 0 or on(instance, gpu) (((GPU_ERROR_STATE{gpu=\"2\"}) and on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) * 0 + 6)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -193,7 +205,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"3\"}",
+          "expr": "((GPU_ERROR_STATE{gpu=\"3\"}) unless on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) + 0 or on(instance, gpu) (((GPU_ERROR_STATE{gpu=\"3\"}) and on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) * 0 + 6)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -206,7 +218,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"4\"} ",
+          "expr": "((GPU_ERROR_STATE{gpu=\"4\"}) unless on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) + 0 or on(instance, gpu) (((GPU_ERROR_STATE{gpu=\"4\"}) and on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) * 0 + 6)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -219,7 +231,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"5\"}",
+          "expr": "((GPU_ERROR_STATE{gpu=\"5\"}) unless on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) + 0 or on(instance, gpu) (((GPU_ERROR_STATE{gpu=\"5\"}) and on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) * 0 + 6)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -232,7 +244,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"6\"}",
+          "expr": "((GPU_ERROR_STATE{gpu=\"6\"}) unless on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) + 0 or on(instance, gpu) (((GPU_ERROR_STATE{gpu=\"6\"}) and on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) * 0 + 6)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",
@@ -245,7 +257,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE{gpu=\"7\"}",
+          "expr": "((GPU_ERROR_STATE{gpu=\"7\"}) unless on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) + 0 or on(instance, gpu) (((GPU_ERROR_STATE{gpu=\"7\"}) and on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) * 0 + 6)",
           "format": "table",
           "hide": false,
           "legendFormat": "__auto",

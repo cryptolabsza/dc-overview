@@ -1,0 +1,206 @@
+{
+  "dashboards/Vast_Dashboard.json": {
+    "description": "Current error state for GPU (2 for error, 1 for no error, 0 unknown state)",
+    "mappings": [
+      {
+        "options": {
+          "from": 0,
+          "result": {
+            "color": "transparent",
+            "index": 0,
+            "text": "Unknown"
+          },
+          "to": 0
+        },
+        "type": "range"
+      },
+      {
+        "options": {
+          "from": 1,
+          "result": {
+            "color": "green",
+            "index": 1,
+            "text": "OK"
+          },
+          "to": 1
+        },
+        "type": "range"
+      },
+      {
+        "options": {
+          "from": 2,
+          "result": {
+            "color": "red",
+            "index": 2,
+            "text": "ERROR"
+          },
+          "to": 2
+        },
+        "type": "range"
+      }
+    ],
+    "expressions": [
+      "GPU_ERROR_STATE{gpu=\"0\"}",
+      "GPU_ERROR_STATE{gpu=\"1\"}",
+      "GPU_ERROR_STATE{gpu=\"2\"}",
+      "GPU_ERROR_STATE{gpu=\"3\"}",
+      "GPU_ERROR_STATE{gpu=\"4\"} ",
+      "GPU_ERROR_STATE{gpu=\"5\"}",
+      "GPU_ERROR_STATE{gpu=\"6\"}",
+      "GPU_ERROR_STATE{gpu=\"7\"}"
+    ]
+  },
+  "src/dc_overview/dashboards/Vast_Dashboard.json": {
+    "description": "Current error state for GPU (2 for error, 1 for no error, 0 unknown state)",
+    "mappings": [
+      {
+        "options": {
+          "from": 0,
+          "result": {
+            "color": "transparent",
+            "index": 0,
+            "text": "Unknown"
+          },
+          "to": 0
+        },
+        "type": "range"
+      },
+      {
+        "options": {
+          "from": 1,
+          "result": {
+            "color": "green",
+            "index": 1,
+            "text": "OK"
+          },
+          "to": 1
+        },
+        "type": "range"
+      },
+      {
+        "options": {
+          "from": 2,
+          "result": {
+            "color": "red",
+            "index": 2,
+            "text": "ERROR"
+          },
+          "to": 2
+        },
+        "type": "range"
+      }
+    ],
+    "expressions": [
+      "GPU_ERROR_STATE{gpu=\"0\"}",
+      "GPU_ERROR_STATE{gpu=\"1\"}",
+      "GPU_ERROR_STATE{gpu=\"2\"}",
+      "GPU_ERROR_STATE{gpu=\"3\"}",
+      "GPU_ERROR_STATE{gpu=\"4\"} ",
+      "GPU_ERROR_STATE{gpu=\"5\"}",
+      "GPU_ERROR_STATE{gpu=\"6\"}",
+      "GPU_ERROR_STATE{gpu=\"7\"}"
+    ]
+  },
+  "server/grafana/dashboards/Vast_Dashboard.json": {
+    "description": "Current error state for GPU (2 for error, 1 for no error, 0 unknown state)",
+    "mappings": [
+      {
+        "options": {
+          "from": 0,
+          "result": {
+            "color": "transparent",
+            "index": 0,
+            "text": "Unknown"
+          },
+          "to": 0
+        },
+        "type": "range"
+      },
+      {
+        "options": {
+          "from": 1,
+          "result": {
+            "color": "green",
+            "index": 1,
+            "text": "OK"
+          },
+          "to": 1
+        },
+        "type": "range"
+      },
+      {
+        "options": {
+          "from": 2,
+          "result": {
+            "color": "red",
+            "index": 2,
+            "text": "ERROR"
+          },
+          "to": 2
+        },
+        "type": "range"
+      }
+    ],
+    "expressions": [
+      "gpu:error_state:status{gpu=\"0\"}",
+      "gpu:error_state:status{gpu=\"1\"}",
+      "gpu:error_state:status{gpu=\"2\"}",
+      "gpu:error_state:status{gpu=\"3\"}",
+      "gpu:error_state:status{gpu=\"4\"} ",
+      "gpu:error_state:status{gpu=\"5\"}",
+      "gpu:error_state:status{gpu=\"6\"}",
+      "gpu:error_state:status{gpu=\"7\"}"
+    ]
+  },
+  "server/grafana/dashboards/vast-dashboard.json": {
+    "description": "Current error state for GPU (2 for error, 1 for no error, 0 unknown state)",
+    "mappings": [
+      {
+        "options": {
+          "from": 0,
+          "result": {
+            "color": "transparent",
+            "index": 0,
+            "text": "Unknown"
+          },
+          "to": 0
+        },
+        "type": "range"
+      },
+      {
+        "options": {
+          "from": 1,
+          "result": {
+            "color": "green",
+            "index": 1,
+            "text": "OK"
+          },
+          "to": 1
+        },
+        "type": "range"
+      },
+      {
+        "options": {
+          "from": 2,
+          "result": {
+            "color": "red",
+            "index": 2,
+            "text": "ERROR"
+          },
+          "to": 2
+        },
+        "type": "range"
+      }
+    ],
+    "expressions": [
+      "GPU_ERROR_STATE{gpu=\"0\"}",
+      "GPU_ERROR_STATE{gpu=\"1\"}",
+      "GPU_ERROR_STATE{gpu=\"2\"}",
+      "GPU_ERROR_STATE{gpu=\"3\"}",
+      "GPU_ERROR_STATE{gpu=\"4\"} ",
+      "GPU_ERROR_STATE{gpu=\"5\"}",
+      "GPU_ERROR_STATE{gpu=\"6\"}",
+      "GPU_ERROR_STATE{gpu=\"7\"}"
+    ]
+  }
+}
