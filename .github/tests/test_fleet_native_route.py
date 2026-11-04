@@ -7,12 +7,14 @@ import importlib.util
 import hashlib
 import json
 import os
+import runpy
 import selectors
 import subprocess
 import sys
 import tempfile
 import tomllib
 import traceback
+import types
 import unittest
 import sqlite3
 import zipfile
@@ -154,8 +156,15 @@ class FleetNativeRouteTest(unittest.TestCase):
         failure = metadata.get("bootstrap_failure")
         self.assertIsInstance(failure, dict, "inner bootstrap diagnostics must survive the existing collector")
         self.assertEqual(set(failure), {"bootstrap_step", "code_label", "source_line", "guard_line",
-                                        "error_kind", "command_outcome", "command_returncode", "scoped_select_diagnostic"})
+                                        "error_kind", "command_outcome", "command_returncode", "scoped_select_diagnostic",
+                                        "scoped_select_inner_diagnostic"})
         self.assertIs(type(failure["scoped_select_diagnostic"]), str)
+        inner = failure['scoped_select_inner_diagnostic']
+        self.assertIs(type(inner), dict)
+        self.assertEqual(set(inner), {'guards', 'condition', 'require_capability'})
+        self.assertIs(type(inner['guards']), list)
+        for name in ('condition', 'require_capability'):
+            self.assertTrue(type(inner[name]) is bool or (type(inner[name]) is str and inner[name] == 'unknown'))
         self.assertIn(failure["bootstrap_step"], {
             "legacy-runtime-inspect", "legacy-updater-probe", "legacy-capabilities-probe",
             "synthetic-runtime-inspect", "synthetic-db-seed", "synthetic-read-aggregate",
@@ -644,7 +653,8 @@ class FleetNativeRouteTest(unittest.TestCase):
                 failure = self.assert_bootstrap_failure_shape(metadata)
                 self.assertEqual(failure, {"bootstrap_step": "unknown", "code_label": "unknown", "source_line": None,
                                            "guard_line": None, "error_kind": "unknown", "command_outcome": "unknown", "command_returncode": None,
-                                           "scoped_select_diagnostic": "unknown"})
+                                           "scoped_select_diagnostic": "unknown",
+                                           "scoped_select_inner_diagnostic": module.inner_unknown()})
                 self.assertNotIn(private, json.dumps(metadata))
 
     def test_scoped_select_closed_observation_and_transport(self):
@@ -763,13 +773,16 @@ class FleetNativeRouteTest(unittest.TestCase):
                 category, error = observation(SimpleNamespace(returncode=1, stdout=b'', stderr=raw))
                 self.assertEqual(category, entry['category'])
                 # Discover owned diagnostic slot without prescribing its private name.
-                new_slots = set(native.NativeCommandFailure.__slots__) - {'_command_outcome', '_command_returncode'}
+                new_slots = set(native.NativeCommandFailure.__slots__) - {'_command_outcome', '_command_returncode', '_scoped_select_inner_diagnostic'}
                 self.assertEqual(len(new_slots), 1)
                 slot = next(iter(new_slots))
                 self.assertEqual(type(getattr(error, slot)), str)
-                for mutation in (lambda: setattr(error, slot, PRIVATE), lambda: delattr(error, slot), lambda: error.__init__('timeout')):
-                    with self.assertRaises((AttributeError, TypeError)):
-                        mutation()
+                for owned in (slot, '_scoped_select_inner_diagnostic'):
+                    saved = getattr(error, owned)
+                    for mutation in (lambda: setattr(error, owned, PRIVATE), lambda: delattr(error, owned), lambda: error.__init__('timeout')):
+                        with self.assertRaises((AttributeError, TypeError)):
+                            mutation()
+                    self.assertEqual(getattr(error, owned), saved)
                 self.assertEqual(getattr(error, slot), entry['category'])
 
         raw = messages[0]['stderr_utf8_exact'].encode()
@@ -885,6 +898,225 @@ class FleetNativeRouteTest(unittest.TestCase):
                 boundary(True)
         self.assertEqual(native.bootstrap_failure_metadata(caught.exception, codes=codes, bootstrap_codes=(boundary.__code__,))['scoped_select_diagnostic'], 'unknown')
 
+
+    def test_inner_recovery_observer_bounds_and_original_child_contract(self):
+        native = self.native_module()
+        private = 'PRIVATE_INNER_EXCEPTION_OR_PATH'
+        def require(condition):
+            if not condition:
+                raise ValueError(private)
+        calls = []
+        def dependency(*args, require_capability=True):
+            calls.append((args, require_capability))
+            require(False)
+        trusted = ((dependency.__code__, 'proxy-updates', 'service_recovery_dependency'),
+                   (require.__code__, 'proxy-recovery', 'require'))
+        def failure():
+            try:
+                dependency('original', require_capability=False)
+            except ValueError as error:
+                return error
+        original = failure()
+        value = native.project_inner_failure(original, trusted)
+        self.assertTrue(value['guards'])
+        self.assertIs(value['condition'], False)
+        self.assertIs(value['require_capability'], False)
+        self.assertNotIn(private, json.dumps(value))
+        self.assertEqual(native.project_inner_failure(original, ()), native.inner_unknown())
+        spoof = require.__code__.replace(co_name=require.__code__.co_name)
+        self.assertEqual(native.project_inner_failure(original, ((spoof, 'proxy-recovery', 'require'),)), native.inner_unknown())
+        class ForeignError(ValueError):
+            def __str__(self):
+                raise AssertionError('exception text must not be read')
+        foreign = ForeignError(private).with_traceback(original.__traceback__)
+        self.assertEqual(native.project_inner_failure(foreign, trusted), native.inner_unknown())
+        # Exactly the context/frame limits remain usable; overflow/cycles do not.
+        contexts = [failure() for _ in range(9)]
+        for first, second in zip(contexts, contexts[1:]):
+            first.__context__ = second
+        self.assertEqual(native.project_inner_failure(contexts[0], trusted), native.inner_unknown())
+        contexts[7].__context__ = None
+        self.assertTrue(native.project_inner_failure(contexts[0], trusted)['guards'])
+        contexts[7].__context__ = contexts[0]
+        self.assertEqual(native.project_inner_failure(contexts[0], trusted), native.inner_unknown())
+        leaf = original.__traceback__
+        while leaf.tb_next is not None:
+            leaf = leaf.tb_next
+        for count in (32, 33):
+            trace = None
+            for _ in range(count):
+                trace = types.TracebackType(trace, leaf.tb_frame, leaf.tb_lasti, leaf.tb_lineno)
+            bounded = ValueError(private).with_traceback(trace)
+            self.assertEqual(bool(native.project_inner_failure(bounded, trusted)['guards']), count == 32)
+        # Hostile values never cross the finite built-in schema.
+        class Trap:
+            def __str__(self):
+                raise AssertionError('foreign coercion')
+            def __eq__(self, other):
+                raise AssertionError('foreign comparison')
+        invalid = [None, Trap(), {**value, 'private': private}, {**value, 'condition': 1},
+                   {**value, 'condition': Trap()}, {**value, 'guards': tuple(value['guards'])},
+                   {**value, 'guards': [{'source': 'proxy-recovery', 'guard': 'require', 'line': True}]},
+                   {**value, 'guards': [{'source': private, 'guard': 'require', 'line': 1}]}]
+        for item in invalid:
+            self.assertEqual(native.inner_record(item), native.inner_unknown())
+        # The real binding wrapper calls the original once and rethrows the
+        # identical failure. A recovered or ambiguous failure is never a cause.
+        module = SimpleNamespace(service_recovery_dependency=dependency)
+        for recovered, observer_fault, setup_fault, broken_pipe, multiple in (
+                (False, False, False, False, False), (True, False, False, False, False),
+                (False, True, False, False, False), (False, False, True, False, False),
+                (False, False, False, True, False), (False, False, False, False, True)):
+            with self.subTest(recovered=recovered, observer_fault=observer_fault, setup_fault=setup_fault,
+                              broken_pipe=broken_pipe, multiple=multiple):
+                entered, caught, calls = [], [], []
+                def console(path, run_name):
+                    entered.append((path, run_name, sys.argv[:]))
+                    for turn in range(2 if multiple else 1):
+                        try:
+                            module.service_recovery_dependency('original', require_capability=False)
+                        except ValueError as error:
+                            caught.append(error)
+                            if not recovered and (not multiple or turn == 1):
+                                raise
+                reader, writer = os.pipe()
+                if broken_pipe:
+                    os.close(reader)
+                try:
+                    with patch.object(native, 'inner_trusted_codes', side_effect=RuntimeError(private) if setup_fault else None, return_value=trusted), patch.object(native.importlib, 'import_module', return_value=module), patch.object(runpy, 'run_path', side_effect=console), patch.object(native, 'project_inner_failure', side_effect=RuntimeError(private) if observer_fault else None, wraps=None if observer_fault else native.project_inner_failure):
+                        if recovered:
+                            native.scoped_select_child(writer, [], ['fixed-console', 'same-arg'])
+                        else:
+                            try:
+                                native.scoped_select_child(writer, [], ['fixed-console', 'same-arg'])
+                            except ValueError as error:
+                                self.assertIs(error, caught[-1])
+                            else:
+                                self.fail('original dependency failure must escape')
+                    self.assertIs(module.service_recovery_dependency, dependency)
+                    self.assertEqual(len(entered), 1)
+                    self.assertEqual(entered[0], ('fixed-console', '__main__', ['fixed-console', 'same-arg']))
+                    self.assertEqual(calls, [(('original',), False)] * (2 if multiple else 1))
+                    with self.assertRaises(OSError):
+                        os.fstat(writer)
+                    if not broken_pipe:
+                        raw = os.read(reader, 8193)
+                        self.assertLessEqual(len(raw), 8192)
+                        self.assertEqual(os.read(reader, 1), b'')
+                        record = json.loads(raw)
+                        self.assertNotIn(private, raw.decode())
+                        self.assertEqual(bool(record['guards']), not (recovered or observer_fault or setup_fault or multiple))
+                finally:
+                    if not broken_pipe:
+                        os.close(reader)
+        # Capture the original traceback nodes before the observer rethrows.
+        # Original callers may catch and chain the same exception immediately.
+        for mode in ('context', 'cause', 'suppressed'):
+            with self.subTest(original_exception_chain=mode):
+                state = {}
+                original_error, outer_error = ValueError(private), RuntimeError(private)
+                def original_dependency():
+                    raise original_error
+                def capture(error, codes):
+                    state['error'] = error
+                    state['original_nodes'] = BaseException.__traceback__.__get__(error, type(error)).tb_next
+                    state['chain'] = (error.__cause__, error.__context__, error.__suppress_context__)
+                    return native.inner_unknown()
+                observed_module = SimpleNamespace(service_recovery_dependency=original_dependency)
+                def original_console(path, run_name):
+                    try:
+                        observed_module.service_recovery_dependency()
+                    except ValueError as error:
+                        self.assertIs(error, state['error'])
+                        trace = BaseException.__traceback__.__get__(error, type(error))
+                        self.assertIs(trace.tb_frame.f_code, original_console.__code__)
+                        self.assertIs(trace.tb_next, state['original_nodes'])
+                        self.assertEqual((error.__cause__, error.__context__, error.__suppress_context__), state['chain'])
+                        if mode == 'cause':
+                            raise outer_error from error
+                        if mode == 'suppressed':
+                            raise outer_error from None
+                        raise outer_error
+                reader, writer = os.pipe()
+                try:
+                    with patch.object(native, 'inner_trusted_codes', return_value=trusted), patch.object(native.importlib, 'import_module', return_value=observed_module), patch.object(runpy, 'run_path', side_effect=original_console), patch.object(native, 'project_inner_failure', side_effect=capture):
+                        try:
+                            native.scoped_select_child(writer, [], ['fixed-console'])
+                        except RuntimeError as error:
+                            self.assertIs(error, outer_error)
+                        else:
+                            self.fail('original contextualized exception must escape')
+                    self.assertIs(observed_module.service_recovery_dependency, original_dependency)
+                    self.assertIs(outer_error.__context__, original_error)
+                    self.assertIs(outer_error.__cause__, original_error if mode == 'cause' else None)
+                    self.assertIs(outer_error.__suppress_context__, mode != 'context')
+                    self.assertEqual((original_error.__cause__, original_error.__context__, original_error.__suppress_context__), state['chain'])
+                    self.assertIs(original_error.__traceback__.tb_next, state['original_nodes'])
+                    self.assertEqual(os.read(reader, 8193), native.encoded(native.inner_unknown()))
+                finally:
+                    os.close(reader)
+        # Real subprocess/pipe/console execution: original argv, input, env,
+        # streams and success/nonzero/timeout results retain their meanings.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root/'python').symlink_to(sys.executable)
+            cli = root/'console'
+            cli.write_text("import os,sys\nassert sys.argv[1:]==['same-arg']\nassert sys.stdin.buffer.read()==b'fixed-input'\nassert os.environ['FIXED_PUBLIC']=='1'\nsys.stdout.buffer.write(b'fixed-out')\nsys.stderr.buffer.write(b'fixed-err')\nraise SystemExit(7)\n")
+            result = native.run(cli, 'same-arg', input_bytes=b'fixed-input', env={**os.environ, 'FIXED_PUBLIC':'1'},
+                                check=False, scoped_select_diagnostic=True, scoped_select_wheels={})
+            self.assertEqual((result.returncode, result.stdout, result.stderr), (7, b'fixed-out', b'fixed-err'))
+            cli.write_text("import sys\nsys.stderr.write('Error: native_service_recovery_required\\n')\nraise SystemExit(1)\n")
+            with self.assertRaises(native.NativeCommandFailure) as caught:
+                native.run(cli, scoped_select_diagnostic=True, scoped_select_wheels={})
+            self.assertEqual(native.command_failure_facts(caught.exception), ('nonzero-exit', 1))
+            self.assertEqual(native.scoped_select_failure_fact(caught.exception), 'recovery-required')
+            self.assertEqual(native.scoped_select_inner_fact(caught.exception), native.inner_unknown())
+            cli.write_text("import time\ntime.sleep(2)\n")
+            with self.assertRaises(native.NativeCommandFailure) as caught:
+                native.run(cli, timeout=0.05, scoped_select_diagnostic=True, scoped_select_wheels={})
+            self.assertEqual(native.command_failure_facts(caught.exception), ('timeout', None))
+            # ADV-001: the interpreter renders the original application nodes,
+            # including application-owned runpy, without observer scaffolding.
+            counter = root/'calls'
+            (root/'application.py').write_text('raise RuntimeError("fixed-public-application")\n')
+            cases = {
+                'runtime': 'raise RuntimeError("fixed-public-runtime")\n',
+                'import': 'import fixed_public_absent_import_for_ADV001\n',
+                'context': 'try:\n raise ValueError("fixed-public-context")\nexcept ValueError:\n raise RuntimeError("fixed-public-outer")\n',
+                'cause': 'try:\n raise ValueError("fixed-public-cause")\nexcept ValueError as cause:\n raise RuntimeError("fixed-public-outer") from cause\n',
+                'suppressed': 'try:\n raise ValueError("fixed-public-suppressed")\nexcept ValueError:\n raise RuntimeError("fixed-public-outer") from None\n',
+                'application-runpy': 'import runpy\nrunpy.run_path(str(Path(__file__).with_name("application.py")),run_name="__main__")\n',
+            }
+            prefix = ('#!'+sys.executable+'\nfrom pathlib import Path\n'
+                      'counter=Path('+repr(str(counter))+')\n'
+                      'counter.write_text(str(int(counter.read_text())+1))\n'
+                      'print("fixed-public-once",flush=True)\n')
+            for name, body in cases.items():
+                with self.subTest(original_terminal_output=name):
+                    cli.write_text(prefix+body)
+                    cli.chmod(0o700)
+                    kwargs = dict(capture_output=True, timeout=5)
+                    counter.write_text('0')
+                    direct = subprocess.run([str(cli)], **kwargs)
+                    self.assertEqual(counter.read_text(), '1')
+                    counter.write_text('0')
+                    wrapped, inner = native.scoped_select_subprocess([str(cli)], kwargs, {})
+                    self.assertEqual(counter.read_text(), '1')
+                    self.assertEqual((wrapped.returncode, wrapped.stdout, wrapped.stderr),
+                                     (direct.returncode, direct.stdout, direct.stderr))
+                    self.assertEqual((direct.returncode, direct.stdout), (1, b'fixed-public-once\n'))
+                    self.assertEqual(inner, native.inner_unknown())
+                    if name == 'application-runpy':
+                        self.assertIn(b'<frozen runpy>', direct.stderr)
+        # The reader accepts one <=8KiB strict object, not concatenation,
+        # duplicate fields, overflow or a fault. No additional child runs occur.
+        raw = native.encoded(value)
+        for payload, qualified in ((raw+b' '*(8192-len(raw)), True), (raw+b' '*(8193-len(raw)), False),
+                                   (raw+raw, False), (b'{"guards":[],"guards":[],"condition":"unknown","require_capability":"unknown"}', False)):
+            with patch.object(native.subprocess, 'run', return_value=SimpleNamespace(returncode=1)) as child, patch.object(native.os, 'read', side_effect=[payload, b'']):
+                _, record = native.scoped_select_subprocess(['fixed-console'], {}, {})
+            self.assertEqual(child.call_count, 1)
+            self.assertEqual(bool(record['guards']), qualified)
 
     def test_broker_child_preserves_original_exception_when_collection_fails(self):
         module = self.native_module()

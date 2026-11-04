@@ -421,3 +421,72 @@ retroactively. The current continuation cap is three, with one spent and two
 unused slots held by the unknown-cause stop condition. Historical counters stay
 unchanged. Observation preparation is not a diagnosed compatibility repair, and
 local source tests do not establish native, release, security or client acceptance.
+
+### Fixture-only inner recovery observation
+
+The scoped selector now runs its original installed console script once inside
+a fixture wrapper in the same host Python environment. Original arguments,
+environment, stdin, captured stdout/stderr, exit status and timeout are retained.
+Only that subprocess inherits one anonymous nonblocking diagnostic pipe. The
+wrapper calls the original `service_recovery_dependency` once per normal call,
+returns its exact result, rethrows the same exception and restores the original
+module binding in `finally`. Production packages and recovery algorithms remain
+unchanged; the test-process binding and bounded diagnostic I/O change.
+
+Before a dependency exception reaches its original caller, the observer removes
+only its own exact invocation frame and bare-rethrows the same exception. At the
+outermost fixture dispatch, a captured contiguous prefix identifies that exact
+dispatch, child and runpy invocation. Only those frame nodes are removed; original
+application nodes and application-owned runpy invocations remain intact. The
+interpreter renders the same exception with its current hook. The fixture never
+replaces or calls `sys.excepthook`, formats exceptions itself, filters output text
+or substitutes an exit code. Cause, context and suppression remain unchanged.
+
+`bootstrap_failure.scoped_select_inner_diagnostic` contains exactly `guards`,
+`condition` and `require_capability`. A guard has only a fixed `source` ID,
+fixed `guard` ID and numeric `line`. The two facts are strict booleans or
+`unknown`; they come only from the recognized `require(condition)` and
+`service_recovery_dependency(..., require_capability=...)` frames. No messages,
+exception arguments, traceback text, paths, hashes, record data or broad locals
+are exported. The existing fifteen output categories keep their meanings.
+
+Qualification checks both exact supplied wheel bytes and the frozen module
+bytes at the installed distribution location, then compares full compiled function
+structure before retaining loaded code-object identities. Traversal is
+limited to eight exception contexts and 32 frames per exception. Foreign raise
+sites or types, source/code drift, cycles, overflow, ambiguous/recovered failures
+and observer faults stay unknown. A candidate is usable only when the failing
+console exception retains that one dependency failure in its context chain.
+Success and other output categories do not export an inner failure.
+
+The child attempts one private record of at most 8192 bytes. A partial write,
+duplicate fields, extra record, oversized/invalid input or collection failure
+cannot replace the original command outcome. Both pipe endpoints are closed on
+all terminal paths. No additional Engine, Docker, SQL, HTTP or CLI probe is
+made. A coordinate identifies an observed trusted guard; it does not by itself
+establish a unique root cause or justify changing a denial/integrity check.
+
+Local output verification compares an actual executable directly with its wrapped
+execution for uncaught RuntimeError, missing import, implicit context, explicit
+cause, suppressed context and an application-owned runpy call. Byte comparisons
+and interpreter versions are retained separately. A source scan of the frozen
+product trees and source-qualified imports in the retained offline environment
+show no product-installed custom exception hook. A real target hook or terminal
+state dependency requiring broader handling stops this repair for re-planning;
+the fixture is not a general interpreter or custom-hook emulator.
+
+The separate local qualified-dependency proof uses a generated console shim and
+manually assembled/extracted source-derived fixture wheels. It substitutes
+`FleetConfig.load`, `select_release_components` dispatch and `UpdateEngine`.
+It exercises real `CLI.main`, `_scoped_idle` and the protected dependency/private
+validators, but bypasses full selector construction, lifecycle/updater locks and
+earlier selector preflights. It does not attest released/native wheel artifacts
+or the complete consumer path. Earlier frozen records are retained with this
+successor clarification; local evidence does not establish the native cause.
+
+The earlier three-slot accounts above are historical. The explicit owner-approved
+4 November continuation has a total automatic cap of five, with two spent.
+Ordinal three is one reviewed inner diagnostic; ordinals four and five require
+concretely diagnosed, tested and reviewed repairs. Unknown after the diagnostic
+stops progression. Source verification grants no native/publication action,
+reservation, release acceptance or LTX update authority by itself.

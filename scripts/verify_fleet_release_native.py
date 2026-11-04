@@ -24,6 +24,7 @@ import time
 import tomllib
 import types
 import uuid
+import zipfile
 from pathlib import Path
 
 REGISTRY_IMAGE = "registry@sha256:1290056e2357eceb0c047cb60ae9abb370305a218e2df650eb8d3ea021b1c151"
@@ -200,11 +201,302 @@ def classify_scoped_select_output(returncode, stdout, stderr, messages=SCOPED_SE
     return next((category for literal, category in messages if stderr == literal), "unknown")
 
 
+INNER_GUARDS = {
+    "proxy-updates": ("service_recovery_dependency", "_validate_predecessor", "observe_original",
+                      "_require_terminated_helper", "_require_recovery_capability",
+                      "_needs_service_receipt", "_retains_predecessor"),
+    "proxy-recovery": ("hold", "require", "strict_json", "_pairs", "_finite_float", "_pattern",
+                       "validate_continuity", "validate_receipt", "_private", "open_existing_directory",
+                       "read_private", "validate_job", "load_bound_job", "validate_original_restored",
+                       "runtime_fingerprints", "_timestamp"),
+}
+_SCOPED_SELECT_DISPATCH_FRAME = None
+_SCOPED_SELECT_TRACEBACK = None
+
+
+def inner_unknown():
+    return {"guards": [], "condition": "unknown", "require_capability": "unknown"}
+
+
+def inner_record(value):
+    """Closed value schema; never coerce foreign objects or retain mutable input."""
+    unknown = inner_unknown()
+    if (type(value) is not dict or any(type(k) is not str for k in value)
+            or set(value) != set(unknown)):
+        return unknown
+    guards = value["guards"]
+    if type(guards) is not list or len(guards) > 256:
+        return unknown
+    result = inner_unknown()
+    for row in guards:
+        if (type(row) is not dict or any(type(k) is not str for k in row)
+                or set(row) != {"source", "guard", "line"}):
+            return unknown
+        source, guard, line = row["source"], row["guard"], row["line"]
+        if (type(source) is not str or source not in INNER_GUARDS or type(guard) is not str
+                or guard not in INNER_GUARDS[source] or type(line) is not int or not 0 < line < 65536):
+            return unknown
+        result["guards"].append({"source": source, "guard": guard, "line": line})
+    for key in ("condition", "require_capability"):
+        fact = value[key]
+        if type(fact) is not bool and not (type(fact) is str and fact == "unknown"):
+            return unknown
+        result[key] = fact
+    if not guards and result != unknown:
+        return unknown
+    return result
+
+
+def inner_contexts(error):
+    contexts, seen = [], set()
+    while error is not None:
+        if id(error) in seen or len(contexts) == 8:
+            return None
+        seen.add(id(error))
+        contexts.append(error)
+        error = BaseException.__context__.__get__(error, type(error))
+    return contexts
+
+
+def project_inner_failure(error, trusted):
+    """Read selected strict booleans only after exact loaded-code qualification."""
+    contexts = inner_contexts(error)
+    if contexts is None:
+        return inner_unknown()
+    result = inner_unknown()
+    facts = {"condition": set(), "require_capability": set()}
+    seen = set()
+    for context in contexts:
+        if type(context) not in (ValueError, RuntimeError, TypeError, KeyError, OSError,
+                                 FileNotFoundError, PermissionError):
+            return inner_unknown()
+        trace = BaseException.__traceback__.__get__(context, type(context))
+        count, leaf = 0, None
+        while trace is not None:
+            if count == 32:
+                return inner_unknown()
+            count += 1
+            code, line = trace.tb_frame.f_code, trace.tb_lineno
+            leaf = next((row for row in trusted if row[0] is code), None)
+            if leaf is not None:
+                if type(line) is not int or line not in {n for _, _, n in code.co_lines()}:
+                    return inner_unknown()
+                _, source, guard = leaf
+                coordinate = (source, guard, line)
+                if coordinate not in seen:
+                    result["guards"].append(dict(source=source, guard=guard, line=line))
+                    seen.add(coordinate)
+                key = ("condition" if (source, guard) == ("proxy-recovery", "require") else
+                       "require_capability" if (source, guard) == ("proxy-updates", "service_recovery_dependency") else None)
+                if key is not None:
+                    value = trace.tb_frame.f_locals.get(key)
+                    facts[key].add(value if type(value) is bool else "unknown")
+            trace = trace.tb_next
+        # An untrusted raise site cannot become a qualified failure merely
+        # because an outer frame happened to be a recognized caller.
+        if leaf is None:
+            return inner_unknown()
+    for key, values in facts.items():
+        if len(values) == 1:
+            result[key] = next(iter(values))
+    value = inner_record(result)
+    return value if len(encoded(value)) <= 8192 else inner_unknown()
+
+
+def inner_trusted_codes(wheels):
+    """Bind installed functions to exact wheel bytes and frozen source bytes."""
+    if type(wheels) is not list or len(wheels) != 2:
+        return ()
+    wheel_members = {}
+    for row in wheels:
+        if type(row) is not list or len(row) != 3 or any(type(v) is not str for v in row):
+            return ()
+        name, path, checksum = row
+        if name not in ("dc-overview", "cryptolabs-proxy") or name in wheel_members:
+            return ()
+        raw = Path(path).read_bytes()
+        if type(checksum) is not str or digest(raw) != checksum:
+            return ()
+        with zipfile.ZipFile(__import__("io").BytesIO(raw)) as archive:
+            wheel_members[name] = {n: archive.read(n) for n in archive.namelist() if n.endswith(".py")}
+    trusted = []
+    for module_name, distribution, product, source_id in (
+        ("dc_overview.fleet_upgrade", "dc-overview", "dc", None),
+        ("cryptolabs_proxy.updates", "cryptolabs-proxy", "proxy", "proxy-updates"),
+        ("cryptolabs_proxy.update_recovery", "cryptolabs-proxy", "proxy", "proxy-recovery"),
+    ):
+        module = importlib.import_module(module_name)
+        member = module_name.replace(".", "/") + ".py"
+        source = wheel_members[distribution][member]
+        expected = FROZEN_PRODUCT_HASHES[product]["src/" + member]
+        installed = importlib.metadata.distribution(distribution).locate_file(member).resolve()
+        if (Path(module.__file__).resolve() != installed or digest(source) != expected
+                or installed.read_bytes() != source):
+            return ()
+        compiled = compile(source, str(installed), "exec")
+        definitions = {c.co_name: c for c in compiled.co_consts if type(c) is types.CodeType}
+        for name in INNER_GUARDS.get(source_id, ()):
+            function = vars(module).get(name)
+            if name == "open_existing_directory" and type(function) is types.FunctionType:
+                function = function.__dict__.get("__wrapped__")
+            if (type(function) is not types.FunctionType
+                    or not helper_code_matches(function.__code__, definitions[name])):
+                return ()
+            trusted.append((function.__code__, source_id, name))
+    return tuple(trusted)
+
+
+def scoped_select_child(descriptor, wheels, argv):
+    """Execute the original console once under a bounded observation binding."""
+    global _SCOPED_SELECT_TRACEBACK
+    import runpy
+    _SCOPED_SELECT_TRACEBACK = None
+    invocation = sys._getframe()
+    caller = invocation.f_back
+    dispatch = (_SCOPED_SELECT_DISPATCH_FRAME, caller, invocation)
+    runpy_codes = tuple(f.__code__ if type(f) is types.FunctionType else None
+                        for f in (runpy.run_path, runpy._run_module_code, runpy._run_code))
+    original, module, failures, trusted = None, None, [], ()
+    try:
+        trusted = inner_trusted_codes(wheels)
+        if trusted:
+            module = importlib.import_module("cryptolabs_proxy.updates")
+            original = module.service_recovery_dependency
+    except BaseException:
+        pass  # Diagnostic setup never substitutes for the original console.
+    def observed(*args, **kwargs):
+        observer_invocation = sys._getframe()
+        try:
+            return original(*args, **kwargs)
+        except BaseException as error:
+            try:
+                value = project_inner_failure(error, trusted)
+            except BaseException:
+                value = inner_unknown()
+            # Multiple recovered failures cannot uniquely bind this observation.
+            if len(failures) < 2:
+                failures.append((error, value))
+            try:
+                trace = BaseException.__traceback__.__get__(error, type(error))
+                if (trace is not None and trace.tb_frame is observer_invocation
+                        and trace.tb_frame.f_code is observer_code):
+                    # Remove our one invocation before the original caller can
+                    # catch/contextualize it. Preserve every original node.
+                    BaseException.__traceback__.__set__(error, trace.tb_next)
+            except BaseException:
+                pass  # A filtering fault must never replace the exception.
+            raise
+    observer_code = observed.__code__
+    if original is not None:
+        module.service_recovery_dependency = observed
+    previous_argv, previous_path = sys.argv, sys.path[:]
+    value = inner_unknown()
+    try:
+        sys.argv = argv
+        sys.path[0] = str(Path(argv[0]).parent)
+        runpy.run_path(argv[0], run_name="__main__")
+    except BaseException as error:
+        try:
+            contexts = inner_contexts(error)
+            if contexts is not None and len(failures) == 1 and any(e is failures[0][0] for e in contexts):
+                value = failures[0][1]
+        except BaseException:
+            pass
+        try:
+            trace = BaseException.__traceback__.__get__(error, type(error))
+            if (dispatch[0] is not None and caller.f_code is main.__code__
+                    and caller.f_back is dispatch[0] and trace is not None
+                    and trace.tb_frame is invocation):
+                trace = trace.tb_next
+                previous, scaffold = invocation, []
+                for code in runpy_codes:
+                    if (code is None or trace is None or trace.tb_frame.f_code is not code
+                            or trace.tb_frame.f_back is not previous):
+                        break
+                    scaffold.append(trace.tb_frame)
+                    previous, trace = trace.tb_frame, trace.tb_next
+                else:
+                    if trace is not None and trace.tb_frame.f_back is previous:
+                        # Actual frame identities bind this single invocation
+                        # prefix. Application-owned runpy calls follow it and
+                        # are never searched or removed.
+                        _SCOPED_SELECT_TRACEBACK = (error, (*dispatch, *scaffold), trace)
+        except BaseException:
+            pass
+        raise
+    finally:
+        if original is not None:
+            module.service_recovery_dependency = original
+        sys.argv, sys.path[:] = previous_argv, previous_path
+        try:
+            raw = encoded(inner_record(value))
+            if len(raw) <= 8192:
+                os.write(descriptor, raw)  # One nonblocking write; partial means unknown.
+        except BaseException:
+            pass
+        finally:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+def scoped_select_subprocess(command, kwargs, wheels):
+    """Private pipe only; no output readback extension or extra CLI invocation."""
+    descriptors = []
+    try:
+        configuration = [[name, str(value[0]), value[2]] for name, value in wheels.items()]
+        reader, writer = os.pipe()
+        descriptors.extend((reader, writer))
+        os.set_blocking(reader, False)
+        os.set_blocking(writer, False)
+        child = [str(Path(command[0]).parent / "python"), "-B", str(Path(__file__).resolve()),
+                 "--scoped-select-child", str(writer), json.dumps(configuration), *command]
+    except BaseException:
+        for fd in descriptors:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        return subprocess.run(command, **kwargs), inner_unknown()
+    try:
+        result = subprocess.run(child, pass_fds=(writer,), **kwargs)
+        try:
+            os.close(writer)
+            descriptors.remove(writer)
+        except OSError:
+            pass
+        raw = b""
+        try:
+            while len(raw) <= 8192:
+                chunk = os.read(reader, 8193 - len(raw))
+                if not chunk:
+                    break
+                raw += chunk
+            def unique(pairs):
+                result = {}
+                for key, item in pairs:
+                    if key in result:
+                        raise ValueError()
+                    result[key] = item
+                return result
+            value = inner_record(json.loads(raw, object_pairs_hook=unique)) if 0 < len(raw) <= 8192 else inner_unknown()
+        except BaseException:
+            value = inner_unknown()
+        return result, value
+    finally:
+        for fd in descriptors:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
 class NativeCommandFailure(RuntimeError):
     """Owned, bounded command facts; never retain arguments or captured output."""
-    __slots__ = ("_command_outcome", "_command_returncode", "_scoped_select_diagnostic")
+    __slots__ = ("_command_outcome", "_command_returncode", "_scoped_select_diagnostic", "_scoped_select_inner_diagnostic")
 
-    def __init__(self, outcome, returncode=None, scoped_select_diagnostic="unknown"):
+    def __init__(self, outcome, returncode=None, scoped_select_diagnostic="unknown", inner=None):
         if hasattr(self, "_command_outcome") or hasattr(self, "_command_returncode"):
             raise AttributeError("command diagnostics are immutable")
         outcomes = {"nonzero-exit": "nonzero-exit", "timeout": "timeout", "spawn-error": "spawn-error"}
@@ -213,18 +505,22 @@ class NativeCommandFailure(RuntimeError):
         object.__setattr__(self, "_command_outcome", outcome)
         object.__setattr__(self, "_command_returncode", returncode)
         object.__setattr__(self, "_scoped_select_diagnostic", scoped_select_category(scoped_select_diagnostic))
+        value = inner_record(inner)
+        object.__setattr__(self, "_scoped_select_inner_diagnostic",
+                           (tuple((g['source'], g['guard'], g['line']) for g in value['guards']),
+                            value['condition'], value['require_capability']))
         message = "native command timed out; native gate held" if outcome == "timeout" else "native command failed; native gate held"
         RuntimeError.__init__(self, message)
 
     def __setattr__(self, name, value):
-        if name in ("_command_outcome", "_command_returncode", "_scoped_select_diagnostic"):
+        if name in NativeCommandFailure.__slots__:
             raise AttributeError("command diagnostics are immutable")
         # Exception propagation/context managers must still manage traceback
         # and chaining attributes. Only the owned command facts are immutable.
         BaseException.__setattr__(self, name, value)
 
     def __delattr__(self, name):
-        if name in ("_command_outcome", "_command_returncode", "_scoped_select_diagnostic"):
+        if name in NativeCommandFailure.__slots__:
             raise AttributeError("command diagnostics are immutable")
         BaseException.__delattr__(self, name)
 
@@ -257,11 +553,30 @@ def scoped_select_failure_fact(
         return "unknown"
 
 
-def run(*args, input_bytes=None, timeout=180, check=True, env=None, scoped_select_diagnostic=False):
+def scoped_select_inner_fact(error, command_type=NativeCommandFailure,
+                            slot=NativeCommandFailure.__dict__["_scoped_select_inner_diagnostic"]):
+    if type(error) is not command_type:
+        return inner_unknown()
     try:
-        result = subprocess.run(
-            [str(a) for a in args], input=input_bytes, capture_output=True, timeout=timeout, env=env
-        )
+        guards, condition, capability = slot.__get__(error, command_type)
+        if type(guards) is not tuple or any(type(g) is not tuple or len(g) != 3 for g in guards):
+            return inner_unknown()
+        return inner_record({'guards': [dict(source=s, guard=g, line=n) for s, g, n in guards],
+                             'condition': condition, 'require_capability': capability})
+    except BaseException:
+        return inner_unknown()
+
+
+def run(*args, input_bytes=None, timeout=180, check=True, env=None, scoped_select_diagnostic=False,
+        scoped_select_wheels=None):
+    inner = inner_unknown()
+    try:
+        command = [str(a) for a in args]
+        kwargs = dict(input=input_bytes, capture_output=True, timeout=timeout, env=env)
+        if scoped_select_diagnostic is True and scoped_select_wheels is not None:
+            result, inner = scoped_select_subprocess(command, kwargs, scoped_select_wheels)
+        else:
+            result = subprocess.run(command, **kwargs)
     except subprocess.TimeoutExpired:
         raise NativeCommandFailure("timeout") from None
     except OSError:
@@ -274,7 +589,8 @@ def run(*args, input_bytes=None, timeout=180, check=True, env=None, scoped_selec
                 diagnostic = classify_scoped_select_output(result.returncode, result.stdout, result.stderr)
             except Exception:
                 pass  # Collection must never replace the original checked command failure.
-        raise NativeCommandFailure("nonzero-exit", result.returncode, diagnostic) from None
+        raise NativeCommandFailure("nonzero-exit", result.returncode, diagnostic,
+                                   inner if diagnostic == 'recovery-required' else None) from None
     return result
 
 
@@ -1219,7 +1535,8 @@ print(json.dumps({'id':j['id']}))
         candidate = qa.data / 'compatible-bootstrap.json'
         write(candidate, manifest)
         run(cli, 'release', 'select', '--release-manifest', candidate,
-            '--component', 'cryptolabs-proxy', '--record-cli', scoped_select_diagnostic=True)
+            '--component', 'cryptolabs-proxy', '--record-cli', scoped_select_diagnostic=True,
+            scoped_select_wheels=self.current)
         assert (qa.jobs / (job_id + '.json')).read_bytes() == self.failed_job_raw
         assert (qa.jobs / 'active.json').read_bytes() == before['active.json'][0]
         _bootstrap_step = "proxy-plan"
@@ -3162,7 +3479,7 @@ def bootstrap_failure_metadata(
 ):
     result = {"bootstrap_step": "unknown", "code_label": "unknown", "source_line": None,
               "guard_line": None, "error_kind": "unknown", "command_outcome": "unknown", "command_returncode": None,
-              "scoped_select_diagnostic": "unknown"}
+              "scoped_select_diagnostic": "unknown", "scoped_select_inner_diagnostic": inner_unknown()}
     frames = []
     frame = BaseException.__traceback__.__get__(error, type(error))
     while frame is not None:
@@ -3200,6 +3517,7 @@ def bootstrap_failure_metadata(
         result["command_outcome"], result["command_returncode"] = command_failure_facts(error)
         if result["bootstrap_step"] == "scoped-select":
             result["scoped_select_diagnostic"] = scoped_select_failure_fact(error)
+            result["scoped_select_inner_diagnostic"] = scoped_select_inner_fact(error)
     return result
 
 
@@ -3239,6 +3557,9 @@ def inspect_volume(name):
 
 # TRACEWEAVER: entrypoint=main; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001; ver=VER-FLEETUPDATE-001
 def main():
+    if len(sys.argv) >= 5 and sys.argv[1] == '--scoped-select-child':
+        scoped_select_child(int(sys.argv[2]), json.loads(sys.argv[3]), sys.argv[4:])
+        return
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check-inputs-only", action="store_true")
     parser.add_argument("--broker-child", action="store_true")
@@ -3267,4 +3588,21 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    _SCOPED_SELECT_DISPATCH_FRAME = sys._getframe()
+    try:
+        main()
+    except BaseException as error:
+        try:
+            captured = _SCOPED_SELECT_TRACEBACK
+            if captured is not None and captured[0] is error:
+                trace = BaseException.__traceback__.__get__(error, type(error))
+                for frame in captured[1]:
+                    if trace is None or trace.tb_frame is not frame:
+                        break
+                    trace = trace.tb_next
+                else:
+                    if trace is captured[2]:
+                        BaseException.__traceback__.__set__(error, trace)
+        except BaseException:
+            pass
+        raise  # The same exception, rendered by the interpreter's current hook.
