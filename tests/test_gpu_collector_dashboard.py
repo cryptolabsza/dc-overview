@@ -11,7 +11,7 @@ import yaml
 ROOT = Path(__file__).parents[1]
 
 
-@pytest.mark.parametrize("name,panel_id", [("DC_Exporter_Details.json", 12), ("DC_Overview.json", 11)])
+@pytest.mark.parametrize("name,panel_id", [("DC_Exporter_Details.json", 12), ("DC_Overview.json", 11), ("Vast_Dashboard.json", 35)])
 def test_dashboard_distinguishes_synthetic_telemetry_failure(name, panel_id):
     packaged = ROOT / "src/dc_overview/dashboards" / name
     mirrored = ROOT / "dashboards" / name
@@ -28,10 +28,11 @@ def test_dashboard_distinguishes_synthetic_telemetry_failure(name, panel_id):
 
 
 @pytest.mark.skipif(not shutil.which("promtool"), reason="promtool unavailable")
+@pytest.mark.parametrize("name,panel_id", [("DC_Exporter_Details.json", 12), ("Vast_Dashboard.json", 35)])
 # TRACEWEAVER: entrypoint=test_dashboard_promql_keeps_real_faults_and_passthrough; req=REQ-GPUALERT-003; trace=TRACE-GPUALERT-003; ver=VER-GPUALERT-003
-def test_dashboard_promql_keeps_real_faults_and_passthrough(tmp_path):
-    d = json.loads((ROOT / "src/dc_overview/dashboards/DC_Exporter_Details.json").read_text())
-    expression = next(p for p in d["panels"] if p.get("id") == 12)["targets"][0]["expr"]
+def test_dashboard_promql_keeps_real_faults_and_passthrough(tmp_path, name, panel_id):
+    d = json.loads((ROOT / "src/dc_overview/dashboards" / name).read_text())
+    expression = next(p for p in d["panels"] if p.get("id") == panel_id)["targets"][0]["expr"]
     inputs = []
     expected = []
     for host, uuid, value, displayed in [("collector", "DRIVER-ERROR", 2, 6), ("physical", "GPU-real", 2, 2), ("passthrough", "GPU-vm", 3, 3)]:
