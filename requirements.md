@@ -99,3 +99,10 @@ cases. Representative local validation also exercised candidate Flask metrics
 through a real Prometheus scrape and the separately owned expressions in 13
 scenarios. These results establish local behavior; they do not claim production
 deployment, notification delivery or acceptance of unrelated Fleet work.
+
+## GPU alert quality — approved 4 November 2026
+
+Owner instruction: “Approve and deploy to both sights”, approving the prior concise Telegram and collector/dashboard triage plan for LTX and Charlotte. Administrative identifiers below label that approved scope. Publication/deployment require fresh remote identity, tests, review, official CI/release artifacts and native site acceptance. This record is not evidence of deployment. No hardware operations, rental changes, credential changes or extra synthetic Telegram sends are authorized.
+
+- REQ-GPUALERT-002: Host-level sustained collector coverage and truthful recovery; additive dc_exporter source intent preserves aggregate GPU policy and legacy scrapes.
+- REQ-GPUALERT-003: Synthetic DRIVER-ERROR dashboard values show telemetry unavailable while real fault/passthrough states remain visible.

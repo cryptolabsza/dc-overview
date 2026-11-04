@@ -1,0 +1,12 @@
+{
+  "focused_overview": 96,
+  "watchdog_full_pass": 205,
+  "watchdog_skipped": 43,
+  "watchdog_subtests": 29,
+  "real_HTTP_replays": "all3 passed after network sandbox removal",
+  "full_overview": "2043 passed",
+  "production_acceptance": "pending",
+  "review": "PASS",
+  "watchdog_full": "205 passed,43 skipped,29 subtests passed",
+  "network_integration": "prior socket-blocked cases now pass"
+}
