@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily verified stable release selection refresh
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=15m
+Unit=dc-overview-release-refresh.service
+
+[Install]
+WantedBy=timers.target

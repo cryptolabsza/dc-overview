@@ -1,0 +1,2251 @@
+............FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF.... [ 96%]
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+_____ test_existing_components_default_pinned_with_no_implicit_follow[ltx] _____
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d14b1a0>, <test_release_broker.Owner object at 0x10d14b260>)
+
+    def test_existing_components_default_pinned_with_no_implicit_follow(policy_product):
+        host, service, owner = policy_product
+        before = host.store.load().selection_raw
+>       listing = service.dispatch("policy-list", {}, actor=ACTOR)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_release_policy.py:109: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-list', params = {}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+__ test_existing_components_default_pinned_with_no_implicit_follow[charlotte] __
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d19c770>, <test_release_broker.Owner object at 0x10d19caa0>)
+
+    def test_existing_components_default_pinned_with_no_implicit_follow(policy_product):
+        host, service, owner = policy_product
+        before = host.store.load().selection_raw
+>       listing = service.dispatch("policy-list", {}, actor=ACTOR)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_release_policy.py:109: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-list', params = {}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_unpin_survives_restart_and_changes_only_one_policy_without_install[ltx] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d19e210>, <test_release_broker.Owner object at 0x10d19e2a0>)
+
+    def test_unpin_survives_restart_and_changes_only_one_policy_without_install(policy_product):
+        host, service, owner = policy_product
+        before = host.store.load()
+>       result = set_mode(service, "follow-stable")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_release_policy.py:119: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '686172db625bed42d2fd2b63c6fa43b6fa22322e4f019bae4ef9679537c7521f'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_unpin_survives_restart_and_changes_only_one_policy_without_install[charlotte] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d2990d0>, <test_release_broker.Owner object at 0x10d299010>)
+
+    def test_unpin_survives_restart_and_changes_only_one_policy_without_install(policy_product):
+        host, service, owner = policy_product
+        before = host.store.load()
+>       result = set_mode(service, "follow-stable")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_release_policy.py:119: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '7f0ed032b41772c6aa18c81f0a70d8a2509ebffa8a2d579e9b660fd003f98b69'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_refresh_only_advances_opted_in_service_and_repin_installed_freezes_it[ltx] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d298b30>, <test_release_broker.Owner object at 0x10d29ba10>)
+admitted = {'times': {'issued_at': '2026-11-04T16:43:21.679174+00:00', 'expires_at': '2026-11-04T16:45:31.679174+00:00'}, 'produc...95aceaf7040fb6828e1d62a85f9db794f3bb97791501e78550', 'verify': <function admitted.<locals>.verify at 0x10d0f7560>, ...}
+
+    def test_refresh_only_advances_opted_in_service_and_repin_installed_freezes_it(policy_product, admitted):
+        host, service, owner = policy_product
+>       set_mode(service, "follow-stable")
+
+tests/test_release_policy.py:134: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '686172db625bed42d2fd2b63c6fa43b6fa22322e4f019bae4ef9679537c7521f'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_refresh_only_advances_opted_in_service_and_repin_installed_freezes_it[charlotte] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d19c6b0>, <test_release_broker.Owner object at 0x10d19ce60>)
+admitted = {'times': {'issued_at': '2026-11-04T16:43:21.700362+00:00', 'expires_at': '2026-11-04T16:45:31.700362+00:00'}, 'produc...c19ab394059365642df6c77eb353238a936dbcdf1a53f81e09', 'verify': <function admitted.<locals>.verify at 0x10d1b53a0>, ...}
+
+    def test_refresh_only_advances_opted_in_service_and_repin_installed_freezes_it(policy_product, admitted):
+        host, service, owner = policy_product
+>       set_mode(service, "follow-stable")
+
+tests/test_release_policy.py:134: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '7f0ed032b41772c6aa18c81f0a70d8a2509ebffa8a2d579e9b660fd003f98b69'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+____ test_mode_failure_has_no_partial_policy_or_selection_change[ltx-stale] ____
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d299100>, <test_release_broker.Owner object at 0x10d299190>)
+fault = 'stale'
+
+    @pytest.mark.parametrize("fault", ["stale", "busy", "disabled", "unproven-installed"])
+    def test_mode_failure_has_no_partial_policy_or_selection_change(policy_product, fault):
+        host, service, owner = policy_product
+        from dc_overview.release_broker import BrokerError
+>       set_mode(service, "follow-stable")
+
+tests/test_release_policy.py:153: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '686172db625bed42d2fd2b63c6fa43b6fa22322e4f019bae4ef9679537c7521f'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+____ test_mode_failure_has_no_partial_policy_or_selection_change[ltx-busy] _____
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d19d7f0>, <test_release_broker.Owner object at 0x10d19cbc0>)
+fault = 'busy'
+
+    @pytest.mark.parametrize("fault", ["stale", "busy", "disabled", "unproven-installed"])
+    def test_mode_failure_has_no_partial_policy_or_selection_change(policy_product, fault):
+        host, service, owner = policy_product
+        from dc_overview.release_broker import BrokerError
+>       set_mode(service, "follow-stable")
+
+tests/test_release_policy.py:153: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '686172db625bed42d2fd2b63c6fa43b6fa22322e4f019bae4ef9679537c7521f'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+__ test_mode_failure_has_no_partial_policy_or_selection_change[ltx-disabled] ___
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d238d70>, <test_release_broker.Owner object at 0x10d239130>)
+fault = 'disabled'
+
+    @pytest.mark.parametrize("fault", ["stale", "busy", "disabled", "unproven-installed"])
+    def test_mode_failure_has_no_partial_policy_or_selection_change(policy_product, fault):
+        host, service, owner = policy_product
+        from dc_overview.release_broker import BrokerError
+>       set_mode(service, "follow-stable")
+
+tests/test_release_policy.py:153: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '686172db625bed42d2fd2b63c6fa43b6fa22322e4f019bae4ef9679537c7521f'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_mode_failure_has_no_partial_policy_or_selection_change[ltx-unproven-installed] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d23b050>, <test_release_broker.Owner object at 0x10d23b560>)
+fault = 'unproven-installed'
+
+    @pytest.mark.parametrize("fault", ["stale", "busy", "disabled", "unproven-installed"])
+    def test_mode_failure_has_no_partial_policy_or_selection_change(policy_product, fault):
+        host, service, owner = policy_product
+        from dc_overview.release_broker import BrokerError
+>       set_mode(service, "follow-stable")
+
+tests/test_release_policy.py:153: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '686172db625bed42d2fd2b63c6fa43b6fa22322e4f019bae4ef9679537c7521f'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_mode_failure_has_no_partial_policy_or_selection_change[charlotte-stale] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d23b410>, <test_release_broker.Owner object at 0x10d23bf80>)
+fault = 'stale'
+
+    @pytest.mark.parametrize("fault", ["stale", "busy", "disabled", "unproven-installed"])
+    def test_mode_failure_has_no_partial_policy_or_selection_change(policy_product, fault):
+        host, service, owner = policy_product
+        from dc_overview.release_broker import BrokerError
+>       set_mode(service, "follow-stable")
+
+tests/test_release_policy.py:153: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '7f0ed032b41772c6aa18c81f0a70d8a2509ebffa8a2d579e9b660fd003f98b69'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_mode_failure_has_no_partial_policy_or_selection_change[charlotte-busy] __
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d19d6d0>, <test_release_broker.Owner object at 0x10d19ecf0>)
+fault = 'busy'
+
+    @pytest.mark.parametrize("fault", ["stale", "busy", "disabled", "unproven-installed"])
+    def test_mode_failure_has_no_partial_policy_or_selection_change(policy_product, fault):
+        host, service, owner = policy_product
+        from dc_overview.release_broker import BrokerError
+>       set_mode(service, "follow-stable")
+
+tests/test_release_policy.py:153: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '7f0ed032b41772c6aa18c81f0a70d8a2509ebffa8a2d579e9b660fd003f98b69'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_mode_failure_has_no_partial_policy_or_selection_change[charlotte-disabled] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d239130>, <test_release_broker.Owner object at 0x10d2385f0>)
+fault = 'disabled'
+
+    @pytest.mark.parametrize("fault", ["stale", "busy", "disabled", "unproven-installed"])
+    def test_mode_failure_has_no_partial_policy_or_selection_change(policy_product, fault):
+        host, service, owner = policy_product
+        from dc_overview.release_broker import BrokerError
+>       set_mode(service, "follow-stable")
+
+tests/test_release_policy.py:153: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '7f0ed032b41772c6aa18c81f0a70d8a2509ebffa8a2d579e9b660fd003f98b69'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_mode_failure_has_no_partial_policy_or_selection_change[charlotte-unproven-installed] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d239f70>, <test_release_broker.Owner object at 0x10d23b4d0>)
+fault = 'unproven-installed'
+
+    @pytest.mark.parametrize("fault", ["stale", "busy", "disabled", "unproven-installed"])
+    def test_mode_failure_has_no_partial_policy_or_selection_change(policy_product, fault):
+        host, service, owner = policy_product
+        from dc_overview.release_broker import BrokerError
+>       set_mode(service, "follow-stable")
+
+tests/test_release_policy.py:153: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '7f0ed032b41772c6aa18c81f0a70d8a2509ebffa8a2d579e9b660fd003f98b69'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[ltx-signature] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d14a3c0>, <test_release_broker.Owner object at 0x10d14b950>)
+admitted = {'times': {'issued_at': '2026-11-04T16:43:21.948765+00:00', 'expires_at': '2026-11-04T16:45:31.948765+00:00'}, 'produc...e53c3df42c52d63af8b4077bf67bc3b7666e6c38c0f21b72ee', 'verify': <function admitted.<locals>.verify at 0x10d1b4f40>, ...}
+fault = 'signature'
+
+    @pytest.mark.parametrize('fault', ['signature','expired','revoked','replay','digest','unavailable'])
+    def test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure(policy_product, admitted, fault):
+        from dataclasses import replace
+        from dc_overview.release_broker import BrokerError, canonical, sha
+        from datetime import timedelta
+        host, service, owner = policy_product
+>       set_mode(service, 'follow-stable')
+
+tests/test_release_policy.py:182: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '686172db625bed42d2fd2b63c6fa43b6fa22322e4f019bae4ef9679537c7521f'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[ltx-expired] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10b1a9790>, <test_release_broker.Owner object at 0x10b1a9430>)
+admitted = {'times': {'issued_at': '2026-11-04T16:43:21.966934+00:00', 'expires_at': '2026-11-04T16:45:31.966934+00:00'}, 'produc...e3716848a278d116a67c8e93cdaa026f85c12d09091ca919db', 'verify': <function admitted.<locals>.verify at 0x10d1b6020>, ...}
+fault = 'expired'
+
+    @pytest.mark.parametrize('fault', ['signature','expired','revoked','replay','digest','unavailable'])
+    def test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure(policy_product, admitted, fault):
+        from dataclasses import replace
+        from dc_overview.release_broker import BrokerError, canonical, sha
+        from datetime import timedelta
+        host, service, owner = policy_product
+>       set_mode(service, 'follow-stable')
+
+tests/test_release_policy.py:182: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '686172db625bed42d2fd2b63c6fa43b6fa22322e4f019bae4ef9679537c7521f'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[ltx-revoked] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d201580>, <test_release_broker.Owner object at 0x10d201eb0>)
+admitted = {'times': {'issued_at': '2026-11-04T16:43:21.984610+00:00', 'expires_at': '2026-11-04T16:45:31.984610+00:00'}, 'produc...cf27c9f4aac7082e2a5799193de985396b77cfb061e3966bfd', 'verify': <function admitted.<locals>.verify at 0x10d1b7420>, ...}
+fault = 'revoked'
+
+    @pytest.mark.parametrize('fault', ['signature','expired','revoked','replay','digest','unavailable'])
+    def test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure(policy_product, admitted, fault):
+        from dataclasses import replace
+        from dc_overview.release_broker import BrokerError, canonical, sha
+        from datetime import timedelta
+        host, service, owner = policy_product
+>       set_mode(service, 'follow-stable')
+
+tests/test_release_policy.py:182: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '686172db625bed42d2fd2b63c6fa43b6fa22322e4f019bae4ef9679537c7521f'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[ltx-replay] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d299f70>, <test_release_broker.Owner object at 0x10d298650>)
+admitted = {'times': {'issued_at': '2026-11-04T16:43:22.002599+00:00', 'expires_at': '2026-11-04T16:45:32.002599+00:00'}, 'produc...577be9bd88d04958f7b32f11bb044f73f0c1ad89d4e0b89038', 'verify': <function admitted.<locals>.verify at 0x10d1772e0>, ...}
+fault = 'replay'
+
+    @pytest.mark.parametrize('fault', ['signature','expired','revoked','replay','digest','unavailable'])
+    def test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure(policy_product, admitted, fault):
+        from dataclasses import replace
+        from dc_overview.release_broker import BrokerError, canonical, sha
+        from datetime import timedelta
+        host, service, owner = policy_product
+>       set_mode(service, 'follow-stable')
+
+tests/test_release_policy.py:182: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '686172db625bed42d2fd2b63c6fa43b6fa22322e4f019bae4ef9679537c7521f'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[ltx-digest] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d14b9e0>, <test_release_broker.Owner object at 0x10d14a000>)
+admitted = {'times': {'issued_at': '2026-11-04T16:43:22.019892+00:00', 'expires_at': '2026-11-04T16:45:32.019892+00:00'}, 'produc...2f91e8aed5385bc321be86203b29bb9e3a8d22b6f3677eec89', 'verify': <function admitted.<locals>.verify at 0x10d0f7ce0>, ...}
+fault = 'digest'
+
+    @pytest.mark.parametrize('fault', ['signature','expired','revoked','replay','digest','unavailable'])
+    def test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure(policy_product, admitted, fault):
+        from dataclasses import replace
+        from dc_overview.release_broker import BrokerError, canonical, sha
+        from datetime import timedelta
+        host, service, owner = policy_product
+>       set_mode(service, 'follow-stable')
+
+tests/test_release_policy.py:182: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '686172db625bed42d2fd2b63c6fa43b6fa22322e4f019bae4ef9679537c7521f'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[ltx-unavailable] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d2235f0>, <test_release_broker.Owner object at 0x10d223500>)
+admitted = {'times': {'issued_at': '2026-11-04T16:43:22.037778+00:00', 'expires_at': '2026-11-04T16:45:32.037778+00:00'}, 'produc...ac38add26b005c248d16f47d6cee7083cd3201bed0b9104e4e', 'verify': <function admitted.<locals>.verify at 0x10d175c60>, ...}
+fault = 'unavailable'
+
+    @pytest.mark.parametrize('fault', ['signature','expired','revoked','replay','digest','unavailable'])
+    def test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure(policy_product, admitted, fault):
+        from dataclasses import replace
+        from dc_overview.release_broker import BrokerError, canonical, sha
+        from datetime import timedelta
+        host, service, owner = policy_product
+>       set_mode(service, 'follow-stable')
+
+tests/test_release_policy.py:182: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '686172db625bed42d2fd2b63c6fa43b6fa22322e4f019bae4ef9679537c7521f'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[charlotte-signature] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d299610>, <test_release_broker.Owner object at 0x10d298290>)
+admitted = {'times': {'issued_at': '2026-11-04T16:43:22.059033+00:00', 'expires_at': '2026-11-04T16:45:32.059033+00:00'}, 'produc...37a632b0bc2cc89575a4571a9e31139d4612425916623ec584', 'verify': <function admitted.<locals>.verify at 0x10d1777e0>, ...}
+fault = 'signature'
+
+    @pytest.mark.parametrize('fault', ['signature','expired','revoked','replay','digest','unavailable'])
+    def test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure(policy_product, admitted, fault):
+        from dataclasses import replace
+        from dc_overview.release_broker import BrokerError, canonical, sha
+        from datetime import timedelta
+        host, service, owner = policy_product
+>       set_mode(service, 'follow-stable')
+
+tests/test_release_policy.py:182: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '7f0ed032b41772c6aa18c81f0a70d8a2509ebffa8a2d579e9b660fd003f98b69'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[charlotte-expired] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10b1aacc0>, <test_release_broker.Owner object at 0x10b1ab320>)
+admitted = {'times': {'issued_at': '2026-11-04T16:43:22.092303+00:00', 'expires_at': '2026-11-04T16:45:32.092303+00:00'}, 'produc...d11acd1fd142402645c8de42aad6b610044aaefcc7f6eb9123', 'verify': <function admitted.<locals>.verify at 0x10d1b6480>, ...}
+fault = 'expired'
+
+    @pytest.mark.parametrize('fault', ['signature','expired','revoked','replay','digest','unavailable'])
+    def test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure(policy_product, admitted, fault):
+        from dataclasses import replace
+        from dc_overview.release_broker import BrokerError, canonical, sha
+        from datetime import timedelta
+        host, service, owner = policy_product
+>       set_mode(service, 'follow-stable')
+
+tests/test_release_policy.py:182: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '7f0ed032b41772c6aa18c81f0a70d8a2509ebffa8a2d579e9b660fd003f98b69'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[charlotte-revoked] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d19fda0>, <test_release_broker.Owner object at 0x10d19c9e0>)
+admitted = {'times': {'issued_at': '2026-11-04T16:43:22.125729+00:00', 'expires_at': '2026-11-04T16:45:32.125729+00:00'}, 'produc...05391a621c787266c323955d1b08cef542c5c9a81174d18d96', 'verify': <function admitted.<locals>.verify at 0x10d176fc0>, ...}
+fault = 'revoked'
+
+    @pytest.mark.parametrize('fault', ['signature','expired','revoked','replay','digest','unavailable'])
+    def test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure(policy_product, admitted, fault):
+        from dataclasses import replace
+        from dc_overview.release_broker import BrokerError, canonical, sha
+        from datetime import timedelta
+        host, service, owner = policy_product
+>       set_mode(service, 'follow-stable')
+
+tests/test_release_policy.py:182: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '7f0ed032b41772c6aa18c81f0a70d8a2509ebffa8a2d579e9b660fd003f98b69'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[charlotte-replay] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d19d640>, <test_release_broker.Owner object at 0x10d19c140>)
+admitted = {'times': {'issued_at': '2026-11-04T16:43:22.158994+00:00', 'expires_at': '2026-11-04T16:45:32.158994+00:00'}, 'produc...cd14d8d0497bf4e3cbad90315e8954ac7dca0fd55a3f4bc69b', 'verify': <function admitted.<locals>.verify at 0x10d2825c0>, ...}
+fault = 'replay'
+
+    @pytest.mark.parametrize('fault', ['signature','expired','revoked','replay','digest','unavailable'])
+    def test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure(policy_product, admitted, fault):
+        from dataclasses import replace
+        from dc_overview.release_broker import BrokerError, canonical, sha
+        from datetime import timedelta
+        host, service, owner = policy_product
+>       set_mode(service, 'follow-stable')
+
+tests/test_release_policy.py:182: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '7f0ed032b41772c6aa18c81f0a70d8a2509ebffa8a2d579e9b660fd003f98b69'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[charlotte-digest] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d200860>, <test_release_broker.Owner object at 0x10d203650>)
+admitted = {'times': {'issued_at': '2026-11-04T16:43:22.192113+00:00', 'expires_at': '2026-11-04T16:45:32.192113+00:00'}, 'produc...8fd28dd4e500b67cb843e241aaa427cb83d5e21aa65805512f', 'verify': <function admitted.<locals>.verify at 0x10d2814e0>, ...}
+fault = 'digest'
+
+    @pytest.mark.parametrize('fault', ['signature','expired','revoked','replay','digest','unavailable'])
+    def test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure(policy_product, admitted, fault):
+        from dataclasses import replace
+        from dc_overview.release_broker import BrokerError, canonical, sha
+        from datetime import timedelta
+        host, service, owner = policy_product
+>       set_mode(service, 'follow-stable')
+
+tests/test_release_policy.py:182: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '7f0ed032b41772c6aa18c81f0a70d8a2509ebffa8a2d579e9b660fd003f98b69'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[charlotte-unavailable] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d1c5820>, <test_release_broker.Owner object at 0x10d1c4f20>)
+admitted = {'times': {'issued_at': '2026-11-04T16:43:22.225401+00:00', 'expires_at': '2026-11-04T16:45:32.225401+00:00'}, 'produc...19dd2160e673131aaf1ac09b2e4b619269b8690ee71c0fd4d5', 'verify': <function admitted.<locals>.verify at 0x10d283880>, ...}
+fault = 'unavailable'
+
+    @pytest.mark.parametrize('fault', ['signature','expired','revoked','replay','digest','unavailable'])
+    def test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure(policy_product, admitted, fault):
+        from dataclasses import replace
+        from dc_overview.release_broker import BrokerError, canonical, sha
+        from datetime import timedelta
+        host, service, owner = policy_product
+>       set_mode(service, 'follow-stable')
+
+tests/test_release_policy.py:182: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '7f0ed032b41772c6aa18c81f0a70d8a2509ebffa8a2d579e9b660fd003f98b69'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_____ test_repeated_check_never_downgrades_an_already_pending_target[ltx] ______
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d1c6660>, <test_release_broker.Owner object at 0x10d1c6930>)
+admitted = {'times': {'issued_at': '2026-11-04T16:43:22.254523+00:00', 'expires_at': '2026-11-04T16:45:32.254523+00:00'}, 'produc...172894edfaa01181ac363d6b7b5068617d792e5d7b173d9ea6', 'verify': <function admitted.<locals>.verify at 0x10d1d4900>, ...}
+
+    def test_repeated_check_never_downgrades_an_already_pending_target(policy_product, admitted):
+        host, service, owner = policy_product
+>       set_mode(service,'follow-stable')
+
+tests/test_release_policy.py:206: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '686172db625bed42d2fd2b63c6fa43b6fa22322e4f019bae4ef9679537c7521f'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+__ test_repeated_check_never_downgrades_an_already_pending_target[charlotte] ___
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d208c80>, <test_release_broker.Owner object at 0x10d208080>)
+admitted = {'times': {'issued_at': '2026-11-04T16:43:22.275634+00:00', 'expires_at': '2026-11-04T16:45:32.275634+00:00'}, 'produc...a2852a83bb4aa329d088aa6f8f9974a50cdc4ef182852c9bdd', 'verify': <function admitted.<locals>.verify at 0x10d1d5da0>, ...}
+
+    def test_repeated_check_never_downgrades_an_already_pending_target(policy_product, admitted):
+        host, service, owner = policy_product
+>       set_mode(service,'follow-stable')
+
+tests/test_release_policy.py:206: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '7f0ed032b41772c6aa18c81f0a70d8a2509ebffa8a2d579e9b660fd003f98b69'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_interrupted_policy_publication_restarts_to_a_coherent_state[ltx-journal] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d20a810>, <test_release_broker.Owner object at 0x10d209a90>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d1c5940>
+boundary = 'journal'
+
+    @pytest.mark.parametrize('boundary', ['journal','selection','public','policy','finish'])
+    def test_interrupted_policy_publication_restarts_to_a_coherent_state(policy_product, monkeypatch, boundary):
+        import dc_overview.release_policy as policy
+        from dc_overview.release_broker import ReleaseBroker
+        from dc_overview.cli import load_config_from_file
+        from pathlib import Path
+        host, service, owner = policy_product
+        before = snapshot(host, service)
+>       original_write = policy.private_write
+                         ^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'dc_overview.release_policy' has no attribute 'private_write'
+
+tests/test_release_policy.py:224: AttributeError
+_ test_interrupted_policy_publication_restarts_to_a_coherent_state[ltx-selection] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d3361b0>, <test_release_broker.Owner object at 0x10d3359a0>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d335e80>
+boundary = 'selection'
+
+    @pytest.mark.parametrize('boundary', ['journal','selection','public','policy','finish'])
+    def test_interrupted_policy_publication_restarts_to_a_coherent_state(policy_product, monkeypatch, boundary):
+        import dc_overview.release_policy as policy
+        from dc_overview.release_broker import ReleaseBroker
+        from dc_overview.cli import load_config_from_file
+        from pathlib import Path
+        host, service, owner = policy_product
+        before = snapshot(host, service)
+>       original_write = policy.private_write
+                         ^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'dc_overview.release_policy' has no attribute 'private_write'
+
+tests/test_release_policy.py:224: AttributeError
+_ test_interrupted_policy_publication_restarts_to_a_coherent_state[ltx-public] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d1c74a0>, <test_release_broker.Owner object at 0x10d1c4650>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d209f10>
+boundary = 'public'
+
+    @pytest.mark.parametrize('boundary', ['journal','selection','public','policy','finish'])
+    def test_interrupted_policy_publication_restarts_to_a_coherent_state(policy_product, monkeypatch, boundary):
+        import dc_overview.release_policy as policy
+        from dc_overview.release_broker import ReleaseBroker
+        from dc_overview.cli import load_config_from_file
+        from pathlib import Path
+        host, service, owner = policy_product
+        before = snapshot(host, service)
+>       original_write = policy.private_write
+                         ^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'dc_overview.release_policy' has no attribute 'private_write'
+
+tests/test_release_policy.py:224: AttributeError
+_ test_interrupted_policy_publication_restarts_to_a_coherent_state[ltx-policy] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d20b1d0>, <test_release_broker.Owner object at 0x10d209130>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d3373e0>
+boundary = 'policy'
+
+    @pytest.mark.parametrize('boundary', ['journal','selection','public','policy','finish'])
+    def test_interrupted_policy_publication_restarts_to_a_coherent_state(policy_product, monkeypatch, boundary):
+        import dc_overview.release_policy as policy
+        from dc_overview.release_broker import ReleaseBroker
+        from dc_overview.cli import load_config_from_file
+        from pathlib import Path
+        host, service, owner = policy_product
+        before = snapshot(host, service)
+>       original_write = policy.private_write
+                         ^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'dc_overview.release_policy' has no attribute 'private_write'
+
+tests/test_release_policy.py:224: AttributeError
+_ test_interrupted_policy_publication_restarts_to_a_coherent_state[ltx-finish] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d438ec0>, <test_release_broker.Owner object at 0x10d438f20>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d438da0>
+boundary = 'finish'
+
+    @pytest.mark.parametrize('boundary', ['journal','selection','public','policy','finish'])
+    def test_interrupted_policy_publication_restarts_to_a_coherent_state(policy_product, monkeypatch, boundary):
+        import dc_overview.release_policy as policy
+        from dc_overview.release_broker import ReleaseBroker
+        from dc_overview.cli import load_config_from_file
+        from pathlib import Path
+        host, service, owner = policy_product
+        before = snapshot(host, service)
+>       original_write = policy.private_write
+                         ^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'dc_overview.release_policy' has no attribute 'private_write'
+
+tests/test_release_policy.py:224: AttributeError
+_ test_interrupted_policy_publication_restarts_to_a_coherent_state[charlotte-journal] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d43b950>, <test_release_broker.Owner object at 0x10d43b800>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d438ef0>
+boundary = 'journal'
+
+    @pytest.mark.parametrize('boundary', ['journal','selection','public','policy','finish'])
+    def test_interrupted_policy_publication_restarts_to_a_coherent_state(policy_product, monkeypatch, boundary):
+        import dc_overview.release_policy as policy
+        from dc_overview.release_broker import ReleaseBroker
+        from dc_overview.cli import load_config_from_file
+        from pathlib import Path
+        host, service, owner = policy_product
+        before = snapshot(host, service)
+>       original_write = policy.private_write
+                         ^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'dc_overview.release_policy' has no attribute 'private_write'
+
+tests/test_release_policy.py:224: AttributeError
+_ test_interrupted_policy_publication_restarts_to_a_coherent_state[charlotte-selection] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d1c4320>, <test_release_broker.Owner object at 0x10d1c6030>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d45f230>
+boundary = 'selection'
+
+    @pytest.mark.parametrize('boundary', ['journal','selection','public','policy','finish'])
+    def test_interrupted_policy_publication_restarts_to_a_coherent_state(policy_product, monkeypatch, boundary):
+        import dc_overview.release_policy as policy
+        from dc_overview.release_broker import ReleaseBroker
+        from dc_overview.cli import load_config_from_file
+        from pathlib import Path
+        host, service, owner = policy_product
+        before = snapshot(host, service)
+>       original_write = policy.private_write
+                         ^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'dc_overview.release_policy' has no attribute 'private_write'
+
+tests/test_release_policy.py:224: AttributeError
+_ test_interrupted_policy_publication_restarts_to_a_coherent_state[charlotte-public] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10bf3bfe0>, <test_release_broker.Owner object at 0x10b1e5910>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d1c5be0>
+boundary = 'public'
+
+    @pytest.mark.parametrize('boundary', ['journal','selection','public','policy','finish'])
+    def test_interrupted_policy_publication_restarts_to_a_coherent_state(policy_product, monkeypatch, boundary):
+        import dc_overview.release_policy as policy
+        from dc_overview.release_broker import ReleaseBroker
+        from dc_overview.cli import load_config_from_file
+        from pathlib import Path
+        host, service, owner = policy_product
+        before = snapshot(host, service)
+>       original_write = policy.private_write
+                         ^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'dc_overview.release_policy' has no attribute 'private_write'
+
+tests/test_release_policy.py:224: AttributeError
+_ test_interrupted_policy_publication_restarts_to_a_coherent_state[charlotte-policy] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d1c5af0>, <test_release_broker.Owner object at 0x10d1c7800>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d2013a0>
+boundary = 'policy'
+
+    @pytest.mark.parametrize('boundary', ['journal','selection','public','policy','finish'])
+    def test_interrupted_policy_publication_restarts_to_a_coherent_state(policy_product, monkeypatch, boundary):
+        import dc_overview.release_policy as policy
+        from dc_overview.release_broker import ReleaseBroker
+        from dc_overview.cli import load_config_from_file
+        from pathlib import Path
+        host, service, owner = policy_product
+        before = snapshot(host, service)
+>       original_write = policy.private_write
+                         ^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'dc_overview.release_policy' has no attribute 'private_write'
+
+tests/test_release_policy.py:224: AttributeError
+_ test_interrupted_policy_publication_restarts_to_a_coherent_state[charlotte-finish] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d201a60>, <test_release_broker.Owner object at 0x10d203050>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d299e80>
+boundary = 'finish'
+
+    @pytest.mark.parametrize('boundary', ['journal','selection','public','policy','finish'])
+    def test_interrupted_policy_publication_restarts_to_a_coherent_state(policy_product, monkeypatch, boundary):
+        import dc_overview.release_policy as policy
+        from dc_overview.release_broker import ReleaseBroker
+        from dc_overview.cli import load_config_from_file
+        from pathlib import Path
+        host, service, owner = policy_product
+        before = snapshot(host, service)
+>       original_write = policy.private_write
+                         ^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'dc_overview.release_policy' has no attribute 'private_write'
+
+tests/test_release_policy.py:224: AttributeError
+___ test_refresh_and_repin_are_serialized_and_stale_refresh_cannot_win[ltx] ____
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d299610>, <test_release_broker.Owner object at 0x10d29a720>)
+admitted = {'times': {'issued_at': '2026-11-04T16:43:22.521231+00:00', 'expires_at': '2026-11-04T16:45:32.521231+00:00'}, 'produc...5f78aa83378151c915c9893f6e83c8258e612cf0e812a92f97', 'verify': <function admitted.<locals>.verify at 0x10d1b5940>, ...}
+
+    def test_refresh_and_repin_are_serialized_and_stale_refresh_cannot_win(policy_product, admitted):
+        import threading
+        from dc_overview.release_broker import ReleaseBroker,BrokerError
+        from dc_overview.cli import load_config_from_file
+        host, service, owner = policy_product
+>       set_mode(service,'follow-stable')
+
+tests/test_release_policy.py:269: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '686172db625bed42d2fd2b63c6fa43b6fa22322e4f019bae4ef9679537c7521f'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_ test_refresh_and_repin_are_serialized_and_stale_refresh_cannot_win[charlotte] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d14a690>, <test_release_broker.Owner object at 0x10d209040>)
+admitted = {'times': {'issued_at': '2026-11-04T16:43:22.542786+00:00', 'expires_at': '2026-11-04T16:45:32.542786+00:00'}, 'produc...cb2fee2eedeaaf59ab9521073f14ebb4afed359708d54d28ca', 'verify': <function admitted.<locals>.verify at 0x10d282e80>, ...}
+
+    def test_refresh_and_repin_are_serialized_and_stale_refresh_cannot_win(policy_product, admitted):
+        import threading
+        from dc_overview.release_broker import ReleaseBroker,BrokerError
+        from dc_overview.cli import load_config_from_file
+        host, service, owner = policy_product
+>       set_mode(service,'follow-stable')
+
+tests/test_release_policy.py:269: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_release_policy.py:86: in set_mode
+    return service.dispatch("policy-set", {"component": "grafana", "mode": mode, **expected(service)}, actor=ACTOR)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_broker.py:521: in dispatch
+    validate_params(action, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'old', 'expected_selection_sha256': '7f0ed032b41772c6aa18c81f0a70d8a2509ebffa8a2d579e9b660fd003f98b69'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+___ test_installed_pin_requires_exact_known_component_artifact[ltx-missing] ____
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d221220>, <test_release_broker.Owner object at 0x10d1c7530>)
+fault = 'missing'
+
+    @pytest.mark.parametrize('fault',['missing','wrong-component','version-conflict','unregistered-image'])
+    def test_installed_pin_requires_exact_known_component_artifact(policy_product,fault):
+        host,service,owner=policy_product
+        current=host.store.load();reference=current.targets['grafana']['reference']
+        image={'Id':'sha256:'+'e'*64,'Os':'linux','Architecture':'amd64',
+               'RepoDigests':[reference], 'Config':{'Labels':{'org.opencontainers.image.version':'1.4.0'}}}
+        live={'Id':'d'*64,'Image':image['Id'],'State':{'Running':True},'Config':{'Image':reference}}
+        if fault=='missing': live['State']['Running']=False
+        if fault=='wrong-component': image['RepoDigests']=['prom/prometheus@sha256:'+'a'*64]
+        if fault=='version-conflict': image['Config']['Labels']['org.opencontainers.image.version']='1.9.0'
+        if fault=='unregistered-image': image['RepoDigests']=['grafana/grafana@sha256:'+'f'*64]
+        inspect=lambda name:live if name=='grafana' else image
+>       assert policy_module().installed_component(current,'grafana',host.store,inspect) is None
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'dc_overview.release_policy' has no attribute 'installed_component'
+
+tests/test_release_policy.py:305: AttributeError
+_ test_installed_pin_requires_exact_known_component_artifact[ltx-wrong-component] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d19c260>, <test_release_broker.Owner object at 0x10d19fce0>)
+fault = 'wrong-component'
+
+    @pytest.mark.parametrize('fault',['missing','wrong-component','version-conflict','unregistered-image'])
+    def test_installed_pin_requires_exact_known_component_artifact(policy_product,fault):
+        host,service,owner=policy_product
+        current=host.store.load();reference=current.targets['grafana']['reference']
+        image={'Id':'sha256:'+'e'*64,'Os':'linux','Architecture':'amd64',
+               'RepoDigests':[reference], 'Config':{'Labels':{'org.opencontainers.image.version':'1.4.0'}}}
+        live={'Id':'d'*64,'Image':image['Id'],'State':{'Running':True},'Config':{'Image':reference}}
+        if fault=='missing': live['State']['Running']=False
+        if fault=='wrong-component': image['RepoDigests']=['prom/prometheus@sha256:'+'a'*64]
+        if fault=='version-conflict': image['Config']['Labels']['org.opencontainers.image.version']='1.9.0'
+        if fault=='unregistered-image': image['RepoDigests']=['grafana/grafana@sha256:'+'f'*64]
+        inspect=lambda name:live if name=='grafana' else image
+>       assert policy_module().installed_component(current,'grafana',host.store,inspect) is None
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'dc_overview.release_policy' has no attribute 'installed_component'
+
+tests/test_release_policy.py:305: AttributeError
+_ test_installed_pin_requires_exact_known_component_artifact[ltx-version-conflict] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d45e2d0>, <test_release_broker.Owner object at 0x10d45c260>)
+fault = 'version-conflict'
+
+    @pytest.mark.parametrize('fault',['missing','wrong-component','version-conflict','unregistered-image'])
+    def test_installed_pin_requires_exact_known_component_artifact(policy_product,fault):
+        host,service,owner=policy_product
+        current=host.store.load();reference=current.targets['grafana']['reference']
+        image={'Id':'sha256:'+'e'*64,'Os':'linux','Architecture':'amd64',
+               'RepoDigests':[reference], 'Config':{'Labels':{'org.opencontainers.image.version':'1.4.0'}}}
+        live={'Id':'d'*64,'Image':image['Id'],'State':{'Running':True},'Config':{'Image':reference}}
+        if fault=='missing': live['State']['Running']=False
+        if fault=='wrong-component': image['RepoDigests']=['prom/prometheus@sha256:'+'a'*64]
+        if fault=='version-conflict': image['Config']['Labels']['org.opencontainers.image.version']='1.9.0'
+        if fault=='unregistered-image': image['RepoDigests']=['grafana/grafana@sha256:'+'f'*64]
+        inspect=lambda name:live if name=='grafana' else image
+>       assert policy_module().installed_component(current,'grafana',host.store,inspect) is None
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'dc_overview.release_policy' has no attribute 'installed_component'
+
+tests/test_release_policy.py:305: AttributeError
+_ test_installed_pin_requires_exact_known_component_artifact[ltx-unregistered-image] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d220230>, <test_release_broker.Owner object at 0x10d45ea50>)
+fault = 'unregistered-image'
+
+    @pytest.mark.parametrize('fault',['missing','wrong-component','version-conflict','unregistered-image'])
+    def test_installed_pin_requires_exact_known_component_artifact(policy_product,fault):
+        host,service,owner=policy_product
+        current=host.store.load();reference=current.targets['grafana']['reference']
+        image={'Id':'sha256:'+'e'*64,'Os':'linux','Architecture':'amd64',
+               'RepoDigests':[reference], 'Config':{'Labels':{'org.opencontainers.image.version':'1.4.0'}}}
+        live={'Id':'d'*64,'Image':image['Id'],'State':{'Running':True},'Config':{'Image':reference}}
+        if fault=='missing': live['State']['Running']=False
+        if fault=='wrong-component': image['RepoDigests']=['prom/prometheus@sha256:'+'a'*64]
+        if fault=='version-conflict': image['Config']['Labels']['org.opencontainers.image.version']='1.9.0'
+        if fault=='unregistered-image': image['RepoDigests']=['grafana/grafana@sha256:'+'f'*64]
+        inspect=lambda name:live if name=='grafana' else image
+>       assert policy_module().installed_component(current,'grafana',host.store,inspect) is None
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'dc_overview.release_policy' has no attribute 'installed_component'
+
+tests/test_release_policy.py:305: AttributeError
+_ test_installed_pin_requires_exact_known_component_artifact[charlotte-missing] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10b1ab890>, <test_release_broker.Owner object at 0x10d1c7aa0>)
+fault = 'missing'
+
+    @pytest.mark.parametrize('fault',['missing','wrong-component','version-conflict','unregistered-image'])
+    def test_installed_pin_requires_exact_known_component_artifact(policy_product,fault):
+        host,service,owner=policy_product
+        current=host.store.load();reference=current.targets['grafana']['reference']
+        image={'Id':'sha256:'+'e'*64,'Os':'linux','Architecture':'amd64',
+               'RepoDigests':[reference], 'Config':{'Labels':{'org.opencontainers.image.version':'1.4.0'}}}
+        live={'Id':'d'*64,'Image':image['Id'],'State':{'Running':True},'Config':{'Image':reference}}
+        if fault=='missing': live['State']['Running']=False
+        if fault=='wrong-component': image['RepoDigests']=['prom/prometheus@sha256:'+'a'*64]
+        if fault=='version-conflict': image['Config']['Labels']['org.opencontainers.image.version']='1.9.0'
+        if fault=='unregistered-image': image['RepoDigests']=['grafana/grafana@sha256:'+'f'*64]
+        inspect=lambda name:live if name=='grafana' else image
+>       assert policy_module().installed_component(current,'grafana',host.store,inspect) is None
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'dc_overview.release_policy' has no attribute 'installed_component'
+
+tests/test_release_policy.py:305: AttributeError
+_ test_installed_pin_requires_exact_known_component_artifact[charlotte-wrong-component] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d45c3b0>, <test_release_broker.Owner object at 0x10d45c620>)
+fault = 'wrong-component'
+
+    @pytest.mark.parametrize('fault',['missing','wrong-component','version-conflict','unregistered-image'])
+    def test_installed_pin_requires_exact_known_component_artifact(policy_product,fault):
+        host,service,owner=policy_product
+        current=host.store.load();reference=current.targets['grafana']['reference']
+        image={'Id':'sha256:'+'e'*64,'Os':'linux','Architecture':'amd64',
+               'RepoDigests':[reference], 'Config':{'Labels':{'org.opencontainers.image.version':'1.4.0'}}}
+        live={'Id':'d'*64,'Image':image['Id'],'State':{'Running':True},'Config':{'Image':reference}}
+        if fault=='missing': live['State']['Running']=False
+        if fault=='wrong-component': image['RepoDigests']=['prom/prometheus@sha256:'+'a'*64]
+        if fault=='version-conflict': image['Config']['Labels']['org.opencontainers.image.version']='1.9.0'
+        if fault=='unregistered-image': image['RepoDigests']=['grafana/grafana@sha256:'+'f'*64]
+        inspect=lambda name:live if name=='grafana' else image
+>       assert policy_module().installed_component(current,'grafana',host.store,inspect) is None
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'dc_overview.release_policy' has no attribute 'installed_component'
+
+tests/test_release_policy.py:305: AttributeError
+_ test_installed_pin_requires_exact_known_component_artifact[charlotte-version-conflict] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d14b050>, <test_release_broker.Owner object at 0x10d14b080>)
+fault = 'version-conflict'
+
+    @pytest.mark.parametrize('fault',['missing','wrong-component','version-conflict','unregistered-image'])
+    def test_installed_pin_requires_exact_known_component_artifact(policy_product,fault):
+        host,service,owner=policy_product
+        current=host.store.load();reference=current.targets['grafana']['reference']
+        image={'Id':'sha256:'+'e'*64,'Os':'linux','Architecture':'amd64',
+               'RepoDigests':[reference], 'Config':{'Labels':{'org.opencontainers.image.version':'1.4.0'}}}
+        live={'Id':'d'*64,'Image':image['Id'],'State':{'Running':True},'Config':{'Image':reference}}
+        if fault=='missing': live['State']['Running']=False
+        if fault=='wrong-component': image['RepoDigests']=['prom/prometheus@sha256:'+'a'*64]
+        if fault=='version-conflict': image['Config']['Labels']['org.opencontainers.image.version']='1.9.0'
+        if fault=='unregistered-image': image['RepoDigests']=['grafana/grafana@sha256:'+'f'*64]
+        inspect=lambda name:live if name=='grafana' else image
+>       assert policy_module().installed_component(current,'grafana',host.store,inspect) is None
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'dc_overview.release_policy' has no attribute 'installed_component'
+
+tests/test_release_policy.py:305: AttributeError
+_ test_installed_pin_requires_exact_known_component_artifact[charlotte-unregistered-image] _
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d2093d0>, <test_release_broker.Owner object at 0x10d20afc0>)
+fault = 'unregistered-image'
+
+    @pytest.mark.parametrize('fault',['missing','wrong-component','version-conflict','unregistered-image'])
+    def test_installed_pin_requires_exact_known_component_artifact(policy_product,fault):
+        host,service,owner=policy_product
+        current=host.store.load();reference=current.targets['grafana']['reference']
+        image={'Id':'sha256:'+'e'*64,'Os':'linux','Architecture':'amd64',
+               'RepoDigests':[reference], 'Config':{'Labels':{'org.opencontainers.image.version':'1.4.0'}}}
+        live={'Id':'d'*64,'Image':image['Id'],'State':{'Running':True},'Config':{'Image':reference}}
+        if fault=='missing': live['State']['Running']=False
+        if fault=='wrong-component': image['RepoDigests']=['prom/prometheus@sha256:'+'a'*64]
+        if fault=='version-conflict': image['Config']['Labels']['org.opencontainers.image.version']='1.9.0'
+        if fault=='unregistered-image': image['RepoDigests']=['grafana/grafana@sha256:'+'f'*64]
+        inspect=lambda name:live if name=='grafana' else image
+>       assert policy_module().installed_component(current,'grafana',host.store,inspect) is None
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'dc_overview.release_policy' has no attribute 'installed_component'
+
+tests/test_release_policy.py:305: AttributeError
+___________ test_native_policy_cli_uses_the_same_owner_contract[ltx] ___________
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d23b710>, <test_release_broker.Owner object at 0x10d23a7e0>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d14a420>
+
+    def test_native_policy_cli_uses_the_same_owner_contract(policy_product,monkeypatch):
+        from click.testing import CliRunner
+        from dc_overview.cli import main
+        from dc_overview import release_broker_service
+        host,service,owner=policy_product;calls=[]
+        monkeypatch.setattr(release_broker_service,'request',lambda action,params:calls.append((action,params)) or {'components':{}})
+        runner=CliRunner()
+        result=runner.invoke(main,['release','policy-set','--component','grafana','--mode','follow-stable',
+            '--expected-selection-id','fixture','--expected-selection-sha256','a'*64])
+>       assert result.exit_code==0,result.output
+E       AssertionError: Usage: main release [OPTIONS] COMMAND [ARGS]...
+E         Try 'main release --help' for help.
+E         
+E         Error: No such command 'policy-set'.
+E         
+E       assert 2 == 0
+E        +  where 2 = <Result SystemExit(2)>.exit_code
+
+tests/test_release_policy.py:317: AssertionError
+________ test_native_policy_cli_uses_the_same_owner_contract[charlotte] ________
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d20a3f0>, <test_release_broker.Owner object at 0x10d20ae40>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d438830>
+
+    def test_native_policy_cli_uses_the_same_owner_contract(policy_product,monkeypatch):
+        from click.testing import CliRunner
+        from dc_overview.cli import main
+        from dc_overview import release_broker_service
+        host,service,owner=policy_product;calls=[]
+        monkeypatch.setattr(release_broker_service,'request',lambda action,params:calls.append((action,params)) or {'components':{}})
+        runner=CliRunner()
+        result=runner.invoke(main,['release','policy-set','--component','grafana','--mode','follow-stable',
+            '--expected-selection-id','fixture','--expected-selection-sha256','a'*64])
+>       assert result.exit_code==0,result.output
+E       AssertionError: Usage: main release [OPTIONS] COMMAND [ARGS]...
+E         Try 'main release --help' for help.
+E         
+E         Error: No such command 'policy-set'.
+E         
+E       assert 2 == 0
+E        +  where 2 = <Result SystemExit(2)>.exit_code
+
+tests/test_release_policy.py:317: AssertionError
+_______ test_broker_policy_params_are_strict_supported_actions[change0] ________
+
+change = {'mode': True}
+
+    @pytest.mark.parametrize('change',[{'mode':True},{'mode':'latest'},{'component':'../ipmi-monitor'},
+        {'expected_selection_sha256':'a'}, {'path':'/etc/passwd'}, {'actor':{'kind':'host-peer','uid':0}}])
+    def test_broker_policy_params_are_strict_supported_actions(change):
+        from dc_overview.release_broker import validate_params
+        body={'component':'grafana','mode':'follow-stable','expected_selection_id':'fixture','expected_selection_sha256':'a'*64}
+>       validate_params('policy-set',body)  # Positive control prevents an unknown-action false pass.
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_release_policy.py:326: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'fixture', 'expected_selection_sha256': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_______ test_broker_policy_params_are_strict_supported_actions[change1] ________
+
+change = {'mode': 'latest'}
+
+    @pytest.mark.parametrize('change',[{'mode':True},{'mode':'latest'},{'component':'../ipmi-monitor'},
+        {'expected_selection_sha256':'a'}, {'path':'/etc/passwd'}, {'actor':{'kind':'host-peer','uid':0}}])
+    def test_broker_policy_params_are_strict_supported_actions(change):
+        from dc_overview.release_broker import validate_params
+        body={'component':'grafana','mode':'follow-stable','expected_selection_id':'fixture','expected_selection_sha256':'a'*64}
+>       validate_params('policy-set',body)  # Positive control prevents an unknown-action false pass.
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_release_policy.py:326: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'fixture', 'expected_selection_sha256': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_______ test_broker_policy_params_are_strict_supported_actions[change2] ________
+
+change = {'component': '../ipmi-monitor'}
+
+    @pytest.mark.parametrize('change',[{'mode':True},{'mode':'latest'},{'component':'../ipmi-monitor'},
+        {'expected_selection_sha256':'a'}, {'path':'/etc/passwd'}, {'actor':{'kind':'host-peer','uid':0}}])
+    def test_broker_policy_params_are_strict_supported_actions(change):
+        from dc_overview.release_broker import validate_params
+        body={'component':'grafana','mode':'follow-stable','expected_selection_id':'fixture','expected_selection_sha256':'a'*64}
+>       validate_params('policy-set',body)  # Positive control prevents an unknown-action false pass.
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_release_policy.py:326: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'fixture', 'expected_selection_sha256': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_______ test_broker_policy_params_are_strict_supported_actions[change3] ________
+
+change = {'expected_selection_sha256': 'a'}
+
+    @pytest.mark.parametrize('change',[{'mode':True},{'mode':'latest'},{'component':'../ipmi-monitor'},
+        {'expected_selection_sha256':'a'}, {'path':'/etc/passwd'}, {'actor':{'kind':'host-peer','uid':0}}])
+    def test_broker_policy_params_are_strict_supported_actions(change):
+        from dc_overview.release_broker import validate_params
+        body={'component':'grafana','mode':'follow-stable','expected_selection_id':'fixture','expected_selection_sha256':'a'*64}
+>       validate_params('policy-set',body)  # Positive control prevents an unknown-action false pass.
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_release_policy.py:326: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'fixture', 'expected_selection_sha256': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_______ test_broker_policy_params_are_strict_supported_actions[change4] ________
+
+change = {'path': '/etc/passwd'}
+
+    @pytest.mark.parametrize('change',[{'mode':True},{'mode':'latest'},{'component':'../ipmi-monitor'},
+        {'expected_selection_sha256':'a'}, {'path':'/etc/passwd'}, {'actor':{'kind':'host-peer','uid':0}}])
+    def test_broker_policy_params_are_strict_supported_actions(change):
+        from dc_overview.release_broker import validate_params
+        body={'component':'grafana','mode':'follow-stable','expected_selection_id':'fixture','expected_selection_sha256':'a'*64}
+>       validate_params('policy-set',body)  # Positive control prevents an unknown-action false pass.
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_release_policy.py:326: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'fixture', 'expected_selection_sha256': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_______ test_broker_policy_params_are_strict_supported_actions[change5] ________
+
+change = {'actor': {'kind': 'host-peer', 'uid': 0}}
+
+    @pytest.mark.parametrize('change',[{'mode':True},{'mode':'latest'},{'component':'../ipmi-monitor'},
+        {'expected_selection_sha256':'a'}, {'path':'/etc/passwd'}, {'actor':{'kind':'host-peer','uid':0}}])
+    def test_broker_policy_params_are_strict_supported_actions(change):
+        from dc_overview.release_broker import validate_params
+        body={'component':'grafana','mode':'follow-stable','expected_selection_id':'fixture','expected_selection_sha256':'a'*64}
+>       validate_params('policy-set',body)  # Positive control prevents an unknown-action false pass.
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_release_policy.py:326: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+action = 'policy-set'
+params = {'component': 'grafana', 'mode': 'follow-stable', 'expected_selection_id': 'fixture', 'expected_selection_sha256': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'}
+
+    def validate_params(action, params):
+        fields = {
+            "list": {"channel"},
+            "preview": {
+                "candidate_ids",
+                "components",
+                "expected_selection_id",
+                "expected_selection_sha256",
+                "operation_kind",
+            },
+            "apply": {
+                "operation_id",
+                "preview_id",
+                "preview_sha256",
+                "expected_selection_id",
+                "expected_selection_sha256",
+            },
+            "status": {"operation_id"},
+            "recover": {"operation_id"},
+        }
+        if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
+>           raise ValueError("invalid release request fields")
+E           ValueError: invalid release request fields
+
+src/dc_overview/release_broker.py:93: ValueError
+_________ test_daily_timer_install_uses_only_fixed_packaged_units[ltx] _________
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d19c650>, <test_release_broker.Owner object at 0x10d19e180>)
+tmp_path = PosixPath('/private/var/folders/2f/ntb_0p9558v4wfcwr5_64dg00000gn/T/pytest-of-hanneszietsman/pytest-10193/test_daily_timer_install_uses_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d22cc80>
+
+    def test_daily_timer_install_uses_only_fixed_packaged_units(policy_product,tmp_path,monkeypatch):
+        from pathlib import Path
+        policy=policy_module();calls=[]
+>       monkeypatch.setattr(policy,'SYSTEMD_DIR',tmp_path/'units')
+E       AttributeError: <module 'dc_overview.release_policy' from '/private/tmp/ltx-auto-advance-20261104/dc-overview/src/dc_overview/release_policy.py'> has no attribute 'SYSTEMD_DIR'
+
+tests/test_release_policy.py:345: AttributeError
+______ test_daily_timer_install_uses_only_fixed_packaged_units[charlotte] ______
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10d19e6f0>, <test_release_broker.Owner object at 0x10d19e5d0>)
+tmp_path = PosixPath('/private/var/folders/2f/ntb_0p9558v4wfcwr5_64dg00000gn/T/pytest-of-hanneszietsman/pytest-10193/test_daily_timer_install_uses_1')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d43a1e0>
+
+    def test_daily_timer_install_uses_only_fixed_packaged_units(policy_product,tmp_path,monkeypatch):
+        from pathlib import Path
+        policy=policy_module();calls=[]
+>       monkeypatch.setattr(policy,'SYSTEMD_DIR',tmp_path/'units')
+E       AttributeError: <module 'dc_overview.release_policy' from '/private/tmp/ltx-auto-advance-20261104/dc-overview/src/dc_overview/release_policy.py'> has no attribute 'SYSTEMD_DIR'
+
+tests/test_release_policy.py:345: AttributeError
+_________ test_cli_and_packaging_include_the_daily_policy_only_refresh _________
+
+    def test_cli_and_packaging_include_the_daily_policy_only_refresh():
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1]
+>       timer = (root / "src/dc_overview/templates/systemd/dc-overview-release-refresh.timer").read_text()
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_release_policy.py:358: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/Users/hanneszietsman/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/pathlib.py:1027: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/private/tmp/ltx-auto-advance-20261104/dc-overview/src/dc_overview/templates/systemd/dc-overview-release-refresh.timer')
+mode = 'r', buffering = -1, encoding = 'locale', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/private/tmp/ltx-auto-advance-20261104/dc-overview/src/dc_overview/templates/systemd/dc-overview-release-refresh.timer'
+
+/Users/hanneszietsman/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/pathlib.py:1013: FileNotFoundError
+=========================== short test summary info ============================
+FAILED tests/test_release_policy.py::test_existing_components_default_pinned_with_no_implicit_follow[ltx]
+FAILED tests/test_release_policy.py::test_existing_components_default_pinned_with_no_implicit_follow[charlotte]
+FAILED tests/test_release_policy.py::test_unpin_survives_restart_and_changes_only_one_policy_without_install[ltx]
+FAILED tests/test_release_policy.py::test_unpin_survives_restart_and_changes_only_one_policy_without_install[charlotte]
+FAILED tests/test_release_policy.py::test_refresh_only_advances_opted_in_service_and_repin_installed_freezes_it[ltx]
+FAILED tests/test_release_policy.py::test_refresh_only_advances_opted_in_service_and_repin_installed_freezes_it[charlotte]
+FAILED tests/test_release_policy.py::test_mode_failure_has_no_partial_policy_or_selection_change[ltx-stale]
+FAILED tests/test_release_policy.py::test_mode_failure_has_no_partial_policy_or_selection_change[ltx-busy]
+FAILED tests/test_release_policy.py::test_mode_failure_has_no_partial_policy_or_selection_change[ltx-disabled]
+FAILED tests/test_release_policy.py::test_mode_failure_has_no_partial_policy_or_selection_change[ltx-unproven-installed]
+FAILED tests/test_release_policy.py::test_mode_failure_has_no_partial_policy_or_selection_change[charlotte-stale]
+FAILED tests/test_release_policy.py::test_mode_failure_has_no_partial_policy_or_selection_change[charlotte-busy]
+FAILED tests/test_release_policy.py::test_mode_failure_has_no_partial_policy_or_selection_change[charlotte-disabled]
+FAILED tests/test_release_policy.py::test_mode_failure_has_no_partial_policy_or_selection_change[charlotte-unproven-installed]
+FAILED tests/test_release_policy.py::test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[ltx-signature]
+FAILED tests/test_release_policy.py::test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[ltx-expired]
+FAILED tests/test_release_policy.py::test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[ltx-revoked]
+FAILED tests/test_release_policy.py::test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[ltx-replay]
+FAILED tests/test_release_policy.py::test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[ltx-digest]
+FAILED tests/test_release_policy.py::test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[ltx-unavailable]
+FAILED tests/test_release_policy.py::test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[charlotte-signature]
+FAILED tests/test_release_policy.py::test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[charlotte-expired]
+FAILED tests/test_release_policy.py::test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[charlotte-revoked]
+FAILED tests/test_release_policy.py::test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[charlotte-replay]
+FAILED tests/test_release_policy.py::test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[charlotte-digest]
+FAILED tests/test_release_policy.py::test_refresh_uses_actual_signed_admission_and_preserves_policy_on_failure[charlotte-unavailable]
+FAILED tests/test_release_policy.py::test_repeated_check_never_downgrades_an_already_pending_target[ltx]
+FAILED tests/test_release_policy.py::test_repeated_check_never_downgrades_an_already_pending_target[charlotte]
+FAILED tests/test_release_policy.py::test_interrupted_policy_publication_restarts_to_a_coherent_state[ltx-journal]
+FAILED tests/test_release_policy.py::test_interrupted_policy_publication_restarts_to_a_coherent_state[ltx-selection]
+FAILED tests/test_release_policy.py::test_interrupted_policy_publication_restarts_to_a_coherent_state[ltx-public]
+FAILED tests/test_release_policy.py::test_interrupted_policy_publication_restarts_to_a_coherent_state[ltx-policy]
+FAILED tests/test_release_policy.py::test_interrupted_policy_publication_restarts_to_a_coherent_state[ltx-finish]
+FAILED tests/test_release_policy.py::test_interrupted_policy_publication_restarts_to_a_coherent_state[charlotte-journal]
+FAILED tests/test_release_policy.py::test_interrupted_policy_publication_restarts_to_a_coherent_state[charlotte-selection]
+FAILED tests/test_release_policy.py::test_interrupted_policy_publication_restarts_to_a_coherent_state[charlotte-public]
+FAILED tests/test_release_policy.py::test_interrupted_policy_publication_restarts_to_a_coherent_state[charlotte-policy]
+FAILED tests/test_release_policy.py::test_interrupted_policy_publication_restarts_to_a_coherent_state[charlotte-finish]
+FAILED tests/test_release_policy.py::test_refresh_and_repin_are_serialized_and_stale_refresh_cannot_win[ltx]
+FAILED tests/test_release_policy.py::test_refresh_and_repin_are_serialized_and_stale_refresh_cannot_win[charlotte]
+FAILED tests/test_release_policy.py::test_installed_pin_requires_exact_known_component_artifact[ltx-missing]
+FAILED tests/test_release_policy.py::test_installed_pin_requires_exact_known_component_artifact[ltx-wrong-component]
+FAILED tests/test_release_policy.py::test_installed_pin_requires_exact_known_component_artifact[ltx-version-conflict]
+FAILED tests/test_release_policy.py::test_installed_pin_requires_exact_known_component_artifact[ltx-unregistered-image]
+FAILED tests/test_release_policy.py::test_installed_pin_requires_exact_known_component_artifact[charlotte-missing]
+FAILED tests/test_release_policy.py::test_installed_pin_requires_exact_known_component_artifact[charlotte-wrong-component]
+FAILED tests/test_release_policy.py::test_installed_pin_requires_exact_known_component_artifact[charlotte-version-conflict]
+FAILED tests/test_release_policy.py::test_installed_pin_requires_exact_known_component_artifact[charlotte-unregistered-image]
+FAILED tests/test_release_policy.py::test_native_policy_cli_uses_the_same_owner_contract[ltx]
+FAILED tests/test_release_policy.py::test_native_policy_cli_uses_the_same_owner_contract[charlotte]
+FAILED tests/test_release_policy.py::test_broker_policy_params_are_strict_supported_actions[change0]
+FAILED tests/test_release_policy.py::test_broker_policy_params_are_strict_supported_actions[change1]
+FAILED tests/test_release_policy.py::test_broker_policy_params_are_strict_supported_actions[change2]
+FAILED tests/test_release_policy.py::test_broker_policy_params_are_strict_supported_actions[change3]
+FAILED tests/test_release_policy.py::test_broker_policy_params_are_strict_supported_actions[change4]
+FAILED tests/test_release_policy.py::test_broker_policy_params_are_strict_supported_actions[change5]
+FAILED tests/test_release_policy.py::test_daily_timer_install_uses_only_fixed_packaged_units[ltx]
+FAILED tests/test_release_policy.py::test_daily_timer_install_uses_only_fixed_packaged_units[charlotte]
+FAILED tests/test_release_policy.py::test_cli_and_packaging_include_the_daily_policy_only_refresh
+59 failed, 16 passed in 1.60s

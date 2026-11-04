@@ -1,0 +1,19 @@
+{
+  "mode": "approved implementation and controlled publication/LTX activation",
+  "baseline_id": "AUTOADVANCE-20261104",
+  "approved_plan_sha256": "94b783d925834004cd3f111dd2437f8ae531850f0184aaa29c52f89f84267795",
+  "owner_record": "owner-approval.json",
+  "ids_are_administrative_mappings": true,
+  "requirements": {
+    "REQ-AUTOADVANCE-001": "exact approved plan C1",
+    "REQ-AUTOADVANCE-002": "exact approved plan C2",
+    "REQ-AUTOADVANCE-003": "exact approved plan C3",
+    "REQ-AUTOADVANCE-004": "exact approved plan C4",
+    "REQ-AUTOADVANCE-005": "exact approved plan C5",
+    "REQ-AUTOADVANCE-006": "exact approved plan C6",
+    "REQ-AUTOADVANCE-007": "exact approved plan C7",
+    "REQ-AUTOADVANCE-008": "exact approved plan C8"
+  },
+  "must_preserve": "allother service modes,pins,data,accounts,lifecycleowner/trustcontracts;manualinstallation;no prerelease/majorautoadvance",
+  "existing_Fleet_dependency": "native/publisher acceptance still required beforeactivation"
+}

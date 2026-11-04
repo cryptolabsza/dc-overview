@@ -264,9 +264,11 @@ def preflight_release(config, manifest_path=None, *, platform=None, fresh_setup=
     return plan
 
 
-def commit_release(config, plan, *, selection_only=False, precommit=None, _locked=False):
+def commit_release(config, plan, *, selection_only=False, precommit=None, _locked=False, policy_operation_id=None):
     from .controller_adoption import ensure_mutation_allowed
     ensure_mutation_allowed(config.config_dir)
+    from .release_policy import guard_publication
+    guard_publication(config, policy_operation_id)
     public_path = config.config_dir / 'fleet-config.yaml'
     previous = getattr(config, '_lifecycle_public_snapshot', public_path.read_bytes() if public_path.exists() else b'')
     with nullcontext() if _locked else config.lifecycle_lock():
@@ -466,7 +468,8 @@ def _scoped_runtime(config, plan, components, source_images, proxy_id=None):
 # TRACEWEAVER: entrypoint=select_release_components; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001; ver=VER-FLEETUPDATE-001
 def select_release_components(config, manifest_path, components, *, record_cli=False,
                               adopt_existing_selection=False, source_images=(), platform=None,
-                              expected_selection_id=None, expected_selection_sha256=None, operation_id=None):
+                              expected_selection_id=None, expected_selection_sha256=None, operation_id=None,
+                              policy_updates=None, precommit_check=None, postcommit=None):
     """Select explicit installed roles, preserving all other roles and intent."""
     from .controller_adoption import ensure_mutation_allowed
     from .release_catalog import COMPONENTS, Manifest, artifact_identity, _require_root
@@ -475,6 +478,11 @@ def select_release_components(config, manifest_path, components, *, record_cli=F
     if (not components or len(set(components)) != len(components)
             or any(name not in COMPONENTS or COMPONENTS[name][0] != 'proxy-updater' for name in components)):
         raise ValueError('scoped selection requires explicit unique proxy-updater components')
+    policy_updates = {} if policy_updates is None else policy_updates
+    if not isinstance(policy_updates, dict) or set(policy_updates) - set(components):
+        raise ValueError('policy changes require an explicit component scope')
+    from .release_policy import guard_publication
+    guard_publication(config, operation_id if policy_updates else None)
     expected_sources = {}
     for entry in source_images:
         if not isinstance(entry, str) or '=' not in entry:
@@ -570,6 +578,12 @@ def select_release_components(config, manifest_path, components, *, record_cli=F
                     if artifact is None:
                         raise ValueError('missing scoped artifact platform')
                     policy[name]['pin'] = artifact_identity(artifact)
+            for name, update in policy_updates.items():
+                if (not isinstance(update, dict) or set(update) not in ({'origin', 'enabled'}, {'origin', 'enabled', 'pin'})
+                        or update.get('enabled') is not policy[name]['enabled']
+                        or update.get('origin') not in ('baseline', 'customer-pin')):
+                    raise ValueError('policy update must preserve enabled service ownership')
+                policy[name] = copy.deepcopy(update)
             plan = store.prepare(manifest_path, platform=previous.platform, policies=policy, enabled_components=())
             if plan.manifest.raw != manifest.raw:
                 raise RuntimeError('manifest changed during scoped preparation')
@@ -585,8 +599,13 @@ def select_release_components(config, manifest_path, components, *, record_cli=F
                     raise RuntimeError('scoped runtime changed during selection')
                 if cli_target is not None:
                     verify_running_cli(cli_target)
+                if precommit_check is not None:
+                    precommit_check()
             config._release_operation_id = operation_id
-            commit_release(config, plan, selection_only=True, precommit=precommit, _locked=True)
+            commit_release(config, plan, selection_only=True, precommit=precommit, _locked=True,
+                           policy_operation_id=operation_id if policy_updates else None)
+            if postcommit is not None:
+                postcommit()
     return {'state': 'pending-deployment', 'scope': list(components), 'tooling_recorded': bool(record_cli),
             'reference_adopted': adopting, 'local_only_sources': local_only,
             'suite_complete': False, 'selection_id': plan.selection['selection_id'],

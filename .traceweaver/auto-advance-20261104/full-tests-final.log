@@ -1,0 +1,175 @@
+........................................................................ [  3%]
+........................................................................ [  6%]
+........................................................................ [ 10%]
+........................................................................ [ 13%]
+........................................................................ [ 16%]
+........................................................................ [ 20%]
+........................................................................ [ 23%]
+........................................................................ [ 27%]
+........................................................................ [ 30%]
+........................................................................ [ 33%]
+........................................................................ [ 37%]
+........................................................................ [ 40%]
+........................................................................ [ 44%]
+........................................................................ [ 47%]
+........................................................................ [ 50%]
+........................................................................ [ 54%]
+........................................................................ [ 57%]
+........................................................................ [ 61%]
+........................................................................ [ 64%]
+........................................................................ [ 67%]
+........................................................................ [ 71%]
+........................................................................ [ 74%]
+........................................................................ [ 78%]
+........................................................................ [ 81%]
+........................................................................ [ 84%]
+........................................................................ [ 88%]
+........................................................................ [ 91%]
+........................................................................ [ 95%]
+........................................................................ [ 98%]
+.................................                                        [100%]
+=============================== warnings summary ===============================
+tests/test_credential_propagation.py: 64 warnings
+tests/test_dc_lifecycle_review_repairs.py: 4 warnings
+tests/test_exporter_install_ui.py: 72 warnings
+tests/test_exporter_toggle.py: 6 warnings
+tests/test_http_inventory.py: 23 warnings
+tests/test_inventory_sync.py: 154 warnings
+tests/test_ipmi_sync.py: 2 warnings
+tests/test_operational_customer_contract.py: 20 warnings
+tests/test_prometheus_sync.py: 2 warnings
+tests/test_selected_completion_versions.py: 21 warnings
+tests/test_selected_ssh_identity_authority.py: 6 warnings
+tests/test_selected_worker_enrollment.py: 30 warnings
+tests/test_selected_worker_enrollment_review_repairs.py: 48 warnings
+tests/test_server_delete.py: 4 warnings
+tests/test_servers_inventory_ui.py: 7 warnings
+tests/test_ssh_key_management.py: 18 warnings
+  /private/tmp/ltx-auto-advance-20261104/venv/lib/python3.12/site-packages/sqlalchemy/sql/schema.py:4362: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return util.wrap_callable(lambda ctx: fn(), fn)  # type: ignore[call-arg, no-any-return, no-untyped-call]  # noqa: E501
+
+tests/test_credential_propagation.py: 13 warnings
+tests/test_exporter_install_ui.py: 8 warnings
+tests/test_exporter_toggle.py: 3 warnings
+tests/test_http_inventory.py: 3 warnings
+tests/test_inventory_sync.py: 14 warnings
+tests/test_operational_customer_contract.py: 1 warning
+tests/test_selected_completion_versions.py: 10 warnings
+tests/test_selected_ssh_identity_authority.py: 4 warnings
+tests/test_selected_worker_enrollment.py: 76 warnings
+tests/test_selected_worker_enrollment_review_repairs.py: 39 warnings
+tests/test_server_delete.py: 2 warnings
+tests/test_servers_inventory_ui.py: 2 warnings
+tests/test_ssh_key_management.py: 7 warnings
+  /private/tmp/ltx-auto-advance-20261104/venv/lib/python3.12/site-packages/flask_sqlalchemy/query.py:30: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    rv = self.get(ident)
+
+tests/test_credential_propagation.py::test_local_credential_save_queues_only_an_encrypted_bundle_and_requires_credential_ack
+tests/test_selected_worker_enrollment_review_repairs.py::test_selected_completion_rejects_each_concurrent_identity_field_before_probe[ssh_key_id]
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/src/dc_overview/app.py:2889: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    if key_id and not SSHKey.query.get(key_id):
+
+tests/test_credential_propagation.py::test_local_credential_save_queues_only_an_encrypted_bundle_and_requires_credential_ack
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/tests/test_credential_propagation.py:66: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    assert Server.query.get(server_id).bmc_password != "bmc-secret"
+
+tests/test_credential_propagation.py::test_saved_bmc_username_with_blank_password_preserves_existing_secret_on_ssh_edit
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/tests/test_credential_propagation.py:105: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    ciphertext = Server.query.get(server_id).bmc_password
+
+tests/test_credential_propagation.py::test_saved_bmc_username_with_blank_password_preserves_existing_secret_on_ssh_edit
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/tests/test_credential_propagation.py:111: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    server = Server.query.get(server_id)
+
+tests/test_credential_propagation.py::test_vault_mode_blocks_credential_mutations_without_changing_local_state
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/tests/test_credential_propagation.py:123: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    with app.app_context(): assert Server.query.get(server_id).ssh_port == 22
+
+tests/test_credential_propagation.py::test_invalid_bmc_input_and_missing_transport_key_do_not_mutate
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/tests/test_credential_propagation.py:148: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    server = Server.query.get(server_id)
+
+tests/test_exporter_install_ui.py: 6 warnings
+tests/test_exporter_toggle.py: 1 warning
+tests/test_operational_customer_contract.py: 3 warnings
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/src/dc_overview/app.py:1710: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    server = Server.query.get(server_id)
+
+tests/test_exporter_install_ui.py::TestLiveCheckInstalledState::test_failed_service_read_preserves_confirmed_installation
+tests/test_exporter_install_ui.py::TestLiveCheckInstalledState::test_service_exists_but_stopped
+tests/test_exporter_install_ui.py::TestLiveCheckInstalledState::test_service_active_and_port_open
+tests/test_exporter_install_ui.py::TestLiveCheckInstalledState::test_no_services_skips_version_ssh
+tests/test_exporter_install_ui.py::test_health_reads_preserve_monitoring_intent_and_discovery[True-False-live]
+tests/test_exporter_install_ui.py::test_health_reads_preserve_monitoring_intent_and_discovery[False-True-live]
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/src/dc_overview/app.py:1785: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    ts_val = datetime.utcnow().isoformat()
+
+tests/test_exporter_install_ui.py: 2 warnings
+tests/test_selected_completion_versions.py: 3 warnings
+tests/test_selected_worker_enrollment.py: 4 warnings
+tests/test_selected_worker_enrollment_review_repairs.py: 3 warnings
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/src/dc_overview/app.py:1444: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    ts_val = datetime.utcnow().isoformat()
+
+tests/test_exporter_install_ui.py::test_health_reads_preserve_monitoring_intent_and_discovery[True-False-watchdog-sync]
+tests/test_exporter_install_ui.py::test_health_reads_preserve_monitoring_intent_and_discovery[False-True-watchdog-sync]
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/src/dc_overview/app.py:2401: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    server.watchdog_agent_last_seen = datetime.utcnow()
+
+tests/test_exporter_install_ui.py: 1 warning
+tests/test_selected_completion_versions.py: 5 warnings
+tests/test_selected_worker_enrollment.py: 4 warnings
+tests/test_selected_worker_enrollment_review_repairs.py: 3 warnings
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/src/dc_overview/app.py:1404: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    server.last_seen = datetime.utcnow()
+
+tests/test_inventory_sync.py::test_delete_keeps_tombstone_outbox_when_receiver_is_unavailable
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/tests/test_inventory_sync.py:103: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    assert Server.query.get(server_id) is None
+
+tests/test_inventory_sync.py::test_existing_server_mapping_update_and_pending_outbox_are_visible_and_retryable
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/tests/test_inventory_sync.py:149: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    server = Server.query.get(server_id)
+
+tests/test_inventory_sync.py::test_readding_then_mapping_a_retired_bmc_restores_its_identity
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/tests/test_inventory_sync.py:181: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    identity = Server.query.get(original_id).inventory_server_id
+
+tests/test_inventory_sync.py::test_readding_then_mapping_a_retired_bmc_restores_its_identity
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/tests/test_inventory_sync.py:191: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    restored = Server.query.get(recreated.get_json()['id'])
+
+tests/test_inventory_sync.py::test_rebinding_the_same_current_bmc_keeps_its_identity_and_advances_revision
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/tests/test_inventory_sync.py:217: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    identity = Server.query.get(server_id).inventory_server_id
+
+tests/test_inventory_sync.py::test_rebinding_the_same_current_bmc_keeps_its_identity_and_advances_revision
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/tests/test_inventory_sync.py:221: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    current = Server.query.get(server_id)
+
+tests/test_selected_worker_enrollment.py::test_real_api_registration_lost_response_reuses_committed_identity
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/tests/test_selected_worker_enrollment.py:272: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    with app.app_context():assert InventoryServer.query.get(registered['id']).inventory_server_id==identity
+
+tests/test_selected_worker_enrollment.py::test_real_cli_parser_api_preflight_install_repeat_and_partial_resume
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/tests/test_selected_worker_enrollment.py:389: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    with app.app_context():assert InventoryServer.query.get(saved_id).inventory_server_id==saved_identity
+
+tests/test_selected_worker_enrollment.py::test_real_api_repeat_preserves_pending_outbox_and_credentials
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/tests/test_selected_worker_enrollment.py:467: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    row=InventoryServer.query.get(created.get_json()['id']);identity=row.inventory_server_id
+
+tests/test_server_delete.py::TestServerDelete::test_delete_server_without_csrf_token_succeeds
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/tests/test_server_delete.py:19: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    assert Server.query.get(sample_server) is not None
+
+tests/test_server_delete.py::TestServerDelete::test_delete_server_without_csrf_token_succeeds
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/tests/test_server_delete.py:30: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    assert Server.query.get(sample_server) is None
+
+tests/test_server_delete.py::TestServerDelete::test_delete_server_unauthenticated_returns_401
+  /private/tmp/ltx-auto-advance-20261104/dc-overview/tests/test_server_delete.py:47: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    assert Server.query.get(sample_server) is not None
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+2121 passed, 725 warnings in 185.55s (0:03:05)

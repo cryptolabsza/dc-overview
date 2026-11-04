@@ -1,0 +1,8 @@
+{
+  "utc": "2026-11-04T16:34:29.958547+00:00",
+  "owner": "Hannes Zietsman",
+  "message": "Yes approve the plan",
+  "approved_plan_sha256": "94b783d925834004cd3f111dd2437f8ae531850f0184aaa29c52f89f84267795",
+  "scope": "all candidatebehavior C1-C8, numberedimplementation andCI/release/LTXverification inexactplan",
+  "no_repeat_approval_needed": true
+}

@@ -69,6 +69,7 @@ def validate_actor(actor):
         raise ValueError("invalid authenticated actor")
 
 
+# TRACEWEAVER: entrypoint=validate_params; req=REQ-AUTOADVANCE-005; trace=TRACE-AUTOADVANCE-005; ver=VER-AUTOADVANCE-005
 def validate_params(action, params):
     fields = {
         "list": {"channel"},
@@ -88,11 +89,20 @@ def validate_params(action, params):
         },
         "status": {"operation_id"},
         "recover": {"operation_id"},
+        "policy-list": set(),
+        "policy-set": {"component", "mode", "expected_selection_id", "expected_selection_sha256"},
+        "policy-refresh": {"expected_selection_id", "expected_selection_sha256"},
     }
     if action not in fields or not isinstance(params, dict) or set(params) != fields[action]:
         raise ValueError("invalid release request fields")
     for key, value in params.items():
-        if key in ("components", "candidate_ids"):
+        if key == "component":
+            if not isinstance(value, str) or value not in catalog.COMPONENTS:
+                raise ValueError("invalid release component")
+        elif key == "mode":
+            if value not in ("pinned", "follow-stable"):
+                raise ValueError("invalid release follow policy")
+        elif key in ("components", "candidate_ids"):
             if (
                 not isinstance(value, list)
                 or not 1 <= len(value) <= 32
@@ -195,6 +205,11 @@ class InstalledOwner:
     def __init__(self, config, policy):
         self.config = config
         self.policy = policy
+
+    def installed_component(self, current, name):
+        from .release_policy import installed_component
+        from .fleet_upgrade import _scoped_inspect
+        return installed_component(current, name, catalog.ReleaseStore(self.config.config_dir / "releases"), _scoped_inspect)
 
     def capabilities(self, contract):
         from cryptolabs_proxy import updates
@@ -519,6 +534,10 @@ class ReleaseBroker:
         self._reload_policy()
         validate_actor(actor)
         validate_params(action, params)
+        if action in ("policy-list", "policy-set", "policy-refresh"):
+            from .release_policy import PolicyManager
+            with self._lock():
+                return PolicyManager(self).dispatch(action, params)
         if action == "list":
             with self._lock():
                 candidates = self._candidates()
@@ -582,9 +601,13 @@ class ReleaseBroker:
                 }
         if action == "preview":
             with self._lock():
+                from .release_policy import guard_publication
+                guard_publication(self.config)
                 return self._preview(params, actor)
         if action == "apply":
             with self._lock():
+                from .release_policy import guard_publication
+                guard_publication(self.config)
                 return self._apply(params, actor)
         self._ensure()
         path = self.root / "operations" / (params["operation_id"] + ".json")

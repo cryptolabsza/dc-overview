@@ -1,0 +1,11 @@
+{
+  "decision": "Proceed",
+  "scope": "exactapprovedplanC1-C8andnamedfiles;noinferrednewrequirements",
+  "authority": "authority.json andowner-approval.json",
+  "profile": "profile.json/frozenbeforeproductionmutations",
+  "vv": "vv-capsule.json/review-definition.json",
+  "baseline_hash": "94b783d925834004cd3f111dd2437f8ae531850f0184aaa29c52f89f84267795",
+  "must_not_change": "otherroles/modes/pins/runtimes/accounts/data;existingtrustandlifecycleguardcontracts;installationmanual",
+  "publication": "separatecontrolledrouteaftercleanreview/verification",
+  "runtime_acceptance": "helduntilactualnative/browser/publisher/bridgeevidence"
+}

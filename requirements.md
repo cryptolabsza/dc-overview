@@ -99,3 +99,39 @@ cases. Representative local validation also exercised candidate Flask metrics
 through a real Prometheus scrape and the separately owned expressions in 13
 scenarios. These results establish local behavior; they do not claim production
 deployment, notification delivery or acceptance of unrelated Fleet work.
+
+## Owner-approved per-service stable following (4 November2026)
+
+Exact authority: `.traceweaver/auto-advance-20261104/plan.md`, SHA256 `94b783d925834004cd3f111dd2437f8ae531850f0184aaa29c52f89f84267795`; receipt `owner-approval.json`. Administrative REQ/TRACE/VER/VAL-AUTOADVANCE-001 through -008 map one-to-one to approved C1-C8 without changing their meaning. Source and verification may proceed; publication/runtime claims require their own current checks. Existing Fleet dependency holds remain.
+
+### REQ-AUTOADVANCE-001 — approved C1
+
+An authenticated Fleet administrator can switch one supported managed service between Pinned and Follow stable; the visible installed/selected version and mode remain distinct.
+
+### REQ-AUTOADVANCE-002 — approved C2
+
+Removing a pin opts only that service into verified stable candidates. Existing pins remain pinned by default. Pin current version freezes the verified installed digest; if its identity/provenance cannot be established, the operation fails without changing policy.
+
+### REQ-AUTOADVANCE-003 — approved C3
+
+Follow stable selects the newest admitted compatible non-prerelease version within the installed major version. No downgrade; a major upgrade requires explicit selection. No usable newer candidate leaves the current selection intact and reports why.
+
+### REQ-AUTOADVANCE-004 — approved C4
+
+Selection refresh occurs on Check Updates and a daily host-side check, including when no browser is open. It changes only opted-in services. Mode changes and refresh never install or restart containers. The existing Update action handles installation.
+
+### REQ-AUTOADVANCE-005 — approved C5
+
+Policy mutation uses the existing host owner boundary, authenticated administrator/session/CSRF/origin checks, explicit service scope, bounded fields, selection compare-and-swap, and existing lifecycle locks. A native CLI exposes the same choices. Failed persistence, stale requests, active operations, unavailable discovery or failed trust verification preserve prior selections and modes.
+
+### REQ-AUTOADVANCE-006 — approved C6
+
+Use verified published release/admission metadata, fixed trusted repository/channel sources and exact immutable digests. Do not replace digests with mutable :latest tags or loosen publisher/signature checks. External-owned services retain their owning lifecycle workflow; unsupported services show an explanation rather than pretending the change succeeded.
+
+### REQ-AUTOADVANCE-007 — approved C7
+
+Show current mode, installed version, selected target and clear failure/progress states; refreshes cannot silently re-pin or cross major versions. Re-pinning prevents a concurrent scheduled refresh from advancing afterward.
+
+### REQ-AUTOADVANCE-008 — approved C8
+
+TDD, independent correctness/security review, native Linux lifecycle/policy verification and real-browser checks precede release. Existing LTX data/accounts/settings and unrelated pins/runtimes remain preserved.

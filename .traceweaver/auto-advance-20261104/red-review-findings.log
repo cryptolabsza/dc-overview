@@ -1,0 +1,152 @@
+FFFFFF                                                                   [100%]
+=================================== FAILURES ===================================
+_____ test_native_writer_wins_before_journal_without_orphaning_policy[ltx] _____
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10afc23c0>, <test_release_broker.Owner object at 0x10ae4b470>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10af9ffb0>
+
+    def test_native_writer_wins_before_journal_without_orphaning_policy(policy_product,monkeypatch):
+        from dc_overview import fleet_upgrade
+        from dc_overview.release_broker import BrokerError
+        policy=policy_module();host,service,owner=policy_product;write=policy.private_write;fired=[]
+        data=copy.deepcopy(host.store.load().manifest.data);data['baseline_id']='competing-native-writer'
+        path=host.config.config_dir/'competing.json';path.write_text(json.dumps(data))
+        def competing_write(target,value):
+            if target.name=='policy-candidate.json' and not fired:
+                fired.append(True)
+                fleet_upgrade.select_release_components(host.config,path,['grafana'],platform='linux/amd64')
+            return write(target,value)
+        with monkeypatch.context() as change:
+            change.setattr(policy,'private_write',competing_write)
+            with pytest.raises((BrokerError,RuntimeError,ValueError)):set_mode(service,'follow-stable')
+        assert fired and host.store.load().selection['selection_id']=='competing-native-writer'
+>       assert not (service.root/'policy-publication.json').exists()
+E       AssertionError: assert not True
+E        +  where True = exists()
+E        +    where exists = (PosixPath('/private/var/folders/2f/ntb_0p9558v4wfcwr5_64dg00000gn/T/pytest-of-hanneszietsman/pytest-10208/test_native_writer_wins_before0/config/releases/broker') / 'policy-publication.json').exists
+E        +      where PosixPath('/private/var/folders/2f/ntb_0p9558v4wfcwr5_64dg00000gn/T/pytest-of-hanneszietsman/pytest-10208/test_native_writer_wins_before0/config/releases/broker') = <dc_overview.release_broker.ReleaseBroker object at 0x10afc23c0>.root
+
+tests/test_release_policy.py:442: AssertionError
+__ test_native_writer_wins_before_journal_without_orphaning_policy[charlotte] __
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10afc3f20>, <test_release_broker.Owner object at 0x10afc3d40>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10b01f110>
+
+    def test_native_writer_wins_before_journal_without_orphaning_policy(policy_product,monkeypatch):
+        from dc_overview import fleet_upgrade
+        from dc_overview.release_broker import BrokerError
+        policy=policy_module();host,service,owner=policy_product;write=policy.private_write;fired=[]
+        data=copy.deepcopy(host.store.load().manifest.data);data['baseline_id']='competing-native-writer'
+        path=host.config.config_dir/'competing.json';path.write_text(json.dumps(data))
+        def competing_write(target,value):
+            if target.name=='policy-candidate.json' and not fired:
+                fired.append(True)
+                fleet_upgrade.select_release_components(host.config,path,['grafana'],platform='linux/amd64')
+            return write(target,value)
+        with monkeypatch.context() as change:
+            change.setattr(policy,'private_write',competing_write)
+            with pytest.raises((BrokerError,RuntimeError,ValueError)):set_mode(service,'follow-stable')
+        assert fired and host.store.load().selection['selection_id']=='competing-native-writer'
+>       assert not (service.root/'policy-publication.json').exists()
+E       AssertionError: assert not True
+E        +  where True = exists()
+E        +    where exists = (PosixPath('/private/var/folders/2f/ntb_0p9558v4wfcwr5_64dg00000gn/T/pytest-of-hanneszietsman/pytest-10208/test_native_writer_wins_before1/config/releases/broker') / 'policy-publication.json').exists
+E        +      where PosixPath('/private/var/folders/2f/ntb_0p9558v4wfcwr5_64dg00000gn/T/pytest-of-hanneszietsman/pytest-10208/test_native_writer_wins_before1/config/releases/broker') = <dc_overview.release_broker.ReleaseBroker object at 0x10afc3f20>.root
+
+tests/test_release_policy.py:442: AssertionError
+___________ test_follow_tracks_a_new_explicitly_installed_major[ltx] ___________
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10b038380>, <test_release_broker.Owner object at 0x10b0383e0>)
+admitted = {'times': {'issued_at': '2026-11-04T17:00:34.548302+00:00', 'expires_at': '2026-11-04T17:02:44.548302+00:00'}, 'produc...dd8ee15ec28a201af54bec951ec8ade3cc986c7a90e9e4d87f', 'verify': <function admitted.<locals>.verify at 0x10b063f60>, ...}
+
+    def test_follow_tracks_a_new_explicitly_installed_major(policy_product,admitted):
+        from dc_overview import fleet_upgrade
+        host,service,owner=policy_product;set_mode(service,'follow-stable')
+        data=copy.deepcopy(host.store.load().manifest.data);data['baseline_id']='explicit-major-two'
+        new=copy.deepcopy(data['components']['grafana']);new['release']='2.0.0'
+        new['artifacts']['linux/amd64']['reference']='grafana/grafana@sha256:'+'c'*64
+        data['components']['grafana']=new;path=host.config.config_dir/'explicit-major.json';path.write_text(json.dumps(data))
+        fleet_upgrade.select_release_components(host.config,path,['grafana'],platform='linux/amd64')
+        owner.installed_component=lambda current,name:copy.deepcopy(new) if name=='grafana' else None
+        service.discovery=lambda:[admitted_version(admitted,'2.1.0',identity='d')]
+        result=service.dispatch('policy-refresh',expected(service),actor=ACTOR)
+>       assert result['advanced']==['grafana'] and result['components']['grafana']['major']==2
+E       AssertionError: assert ([] == ['grafana']
+E         
+E         Right contains one more item: 'grafana'
+E         Use -v to get more diff)
+
+tests/test_release_policy.py:457: AssertionError
+________ test_follow_tracks_a_new_explicitly_installed_major[charlotte] ________
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10b03a3f0>, <test_release_broker.Owner object at 0x10b038f50>)
+admitted = {'times': {'issued_at': '2026-11-04T17:00:34.591546+00:00', 'expires_at': '2026-11-04T17:02:44.591546+00:00'}, 'produc...4154b77f9a9c822d13117ae0ee803fc5ba56135bca1c9148bc', 'verify': <function admitted.<locals>.verify at 0x10af6c400>, ...}
+
+    def test_follow_tracks_a_new_explicitly_installed_major(policy_product,admitted):
+        from dc_overview import fleet_upgrade
+        host,service,owner=policy_product;set_mode(service,'follow-stable')
+        data=copy.deepcopy(host.store.load().manifest.data);data['baseline_id']='explicit-major-two'
+        new=copy.deepcopy(data['components']['grafana']);new['release']='2.0.0'
+        new['artifacts']['linux/amd64']['reference']='grafana/grafana@sha256:'+'c'*64
+        data['components']['grafana']=new;path=host.config.config_dir/'explicit-major.json';path.write_text(json.dumps(data))
+        fleet_upgrade.select_release_components(host.config,path,['grafana'],platform='linux/amd64')
+        owner.installed_component=lambda current,name:copy.deepcopy(new) if name=='grafana' else None
+        service.discovery=lambda:[admitted_version(admitted,'2.1.0',identity='d')]
+        result=service.dispatch('policy-refresh',expected(service),actor=ACTOR)
+>       assert result['advanced']==['grafana'] and result['components']['grafana']['major']==2
+E       AssertionError: assert ([] == ['grafana']
+E         
+E         Right contains one more item: 'grafana'
+E         Use -v to get more diff)
+
+tests/test_release_policy.py:457: AssertionError
+______ test_repin_revalidates_installed_identity_inside_native_locks[ltx] ______
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10afc3290>, <test_release_broker.Owner object at 0x10afc0f80>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1091c72f0>
+
+    def test_repin_revalidates_installed_identity_inside_native_locks(policy_product,monkeypatch):
+        from dc_overview.release_broker import BrokerError
+        policy=policy_module();host,service,owner=policy_product;set_mode(service,'follow-stable')
+        before=snapshot(host,service);write=policy.private_write;fired=[]
+        def change_installed(path,value):
+            if path.name=='policy-candidate.json' and not fired:
+                fired.append(True)
+                owner.installed_component=lambda *a:None
+            return write(path,value)
+        with monkeypatch.context() as change:
+            change.setattr(policy,'private_write',change_installed)
+>           with pytest.raises(BrokerError) as error:set_mode(service,'pinned')
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE BrokerError
+
+tests/test_release_policy.py:473: Failed
+___ test_repin_revalidates_installed_identity_inside_native_locks[charlotte] ___
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10afc1850>, <test_release_broker.Owner object at 0x10afc2420>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10b0efe90>
+
+    def test_repin_revalidates_installed_identity_inside_native_locks(policy_product,monkeypatch):
+        from dc_overview.release_broker import BrokerError
+        policy=policy_module();host,service,owner=policy_product;set_mode(service,'follow-stable')
+        before=snapshot(host,service);write=policy.private_write;fired=[]
+        def change_installed(path,value):
+            if path.name=='policy-candidate.json' and not fired:
+                fired.append(True)
+                owner.installed_component=lambda *a:None
+            return write(path,value)
+        with monkeypatch.context() as change:
+            change.setattr(policy,'private_write',change_installed)
+>           with pytest.raises(BrokerError) as error:set_mode(service,'pinned')
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE BrokerError
+
+tests/test_release_policy.py:473: Failed
+=========================== short test summary info ============================
+FAILED tests/test_release_policy.py::test_native_writer_wins_before_journal_without_orphaning_policy[ltx]
+FAILED tests/test_release_policy.py::test_native_writer_wins_before_journal_without_orphaning_policy[charlotte]
+FAILED tests/test_release_policy.py::test_follow_tracks_a_new_explicitly_installed_major[ltx]
+FAILED tests/test_release_policy.py::test_follow_tracks_a_new_explicitly_installed_major[charlotte]
+FAILED tests/test_release_policy.py::test_repin_revalidates_installed_identity_inside_native_locks[ltx]
+FAILED tests/test_release_policy.py::test_repin_revalidates_installed_identity_inside_native_locks[charlotte]
+6 failed, 85 deselected in 1.65s

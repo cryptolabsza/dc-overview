@@ -122,6 +122,48 @@ def release_candidates(channel):
     _release_request('list', {'channel': channel})
 
 
+@release.command('policies')
+def release_policies():
+    """Show pinned/follow-stable intent independently of installed versions."""
+    _release_request('policy-list', {})
+
+
+@release.command('policy-set')
+@click.option('--component', required=True)
+@click.option('--mode', type=click.Choice(['pinned', 'follow-stable']), required=True)
+@click.option('--expected-selection-id', required=True)
+@click.option('--expected-selection-sha256', required=True)
+def release_policy_set(component, mode, expected_selection_id, expected_selection_sha256):
+    """Change one service policy without installing or restarting it."""
+    _release_request('policy-set', dict(component=component, mode=mode,
+        expected_selection_id=expected_selection_id, expected_selection_sha256=expected_selection_sha256))
+
+
+@release.command('policy-refresh')
+# TRACEWEAVER: entrypoint=release_policy_refresh; req=REQ-AUTOADVANCE-004; trace=TRACE-AUTOADVANCE-004; ver=VER-AUTOADVANCE-004
+def release_policy_refresh():
+    """Advance opted-in stable selections only; never install updates."""
+    from .release_broker_service import request
+    import json
+    try:
+        current = request('policy-list', {})
+        result = request('policy-refresh', {'expected_selection_id': current['selection_id'],
+            'expected_selection_sha256': current['selection_sha256']})
+        click.echo(json.dumps(result, sort_keys=True))
+    except (ValueError, RuntimeError, OSError, KeyError) as error:
+        raise click.ClickException(str(error)) from None
+
+
+@release.command('policy-install-timer')
+def release_policy_install_timer():
+    """Install the packaged daily selection-only check on this host."""
+    from .release_policy import install_timer
+    try:
+        install_timer()
+    except (ValueError, RuntimeError, OSError) as error:
+        raise click.ClickException(str(error)) from None
+
+
 @release.command('preview')
 @click.option('--candidate', 'candidate_ids', multiple=True, required=True)
 @click.option('--component', 'components', multiple=True, required=True)

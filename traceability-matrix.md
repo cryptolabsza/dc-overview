@@ -38,6 +38,16 @@ The root-reviewed native preflight repair is limited to the `release_candidates.
 
 | Artifact Path | Requirement | Trace | Verification | Anchor Type | Role |
 | --- | --- | --- | --- | --- | --- |
+| src/dc_overview/release_policy.py | REQ-AUTOADVANCE-003 | TRACE-AUTOADVANCE-003 | VER-AUTOADVANCE-003 | file-role | stable-release-policy |
+| tests/test_release_policy.py | REQ-AUTOADVANCE-008 | TRACE-AUTOADVANCE-008 | VER-AUTOADVANCE-008 | file-role | policy-regression |
+| tests/test_release_policy.py | REQ-AUTOADVANCE-008 | TRACE-AUTOADVANCE-008 | VER-AUTOADVANCE-008 | verifies | policy-regression |
+| src/dc_overview/release_policy.py | REQ-AUTOADVANCE-002 | TRACE-AUTOADVANCE-002 | VER-AUTOADVANCE-002 | entrypoint | policy-entrypoint |
+| src/dc_overview/release_policy.py | REQ-AUTOADVANCE-004 | TRACE-AUTOADVANCE-004 | VER-AUTOADVANCE-004 | entrypoint | policy-entrypoint |
+| src/dc_overview/release_broker.py | REQ-AUTOADVANCE-005 | TRACE-AUTOADVANCE-005 | VER-AUTOADVANCE-005 | entrypoint | policy-entrypoint |
+| src/dc_overview/cli.py | REQ-AUTOADVANCE-004 | TRACE-AUTOADVANCE-004 | VER-AUTOADVANCE-004 | entrypoint | policy-entrypoint |
+
+| Artifact Path | Requirement | Trace | Verification | Anchor Type | Role |
+| --- | --- | --- | --- | --- | --- | --- |
 | src/dc_overview/cli.py | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | file-role | release-owner |
 | src/dc_overview/cli.py | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | entrypoint | release-owner |
 | src/dc_overview/fleet_upgrade.py | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | file-role | release-owner |
@@ -94,3 +104,34 @@ review metadata, not a substitute for fresh CI on the published head.
 | tests/test_selected_worker_enrollment.py | REQ-MON-001 | TRACE-MON-001 | VER-MON-001 | verifies | selected-enrollment-intent-contract |
 | tests/test_http_inventory.py | REQ-MON-002 | TRACE-MON-002 | VER-MON-002 | verifies | policy-metric-regression |
 | tests/test_http_inventory.py | REQ-MON-003 | TRACE-MON-003 | VER-MON-003 | verifies | application-scrape-regression |
+
+## Approved auto-advance work-item mapping
+
+| Trace | Requirement | Implementation | Verification | Validation | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| TRACE-AUTOADVANCE-001 | REQ-AUTOADVANCE-001 | approved plan step1-5; file anchors added as implemented | VER-AUTOADVANCE-001 | VAL-AUTOADVANCE-001 | owner-approved / verification pending |
+| TRACE-AUTOADVANCE-002 | REQ-AUTOADVANCE-002 | approved plan step1-5; file anchors added as implemented | VER-AUTOADVANCE-002 | VAL-AUTOADVANCE-002 | owner-approved / verification pending |
+| TRACE-AUTOADVANCE-003 | REQ-AUTOADVANCE-003 | approved plan step1-5; file anchors added as implemented | VER-AUTOADVANCE-003 | VAL-AUTOADVANCE-003 | owner-approved / verification pending |
+| TRACE-AUTOADVANCE-004 | REQ-AUTOADVANCE-004 | approved plan step1-5; file anchors added as implemented | VER-AUTOADVANCE-004 | VAL-AUTOADVANCE-004 | owner-approved / verification pending |
+| TRACE-AUTOADVANCE-005 | REQ-AUTOADVANCE-005 | approved plan step1-5; file anchors added as implemented | VER-AUTOADVANCE-005 | VAL-AUTOADVANCE-005 | owner-approved / verification pending |
+| TRACE-AUTOADVANCE-006 | REQ-AUTOADVANCE-006 | approved plan step1-5; file anchors added as implemented | VER-AUTOADVANCE-006 | VAL-AUTOADVANCE-006 | owner-approved / verification pending |
+| TRACE-AUTOADVANCE-007 | REQ-AUTOADVANCE-007 | approved plan step1-5; file anchors added as implemented | VER-AUTOADVANCE-007 | VAL-AUTOADVANCE-007 | owner-approved / verification pending |
+| TRACE-AUTOADVANCE-008 | REQ-AUTOADVANCE-008 | approved plan step1-5; file anchors added as implemented | VER-AUTOADVANCE-008 | VAL-AUTOADVANCE-008 | owner-approved / verification pending |
+
+## Traceability Matrix
+
+| Implementation | Requirement | Trace | Verification | Validation | Status |
+| --- | --- | --- | --- | --- | --- |
+| src/dc_overview/release_policy.py | REQ-AUTOADVANCE-002 | TRACE-AUTOADVANCE-002 | VER-AUTOADVANCE-002 | VAL-AUTOADVANCE-002 | owner-approved |
+| src/dc_overview/release_broker.py | REQ-AUTOADVANCE-002 | TRACE-AUTOADVANCE-002 | VER-AUTOADVANCE-002 | VAL-AUTOADVANCE-002 | owner-approved |
+| src/dc_overview/fleet_upgrade.py | REQ-AUTOADVANCE-002 | TRACE-AUTOADVANCE-002 | VER-AUTOADVANCE-002 | VAL-AUTOADVANCE-002 | owner-approved |
+| src/dc_overview/cli.py | REQ-AUTOADVANCE-002 | TRACE-AUTOADVANCE-002 | VER-AUTOADVANCE-002 | VAL-AUTOADVANCE-002 | owner-approved |
+| src/dc_overview/release_policy.py | REQ-AUTOADVANCE-003 | TRACE-AUTOADVANCE-003 | VER-AUTOADVANCE-003 | VAL-AUTOADVANCE-003 | owner-approved |
+| src/dc_overview/release_policy.py | REQ-AUTOADVANCE-004 | TRACE-AUTOADVANCE-004 | VER-AUTOADVANCE-004 | VAL-AUTOADVANCE-004 | owner-approved |
+| src/dc_overview/cli.py | REQ-AUTOADVANCE-004 | TRACE-AUTOADVANCE-004 | VER-AUTOADVANCE-004 | VAL-AUTOADVANCE-004 | owner-approved |
+| src/dc_overview/templates/systemd/dc-overview-release-refresh.service | REQ-AUTOADVANCE-004 | TRACE-AUTOADVANCE-004 | VER-AUTOADVANCE-004 | VAL-AUTOADVANCE-004 | owner-approved |
+| src/dc_overview/templates/systemd/dc-overview-release-refresh.timer | REQ-AUTOADVANCE-004 | TRACE-AUTOADVANCE-004 | VER-AUTOADVANCE-004 | VAL-AUTOADVANCE-004 | owner-approved |
+| src/dc_overview/release_policy.py | REQ-AUTOADVANCE-005 | TRACE-AUTOADVANCE-005 | VER-AUTOADVANCE-005 | VAL-AUTOADVANCE-005 | owner-approved |
+| src/dc_overview/release_broker.py | REQ-AUTOADVANCE-005 | TRACE-AUTOADVANCE-005 | VER-AUTOADVANCE-005 | VAL-AUTOADVANCE-005 | owner-approved |
+| src/dc_overview/fleet_upgrade.py | REQ-AUTOADVANCE-005 | TRACE-AUTOADVANCE-005 | VER-AUTOADVANCE-005 | VAL-AUTOADVANCE-005 | owner-approved |
+| tests/test_release_policy.py | REQ-AUTOADVANCE-008 | TRACE-AUTOADVANCE-008 | VER-AUTOADVANCE-008 | VAL-AUTOADVANCE-008 | owner-approved |
