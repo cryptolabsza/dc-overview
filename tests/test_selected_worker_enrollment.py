@@ -1,3 +1,5 @@
+# TRACEWEAVER: file-role=selected-enrollment-intent-contract; req=REQ-MON-001; trace=TRACE-MON-001; ver=VER-MON-001
+# TRACEWEAVER: verifies=VER-MON-001; req=REQ-MON-001; trace=TRACE-MON-001
 """Ordinary selected enrollment; all external transports are controlled adapters."""
 import base64
 import importlib
@@ -532,7 +534,7 @@ def test_selected_server_check_preserves_held_installations_and_refreshes_after_
     monkeypatch.setattr('dc_overview.app.update_prometheus_targets',writer)
     response=client.get(f'/api/servers/{identity}/check'+_selected_api_query(app,monkeypatch,identity),headers=auth_headers)
     assert response.status_code==200
-    assert seen==[(True,False,True,False)]
+    assert seen==[(True,True,True,True)]
 
 
 def test_selected_server_check_unknown_presence_preserves_observations(app,client,auth_headers,monkeypatch):
@@ -615,7 +617,7 @@ def test_selected_discovery_failure_keeps_committed_observations(app,client,auth
     response=client.get(f'/api/servers/{identity}/check'+_selected_api_query(app,monkeypatch,identity),headers=auth_headers)
     assert response.status_code==503 and 'committed' in response.get_json()['error']
     with app.app_context():
-        row=db.session.get(InventoryServer,identity);assert row.node_exporter_installed is True and row.node_exporter_enabled is False
+        row=db.session.get(InventoryServer,identity);assert row.node_exporter_installed is True and row.node_exporter_enabled is True
 
 
 def test_selected_invalid_query_is_rejected_before_transport(app,client,auth_headers,monkeypatch):

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# TRACEWEAVER: file-role=monitoring-intent-implementation; req=REQ-MON-001; trace=TRACE-MON-001; ver=VER-MON-001
 """
 DC Overview - GPU Datacenter Monitoring Web Application
 
@@ -53,6 +54,7 @@ from .web_watchdog import (
 )
 from .web_prometheus import update_prometheus_targets as _update_prometheus_targets
 from .web_prometheus import reload_prometheus
+from .web_prometheus import TelemetryMonitoringCollector
 from .inventory_sync import deliver_inventory_outbox, inventory_delivery_is_configured
 from .inventory_sync import configured_inventory_secret
 from .credential_authority import credential_authority, credential_mutation_error
@@ -333,6 +335,7 @@ dc_servers_online = Gauge('dc_overview_servers_online', 'Number of online server
 dc_exporters_installed = Gauge('dc_overview_exporters_installed', 'Exporters installed', 
                                 ['server', 'exporter'], registry=registry)
 dc_gpu_total = Gauge('dc_overview_gpu_total', 'Total GPUs across all servers', registry=registry)
+registry.register(TelemetryMonitoringCollector(lambda: Server.query.all()))
 
 # =============================================================================
 # AUTHENTICATION
@@ -1361,10 +1364,10 @@ def _check_server_observations(server_id):
         'watchdog_agent': check_watchdog_agent(server)
     }
     
-    # Sync installed/enabled state with actual port checks
+    # Health observations can discover installation but never own enablement.
     for exp_key in ['node_exporter', 'dc_exporter', 'dcgm_exporter']:
-        if service_observations is not None:
-            setattr(server, f'{exp_key}_installed', service_observations[exp_key]['installed'])
+        if service_observations is not None and service_observations[exp_key]['installed']:
+            setattr(server, f'{exp_key}_installed', True)
         is_running = results[exp_key].get('running', False)
         if service_observations is not None:
             is_running = bool(is_running and service_observations[exp_key]['installed'] and service_observations[exp_key]['active'])
@@ -1372,25 +1375,21 @@ def _check_server_observations(server_id):
             results[exp_key]['installed'] = service_observations[exp_key]['installed']
         if is_running:
             setattr(server, f'{exp_key}_installed', True)
-            setattr(server, f'{exp_key}_enabled', True)
-        else:
-            # Not responding — clear enabled flag so UI shows correct state
-            setattr(server, f'{exp_key}_enabled', False)
     
     # Update watchdog DB state from the check result
     wd_result = results['watchdog_agent']
     if service_observations is not None:
         installed = service_observations['watchdog_agent']['installed']
         running = installed and service_observations['watchdog_agent']['active'] and wd_result.get('running') is True
-        server.watchdog_agent_installed = installed
-        server.watchdog_agent_enabled = running
+        if installed:
+            server.watchdog_agent_installed = True
         wd_result['installed'] = installed
         wd_result['running'] = running
         if wd_result.get('version'):
             server.watchdog_agent_version = wd_result['version']
-    elif wd_result.get('source') != 'database':  # Don't re-save cached data as new data
-        server.watchdog_agent_installed = wd_result.get('installed', False)
-        server.watchdog_agent_enabled = wd_result.get('running', False)
+    elif wd_result.get('source') not in ('database', 'none'):
+        if wd_result.get('installed'):
+            server.watchdog_agent_installed = True
         if wd_result.get('version'):
             server.watchdog_agent_version = wd_result['version']
     
@@ -1653,9 +1652,7 @@ def _build_exporter_response(server, versions=None, updates=None, source='cached
     """
     if versions is None:
         # Build versions from DB cached values.
-        # Only include version if the exporter is actually running (enabled).
-        # If installed but stopped, version stays out so the UI shows "Stopped"
-        # rather than a green version badge.
+        # Include cached versions only for configured monitoring channels.
         versions = {}
         if server.node_exporter_enabled and server.node_exporter_version:
             versions['node_exporter'] = server.node_exporter_version
@@ -1747,18 +1744,18 @@ def _do_live_exporter_check(server_id):
         for exp_key in ('node_exporter', 'dc_exporter', 'dcgm_exporter'):
             svc = svc_status[exp_key]
             port_running = port_checks[exp_key].get('running', False)
-            is_active = svc['active'] or port_running
-            
-            setattr(server, f'{exp_key}_installed', svc['installed'])
-            setattr(server, f'{exp_key}_enabled', is_active)
+            # Failed/negative observations cannot undo confirmed provisioning.
+            # Explicit install/remove/toggle operations own configured intent.
+            if svc['installed'] or port_running:
+                setattr(server, f'{exp_key}_installed', True)
             if versions.get(exp_key):
                 setattr(server, f'{exp_key}_version', versions[exp_key])
         
         # Also check watchdog agent
         watchdog_status = check_watchdog_agent(server)
         if watchdog_status.get('source') not in ('database', 'none'):
-            server.watchdog_agent_installed = watchdog_status.get('installed', False)
-            server.watchdog_agent_enabled = watchdog_status.get('running', False)
+            if watchdog_status.get('installed'):
+                server.watchdog_agent_installed = True
             if watchdog_status.get('version'):
                 server.watchdog_agent_version = watchdog_status['version']
         
@@ -2055,8 +2052,8 @@ def api_watchdog_status(server_id):
     
     # Update server record unless we only got cached DB data back
     if status.get('source') != 'database' and status.get('source') != 'none':
-        server.watchdog_agent_installed = status.get('installed', False)
-        server.watchdog_agent_enabled = status.get('running', False)
+        if status.get('installed'):
+            server.watchdog_agent_installed = True
         if status.get('version'):
             server.watchdog_agent_version = status['version']
         db.session.commit()
@@ -2398,7 +2395,6 @@ def _sync_watchdog_status_from_api():
         agent_info = agents_map.get(server.name.lower())
         if agent_info:
             server.watchdog_agent_installed = True
-            server.watchdog_agent_enabled = agent_info.get('online', False)
             if agent_info.get('version'):
                 server.watchdog_agent_version = agent_info['version']
             # Update last_seen from heartbeat data
@@ -3350,6 +3346,7 @@ def api_grafana_sync_all_roles():
 @app.route('/metrics')
 @csrf.exempt
 @limiter.limit("30 per minute")  # Rate limit metrics scraping
+# TRACEWEAVER: entrypoint=prometheus_metrics; req=REQ-MON-002; trace=TRACE-MON-002; ver=VER-MON-002
 def prometheus_metrics():
     """Prometheus metrics endpoint."""
     # Update metrics

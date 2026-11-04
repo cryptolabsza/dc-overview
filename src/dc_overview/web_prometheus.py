@@ -1,3 +1,4 @@
+# TRACEWEAVER: file-role=telemetry-policy-collector; req=REQ-MON-002; trace=TRACE-MON-002; ver=VER-MON-002
 """Inventory discovery updates with explicit monitoring ownership and recovery."""
 import json
 import logging
@@ -8,6 +9,7 @@ from pathlib import Path
 
 import requests
 import yaml
+from prometheus_client.core import GaugeMetricFamily
 
 from .monitoring import (apply_prometheus_config, atomic_write_bytes, merge_prometheus_config,
                          validate_known_discovery_targets)
@@ -16,13 +18,39 @@ logger = logging.getLogger(__name__)
 IPMI_CONFIG_PATH = '/etc/ipmi-monitor/servers.yaml'
 
 
+def monitoring_name(server):
+    """Resolve the host identity shared by discovery and alert policy."""
+    return server.monitoring_name or server.name
+
+
+class TelemetryMonitoringCollector:
+    """Expose a fresh inventory snapshot without retaining removed host labels."""
+
+    def __init__(self, get_servers):
+        self.get_servers = get_servers
+
+# TRACEWEAVER: entrypoint=collect; req=REQ-MON-002; trace=TRACE-MON-002; ver=VER-MON-002
+    def collect(self):
+        metric = GaugeMetricFamily(
+            'dc_overview_telemetry_monitoring_enabled',
+            'Configured monitoring intent for each telemetry channel',
+            labels=['server_name', 'telemetry'],
+        )
+        for server in self.get_servers():
+            name = monitoring_name(server)
+            metric.add_metric([name, 'filesystem'], int(bool(server.node_exporter_enabled)))
+            metric.add_metric([name, 'gpu'], int(bool(
+                server.dc_exporter_enabled or server.dcgm_exporter_enabled)))
+        yield metric
+
+
 def build_discovery_targets(servers):
     """Use one inventory for every exporter; preserve explicit legacy aliases."""
     targets = []
     exporters = (('node_exporter', 'node', 9100), ('dc_exporter', 'dc', 9835),
                  ('dcgm_exporter', 'dcgm', 9400), ('watchdog_agent', 'watchdog', 9878))
     for server in servers:
-        name = server.monitoring_name or server.name
+        name = monitoring_name(server)
         address = server.server_ip
         if ':' in address:
             address = f'[{address}]'
