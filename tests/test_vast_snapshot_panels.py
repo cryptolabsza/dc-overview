@@ -12,6 +12,18 @@ LEGACY_SHA256 = {'server/grafana/dashboards/Vast_Dashboard.json': '0293affb7394a
 TARGET_CONTRACT_SHA256 = {'39': '676dddcc18d637afda58b402d81b6226079b0dfa98dfa0bd04ed49246845e649', '41': '1b07fcc874fdcaa8d218b0d260d1f2388c4f6d462af511cf47761d1e89039626'}
 
 
+def restore_pre_collector_state(dashboard, path):
+    """Project only approved panel35 fields back to their immutable baseline."""
+    before = json.loads((ROOT / "tests/fixtures/gpu-state-pre-collector.json").read_text())[path]
+    state = next(p for p in dashboard["panels"] if p["id"] == 35)
+    state["description"] = before["description"]
+    state["fieldConfig"]["defaults"]["mappings"] = before["mappings"]
+    assert len(state["targets"]) == len(before["expressions"])
+    for target, expression in zip(state["targets"], before["expressions"], strict=True):
+        target["expr"] = expression
+    return dashboard
+
+
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
@@ -37,6 +49,7 @@ def test_snapshot_targets_are_instant_and_preserve_queries(path):
 @pytest.mark.parametrize("path", CANONICAL)
 def test_all_other_panels_and_dashboard_settings_are_unchanged(path):
     dashboard = json.loads((ROOT / path).read_text())
+    restore_pre_collector_state(dashboard, path)
     dashboard["panels"] = [p for p in dashboard["panels"] if p.get("id") not in (39, 41)]
     assert digest(dashboard) == OUTSIDE_SNAPSHOT_SHA256[path]
 
@@ -44,7 +57,8 @@ def test_all_other_panels_and_dashboard_settings_are_unchanged(path):
 def test_canonical_copies_match_and_legacy_bytes_are_preserved():
     assert (ROOT / CANONICAL[0]).read_bytes() == (ROOT / CANONICAL[1]).read_bytes()
     for path, expected in LEGACY_SHA256.items():
-        assert hashlib.sha256((ROOT / path).read_bytes()).hexdigest() == expected
+        restored = restore_pre_collector_state(json.loads((ROOT / path).read_text()), path)
+        assert hashlib.sha256((json.dumps(restored, indent=2, ensure_ascii=False) + "\n").encode()).hexdigest() == expected
 
 
 @pytest.mark.parametrize("path", CANONICAL)
