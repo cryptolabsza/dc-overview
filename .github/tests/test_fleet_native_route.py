@@ -161,7 +161,11 @@ class FleetNativeRouteTest(unittest.TestCase):
         self.assertIs(type(failure["scoped_select_diagnostic"]), str)
         inner = failure['scoped_select_inner_diagnostic']
         self.assertIs(type(inner), dict)
-        self.assertEqual(set(inner), {'guards', 'condition', 'require_capability'})
+        self.assertEqual(set(inner), {'guards', 'condition', 'require_capability', 'continuity_equal'})
+        self.assertTrue(inner['continuity_equal'] == 'unknown' or
+                        (type(inner['continuity_equal']) is dict and
+                         set(inner['continuity_equal']) == set(self.native_module().CONTINUITY_FIELDS) and
+                         all(type(v) is bool for v in inner['continuity_equal'].values())))
         self.assertIs(type(inner['guards']), list)
         for name in ('condition', 'require_capability'):
             self.assertTrue(type(inner[name]) is bool or (type(inner[name]) is str and inner[name] == 'unknown'))
@@ -1117,6 +1121,155 @@ class FleetNativeRouteTest(unittest.TestCase):
                 _, record = native.scoped_select_subprocess(['fixed-console'], {}, {})
             self.assertEqual(child.call_count, 1)
             self.assertEqual(bool(record['guards']), qualified)
+
+    def test_continuity_projection_is_closed_qualified_and_preserves_transport(self):
+        native = self.native_module()
+        # Qualification boundary only: the separate immutable Proxy2f contract
+        # executes the genuine producer/guard. This fixture isolates hostile
+        # locals/global drift without installing product packages or probing IO.
+        fields = native.CONTINUITY_FIELDS
+        namespace = types.ModuleType('fixed_continuity_projection_fixture')
+        source = ('from dataclasses import dataclass\n@dataclass(frozen=True)\n'
+                  'class OriginalObservation:\n container_id: str\n image_id: str\n'
+                  ' helper_terminated: bool\n healthy: bool\n continuity: dict\n'
+                  'def hold():\n raise ValueError("PRIVATE_CONTINUITY_FAILURE")\n'
+                  'def require(condition):\n if not condition: hold()\n'
+                  'def validate_receipt(value):\n return value\n'
+                  'def validate_job(value):\n return value\n'
+                  'def validate_continuity(value):\n return value\n'
+                  'def _pattern(value, pattern):\n return True\n'
+                  'def validate_original_restored(receipt, observation):\n value=validate_receipt(receipt)\n')
+        source += '\n' * (227 - source.count('\n'))
+        source += ' require(validate_continuity(observation.continuity)==value["continuity"])\n'
+        with patch.dict(sys.modules, {namespace.__name__: namespace}):
+            exec(compile(source, '<fixed-continuity-boundary>', 'exec'), namespace.__dict__)
+        namespace.HASH_KEYS = set(fields[:10])
+        namespace.CONTINUITY_KEYS = set(fields) | {'projection', 'saved_identity_field_count', 'stored_key_digest_matches', 'sync_enabled'}
+        trusted = tuple((getattr(namespace, name).__code__, 'proxy-recovery', name)
+                        for name in ('validate_original_restored', 'validate_receipt', 'validate_job',
+                                     'validate_continuity', 'require', 'hold', '_pattern'))
+        unbound = trusted
+        trusted = native.bind_inner_trusted_context(trusted, namespace)
+        genuine_class = namespace.OriginalObservation
+        self.assertIs(trusted.observation_class, genuine_class)
+        baseline = {key: 'b' * 64 for key in fields[:10]}
+        baseline.update(database_device=1, database_inode=2, projection='ipmi-original-continuity-v1',
+                        saved_identity_field_count=5, stored_key_digest_matches=True, sync_enabled=False)
+        def failure(changed=('database_inode',)):
+            before, after = dict(baseline), dict(baseline)
+            for key in changed:
+                after[key] = 'c' * 64 if key.endswith('_sha256') else after[key] + 1
+            observation = namespace.OriginalObservation('1' * 64, 'sha256:' + '2' * 64, True, True, after)
+            try:
+                namespace.validate_original_restored({'continuity': before}, observation)
+            except ValueError as error:
+                return error, observation, before
+            self.fail('original equality guard must reject fixture')
+        for changed in [(key,) for key in fields] + [fields[:2]]:
+            with self.subTest(fields=changed):
+                error, observation, before = failure(changed)
+                record = native.project_inner_failure(error, trusted)
+                expected = {key: key not in changed for key in fields}
+                self.assertEqual(record['continuity_equal'], expected)
+                self.assertIs(record['condition'], False)
+                self.assertEqual(native.inner_record(record), record)
+                self.assertNotIn('PRIVATE_CONTINUITY_FAILURE', json.dumps(record))
+                self.assertLessEqual(len(native.encoded(record)), 8192)
+                owned = native.NativeCommandFailure('nonzero-exit', 1, 'recovery-required', record)
+                record['continuity_equal']['database_inode'] = not expected['database_inode']
+                self.assertEqual(native.scoped_select_inner_fact(owned)['continuity_equal'], expected)
+                payload = native.encoded(native.scoped_select_inner_fact(owned))
+                with patch.object(native.subprocess, 'run', return_value=SimpleNamespace(returncode=1)) as child, patch.object(native.os, 'read', side_effect=[payload, b'']):
+                    _, transported = native.scoped_select_subprocess(['fixed-console'], {}, {})
+                self.assertEqual(child.call_count, 1)
+                self.assertEqual(transported['continuity_equal'], expected)
+                self.assertEqual(before, baseline)
+                self.assertEqual(error.args, ('PRIVATE_CONTINUITY_FAILURE',))
+        error, _, _ = failure()
+        self.assertEqual(native.project_inner_failure(error, unbound)['continuity_equal'], 'unknown')
+        calls = {'eq': 0, 'getattr': 0, 'hash': 0}
+        class Trap:
+            def __hash__(self):
+                calls['hash'] += 1
+                return 0
+            def __eq__(self, other):
+                calls['eq'] += 1
+                raise AssertionError('foreign equality must not execute')
+            def __getattribute__(self, name):
+                calls['getattr'] += 1
+                raise AssertionError('foreign attributes must not execute')
+        class ForeignDict(dict):
+            def __eq__(self, other):
+                calls['eq'] += 1
+                raise AssertionError('foreign dictionary equality must not execute')
+        for key, value in [('database_inode', True), ('database_device', -1), ('settings_sha256', Trap()),
+                           ('settings_sha256', 'X' * 64), ('projection', Trap()),
+                           ('saved_identity_field_count', True), ('stored_key_digest_matches', 1),
+                           ('sync_enabled', 0)]:
+            with self.subTest(malformed=key, value_type=type(value).__name__):
+                error, observation, _ = failure()
+                observation.continuity[key] = value
+                self.assertEqual(native.project_inner_failure(error, trusted)['continuity_equal'], 'unknown')
+                self.assertEqual(calls, {'eq': 0, 'getattr': 0, 'hash': 0})
+        for change in ('missing', 'extra', 'foreign-dict', 'foreign-observation', 'all-equal', 'globals', 'class', 'replacement-global', 'replacement-both', 'module', 'schema', 'ambiguous', 'source', 'line'):
+            with self.subTest(rejection=change):
+                error, observation, before = failure()
+                with patch.dict(namespace.__dict__):
+                    selected = trusted
+                    if change == 'missing': observation.continuity.pop('network_sha256')
+                    if change == 'extra': observation.continuity['PRIVATE_EXTRA'] = Trap()
+                    if change == 'foreign-dict': object.__setattr__(observation, 'continuity', ForeignDict(observation.continuity))
+                    if change == 'foreign-observation':
+                        class ForeignObservation(namespace.OriginalObservation):
+                            def __getattribute__(self, name):
+                                calls['getattr'] += 1
+                                raise AssertionError('subclass attribute must not execute')
+                        object.__setattr__(observation, '__class__', ForeignObservation)
+                    if change == 'all-equal': observation.continuity.update(before)
+                    if change == 'globals': namespace.require = lambda condition: None
+                    if change == 'class': namespace.OriginalObservation = Trap
+                    if change in ('replacement-global', 'replacement-both'):
+                        attributes = {key: value for key, value in vars(genuine_class).items()
+                                      if key not in ('__dict__', '__weakref__')}
+                        replacement = type('OriginalObservation', (), attributes)
+                        self.assertIsNot(replacement, genuine_class)
+                        namespace.OriginalObservation = replacement
+                        if change == 'replacement-both': object.__setattr__(observation, '__class__', replacement)
+                    if change == 'module': namespace.__name__ = Trap()
+                    if change == 'schema': namespace.HASH_KEYS = set()
+                    if change == 'ambiguous': error.__context__ = failure()[0]
+                    if change == 'source': selected = tuple(row for row in trusted if row[2] != 'validate_continuity')
+                    if change == 'line':
+                        trace = error.__traceback__
+                        while trace.tb_frame.f_code is not namespace.validate_original_restored.__code__:
+                            trace = trace.tb_next
+                        error.__traceback__ = types.TracebackType(trace.tb_next, trace.tb_frame, trace.tb_lasti, 227)
+                    self.assertEqual(native.project_inner_failure(error, selected)['continuity_equal'], 'unknown')
+                    self.assertEqual(calls, {'eq': 0, 'getattr': 0, 'hash': 0})
+        error, _, _ = failure()
+        method = namespace.OriginalObservation.__setattr__
+        constants = method.__code__.co_consts
+        index = next(i for i, value in enumerate(constants) if type(value) in (tuple, frozenset))
+        hostile = type(constants[index])([Trap()])
+        calls.update(eq=0, getattr=0, hash=0)  # Ignore construction; observe only the projector.
+        original_code = method.__code__
+        try:
+            method.__code__ = original_code.replace(co_consts=constants[:index] + (hostile,) + constants[index + 1:])
+            self.assertEqual(native.project_inner_failure(error, trusted)['continuity_equal'], 'unknown')
+            self.assertEqual(calls, {'eq': 0, 'getattr': 0, 'hash': 0})
+        finally:
+            method.__code__ = original_code
+        record = native.project_inner_failure(error, trusted)
+        for value in ({}, {**record['continuity_equal'], 'database_inode': 0},
+                      {**record['continuity_equal'], 'PRIVATE_EXTRA': True},
+                      {key: True for key in fields}, Trap(), ForeignDict(record['continuity_equal'])):
+            self.assertEqual(native.inner_record({**record, 'continuity_equal': value}), native.inner_unknown())
+            self.assertEqual(calls, {'eq': 0, 'getattr': 0, 'hash': 0})
+        owned = native.NativeCommandFailure('nonzero-exit', 1, 'recovery-required', record)
+        raw = owned._scoped_select_inner_diagnostic
+        object.__setattr__(owned, '_scoped_select_inner_diagnostic', (*raw[:3], ((Trap(), True),) * 12))
+        self.assertEqual(native.scoped_select_inner_fact(owned), native.inner_unknown())
+        self.assertEqual(calls, {'eq': 0, 'getattr': 0, 'hash': 0})
 
     def test_broker_child_preserves_original_exception_when_collection_fails(self):
         module = self.native_module()

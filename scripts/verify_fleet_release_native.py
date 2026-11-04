@@ -25,6 +25,7 @@ import tomllib
 import types
 import uuid
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 
 REGISTRY_IMAGE = "registry@sha256:1290056e2357eceb0c047cb60ae9abb370305a218e2df650eb8d3ea021b1c151"
@@ -214,8 +215,140 @@ _SCOPED_SELECT_DISPATCH_FRAME = None
 _SCOPED_SELECT_TRACEBACK = None
 
 
+CONTINUITY_FIELDS = (
+    "runtime_config_sha256", "host_config_sha256", "mounts_sha256", "network_sha256",
+    "schema_sha256", "settings_sha256", "stable_cloud_sha256", "stable_inventory_sha256",
+    "saved_identity_sha256", "declared_config_sha256", "database_device", "database_inode",
+)
+_OBSERVATION_FIELDS = ("container_id", "image_id", "helper_terminated", "healthy", "continuity")
+
+
+@dataclass(frozen=True)
+class _ContinuityObservationShape:
+    container_id: str
+    image_id: str
+    helper_terminated: bool
+    healthy: bool
+    continuity: dict
+
+
+@dataclass(frozen=True, slots=True)
+class _InnerTrustedContext:
+    codes: tuple
+    recovery_globals: dict
+    observation_class: type
+
+    def __iter__(self):
+        return iter(self.codes)
+
+    def __bool__(self):
+        return bool(self.codes)
+
+
+def bind_inner_trusted_context(codes, recovery):
+    """Capture class identity after source qualification, before original execution."""
+    if type(codes) is not tuple or type(recovery) is not types.ModuleType:
+        return ()
+    namespace = vars(recovery)
+    cls = namespace.get("OriginalObservation")
+    if not continuity_class_valid(namespace, cls):
+        return codes  # Guard coordinates remain useful; field facts stay unbound.
+    return _InnerTrustedContext(codes, namespace, cls)
+
+
 def inner_unknown():
-    return {"guards": [], "condition": "unknown", "require_capability": "unknown"}
+    return {"guards": [], "condition": "unknown", "require_capability": "unknown",
+            "continuity_equal": "unknown"}
+
+
+def continuity_equal_record(value):
+    if (type(value) is not dict or any(type(k) is not str for k in value)
+            or set(value) != set(CONTINUITY_FIELDS)
+            or any(type(v) is not bool for v in value.values()) or all(value.values())):
+        return "unknown"
+    return {key: value[key] for key in CONTINUITY_FIELDS}
+
+
+def continuity_values_valid(value):
+    """Check primitives before comparing; never invoke a foreign equality method."""
+    fixed = {"projection", "saved_identity_field_count", "stored_key_digest_matches", "sync_enabled"}
+    if (type(value) is not dict or any(type(k) is not str for k in value)
+            or set(value) != set(CONTINUITY_FIELDS) | fixed):
+        return False
+    for key in CONTINUITY_FIELDS[:10]:
+        if type(value[key]) is not str or re.fullmatch("[0-9a-f]{64}", value[key]) is None:
+            return False
+    return (type(value["projection"]) is str and value["projection"] == "ipmi-original-continuity-v1"
+            and type(value["database_device"]) is int and value["database_device"] >= 0
+            and type(value["database_inode"]) is int and value["database_inode"] > 0
+            and type(value["saved_identity_field_count"]) is int and value["saved_identity_field_count"] == 5
+            and value["stored_key_digest_matches"] is True and value["sync_enabled"] is False)
+
+
+def continuity_class_valid(namespace, cls):
+    if type(cls) is not type:
+        return False
+    attributes = vars(cls)
+    if (type(attributes.get("__module__")) is not str or type(namespace.get("__name__")) is not str
+            or attributes["__module__"] != namespace["__name__"]
+            or cls.__name__ != "OriginalObservation" or cls.__qualname__ != "OriginalObservation"
+            or type(attributes.get("__match_args__")) is not tuple
+            or any(type(k) is not str for k in attributes["__match_args__"])
+            or attributes["__match_args__"] != _OBSERVATION_FIELDS
+            or "__getattribute__" in attributes or "__getattr__" in attributes
+            or any(name in attributes for name in _OBSERVATION_FIELDS)):
+        return False
+    for name in ("__init__", "__eq__", "__setattr__", "__delattr__", "__hash__"):
+        method = attributes.get(name)
+        if (type(method) is not types.FunctionType or method.__globals__ is not namespace
+                or len(method.__code__.co_consts) > 16
+                or any(not (type(c) in (str, int, bool, type(None)) or
+                            (type(c) in (tuple, frozenset) and len(c) <= 8
+                             and all(type(k) is str for k in c))) for c in method.__code__.co_consts)
+                or not helper_code_matches(method.__code__, vars(_ContinuityObservationShape)[name].__code__)):
+            return False
+    descriptor = attributes.get("__dict__")
+    if type(descriptor) is not types.GetSetDescriptorType or descriptor.__objclass__ is not cls:
+        return False
+    return True
+
+
+def project_continuity_frame(frame, trusted):
+    """Use the already captured exact guard frame, never rerun any observer/validator."""
+    namespace, local = frame.f_globals, frame.f_locals
+    if type(trusted) is not _InnerTrustedContext or trusted.recovery_globals is not namespace:
+        return "unknown"
+    observation, receipt = local.get("observation"), local.get("value")
+    cls = trusted.observation_class
+    if (namespace.get("OriginalObservation") is not cls or type(observation) is not cls
+            or not continuity_class_valid(namespace, cls)):
+        return "unknown"
+    for name in ("validate_original_restored", "validate_receipt", "validate_job", "validate_continuity", "require", "hold", "_pattern"):
+        function = namespace.get(name)
+        if (type(function) is not types.FunctionType or function.__globals__ is not namespace
+                or not any(code is function.__code__ and source == "proxy-recovery" and guard == name
+                           for code, source, guard in trusted)):
+            return "unknown"
+    hashes, keys = namespace.get("HASH_KEYS"), namespace.get("CONTINUITY_KEYS")
+    if (type(hashes) is not set or any(type(k) is not str for k in hashes)
+            or hashes != set(CONTINUITY_FIELDS[:10]) or type(keys) is not set
+            or any(type(k) is not str for k in keys)
+            or keys != set(CONTINUITY_FIELDS) | {"projection", "saved_identity_field_count", "stored_key_digest_matches", "sync_enabled"}):
+        return "unknown"
+    descriptor = vars(cls)["__dict__"]
+    state = descriptor.__get__(observation, cls)
+    if (type(state) is not dict or any(type(k) is not str for k in state)
+            or set(state) != set(_OBSERVATION_FIELDS)
+            or state["helper_terminated"] is not True or state["healthy"] is not True
+            or type(state["container_id"]) is not str or re.fullmatch("[0-9a-f]{64}", state["container_id"]) is None
+            or type(state["image_id"]) is not str or re.fullmatch("sha256:[0-9a-f]{64}", state["image_id"]) is None
+            or type(receipt) is not dict or any(type(k) is not str for k in receipt)
+            or "continuity" not in receipt):
+        return "unknown"
+    before, after = receipt["continuity"], state["continuity"]
+    if not continuity_values_valid(before) or not continuity_values_valid(after):
+        return "unknown"
+    return continuity_equal_record({key: before[key] == after[key] for key in CONTINUITY_FIELDS})
 
 
 def inner_record(value):
@@ -242,6 +375,14 @@ def inner_record(value):
         if type(fact) is not bool and not (type(fact) is str and fact == "unknown"):
             return unknown
         result[key] = fact
+    equality = value["continuity_equal"]
+    result["continuity_equal"] = continuity_equal_record(equality)
+    if result["continuity_equal"] != "unknown" and (result["condition"] is not False
+            or sum(g == {"source": "proxy-recovery", "guard": "validate_original_restored", "line": 228}
+                   for g in result["guards"]) != 1):
+        return unknown
+    if result["continuity_equal"] == "unknown" and not (type(equality) is str and equality == "unknown"):
+        return unknown
     if not guards and result != unknown:
         return unknown
     return result
@@ -266,6 +407,7 @@ def project_inner_failure(error, trusted):
     result = inner_unknown()
     facts = {"condition": set(), "require_capability": set()}
     seen = set()
+    continuity = []
     for context in contexts:
         if type(context) not in (ValueError, RuntimeError, TypeError, KeyError, OSError,
                                  FileNotFoundError, PermissionError):
@@ -291,6 +433,14 @@ def project_inner_failure(error, trusted):
                 if key is not None:
                     value = trace.tb_frame.f_locals.get(key)
                     facts[key].add(value if type(value) is bool else "unknown")
+                if (source, guard, line) == ("proxy-recovery", "validate_original_restored", 228):
+                    try:
+                        actual_line = next((n for start, end, n in code.co_lines()
+                                            if start <= trace.tb_lasti < end), None)
+                        continuity.append(project_continuity_frame(trace.tb_frame, trusted)
+                                          if actual_line == 228 else "unknown")
+                    except BaseException:
+                        continuity.append("unknown")
             trace = trace.tb_next
         # An untrusted raise site cannot become a qualified failure merely
         # because an outer frame happened to be a recognized caller.
@@ -299,6 +449,8 @@ def project_inner_failure(error, trusted):
     for key, values in facts.items():
         if len(values) == 1:
             result[key] = next(iter(values))
+    if len(contexts) == 1 and len(continuity) == 1 and result["condition"] is False:
+        result["continuity_equal"] = continuity[0]
     value = inner_record(result)
     return value if len(encoded(value)) <= 8192 else inner_unknown()
 
@@ -343,7 +495,7 @@ def inner_trusted_codes(wheels):
                     or not helper_code_matches(function.__code__, definitions[name])):
                 return ()
             trusted.append((function.__code__, source_id, name))
-    return tuple(trusted)
+    return bind_inner_trusted_context(tuple(trusted), module)
 
 
 def scoped_select_child(descriptor, wheels, argv):
@@ -508,7 +660,8 @@ class NativeCommandFailure(RuntimeError):
         value = inner_record(inner)
         object.__setattr__(self, "_scoped_select_inner_diagnostic",
                            (tuple((g['source'], g['guard'], g['line']) for g in value['guards']),
-                            value['condition'], value['require_capability']))
+                            value['condition'], value['require_capability'],
+                            tuple(value['continuity_equal'].items()) if type(value['continuity_equal']) is dict else 'unknown'))
         message = "native command timed out; native gate held" if outcome == "timeout" else "native command failed; native gate held"
         RuntimeError.__init__(self, message)
 
@@ -558,11 +711,19 @@ def scoped_select_inner_fact(error, command_type=NativeCommandFailure,
     if type(error) is not command_type:
         return inner_unknown()
     try:
-        guards, condition, capability = slot.__get__(error, command_type)
+        guards, condition, capability, equality = slot.__get__(error, command_type)
         if type(guards) is not tuple or any(type(g) is not tuple or len(g) != 3 for g in guards):
             return inner_unknown()
+        if type(equality) is tuple:
+            if (len(equality) != len(CONTINUITY_FIELDS)
+                    or any(type(row) is not tuple or len(row) != 2 or type(row[0]) is not str
+                           or type(row[1]) is not bool for row in equality)
+                    or set(key for key, _ in equality) != set(CONTINUITY_FIELDS)):
+                return inner_unknown()
+            equality = dict(equality)
         return inner_record({'guards': [dict(source=s, guard=g, line=n) for s, g, n in guards],
-                             'condition': condition, 'require_capability': capability})
+                             'condition': condition, 'require_capability': capability,
+                             'continuity_equal': equality})
     except BaseException:
         return inner_unknown()
 

@@ -443,12 +443,35 @@ replaces or calls `sys.excepthook`, formats exceptions itself, filters output te
 or substitutes an exit code. Cause, context and suppression remain unchanged.
 
 `bootstrap_failure.scoped_select_inner_diagnostic` contains exactly `guards`,
-`condition` and `require_capability`. A guard has only a fixed `source` ID,
+`condition`, `require_capability` and `continuity_equal`. A guard has only a fixed `source` ID,
 fixed `guard` ID and numeric `line`. The two facts are strict booleans or
 `unknown`; they come only from the recognized `require(condition)` and
 `service_recovery_dependency(..., require_capability=...)` frames. No messages,
 exception arguments, traceback text, paths, hashes, record data or broad locals
 are exported. The existing fifteen output categories keep their meanings.
+
+`continuity_equal` is either the literal `unknown` or exactly twelve strict
+booleans: `runtime_config_sha256`, `host_config_sha256`, `mounts_sha256`,
+`network_sha256`, `schema_sha256`, `settings_sha256`, `stable_cloud_sha256`,
+`stable_inventory_sha256`, `saved_identity_sha256`, `declared_config_sha256`,
+`database_device` and `database_inode`. `true` means the already captured
+receipt and observation values agree; `false` identifies a differing field.
+No underlying values, digests or device/inode numbers leave the child.
+
+This projection requires one exact trusted `validate_original_restored` frame
+at the frozen Proxy guard line 228, its actual bytecode location, and a false
+`require` condition. The loaded function/global bindings, continuity schema,
+genuine frozen dataclass shape and exact observation class must agree. Both
+the current class global and observation type must match the class identity
+captured in the trusted context after wheel/source qualification, before the
+original dependency executes once. A later same-shape replacement is unknown;
+unbound function tuples cannot qualify a continuity field observation. Both
+sixteen-field continuity dictionaries must contain only the required primitive
+types and schema constants before any field comparison. No validator or
+observer is called again. Foreign objects, changed globals/classes, malformed
+state, multiple contexts/qualifying frames or an inconsistent all-equal result
+leave the whole field `unknown`. The existing immutable exception facts and
+bounded private record carry only the copied boolean map.
 
 Qualification checks both exact supplied wheel bytes and the frozen module
 bytes at the installed distribution location, then compares full compiled function
