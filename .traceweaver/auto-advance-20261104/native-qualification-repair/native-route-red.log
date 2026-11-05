@@ -1,0 +1,41 @@
+test_approved_policy_source_pair_passes_real_guard_and_tampering_fails (test_fleet_native_route.FleetNativeRouteTest.test_approved_policy_source_pair_passes_real_guard_and_tampering_fails) ... FAIL
+test_broker_child_preserves_original_exception_when_collection_fails (test_fleet_native_route.FleetNativeRouteTest.test_broker_child_preserves_original_exception_when_collection_fails) ... ok
+test_child_file_is_private_bounded_reset_and_consumed_before_cleanup (test_fleet_native_route.FleetNativeRouteTest.test_child_file_is_private_bounded_reset_and_consumed_before_cleanup) ... ok
+test_child_metadata_uses_original_code_identity_and_fixed_error_kind (test_fleet_native_route.FleetNativeRouteTest.test_child_metadata_uses_original_code_identity_and_fixed_error_kind) ... ok
+test_kill_records_numeric_failure_and_never_restarts_or_masks_it (test_fleet_native_route.FleetNativeRouteTest.test_kill_records_numeric_failure_and_never_restarts_or_masks_it) ... ok
+test_lost_reply_keeps_request_connected_until_durable_acceptance (test_fleet_native_route.FleetNativeRouteTest.test_lost_reply_keeps_request_connected_until_durable_acceptance) ... ok
+test_main_crash_rejects_unsupported_or_invalid_live_identity (test_fleet_native_route.FleetNativeRouteTest.test_main_crash_rejects_unsupported_or_invalid_live_identity) ... ok
+test_main_crash_requires_old_identity_death_before_start_and_fresh_broker (test_fleet_native_route.FleetNativeRouteTest.test_main_crash_requires_old_identity_death_before_start_and_fresh_broker) ... ok
+test_placeholder_fails_before_guest_commands (test_fleet_native_route.FleetNativeRouteTest.test_placeholder_fails_before_guest_commands) ... ok
+test_process_stat_identity_is_bounded_and_validated (test_fleet_native_route.FleetNativeRouteTest.test_process_stat_identity_is_bounded_and_validated) ... ok
+test_route_is_exact_public_pr_and_never_inherits_authority (test_fleet_native_route.FleetNativeRouteTest.test_route_is_exact_public_pr_and_never_inherits_authority) ... FAIL
+test_service_snapshot_exports_only_closed_fields (test_fleet_native_route.FleetNativeRouteTest.test_service_snapshot_exports_only_closed_fields) ... ok
+
+======================================================================
+FAIL: test_approved_policy_source_pair_passes_real_guard_and_tampering_fails (test_fleet_native_route.FleetNativeRouteTest.test_approved_policy_source_pair_passes_real_guard_and_tampering_fails)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/ltx-native-repair-20261105/dc-overview/.github/tests/test_fleet_native_route.py", line 44, in test_approved_policy_source_pair_passes_real_guard_and_tampering_fails
+    self.assertEqual(workflow["env"]["PROXY_SOURCE_SHA"], proxy_sha)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: '5db15086c26095179f2af56bfa434c85426a6699' != '6e5186401e78cc8ba7b6ffe18eb24712ef9263b1'
+- 5db15086c26095179f2af56bfa434c85426a6699
++ 6e5186401e78cc8ba7b6ffe18eb24712ef9263b1
+
+
+======================================================================
+FAIL: test_route_is_exact_public_pr_and_never_inherits_authority (test_fleet_native_route.FleetNativeRouteTest.test_route_is_exact_public_pr_and_never_inherits_authority)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/private/tmp/ltx-native-repair-20261105/dc-overview/.github/tests/test_fleet_native_route.py", line 504, in test_route_is_exact_public_pr_and_never_inherits_authority
+    self.assertEqual(pin, "6e5186401e78cc8ba7b6ffe18eb24712ef9263b1")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: '5db15086c26095179f2af56bfa434c85426a6699' != '6e5186401e78cc8ba7b6ffe18eb24712ef9263b1'
+- 5db15086c26095179f2af56bfa434c85426a6699
++ 6e5186401e78cc8ba7b6ffe18eb24712ef9263b1
+
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.176s
+
+FAILED (failures=2)

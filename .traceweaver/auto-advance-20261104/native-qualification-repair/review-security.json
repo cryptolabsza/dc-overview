@@ -1,0 +1,7 @@
+{
+  "reviewer": "advance_vv_security",
+  "findings": [],
+  "result": "passed",
+  "verification": "All25frozenhashes match exact publishedgitblobs; alloriginalentriesretained;ASTunchangedoutsidemap;workflowpinonly",
+  "limit": "Native runtime,publisher,deploymentacceptanceheld"
+}

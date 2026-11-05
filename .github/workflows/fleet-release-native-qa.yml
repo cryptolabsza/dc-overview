@@ -6,7 +6,7 @@ name: Fleet release native verification
 permissions:
   contents: read
 env:
-  PROXY_SOURCE_SHA: 5db15086c26095179f2af56bfa434c85426a6699
+  PROXY_SOURCE_SHA: 6e5186401e78cc8ba7b6ffe18eb24712ef9263b1
 jobs:
   native:
     if: >-

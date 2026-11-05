@@ -3,10 +3,12 @@
 """Bounded security contract for the explicit native QA route; no guest execution."""
 
 import ast
+import hashlib
 import importlib.util
 import json
 import os
 import subprocess
+import shutil
 import tempfile
 import tomllib
 import traceback
@@ -31,6 +33,53 @@ GUEST_HOSTS = (
 
 
 class FleetNativeRouteTest(unittest.TestCase):
+    # TRACEWEAVER: verifies=VER-AUTOADVANCE-008; req=REQ-AUTOADVANCE-008; trace=TRACE-AUTOADVANCE-008
+    def test_approved_policy_source_pair_passes_real_guard_and_tampering_fails(self):
+        module = self.native_module()
+        proxy = ROOT.parent / "proxy"
+        self.assertTrue(proxy.is_dir(), "Run with the reviewed Proxy checkout beside DC as proxy")
+        proxy_sha = subprocess.check_output(["git", "-C", str(proxy), "rev-parse", "HEAD"]).decode().strip()
+        self.assertEqual(proxy_sha, "6e5186401e78cc8ba7b6ffe18eb24712ef9263b1")
+        workflow = yaml.safe_load(WORKFLOW.read_text())
+        self.assertEqual(workflow["env"]["PROXY_SOURCE_SHA"], proxy_sha)
+        required = {
+            "src/dc_overview/release_policy.py",
+            "src/dc_overview/templates/systemd/dc-overview-release-refresh.service",
+            "src/dc_overview/templates/systemd/dc-overview-release-refresh.timer",
+        }
+        self.assertTrue(required <= module.FROZEN_PRODUCT_HASHES["dc"].keys())
+        tree = ast.parse(SCRIPT.read_text())
+        preflight = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "preflight")
+        guard = next(n for n in ast.walk(preflight) if isinstance(n, ast.For)
+                     and isinstance(n.target, ast.Tuple)
+                     and [getattr(v, "id", None) for v in n.target.elts] == ["source", "expected", "product"])
+        code = compile(ast.Module(body=[guard], type_ignores=[]), str(SCRIPT), "exec")
+        with tempfile.TemporaryDirectory() as temporary:
+            roots = {product: Path(temporary) / product for product in ("dc", "proxy")}
+            for product, source in (("dc", ROOT), ("proxy", proxy)):
+                for name in module.FROZEN_PRODUCT_HASHES[product]:
+                    destination = roots[product] / name
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(source / name, destination)
+            args = SimpleNamespace(dc_source=roots["dc"], dc_sha="a" * 40,
+                                   proxy_source=roots["proxy"], proxy_sha=proxy_sha)
+            def git_identity(*arguments):
+                self.assertEqual(arguments[0], "git")
+                return SimpleNamespace(stdout=(args.dc_sha if arguments[2] == roots["dc"] else proxy_sha).encode())
+            context = dict(self=SimpleNamespace(args=args), run=git_identity,
+                           FROZEN_PRODUCT_HASHES=module.FROZEN_PRODUCT_HASHES,
+                           digest=lambda value: hashlib.sha256(value).hexdigest())
+            exec(code, context)
+            for product, name in (("dc", "src/dc_overview/release_policy.py"),
+                                  ("proxy", "src/cryptolabs_proxy/release_client.py")):
+                path = roots[product] / name
+                original = path.read_bytes()
+                path.write_bytes(original + b"\n# altered source\n")
+                with self.assertRaisesRegex(RuntimeError, "frozen product source hash mismatch"):
+                    exec(code, context)
+                path.write_bytes(original)
+            exec(code, context)
+
     def native_module(self):
         spec = importlib.util.spec_from_file_location("fleet_native_diagnostics", SCRIPT)
         module = importlib.util.module_from_spec(spec)
@@ -452,7 +501,7 @@ class FleetNativeRouteTest(unittest.TestCase):
         self.assertEqual(checkouts[0]["with"]["ref"], "${{ github.event.pull_request.head.sha }}")
         self.assertEqual(checkouts[1]["with"]["repository"], "cryptolabsza/cryptolabs-proxy")
         pin = data["env"]["PROXY_SOURCE_SHA"]
-        self.assertEqual(pin, "5db15086c26095179f2af56bfa434c85426a6699")
+        self.assertEqual(pin, "6e5186401e78cc8ba7b6ffe18eb24712ef9263b1")
         preflight = next(
             i for i, s in enumerate(job["steps"]) if s.get("name") == "Reject unresolved source pin"
         )

@@ -1,0 +1,86 @@
+[
+  {
+    "product": "dc",
+    "file": "src/dc_overview/cli.py",
+    "before": "39ec1edbf04d91293eed13a63f7fd8cc7d6f1a3f2d4f83017829cfe3b7c83b7f",
+    "after": "63501cf00a6cb238d8f386b16f8f2393342344c5c69493cbf6fcb37a20e9276e",
+    "provenance": "published exact reviewed feature head; final source-hashes receipt where present"
+  },
+  {
+    "product": "dc",
+    "file": "src/dc_overview/fleet_upgrade.py",
+    "before": "5f4504f38f64c59d00ca90b13cf94eb905c5fe3fe5ebd3fa49b28561f0d8cc14",
+    "after": "a2d9cf730de5b0d68b1071d4329dd9e4b2af1bf285f1857b5d6abd52f205674e",
+    "provenance": "published exact reviewed feature head; final source-hashes receipt where present"
+  },
+  {
+    "product": "dc",
+    "file": "src/dc_overview/release_broker.py",
+    "before": "137c990c00ba4d59ade7c8490b9fd9b574709f73c0d072466bbc41e253fbb33b",
+    "after": "5916872d5ec87a2e9b69529c2c8a16f9a871667d9ff0ae27a0f1691fcaa296b7",
+    "provenance": "published exact reviewed feature head; final source-hashes receipt where present"
+  },
+  {
+    "product": "dc",
+    "file": "src/dc_overview/release_policy.py",
+    "before": null,
+    "after": "0061e5a66b4f5495fe7bc83e8426b085983a1c42c12bb25cfdf853c33dc06b7b",
+    "provenance": "published exact reviewed feature head; final source-hashes receipt where present"
+  },
+  {
+    "product": "dc",
+    "file": "src/dc_overview/templates/systemd/dc-overview-release-refresh.service",
+    "before": null,
+    "after": "b21ecf63d9ab5ce9a39ed84aeedb706a8064a38485bb22f85c3bdfbc0ed9dd2e",
+    "provenance": "published exact reviewed feature head; final source-hashes receipt where present"
+  },
+  {
+    "product": "dc",
+    "file": "src/dc_overview/templates/systemd/dc-overview-release-refresh.timer",
+    "before": null,
+    "after": "1bfcb7323a7e29f240c923e6e9d2f75f41717e2fd0ee385e4232d0fd34dfd3ca",
+    "provenance": "published exact reviewed feature head; final source-hashes receipt where present"
+  },
+  {
+    "product": "proxy",
+    "file": "landing-page/index.html",
+    "before": "20061e8140c5132b68f0bdc5a7ebfd48023534cf6f1ea7f2921ea6d04530ff37",
+    "after": "1d88cf658c71b58af29d501837e876c0f48c0e7d5083a0f90fab4ba8e6774552",
+    "provenance": "published exact reviewed feature head; final source-hashes receipt where present"
+  },
+  {
+    "product": "proxy",
+    "file": "src/cryptolabs_proxy/auth.py",
+    "before": "e9bda16030012f4045364ea4fa6929c6d42e6da5d4e1392259298fbcff3fb679",
+    "after": "dd0149b619ee37aced86cd8de4829e3487b476217cd0733a570c727bff1be08d",
+    "provenance": "published exact reviewed feature head; final source-hashes receipt where present"
+  },
+  {
+    "product": "proxy",
+    "file": "src/cryptolabs_proxy/release_client.py",
+    "before": "d3ed1dd31ea3a54f07a17772fefdbbb1bc9105880ab7b0d563f17d73a4332c25",
+    "after": "dd496ad4d007cb98039e5ba8bdf899398dc576d2448e199be6e875b7c1d75fec",
+    "provenance": "published exact reviewed feature head; final source-hashes receipt where present"
+  },
+  {
+    "product": "proxy",
+    "file": "src/cryptolabs_proxy/standard_adoption.py",
+    "before": "46f7bd6d889d00d41f632e6246f9269ea9a1833626482383acbfd30454d079a2",
+    "after": "dbb9cbc33727efabf6b267a8c909d7fb0269d4aba97cb0dd7178379bcea15e08",
+    "provenance": "published exact reviewed feature head; final source-hashes receipt where present"
+  },
+  {
+    "product": "proxy",
+    "file": "src/cryptolabs_proxy/updates.py",
+    "before": "cdb0958893eb6a11dc2764c4384ea784bf4b9632418a0871c3cee35bde3d00b6",
+    "after": "c1b800399824f05af8dfcd764ac32639b4ed7d428545282f080e4386fc571fe2",
+    "provenance": "published exact reviewed feature head; final source-hashes receipt where present"
+  },
+  {
+    "product": "proxy",
+    "file": "src/cryptolabs_proxy/update_recovery.py",
+    "before": null,
+    "after": "0063848821dd41d8f600e936a432bee10c80f9851ce0b99a00aea8aa43f29316",
+    "provenance": "published exact reviewed feature head; final source-hashes receipt where present"
+  }
+]

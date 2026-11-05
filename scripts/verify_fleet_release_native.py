@@ -36,32 +36,37 @@ SERVICE = "dc-overview-release-broker.service"
 SOCKET_UNIT = "dc-overview-release-broker.socket"
 ORIGIN = "https://127.0.0.1:18443"
 # Filled from the accepted frozen source manifests, never from an untrusted runtime response.
+# TRACEWEAVER: verifies=VER-AUTOADVANCE-008; req=REQ-AUTOADVANCE-008; trace=TRACE-AUTOADVANCE-008
 FROZEN_PRODUCT_HASHES = {
     "dc": {
-        "src/dc_overview/cli.py": "39ec1edbf04d91293eed13a63f7fd8cc7d6f1a3f2d4f83017829cfe3b7c83b7f",
-        "src/dc_overview/fleet_upgrade.py": "5f4504f38f64c59d00ca90b13cf94eb905c5fe3fe5ebd3fa49b28561f0d8cc14",
-        "src/dc_overview/release_broker.py": "137c990c00ba4d59ade7c8490b9fd9b574709f73c0d072466bbc41e253fbb33b",
+        "src/dc_overview/cli.py": "63501cf00a6cb238d8f386b16f8f2393342344c5c69493cbf6fcb37a20e9276e",
+        "src/dc_overview/fleet_upgrade.py": "a2d9cf730de5b0d68b1071d4329dd9e4b2af1bf285f1857b5d6abd52f205674e",
+        "src/dc_overview/release_broker.py": "5916872d5ec87a2e9b69529c2c8a16f9a871667d9ff0ae27a0f1691fcaa296b7",
         "src/dc_overview/release_broker_service.py": "92dbdf0d83c2aa3ef74a518947599102077c58ee85a95589690087052d115d08",
         "src/dc_overview/release_candidates.py": "bf8bd9145005901817cb4bbaa24726dbee20e7555e782e7383722e24df1d41a3",
         "src/dc_overview/release_catalog.py": "21d4cf4731226c4ca9498cd4999bec1ec90bb9d3628faa615e13f20ccd9a29f6",
         "src/dc_overview/templates/systemd/dc-overview-release-broker.service": "6128bf4553bd87458c680377e1b4490fc157b6f092072271bc77bd21b18c4612",
         "src/dc_overview/templates/systemd/dc-overview-release-broker.socket": "67994e4c1d4b2ac9fa4b44de9e8ba60db2b087424993fce77656c0618272c559",
+        "src/dc_overview/release_policy.py": "0061e5a66b4f5495fe7bc83e8426b085983a1c42c12bb25cfdf853c33dc06b7b",
+        "src/dc_overview/templates/systemd/dc-overview-release-refresh.service": "b21ecf63d9ab5ce9a39ed84aeedb706a8064a38485bb22f85c3bdfbc0ed9dd2e",
+        "src/dc_overview/templates/systemd/dc-overview-release-refresh.timer": "1bfcb7323a7e29f240c923e6e9d2f75f41717e2fd0ee385e4232d0fd34dfd3ca"
     },
     "proxy": {
         "src/cryptolabs_proxy/account_link.py": "c9f921e25ee0341c3b191064f1a57c94919310d5d4e08ec2c2c3030b964ea634",
-        "landing-page/index.html": "20061e8140c5132b68f0bdc5a7ebfd48023534cf6f1ea7f2921ea6d04530ff37",
+        "landing-page/index.html": "1d88cf658c71b58af29d501837e876c0f48c0e7d5083a0f90fab4ba8e6774552",
         "nginx/nginx.conf": "5a6f8bbd6c9121fb0b1a2fd4884205b996f52c332ae2e0ea9b026fc5a748ed7d",
         "scripts/health-api.py": "cc70687058e964b1afce202fed0117f8fee511cdece637f853eee2f25684e6d3",
-        "src/cryptolabs_proxy/auth.py": "e9bda16030012f4045364ea4fa6929c6d42e6da5d4e1392259298fbcff3fb679",
+        "src/cryptolabs_proxy/auth.py": "dd0149b619ee37aced86cd8de4829e3487b476217cd0733a570c727bff1be08d",
         "src/cryptolabs_proxy/config.py": "cb921e11d4cf316df013c53bd36c7de89b0a8e5cb66df6dd3131f7425d15cf3f",
-        "src/cryptolabs_proxy/release_client.py": "d3ed1dd31ea3a54f07a17772fefdbbb1bc9105880ab7b0d563f17d73a4332c25",
+        "src/cryptolabs_proxy/release_client.py": "dd496ad4d007cb98039e5ba8bdf899398dc576d2448e199be6e875b7c1d75fec",
         "src/cryptolabs_proxy/release_selection.py": "b56a4dac88c8ef0c03500430ab1054bcf142e4bfaeef7edce67fce0f27f5b5d4",
-        "src/cryptolabs_proxy/standard_adoption.py": "46f7bd6d889d00d41f632e6246f9269ea9a1833626482383acbfd30454d079a2",
+        "src/cryptolabs_proxy/standard_adoption.py": "dbb9cbc33727efabf6b267a8c909d7fb0269d4aba97cb0dd7178379bcea15e08",
         "src/cryptolabs_proxy/templates/docker-compose.yml.j2": "ec923fb17e99c649bb0aacd95eb8aeee465cfc9dbc6c65b721461cbf094a8856",
         "src/cryptolabs_proxy/templates/nginx.conf.j2": "d14273f48d5370f480870068b8bcf1ebb2a84a868979079ff97549ef8fcdd7ed",
         "src/cryptolabs_proxy/templates/previous-standard-nginx-444d7c0.conf.j2": "f12e2b9800cbaa0e49e685506cfaad38eb7e568fa6d239fa15277af59073d8de",
-        "src/cryptolabs_proxy/updates.py": "cdb0958893eb6a11dc2764c4384ea784bf4b9632418a0871c3cee35bde3d00b6",
-    },
+        "src/cryptolabs_proxy/updates.py": "c1b800399824f05af8dfcd764ac32639b4ed7d428545282f080e4386fc571fe2",
+        "src/cryptolabs_proxy/update_recovery.py": "0063848821dd41d8f600e936a432bee10c80f9851ce0b99a00aea8aa43f29316"
+    }
 }
 
 

@@ -1,0 +1,30 @@
+{
+  "requirement": "REQ-AUTOADVANCE-008",
+  "trace": "TRACE-AUTOADVANCE-008",
+  "verification": "VER-AUTOADVANCE-008",
+  "approved_plan_sha256": "94b783d925834004cd3f111dd2437f8ae531850f0184aaa29c52f89f84267795",
+  "baseline_DC": "fa4e8256fe927e490aabd6657f060ac2d28bb094",
+  "reviewed_Proxy": "6e5186401e78cc8ba7b6ffe18eb24712ef9263b1",
+  "scope": "Native source-qualification references only; no application or recovery behavior changes",
+  "red": "native-route-red.log: 2 failures",
+  "green": "native-route-green.log: 12 tests passed",
+  "guard_preservation": "all21originalguardedfilesretained;3policy/timerfilesandProxyrecoveryadded;sourceandinstalledwheelcheckcodeunchanged",
+  "validation_question": "Does the exact approved source pair clear source qualification while changed bytes are refused?",
+  "answer": "yes in isolated source-guard regression; not native runtime acceptance",
+  "reviews": [
+    "review-testing.json",
+    "review-security.json"
+  ],
+  "source_sha256": {
+    ".github/tests/test_fleet_native_route.py": "818aae1827d91ac3143f7a778ac88d4fb24f77b31cdb936522caf966a26ce45f",
+    ".github/workflows/fleet-release-native-qa.yml": "2f4336f0b6dfb1ee98bfbc7942f45c58034c3495227a7ec41238aa2f39035a66",
+    "scripts/verify_fleet_release_native.py": "456f4c72faaddfc62fdf8bf095b95f56f69353d913341ffe036b4befcd091b43"
+  },
+  "held": [
+    "full native feature runtime",
+    "existingPR34cloudcontinuityfailure",
+    "trusted production publisher/catalog",
+    "main release and both-site activation"
+  ],
+  "reproduce": "Checkout DC candidate as dc and reviewed Proxy6e518640 as sibling proxy; python3 -m unittest discover -s dc/.github/tests -p test_fleet_native_route.py -v"
+}
