@@ -1,0 +1,41 @@
+{
+  "schema_version": "tw-workflow-profile/1",
+  "task_id": "GPUALERT-20261104",
+  "profile_revision": 1,
+  "profile_status": "planned",
+  "risk": "L3",
+  "selection_rationale": "Cross-repository notification behavior and owner-authorized two-site release/deployment.",
+  "selected_controls": [
+    "TDD",
+    "full-vv",
+    "independent-preflight-review",
+    "independent-final-code-review",
+    "normal-CI-release",
+    "immutable-native-deployment",
+    "rollback",
+    "postreload-observations"
+  ],
+  "reviewer_cap": 2,
+  "repair_cycle_cap": 2,
+  "requires_deploy": true,
+  "requires_chrome_dogfood": false,
+  "process_budget": {
+    "estimated_delivery_minutes": 65,
+    "estimated_process_target_minutes": 16.25,
+    "estimated_process_ceiling_minutes": 65
+  },
+  "child_roles": {
+    "builder": "main",
+    "verifier": "main",
+    "reviewer": "native-independent",
+    "deployer": "main"
+  },
+  "model_selection": {
+    "availability": [
+      "inherited-current-model"
+    ],
+    "choice": "inherited-current-model",
+    "rationale": "No model override; sequential implementation and independent review permitted by AGENTS."
+  },
+  "profile_hash": "sha256:cc90f831e40096c6149022f750fcae50168eba900cbb233783b11a5e595a390b"
+}

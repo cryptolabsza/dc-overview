@@ -135,3 +135,12 @@ review metadata, not a substitute for fresh CI on the published head.
 | src/dc_overview/release_broker.py | REQ-AUTOADVANCE-005 | TRACE-AUTOADVANCE-005 | VER-AUTOADVANCE-005 | VAL-AUTOADVANCE-005 | owner-approved |
 | src/dc_overview/fleet_upgrade.py | REQ-AUTOADVANCE-005 | TRACE-AUTOADVANCE-005 | VER-AUTOADVANCE-005 | VAL-AUTOADVANCE-005 | owner-approved |
 | tests/test_release_policy.py | REQ-AUTOADVANCE-008 | TRACE-AUTOADVANCE-008 | VER-AUTOADVANCE-008 | VAL-AUTOADVANCE-008 | owner-approved |
+
+## GPU alert quality mapping
+
+| Requirement | Trace | Verification | Validation | Implementation | Status |
+| --- | --- | --- | --- | --- | --- |
+| REQ-GPUALERT-002 | TRACE-GPUALERT-002 | VER-GPUALERT-002 | VAL-GPUALERT-002 | src/dc_overview/grafana_alerts.py; src/dc_overview/web_prometheus.py; src/dc_overview/templates/grafana/provisioning/alerting/fleet-gpu-health.yml; src/dc_overview/templates/grafana/provisioning/alerting/dc-overview-notifications.yml; tests/test_gpu_collector_alerts.py; tests/test_gpu_collector_dashboard.py; tests/test_http_inventory.py | Approved scope; local verification only; deployment held |
+| REQ-GPUALERT-003 | TRACE-GPUALERT-003 | VER-GPUALERT-003 | VAL-GPUALERT-003 | src/dc_overview/dashboards/DC_Exporter_Details.json; src/dc_overview/dashboards/DC_Overview.json; dashboards/DC_Exporter_Details.json; dashboards/DC_Overview.json; server/grafana/dashboards/dc-overview.json; tests/test_gpu_collector_dashboard.py | Approved scope; local verification only; deployment held |
+
+Vast panel35 uses the same approved REQ-GPUALERT-003 behavior: `src/dc_overview/dashboards/Vast_Dashboard.json`, `dashboards/Vast_Dashboard.json`, both server Vast mirrors, `tests/test_gpu_collector_dashboard.py`, `tests/fixtures/gpu-state-pre-collector.json`, and the existing whole-dashboard preservation test in `tests/test_vast_occupancy_dashboard.py`. The original occupancy digest constants remain unchanged; only the three approved panel35 fields are restored to their captured baseline before that guard. Independent mechanical review is `.traceweaver/gpu-alerts-20261104/vast-state-review.md`.

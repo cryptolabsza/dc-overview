@@ -1,3 +1,4 @@
+# TRACEWEAVER: file-role=gpu-alert-behavior; req=REQ-GPUALERT-002; trace=TRACE-GPUALERT-002; ver=VER-GPUALERT-002
 """Render, install, and reload DC Overview's Grafana fleet alerts."""
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ MANAGED_ALERT_UIDS = frozenset(
         "fleet-gpu-hardware-failure",
         "fleet-gpu-inventory-mismatch",
         "fleet-gpu-thermal-slowdown",
+        "fleet-gpu-collector-unavailable",
         "runner-storage-telemetry",
         "runner-storage-pool-warning",
         "runner-storage-pool-critical",
@@ -54,6 +56,7 @@ _HARDWARE_USABLE_EXPRESSION = "__DC_OVERVIEW_HARDWARE_USABLE_EXPRESSION__"
 _HARDWARE_TOTAL_EXPRESSION = "__DC_OVERVIEW_HARDWARE_TOTAL_EXPRESSION__"
 _INVENTORY_USABLE_EXPRESSION = "__DC_OVERVIEW_INVENTORY_USABLE_EXPRESSION__"
 _INVENTORY_TOTAL_EXPRESSION = "__DC_OVERVIEW_INVENTORY_TOTAL_EXPRESSION__"
+_COLLECTOR_EXPRESSION = "__DC_OVERVIEW_COLLECTOR_EXPRESSION__"
 ROLLBACK_RELOAD_ATTEMPTS = 2
 RECEIVER_ROLLBACK_PUT_ATTEMPTS = 2
 RECEIVER_READY_ATTEMPTS = 30
@@ -276,6 +279,52 @@ def _inventory_mismatch_count_expression(
   DCXP_GPU_COUNT{{type=\"{count_type}\"}}"""
 
 
+def _collector_expression(instance_matcher: str) -> str:
+    """Keep exporter coverage separate from physical faults and scrape success."""
+    selector = f"instance=~{_promql_string(instance_matcher)}"
+    policy = 'dc_overview_telemetry_monitoring_enabled{telemetry="gpu"}'
+    fresh_policy = f"({policy} and (time() - timestamp({policy}) <= 90))"
+    source_policy = f'dc_overview_telemetry_monitoring_enabled{{telemetry="dc_exporter",server_name=~{_promql_string(instance_matcher)}}}'
+    fresh_source_policy = f"({source_policy} and (time() - timestamp({source_policy}) <= 90))"
+    source_enabled = f'label_replace(({fresh_source_policy} == 1), "instance", "$1", "server_name", "(.+)")'
+    source_disabled = f'label_replace(({fresh_source_policy} == 0), "instance", "$1", "server_name", "(.+)")'
+    managed = f'up{{{selector},exporter=~".+"}}'
+    managed_hosts = f"({managed} and (time() - timestamp({managed}) <= 90))"
+    target = f'up{{{selector},exporter="dc"}}'
+    fresh_target = f"({target} and (time() - timestamp({target}) <= 90))"
+    pcie = f'DCXP_GPU_COUNT{{{selector},type="pcie"}}'
+    nvml = f'DCXP_GPU_COUNT{{{selector},type="nvml"}}'
+    fresh_pcie = f"({pcie} and (time() - timestamp({pcie}) <= 90))"
+    fresh_nvml = f"({nvml} and (time() - timestamp({nvml}) <= 90))"
+    passthrough = f'DCXP_GPU_STATE{{{selector}}}'
+    fresh_vm = f"({passthrough} == 3) and (time() - timestamp({passthrough}) <= 90)"
+    vm_count = f"(count by(instance) (max by(instance, gpu) ({fresh_vm})) or on(instance) (max by(instance) ({fresh_nvml}) * 0))"
+    # Modern discovery is authoritative for which collector is enabled. Legacy
+    # installations without discovery/policy identities retain metric fallback.
+    anchor = f"""(
+  max by(instance) ({fresh_target} * 0 + 1)
+  or
+  max by(instance) ({source_enabled})
+  or
+  (
+    max by(instance) ({fresh_pcie} > 0) * 0 + 1
+    unless on(instance) max by(instance) ({managed_hosts})
+  )
+)"""
+    complete = f"""(
+  ((max by(instance) ({fresh_nvml}) + on(instance) {vm_count}) == on(instance) max by(instance) ({fresh_pcie}))
+  and on(instance) (max by(instance) ({fresh_nvml}) >= 0)
+  unless on(instance) (max by(instance) ({fresh_target}) == 0)
+)"""
+    disabled = f'label_replace(({fresh_policy} == 0), "instance", "$1", "server_name", "(.+)")'
+    return f"""(
+  ({anchor} unless on(instance) {complete})
+  or
+  ({anchor} and on(instance) {complete}) * 0
+)
+unless on(instance) ({disabled} or {source_disabled})"""
+
+
 def _default_notification_settings(receiver: str) -> Dict[str, Any]:
     return {
         "receiver": receiver,
@@ -286,6 +335,7 @@ def _default_notification_settings(receiver: str) -> Dict[str, Any]:
     }
 
 
+# TRACEWEAVER: entrypoint=render_grafana_alerts; req=REQ-GPUALERT-002; trace=TRACE-GPUALERT-002; ver=VER-GPUALERT-002
 def render_grafana_alerts(
     *,
     instance_matcher: str = ".+",
@@ -302,6 +352,7 @@ def render_grafana_alerts(
 
     document = _template_document()
     expressions = {
+        _COLLECTOR_EXPRESSION: _collector_expression(instance_matcher),
         _THERMAL_EXPRESSION: _thermal_expression(instance_matcher),
         _HARDWARE_USABLE_EXPRESSION: _hardware_count_expression(
             instance_matcher, "usable"
@@ -327,6 +378,8 @@ def render_grafana_alerts(
 
             if receiver:
                 rule["notification_settings"] = _default_notification_settings(receiver)
+                if rule["uid"] == "fleet-gpu-collector-unavailable":
+                    rule["notification_settings"]["group_by"] = ["alertname", "instance"]
             elif _notification_settings and rule["uid"] in _notification_settings:
                 rule["notification_settings"] = copy.deepcopy(
                     _notification_settings[rule["uid"]]

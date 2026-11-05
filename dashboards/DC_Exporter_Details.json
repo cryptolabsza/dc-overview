@@ -1392,6 +1392,11 @@
                   "color": "purple",
                   "index": 3,
                   "text": "VM Passthrough"
+                },
+                "6": {
+                  "color": "orange",
+                  "index": 4,
+                  "text": "Telemetry unavailable"
                 }
               },
               "type": "value"
@@ -1453,14 +1458,15 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "GPU_ERROR_STATE",
+          "expr": "((GPU_ERROR_STATE) unless on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) + 0 or on(instance, gpu) (((GPU_ERROR_STATE) and on(instance, gpu) (DCXP_GPU_STATE{UUID=\"DRIVER-ERROR\"} == 2)) * 0 + 6)",
           "legendFormat": "{{Hostname}} GPU{{gpu}}",
           "range": true,
           "refId": "A"
         }
       ],
       "title": "GPU Error State",
-      "type": "stat"
+      "type": "stat",
+      "description": "GPU state by source evidence. Telemetry unavailable means synthetic DRIVER-ERROR collection records; it does not establish a physical GPU failure."
     },
     {
       "datasource": {

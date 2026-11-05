@@ -135,3 +135,10 @@ Show current mode, installed version, selected target and clear failure/progress
 ### REQ-AUTOADVANCE-008 — approved C8
 
 TDD, independent correctness/security review, native Linux lifecycle/policy verification and real-browser checks precede release. Existing LTX data/accounts/settings and unrelated pins/runtimes remain preserved.
+
+## GPU alert quality — approved 4 November 2026
+
+Owner instruction: “Approve and deploy to both sights”, approving the prior concise Telegram and collector/dashboard triage plan for LTX and Charlotte. Administrative identifiers below label that approved scope. Publication/deployment require fresh remote identity, tests, review, official CI/release artifacts and native site acceptance. This record is not evidence of deployment. No hardware operations, rental changes, credential changes or extra synthetic Telegram sends are authorized.
+
+- REQ-GPUALERT-002: Host-level sustained collector coverage and truthful recovery; additive dc_exporter source intent preserves aggregate GPU policy and legacy scrapes.
+- REQ-GPUALERT-003: Synthetic DRIVER-ERROR dashboard values show telemetry unavailable while real fault/passthrough states remain visible.
