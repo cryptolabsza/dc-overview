@@ -538,10 +538,31 @@ filesystem boundary substitutes. A separate bounded local proof extracts the
 exact initializer literal and uses the retained old ORM source with all 135
 input hashes checked before/after. Neither establishes Docker/native acceptance
 or identifies the native-four historical writer. The approved continuation cap
-is seven automatic native attempts, four spent and three conditional remaining,
+is seven automatic native attempts, five spent and two conditional remaining,
 with zero manual attempts. This first functional slot permits one initial
 candidate and at most two separately diagnosed, root-allocated corrections.
 Source validation grants no native, publication or release authority.
+
+Both initializer writer inventories use `docker ps -aq --no-trunc` and require
+each emitted ID to match the full lowercase 64-hex grammar before comparison
+or inspection. After full initializer custody validation, only exact equality
+with its created ID excludes that one-shot from the second writer scan. A
+different full ID sharing its first twelve characters still undergoes the
+unchanged foreign-name and owned-volume mount checks.
+
+The portable Engine boundary returns twelve-character IDs by default and full
+IDs only for `--no-trunc`, while inspect resolves either representation. Its
+failure-first regression reproduces the self-as-writer rejection, and checks
+that truncated or malformed output despite `--no-trunc` holds before start in
+either inventory. This correction leaves the initializer literal unchanged;
+the retained actual old-ORM proof is reused without another Docker lifecycle
+or ORM execution. Native attempt five exposed an assertion at outer fixture
+callsite 2975; its exact inner assertion remains unknown. The local source
+contract reproduction does not establish that historical inner frame. Native
+execution, exact-owned terminal cleanup and external VM destruction evidence
+remain necessary. This work item's initial candidate and both root-allocated
+source corrections are spent; remaining native attempts grant no new source
+correction allowance.
 
 Named-volume IPMI data creation first inventories exact volume names and rejects
 any preexisting name, even empty or carrying the same run label. A fresh

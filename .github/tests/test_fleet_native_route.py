@@ -313,7 +313,9 @@ class FleetNativeRouteTest(unittest.TestCase):
                      'wrong-image', 'wrong-site-name', 'create-timeout', 'start-failed', 'wait-timeout',
                      'nonzero', 'still-running', 'wrong-terminal-id', 'deadline', 'changed-volume',
                      'config-swap', 'symlink-volume', 'cleanup-foreign', 'volume-create-timeout',
-                     'cleanup-volume-label', 'cleanup-volume-inode')
+                     'cleanup-volume-label', 'cleanup-volume-inode', 'truncated-before-create',
+                     'malformed-before-create', 'truncated-after-create', 'malformed-after-create',
+                     'same-prefix-writer')
         for scenario in scenarios:
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory).resolve()
@@ -330,6 +332,7 @@ class FleetNativeRouteTest(unittest.TestCase):
                 qa.label = 'io.cryptolabs.native-qa.run=123'
                 qa.refs = {'ipmi-old': 'ghcr.io/cryptolabsza/ipmi-monitor@sha256:' + 'c' * 64}
                 image_id, identity = 'sha256:' + 'b' * 64, 'a' * 64
+                foreign_identity = identity[:12] + 'd' * 52
                 clock, calls, timeouts = [100.0], [], []
                 state = dict(created=False, started=False, exited=False, removed=False, runtime=False,
                              volume_exists=preexisting)
@@ -367,9 +370,18 @@ class FleetNativeRouteTest(unittest.TestCase):
                     if args[0] == 'ps':
                         if state['removed']:
                             return reply()
+                        if args == ('ps', '-aq', '--no-trunc'):
+                            if scenario == ('truncated-after-create' if state['created'] else 'truncated-before-create'):
+                                return reply(identity[:12].encode())
+                            if scenario == ('malformed-after-create' if state['created'] else 'malformed-before-create'):
+                                return reply(b'g' * 64)
                         if state['created']:
-                            return reply(identity.encode())
-                        return reply(b'f' * 64 if scenario in ('existing-runtime', 'stopped-writer') else b'')
+                            if scenario == 'same-prefix-writer':
+                                return reply(('\n'.join((identity, foreign_identity)) if '--no-trunc' in args
+                                              else '\n'.join((identity[:12], foreign_identity[:12]))).encode())
+                            return reply((identity if '--no-trunc' in args else identity[:12]).encode())
+                        foreign = 'f' * 64 if scenario in ('existing-runtime', 'stopped-writer') else ''
+                        return reply((foreign if '--no-trunc' in args else foreign[:12]).encode())
                     if args[0] == 'create':
                         name = args[args.index('--name') + 1]
                         self.assertIn(name, qa.site_initializers)
@@ -392,9 +404,13 @@ class FleetNativeRouteTest(unittest.TestCase):
                             raise module.NativeCommandFailure('timeout')
                         return reply(identity.encode())
                     if args[0] == 'inspect':
-                        if args[1] == 'f' * 64:
+                        if args[1] == foreign_identity:
+                            return record_json({'Id': foreign_identity, 'Name': '/foreign-writer',
+                                'State': {'Running': False}, 'Mounts': [{'Name': volume, 'Source': str(data)}]})
+                        if args[1] in ('f' * 64, 'f' * 12):
                             return record_json({'Name': '/ipmi-monitor' if scenario == 'existing-runtime' else '/stopped',
                                 'State': {'Running': False}, 'Mounts': [{'Name': volume}]})
+                        self.assertIn(args[1], (identity, identity[:12]))
                         if scenario == 'wrong-terminal-id' and state['exited']:
                             return record_json(dict(value, Id='e' * 64))
                         return record_json(value)
@@ -487,6 +503,22 @@ class FleetNativeRouteTest(unittest.TestCase):
                             exec(code, scope)
                         self.assertFalse(state['runtime'])
                     self.assertEqual(timeouts, sorted(timeouts, reverse=True))
+                    if scenario == 'pass':
+                        scans = [args for args in calls if args[0] == 'ps']
+                        self.assertEqual(scans, [('ps', '-aq', '--no-trunc')] * 2)
+                        before_start = calls[:next(i for i, args in enumerate(calls) if args[0] == 'start')]
+                        self.assertEqual([args for args in before_start if args[0] == 'inspect'], [('inspect', identity)])
+                    if scenario.startswith(('truncated-', 'malformed-')):
+                        self.assertFalse(state['started'])
+                        inspected = [args[1] for args in calls if args[0] == 'inspect']
+                        self.assertNotIn(identity[:12], inspected)
+                        self.assertNotIn('g' * 64, inspected)
+                        self.assertEqual(state['created'], scenario.endswith('after-create'))
+                    if scenario == 'same-prefix-writer':
+                        self.assertEqual(identity[:12], foreign_identity[:12])
+                        self.assertNotEqual(identity, foreign_identity)
+                        self.assertIn(('inspect', foreign_identity), calls)
+                        self.assertFalse(state['started'])
                     if scenario in ('pass', 'create-timeout', 'cleanup-foreign', 'volume-create-timeout',
                                     'cleanup-volume-label', 'cleanup-volume-inode'):
                         qa.consume_child_failure = lambda: None

@@ -2731,7 +2731,8 @@ class NativeQA:
         custody = filesystem(require_empty=True)
 
         def no_other_writer():
-            for identity in engine('ps', '-aq').stdout.decode().split():
+            for identity in engine('ps', '-aq', '--no-trunc').stdout.decode().split():
+                assert re.fullmatch(r'[0-9a-f]{64}', identity)
                 value = json.loads(engine('inspect', identity).stdout)[0]
                 assert value['Name'] not in ('/ipmi-monitor', '/' + name)
                 assert not any(m.get('Name') == volume or m.get('Source') == custody[0]
@@ -2755,7 +2756,8 @@ class NativeQA:
         assert value['State']['Running'] is False and value['State']['Status'] == 'created'
         assert filesystem(require_empty=True) == custody
         # Recheck all other mounts immediately before start; allow only this exact one-shot.
-        for identity in engine('ps', '-aq').stdout.decode().split():
+        for identity in engine('ps', '-aq', '--no-trunc').stdout.decode().split():
+            assert re.fullmatch(r'[0-9a-f]{64}', identity)
             if identity != created:
                 other = json.loads(engine('inspect', identity).stdout)[0]
                 assert other['Name'] != '/ipmi-monitor'
