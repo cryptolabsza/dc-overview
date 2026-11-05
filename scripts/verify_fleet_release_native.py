@@ -42,6 +42,71 @@ SOCKET = "/run/dc-overview-release-broker.sock"
 SERVICE = "dc-overview-release-broker.service"
 SOCKET_UNIT = "dc-overview-release-broker.socket"
 ORIGIN = "https://127.0.0.1:18443"
+# The exact reviewed body is also extracted, never reimplemented, by local V&V.
+SYNTHETIC_SITE_INITIALIZER = """\
+# Proposed literal body to embed once in verifier; NOT EXECUTED by definition.
+# Local driver executes the candidate verifier literal byte-for-byte after source GO.
+import atexit
+import hashlib
+import importlib
+import importlib.util
+import os
+from pathlib import Path
+import socket
+import subprocess
+import threading
+import urllib.request
+import requests
+
+def denied(*args, **kwargs):
+    raise RuntimeError('synthetic initializer forbidden transport/background')
+
+# A network-none container is mandatory in addition to these local sentinels.
+subprocess.run = denied
+subprocess.Popen = denied
+socket.socket.connect = denied
+socket.socket.connect_ex = denied
+urllib.request.urlopen = denied
+requests.sessions.Session.request = denied
+threading.Thread.start = denied
+assert os.environ['SITE_NAME'] == 'SYNTHETIC Fleet native fixture'
+# Native DATA_DIR must equal /app/data; local driver substitutes one fresh temp directory.
+assert Path(os.environ['DATA_DIR']).is_dir()
+spec = importlib.util.find_spec('ipmi_monitor.app')
+assert spec is not None and spec.origin is not None
+assert hashlib.sha256(Path(spec.origin).read_bytes()).hexdigest() == 'e3e569fc0c98e3247f525b0ed5cc54da36a8ba9334b0d532322cc23dbd7b22a8'
+module = importlib.import_module('ipmi_monitor.app')
+atexit.unregister(module.report_shutdown)
+assert module._background_started is False
+assert Path(module.DATA_DIR).resolve() == Path(os.environ['DATA_DIR']).resolve()
+assert Path(module.__file__).resolve() == Path(spec.origin).resolve()
+expected_columns = ('id','license_key','sync_enabled','sync_interval','last_sync',
+    'last_sync_status','last_sync_message','subscription_tier','subscription_valid',
+    'max_servers','features','site_id','site_name','site_location','created_at','updated_at')
+with module.app.app_context():
+    assert module.Server.query.count() == module.ServerInventory.query.count() == 0
+    assert module.ServerStatus.query.count() == 0
+    assert tuple(column.name for column in module.CloudSync.__table__.columns) == expected_columns
+    assert module.CloudSync.query.count() == 0
+    config = module.CloudSync.get_config()
+    assert module.CloudSync.query.count() == 1 and config.id == 1
+    assert config.site_id is None and config.site_name is None
+    config.site_id = 'synthetic-fleet-native-site'
+    config.site_name = 'SYNTHETIC Fleet native fixture'
+    module.db.session.commit()
+    def all_rows():
+        module.db.session.expire_all()
+        return tuple(tuple(getattr(row, name) for name in expected_columns)
+                     for row in module.CloudSync.query.order_by(module.CloudSync.id).all())
+    baseline = all_rows()
+    assert len(baseline) == 1
+    for _ in range(2):
+        assert module.get_or_create_site_id() == ('synthetic-fleet-native-site', 'SYNTHETIC Fleet native fixture')
+        assert all_rows() == baseline
+    assert module._background_started is False
+    assert module.Server.query.count() == module.ServerInventory.query.count() == 0
+# No row values/hashes or imported module exception payload are exported.
+"""
 # Filled from the accepted frozen source manifests, never from an untrusted runtime response.
 FROZEN_PRODUCT_HASHES = {
     "dc": {
@@ -1521,6 +1586,9 @@ class LegacyRecoveryFixture:
         from datetime import datetime, timezone
         _bootstrap_step = "synthetic-db-seed"
         with sqlite3.connect(database) as db:
+            # Verify initialization before *any* seed write; never repair site fields here.
+            assert db.execute('SELECT id,site_id,site_name FROM cloud_sync').fetchall() == [
+                (1, 'synthetic-fleet-native-site', 'SYNTHETIC Fleet native fixture')]
             credential = 'SYNTHETIC-NONSECRET-NOT-A-CREDENTIAL'
             fields = {'ai_link_email': 'fixture@example.invalid', 'ai_link_user_id': 'fixture-user',
                       'ai_link_customer_id': 'fixture-customer', 'ai_link_linked_at': '2026-11-02T00:00:00Z',
@@ -1528,10 +1596,6 @@ class LegacyRecoveryFixture:
             for key, value in fields.items():
                 db.execute('DELETE FROM system_settings WHERE key=?', (key,))
                 db.execute('INSERT INTO system_settings(key,value) VALUES (?,?)', (key, value))
-            count = db.execute('SELECT count(*) FROM cloud_sync').fetchone()[0]
-            assert count <= 1
-            if not count:
-                db.execute('INSERT INTO cloud_sync(id) VALUES (1)')
             db.execute('UPDATE cloud_sync SET license_key=?,sync_enabled=0,subscription_valid=1', (credential,))
             sampled_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
             db.execute("INSERT OR REPLACE INTO server_status(bmc_ip,server_name,last_check) VALUES ('192.0.2.254','SYNTHETIC-no-collector',?)", (sampled_at,))
@@ -1780,6 +1844,8 @@ class NativeQA:
         self.hosts = None
         self.units = []
         self.volumes = []
+        self.synthetic_ipmi_volume = None
+        self.site_initializers = {}
         self.networks = []
         self.session = None
         self.cookie = None
@@ -2573,6 +2639,141 @@ class NativeQA:
         run("systemd-analyze", "verify", *self.units)
         run("systemctl", "daemon-reload")
 
+    def synthetic_ipmi_volume_custody(self, *, require_empty=False, timeout=60):
+        """Only the named-volume fixture's positively created IPMI resource."""
+        expected = self.synthetic_ipmi_volume
+        assert expected is not None
+        info = json.loads(docker('volume', 'inspect', expected['name'], timeout=timeout).stdout)[0]
+        key, label = self.label.split('=', 1)
+        assert info['Name'] == expected['name'] and info.get('Labels', {}).get(key) == label
+        assert info.get('Labels', {}).get('io.cryptolabs.native-qa.volume') == expected['nonce']
+        assert info['Driver'] == 'local' and not info.get('Options')
+        path = Path(info['Mountpoint'])
+        assert path.is_absolute() and path.resolve() == path
+        chain = trust_directories(path)
+        if require_empty:
+            assert not list(path.iterdir())
+        return str(path), chain, info.get('CreatedAt')
+
+    def site_initializer_custody(self, value, expected):
+        """An exact stopped/started one-shot record, never just a matching name."""
+        assert re.fullmatch(r"[0-9a-f]{64}", value['Id'])
+        assert expected['id'] is None or value['Id'] == expected['id']
+        assert value['Name'] == '/' + expected['name']
+        key, label = self.label.split('=', 1)
+        config, host = value['Config'], value['HostConfig']
+        assert config.get('Labels', {}).get(key) == label
+        assert value['Image'] == expected['image'] and config['Image'] == expected['image']
+        assert config['Entrypoint'] == ['python3']
+        assert config['Cmd'] == ['-c', SYNTHETIC_SITE_INITIALIZER]
+        assert host['NetworkMode'] == 'none' and host['Privileged'] is False
+        assert not any(host.get(k) for k in ('Binds', 'Devices', 'CapAdd', 'PidMode', 'VolumesFrom'))
+        env = config['Env']
+        for entry in ('DATA_DIR=/app/data', 'SITE_NAME=SYNTHETIC Fleet native fixture'):
+            assert [item for item in env if item.split('=', 1)[0] == entry.split('=', 1)[0]] == [entry]
+        assert len(value['Mounts']) == 2
+        mounts = {mount['Destination']: mount for mount in value['Mounts']}
+        data, empty = mounts['/app/data'], mounts['/app/config/servers.yaml']
+        assert data['Type'] == 'volume' and data['Name'] == expected['volume']
+        assert data['Source'] == expected['mountpoint'] and data['RW'] is True
+        assert empty['Type'] == 'bind' and empty['Source'] == expected['config'] and empty['RW'] is False
+
+    # TRACEWEAVER: entrypoint=initialize_synthetic_site; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001; ver=VER-FLEETUPDATE-001
+    def initialize_synthetic_site(self, volume, empty, network):
+        """One offline initialization, before any old runtime or continuity baseline."""
+        deadline = time.monotonic() + 60
+
+        def remaining():
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise NativeCommandFailure('timeout')
+            return left
+
+        def engine(*args):
+            return docker(*args, timeout=remaining())
+
+        def image(ref):
+            return json.loads(engine('image', 'inspect', ref).stdout)[0]
+
+        old = image(IPMI_OLD)
+        assert IPMI_OLD in old['RepoDigests']
+        assert old['Os'] == 'linux' and old['Architecture'] == 'amd64'
+        assert old['Config']['Labels']['org.opencontainers.image.revision'] == 'a5cfd4ea0d6e43c6346f641693fcb6eef449433b'
+        image_id = old['Id']
+        assert re.fullmatch(r'sha256:[0-9a-f]{64}', image_id)
+        assert re.fullmatch(r'ghcr\.io/cryptolabsza/ipmi-monitor@sha256:[0-9a-f]{64}', self.refs['ipmi-old'])
+        mirror = image(self.refs['ipmi-old'])
+        assert mirror['Id'] == image_id and self.refs['ipmi-old'] in mirror['RepoDigests']
+        assert volume in self.volumes and volume == network + '-data'
+        assert re.fullmatch(r'native-fleet-named-volume-[1-9][0-9]*', network)
+        assert self.label == 'io.cryptolabs.native-qa.run=' + network.rsplit('-', 1)[1]
+        name = network + '-site-init'
+
+        def filesystem(*, require_empty):
+            info = json.loads(engine('volume', 'inspect', volume).stdout)[0]
+            key, label = self.label.split('=', 1)
+            assert info['Name'] == volume and info.get('Labels', {}).get(key) == label
+            assert info['Driver'] == 'local' and not info.get('Options')
+            assert self.synthetic_ipmi_volume['name'] == volume
+            assert self.synthetic_ipmi_volume_custody(timeout=remaining()) == self.synthetic_ipmi_volume['custody']
+            mountpoint = Path(info['Mountpoint'])
+            assert mountpoint.is_absolute() and mountpoint.resolve() == mountpoint
+            directories = trust_directories(mountpoint)
+            assert empty.is_absolute() and empty.resolve() == empty
+            config_chain = trust_directories(empty.parent)
+            config_bytes, config_info = trust_read(empty)
+            assert config_bytes == b'servers: []\n'
+            if require_empty:
+                assert not list(mountpoint.iterdir())
+            return (str(mountpoint), directories, config_chain,
+                    trust_identity(config_info), trust_metadata(config_info))
+
+        custody = filesystem(require_empty=True)
+
+        def no_other_writer():
+            for identity in engine('ps', '-aq').stdout.decode().split():
+                value = json.loads(engine('inspect', identity).stdout)[0]
+                assert value['Name'] not in ('/ipmi-monitor', '/' + name)
+                assert not any(m.get('Name') == volume or m.get('Source') == custody[0]
+                               for m in value.get('Mounts', []))
+
+        no_other_writer()
+        expected = dict(name=name, image=image_id, volume=volume,
+                        mountpoint=custody[0], config=str(empty), id=None)
+        assert name not in self.site_initializers
+        # Before Engine can create/start anything, normal cleanup knows exact ownership.
+        self.site_initializers[name] = expected
+        created = engine('create', '--name', name, '--label', self.label, '--network', 'none',
+                         '--entrypoint', 'python3', '--mount', f'type=volume,src={volume},dst=/app/data',
+                         '--mount', f'type=bind,src={empty},dst=/app/config/servers.yaml,readonly',
+                         '-e', 'DATA_DIR=/app/data', '-e', 'SITE_NAME=SYNTHETIC Fleet native fixture',
+                         image_id, '-c', SYNTHETIC_SITE_INITIALIZER).stdout.decode().strip()
+        assert re.fullmatch(r'[0-9a-f]{64}', created)
+        expected['id'] = created
+        value = json.loads(engine('inspect', created).stdout)[0]
+        self.site_initializer_custody(value, expected)
+        assert value['State']['Running'] is False and value['State']['Status'] == 'created'
+        assert filesystem(require_empty=True) == custody
+        # Recheck all other mounts immediately before start; allow only this exact one-shot.
+        for identity in engine('ps', '-aq').stdout.decode().split():
+            if identity != created:
+                other = json.loads(engine('inspect', identity).stdout)[0]
+                assert other['Name'] != '/ipmi-monitor'
+                assert not any(m.get('Name') == volume or m.get('Source') == custody[0]
+                               for m in other.get('Mounts', []))
+        engine('start', created)
+        assert engine('wait', created).stdout.strip() == b'0'
+        value = json.loads(engine('inspect', created).stdout)[0]
+        self.site_initializer_custody(value, expected)
+        state = value['State']
+        assert state['Running'] is False and state['Status'] == 'exited'
+        assert type(state['ExitCode']) is int and state['ExitCode'] == 0
+        assert not state.get('OOMKilled') and not state.get('Error')
+        assert filesystem(require_empty=False) == custody
+        remaining()
+        # Retain this stopped exact ID in normal cleanup ownership until reset.
+        return image_id
+
     def fixture(self, layout):
         import yaml
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -2753,8 +2954,26 @@ class NativeQA:
         empty = self.data / "servers.yaml"
         write(empty, b"servers: []\n", 0o644)
         ipmi_data = network + "-data"
-        docker("volume", "create", "--label", self.label, ipmi_data)
-        self.volumes.append(ipmi_data)
+        if layout == 'named-volume':
+            # Engine create is idempotent. Reject occupied names before any intent
+            # registration; the fresh nonce also rejects a collision after inventory.
+            assert ipmi_data not in docker('volume', 'ls', '--format', '{{.Name}}').stdout.decode().splitlines()
+            assert self.synthetic_ipmi_volume is None
+            self.synthetic_ipmi_volume = dict(name=ipmi_data, nonce=secrets.token_hex(16), custody=None)
+            docker('volume', 'create', '--label', self.label, '--label',
+                   'io.cryptolabs.native-qa.volume=' + self.synthetic_ipmi_volume['nonce'], ipmi_data)
+            # An ambiguous create or failed custody read leaves only a pending intent.
+            # It never enters the deletion list; cleanup holds for external VM teardown.
+            self.synthetic_ipmi_volume['custody'] = self.synthetic_ipmi_volume_custody(require_empty=True)
+            self.volumes.append(ipmi_data)
+        else:
+            docker("volume", "create", "--label", self.label, ipmi_data)
+            self.volumes.append(ipmi_data)
+        old_ipmi = self.refs["ipmi-old"]
+        site_environment = ()
+        if layout == "named-volume":
+            old_ipmi = self.initialize_synthetic_site(ipmi_data, empty, network)
+            site_environment = ("-e", "SITE_NAME=SYNTHETIC Fleet native fixture")
         docker(
             "run",
             "-d",
@@ -2768,7 +2987,8 @@ class NativeQA:
             f"type=volume,src={ipmi_data},dst=/app/data",
             "--mount",
             f"type=bind,src={empty},dst=/app/config/servers.yaml,readonly",
-            self.refs["ipmi-old"],
+            *site_environment,
+            old_ipmi,
         )
         socket_mount = ("--mount", f"type=bind,src={SOCKET},dst={SOCKET},readonly") if layout == 'bind' else ()
         docker(
@@ -3321,6 +3541,18 @@ class NativeQA:
         self.consume_child_failure()
         run("systemctl", "stop", SERVICE, check=False)
         run("systemctl", "stop", SOCKET_UNIT, check=False)
+        if self.synthetic_ipmi_volume is not None and self.synthetic_ipmi_volume['custody'] is None:
+            raise RuntimeError('synthetic volume creation custody uncertain; cleanup held')
+        # Registered before create: a timed-out create may have reached Engine.
+        # A name alone never authorizes removal; revalidate the full owned record.
+        for name, expected in list(self.site_initializers.items()):
+            found = docker("ps", "-aq", "--filter", "name=^/" + name + "$").stdout.split()
+            if found:
+                assert len(found) == 1
+                value = inspect(found[0].decode())
+                self.site_initializer_custody(value, expected)
+                docker("rm", "-f", value["Id"])
+            del self.site_initializers[name]
         # Only exact helpers created by this fixture's retained operation IDs.
         for key in self.job_ids:
             name = "cryptolabs-update-" + key
@@ -3349,7 +3581,13 @@ class NativeQA:
             if value.get("Name") != "/native-fleet-registry":
                 docker("rm", "-f", identity)
         for name in self.volumes:
-            docker("volume", "rm", name, check=False)
+            if self.synthetic_ipmi_volume is not None and name == self.synthetic_ipmi_volume['name']:
+                assert self.synthetic_ipmi_volume_custody() == self.synthetic_ipmi_volume['custody']
+                docker('volume', 'rm', name)  # checked, non-force; an attached volume must hold
+                self.synthetic_ipmi_volume = None
+            else:
+                docker("volume", "rm", name, check=False)
+        assert self.synthetic_ipmi_volume is None
         self.volumes = []
         for name in self.networks:
             docker("network", "rm", name, check=False)

@@ -208,11 +208,13 @@ class FleetNativeRouteTest(unittest.TestCase):
             with sqlite3.connect(data / "ipmi_events.db") as db:
                 for sql in (
                     "CREATE TABLE system_settings(key TEXT PRIMARY KEY,value TEXT)",
-                    "CREATE TABLE cloud_sync(id INTEGER PRIMARY KEY,license_key TEXT,sync_enabled INTEGER,subscription_valid INTEGER)",
+                    "CREATE TABLE cloud_sync(id INTEGER PRIMARY KEY,license_key TEXT,sync_enabled INTEGER,subscription_valid INTEGER,site_id TEXT,site_name TEXT)",
                     "CREATE TABLE server(id INTEGER PRIMARY KEY,bmc_ip TEXT,server_name TEXT,status TEXT,updated_at TEXT)",
                     "CREATE TABLE server_status(bmc_ip TEXT PRIMARY KEY,server_name TEXT,last_check TEXT)",
                 ):
                     db.execute(sql)
+                db.execute("INSERT INTO cloud_sync(id,site_id,site_name) VALUES (1,?,?)",
+                           ('synthetic-fleet-native-site', 'SYNTHETIC Fleet native fixture'))
             volume = "native-fleet-named-volume-123-data"
             observed = {"Id": "a" * 64, "Image": "sha256:" + "b" * 64,
                         "State": {"Running": True}, "Config": {"Labels": {"io.cryptolabs.native-qa.run": "123"}},
@@ -223,6 +225,16 @@ class FleetNativeRouteTest(unittest.TestCase):
             qa.volumes = [volume]
             qa.network = "native-fleet-named-volume-123"
             qa.label = "io.cryptolabs.native-qa.run=123"
+            # A missing/wrong initialization must fail before even account seed writes.
+            with sqlite3.connect(data / "ipmi_events.db") as db:
+                db.execute("UPDATE cloud_sync SET site_name='wrong'")
+            with patch.object(module, "inspect", return_value=observed):
+                with self.assertRaises(AssertionError):
+                    qa.recovery.seed_synthetic_selected_state()
+            with sqlite3.connect(data / "ipmi_events.db") as db:
+                self.assertEqual(db.execute('SELECT count(*) FROM system_settings').fetchone()[0], 0)
+                self.assertEqual(db.execute('SELECT license_key,site_name FROM cloud_sync').fetchall(), [(None, 'wrong')])
+                db.execute('UPDATE cloud_sync SET site_name=?', ('SYNTHETIC Fleet native fixture',))
             captured = {}
             original_spec = importlib.util.spec_from_file_location
             def capture_spec(name, path):
@@ -245,6 +257,9 @@ class FleetNativeRouteTest(unittest.TestCase):
                 with self.assertRaises(SeedCaptured):
                     qa.recovery.seed_synthetic_selected_state()
             helper = captured["helper"]
+            with sqlite3.connect(data / "ipmi_events.db") as db:
+                self.assertEqual(db.execute('SELECT site_id,site_name FROM cloud_sync').fetchall(),
+                                 [('synthetic-fleet-native-site', 'SYNTHETIC Fleet native fixture')])
             self.assertEqual(captured["pin"]["mounts"], observed["Mounts"])
             self.assertEqual(captured["pin"]["container_id"], observed["Id"])
             # The producer and runtime identity checks remain real. Stop the
@@ -282,6 +297,237 @@ class FleetNativeRouteTest(unittest.TestCase):
             self.assertIn(failure["guard_line"], range(custody.lineno, custody.end_lineno + 1))
             self.assertEqual(failure["command_outcome"], "none")
             self.assertIsNone(failure["command_returncode"])
+
+    def test_synthetic_site_initialization_orders_real_fixture_and_holds_failures(self):
+        """Real fixture/orchestration; only Engine and unavailable root FS custody substituted."""
+        module = self.native_module()
+        tree = ast.parse(SCRIPT.read_text())
+        klass = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'NativeQA')
+        fixture = next(n for n in klass.body if isinstance(n, ast.FunctionDef) and n.name == 'fixture')
+        def assignment(node, name):
+            return isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets)
+        start = next(i for i, n in enumerate(fixture.body) if assignment(n, 'empty'))
+        stop = next(i for i, n in enumerate(fixture.body) if assignment(n, 'socket_mount'))
+        code = compile(ast.fix_missing_locations(ast.Module(body=fixture.body[start:stop], type_ignores=[])), str(SCRIPT), 'exec')
+        scenarios = ('pass', 'bind', 'foreign-volume', 'nonempty', 'preexisting-empty', 'existing-runtime', 'stopped-writer',
+                     'wrong-image', 'wrong-site-name', 'create-timeout', 'start-failed', 'wait-timeout',
+                     'nonzero', 'still-running', 'wrong-terminal-id', 'deadline', 'changed-volume',
+                     'config-swap', 'symlink-volume', 'cleanup-foreign', 'volume-create-timeout',
+                     'cleanup-volume-label', 'cleanup-volume-inode')
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                data = root / 'data'; data.mkdir()
+                preexisting = scenario in ('foreign-volume', 'nonempty', 'preexisting-empty')
+                if scenario in ('foreign-volume', 'nonempty'):
+                    (data / 'prior.db').write_bytes(b'SYNTHETIC retained data')
+                initial_volume_inode = data.stat().st_ino
+                volume = 'native-fleet-named-volume-123-data'
+                if scenario == 'symlink-volume':
+                    (root / 'alias').symlink_to(data, target_is_directory=True)
+                qa = module.NativeQA(SimpleNamespace(evidence_dir=root / 'evidence'))
+                qa.data = root
+                qa.label = 'io.cryptolabs.native-qa.run=123'
+                qa.refs = {'ipmi-old': 'ghcr.io/cryptolabsza/ipmi-monitor@sha256:' + 'c' * 64}
+                image_id, identity = 'sha256:' + 'b' * 64, 'a' * 64
+                clock, calls, timeouts = [100.0], [], []
+                state = dict(created=False, started=False, exited=False, removed=False, runtime=False,
+                             volume_exists=preexisting)
+                volume_labels = {'io.cryptolabs.native-qa.run': 'foreign' if scenario == 'foreign-volume' else '123'}
+                value = {}
+                def reply(output=b''):
+                    return SimpleNamespace(returncode=0, stdout=output, stderr=b'')
+                def record_json(item):
+                    return reply(json.dumps([item]).encode())
+                def engine(*args, **kwargs):
+                    calls.append(args)
+                    if 'timeout' in kwargs:
+                        timeouts.append(kwargs['timeout'])
+                        self.assertGreater(kwargs['timeout'], 0)
+                        self.assertLessEqual(kwargs['timeout'], 60)
+                    clock[0] += 1
+                    if args[:2] == ('volume', 'ls'):
+                        return reply(volume.encode() if state['volume_exists'] else b'')
+                    if args[:2] == ('volume', 'create'):
+                        # Engine create is idempotent: existing data and labels survive it.
+                        if not state['volume_exists']:
+                            volume_labels.update(dict(args[i + 1].split('=', 1) for i, arg in enumerate(args) if arg == '--label'))
+                            state['volume_exists'] = True
+                        if scenario == 'volume-create-timeout':
+                            raise module.NativeCommandFailure('timeout')
+                        return reply(volume.encode())
+                    if args[:2] == ('image', 'inspect'):
+                        return record_json({'Id': ('sha256:' + 'd' * 64 if scenario == 'wrong-image' and args[2] != module.IPMI_OLD else image_id),
+                            'RepoDigests': [args[2]], 'Os': 'linux', 'Architecture': 'amd64',
+                            'Config': {'Labels': {'org.opencontainers.image.revision': 'a5cfd4ea0d6e43c6346f641693fcb6eef449433b'}}})
+                    if args[:2] == ('volume', 'inspect'):
+                        return record_json({'Name': volume, 'Driver': 'local', 'Options': None,
+                            'Labels': dict(volume_labels),
+                            'Mountpoint': str(root / 'alias' if scenario == 'symlink-volume' else data)})
+                    if args[0] == 'ps':
+                        if state['removed']:
+                            return reply()
+                        if state['created']:
+                            return reply(identity.encode())
+                        return reply(b'f' * 64 if scenario in ('existing-runtime', 'stopped-writer') else b'')
+                    if args[0] == 'create':
+                        name = args[args.index('--name') + 1]
+                        self.assertIn(name, qa.site_initializers)
+                        self.assertIsNone(qa.site_initializers[name]['id'])
+                        self.assertIn(volume, qa.volumes)
+                        mounts = [args[i + 1] for i, arg in enumerate(args) if arg == '--mount']
+                        self.assertEqual(mounts, [f'type=volume,src={volume},dst=/app/data', f'type=bind,src={root}/servers.yaml,dst=/app/config/servers.yaml,readonly'])
+                        value.update(Id=identity, Name='/' + name, Image=image_id,
+                            Config={'Labels': {'io.cryptolabs.native-qa.run': '123'}, 'Image': args[-3],
+                                'Entrypoint': [args[args.index('--entrypoint') + 1]], 'Cmd': list(args[-2:]),
+                                'Env': [args[i + 1] for i, arg in enumerate(args) if arg == '-e']},
+                            HostConfig={'NetworkMode': args[args.index('--network') + 1], 'Privileged': False},
+                            Mounts=[{'Destination': '/app/data', 'Type': 'volume', 'Name': volume, 'Source': str(data), 'RW': True},
+                                {'Destination': '/app/config/servers.yaml', 'Type': 'bind', 'Source': str(root / 'servers.yaml'), 'RW': False}],
+                            State={'Running': False, 'Status': 'created'})
+                        if scenario == 'wrong-site-name':
+                            value['Config']['Env'][-1] = 'SITE_NAME=wrong'
+                        state['created'] = True
+                        if scenario == 'create-timeout':
+                            raise module.NativeCommandFailure('timeout')
+                        return reply(identity.encode())
+                    if args[0] == 'inspect':
+                        if args[1] == 'f' * 64:
+                            return record_json({'Name': '/ipmi-monitor' if scenario == 'existing-runtime' else '/stopped',
+                                'State': {'Running': False}, 'Mounts': [{'Name': volume}]})
+                        if scenario == 'wrong-terminal-id' and state['exited']:
+                            return record_json(dict(value, Id='e' * 64))
+                        return record_json(value)
+                    if args[0] == 'start':
+                        self.assertEqual(qa.site_initializers[value['Name'][1:]]['id'], identity)
+                        self.assertEqual(args[1], identity)
+                        state['started'] = True
+                        if scenario == 'start-failed':
+                            raise module.NativeCommandFailure('nonzero-exit', 1)
+                        if scenario == 'deadline':
+                            clock[0] += 60
+                        return reply()
+                    if args[0] == 'wait':
+                        self.assertTrue(state['started'])
+                        if scenario == 'wait-timeout':
+                            raise module.NativeCommandFailure('timeout')
+                        state['exited'] = True
+                        value['State'] = {'Running': scenario == 'still-running', 'Status': 'running' if scenario == 'still-running' else 'exited', 'ExitCode': 0}
+                        if scenario == 'changed-volume':
+                            data.rename(root / 'old-data'); data.mkdir()
+                        if scenario == 'config-swap':
+                            (root / 'servers.yaml').rename(root / 'old-config')
+                            (root / 'servers.yaml').write_text('servers: []\n')
+                        return reply(b'7' if scenario == 'nonzero' else b'0')
+                    if args[0] == 'run':
+                        self.assertIn('ipmi-monitor', args)
+                        if scenario != 'bind':
+                            self.assertTrue(state['exited'])
+                            self.assertIs(value['State']['Running'], False)
+                            self.assertEqual(args[-3:], ('-e', 'SITE_NAME=SYNTHETIC Fleet native fixture', image_id))
+                        else:
+                            self.assertFalse(state['created'])
+                            self.assertEqual(args[-1], qa.refs['ipmi-old'])
+                            self.assertNotIn('SITE_NAME=SYNTHETIC Fleet native fixture', args)
+                        state['runtime'] = True
+                    if args[:2] == ('rm', '-f'):
+                        self.assertEqual(args[2], identity)
+                        state['removed'] = True
+                    if args[:2] == ('volume', 'rm'):
+                        if not preexisting:
+                            self.assertTrue(state['removed'])
+                        # Model successful Engine removal with actual temporary data deletion,
+                        # so the rejection/reset composition observes harm, not just argv.
+                        for child in data.iterdir():
+                            child.unlink()
+                        data.rmdir()
+                        state['volume_exists'] = False
+                    return reply()
+                scope = dict(module.__dict__, self=qa, layout='bind' if scenario == 'bind' else 'named-volume', network='native-fleet-named-volume-123')
+                # Root-only ancestry/file ownership is unavailable in portable CI.
+                # Keep actual no-follow path identities/content and replacement checks.
+                def directories(path):
+                    return [(str(path), module.trust_identity(path.lstat()))]
+                def read_config(path):
+                    with path.open('rb') as stream:
+                        return stream.read(), os.fstat(stream.fileno())
+                with patch.object(module, 'docker', side_effect=engine), patch.object(module.time, 'monotonic', side_effect=lambda: clock[0]), patch.object(module, 'trust_directories', side_effect=directories), patch.object(module, 'trust_read', side_effect=read_config):
+                    scope['docker'] = module.docker
+                    if preexisting:
+                        original_error = None
+                        try:
+                            exec(code, scope)
+                        except (AssertionError, module.NativeCommandFailure) as error:
+                            original_error = error
+                        qa.consume_child_failure = lambda: None
+                        qa.recovery.reset = lambda: None
+                        cleanup_error = None
+                        with patch.object(module, 'run'), patch.object(module.shutil, 'rmtree'):
+                            try:
+                                qa.reset_fixture()
+                            except Exception as error:
+                                cleanup_error = error
+                        # Inspect survival before checking the original refusal. Initial
+                        # candidate accepts the empty same-label case, then deletes it too.
+                        self.assertTrue(data.is_dir(), 'actual reset deleted a preexisting volume; '
+                            f'initial={type(original_error).__name__}, cleanup={type(cleanup_error).__name__}')
+                        self.assertEqual(data.stat().st_ino, initial_volume_inode)
+                        if scenario != 'preexisting-empty':
+                            self.assertEqual((data / 'prior.db').read_bytes(), b'SYNTHETIC retained data')
+                        self.assertTrue(state['volume_exists'])
+                        self.assertFalse(state['runtime'])
+                        self.assertIsInstance(original_error, (AssertionError, module.NativeCommandFailure))
+                        self.assertFalse(any(args[:2] == ('volume', 'rm') for args in calls))
+                        continue
+                    if scenario in ('pass', 'bind', 'cleanup-foreign', 'cleanup-volume-label', 'cleanup-volume-inode'):
+                        exec(code, scope)
+                        self.assertTrue(state['runtime'])
+                    else:
+                        with self.assertRaises((AssertionError, module.NativeCommandFailure)):
+                            exec(code, scope)
+                        self.assertFalse(state['runtime'])
+                    self.assertEqual(timeouts, sorted(timeouts, reverse=True))
+                    if scenario in ('pass', 'create-timeout', 'cleanup-foreign', 'volume-create-timeout',
+                                    'cleanup-volume-label', 'cleanup-volume-inode'):
+                        qa.consume_child_failure = lambda: None
+                        qa.recovery.reset = lambda: None
+                        if scenario == 'cleanup-foreign':
+                            value['Config']['Labels']['io.cryptolabs.native-qa.run'] = 'foreign'
+                        if scenario == 'cleanup-volume-label':
+                            volume_labels['io.cryptolabs.native-qa.volume'] = 'foreign-nonce'
+                        if scenario == 'cleanup-volume-inode':
+                            data.rename(root / 'retained-owned-volume'); data.mkdir()
+                            (data / 'prior.db').write_bytes(b'SYNTHETIC replacement data')
+                        cleanup_inode = data.stat().st_ino
+                        with patch.object(module, 'run'), patch.object(module.shutil, 'rmtree'):
+                            if scenario == 'volume-create-timeout':
+                                with self.assertRaisesRegex(RuntimeError, 'volume creation custody uncertain'):
+                                    qa.reset_fixture()
+                                self.assertFalse(state['created'])
+                                self.assertTrue(state['volume_exists'])
+                                self.assertTrue(data.is_dir())
+                                self.assertEqual(data.stat().st_ino, cleanup_inode)
+                                self.assertFalse(any(args[:2] == ('volume', 'rm') for args in calls))
+                            elif scenario in ('cleanup-volume-label', 'cleanup-volume-inode'):
+                                with self.assertRaises(AssertionError):
+                                    qa.reset_fixture()
+                                self.assertTrue(state['removed'], 'the exact owned one-shot may be removed')
+                                self.assertTrue(state['volume_exists'])
+                                self.assertTrue(data.is_dir())
+                                self.assertEqual(data.stat().st_ino, cleanup_inode)
+                                if scenario == 'cleanup-volume-inode':
+                                    self.assertEqual((data / 'prior.db').read_bytes(), b'SYNTHETIC replacement data')
+                                    self.assertTrue((root / 'retained-owned-volume').is_dir())
+                                self.assertFalse(any(args[:2] == ('volume', 'rm') for args in calls))
+                            elif scenario == 'cleanup-foreign':
+                                with self.assertRaises(AssertionError):
+                                    qa.reset_fixture()
+                                self.assertFalse(state['removed'])
+                                self.assertFalse(any(args[:2] == ('volume', 'rm') for args in calls))
+                            else:
+                                qa.reset_fixture()
+                                self.assertTrue(state['removed'])
+                                self.assertEqual(qa.site_initializers, {})
 
     def test_rejected_preexisting_backup_root_survives_actual_reset(self):
         module = self.native_module()
@@ -1308,19 +1554,28 @@ class FleetNativeRouteTest(unittest.TestCase):
 
         # Existing execute/cleanup orchestration must survive a diagnostic
         # collector failure. Only whole phase boundaries are substituted.
-        with tempfile.TemporaryDirectory() as directory:
-            qa = module.NativeQA(SimpleNamespace(evidence_dir=Path(directory)))
-            cleaned = []
-            def failed_fixture(layout):
-                raise RuntimeError("PRIVATE_BOOTSTRAP_FAILURE")
-            with patch.object(qa, "preflight"), patch.object(qa, "images"), patch.object(qa, "units_install"), patch.object(qa, "fixture", side_effect=failed_fixture), patch.object(qa, "cleanup", side_effect=lambda: cleaned.append(True)), patch.object(module, "native_phase_failure_metadata", side_effect=RuntimeError("PRIVATE_COLLECTOR_FAILURE")):
-                with self.assertRaisesRegex(RuntimeError, "^native verification failed; native gate held$"):
-                    qa.execute()
-            self.assertEqual(cleaned, [True])
-            event = next(event for event in qa.events if event["case"] == "native-flow")
-            self.assertEqual(event["result"], "failed")
-            self.assertEqual(event["phase"], "fixture")
-            self.assertNotIn("PRIVATE", json.dumps(qa.events))
+        for cleanup_fails in (False, True):
+            with self.subTest(cleanup_fails=cleanup_fails), tempfile.TemporaryDirectory() as directory:
+                qa = module.NativeQA(SimpleNamespace(evidence_dir=Path(directory)))
+                cleaned = []
+                def failed_fixture(layout):
+                    raise RuntimeError("PRIVATE_BOOTSTRAP_FAILURE")
+                def cleanup_boundary():
+                    cleaned.append(True)
+                    if cleanup_fails:
+                        raise RuntimeError("PRIVATE_CLEANUP_CUSTODY_FAILURE")
+                with patch.object(qa, "preflight"), patch.object(qa, "images"), patch.object(qa, "units_install"), patch.object(qa, "fixture", side_effect=failed_fixture), patch.object(qa, "cleanup", side_effect=cleanup_boundary), patch.object(module, "native_phase_failure_metadata", side_effect=RuntimeError("PRIVATE_COLLECTOR_FAILURE")):
+                    expected = "fixture cleanup held" if cleanup_fails else "native verification failed"
+                    with self.assertRaisesRegex(RuntimeError, "^" + expected + "; native gate held$"):
+                        qa.execute()
+                self.assertEqual(cleaned, [True])
+                event = next(event for event in qa.events if event["case"] == "native-flow")
+                self.assertEqual(event["result"], "failed")
+                self.assertEqual(event["phase"], "fixture")
+                self.assertNotIn("PRIVATE", json.dumps(qa.events))
+                if cleanup_fails:
+                    self.assertTrue(any(event['case'] == 'native-flow' and event.get('phase') == 'cleanup'
+                                        for event in qa.events))
 
     def test_child_file_is_private_bounded_reset_and_consumed_before_cleanup(self):
         module = self.native_module()

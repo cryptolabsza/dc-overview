@@ -513,3 +513,51 @@ Ordinal three is one reviewed inner diagnostic; ordinals four and five require
 concretely diagnosed, tested and reviewed repairs. Unknown after the diagnostic
 stops progression. Source verification grants no native/publication action,
 reservation, release acceptance or LTX update authority by itself.
+
+The 5 November synthetic-fixture candidate initializes the named-volume layout
+before starting old IPMI. It verifies the immutable old image and revision,
+fresh owned empty volume, root path custody, empty configuration and absence of
+other runtime/mount users. An exact owned one-shot is registered for cleanup
+before create, inspected before start, and run with network `none` and only the
+data volume plus readonly empty server configuration. One absolute 60-second
+deadline covers its lifecycle; only an inspected terminal exit zero permits
+runtime startup. Cleanup revalidates name, ID, label, image, command, environment
+and mounts before removing its exact ID, including uncertain create outcomes.
+
+The literal initializer checks old app source bytes before import, uses actual
+import-time database initialization and ORM commit, and verifies every typed
+cloud row field after two calls to the real site getter. It forbids network,
+process and thread starts, unregisters shutdown reporting, and never calls
+`create_app`. The later old runtime gets the same synthetic `SITE_NAME`. SQL
+seeding verifies the singleton site identity before any write and never writes
+site fields. The bind layout and original protection observer, strict continuity
+equality, locks/history and root custody remain unchanged.
+
+Portable route tests exercise real orchestration with Engine and root-only
+filesystem boundary substitutes. A separate bounded local proof extracts the
+exact initializer literal and uses the retained old ORM source with all 135
+input hashes checked before/after. Neither establishes Docker/native acceptance
+or identifies the native-four historical writer. The approved continuation cap
+is seven automatic native attempts, four spent and three conditional remaining,
+with zero manual attempts. This first functional slot permits one initial
+candidate and at most two separately diagnosed, root-allocated corrections.
+Source validation grants no native, publication or release authority.
+
+Named-volume IPMI data creation first inventories exact volume names and rejects
+any preexisting name, even empty or carrying the same run label. A fresh
+per-creation nonce label and root mountpoint chain/inode custody must be
+positively verified while empty before cleanup registration. A create
+timeout/failure or uncertain custody remains a pending intent outside the
+deletion list; reset holds and requires external VM destruction rather than
+deleting unknown data. Reset rechecks the retained name, run/nonce labels, local
+driver, mountpoint/root chain/inode and creation metadata immediately before
+checked, non-force removal of this resource. Other layouts and existing
+product/protection contracts are unchanged.
+
+Inventory and compare-before-remove are point-in-time custody checks under the
+admitted exclusive fresh VM/trusted Engine. They do not provide atomic exclusion
+against another privileged actor. The initializer's shared 60-second
+command/verification deadline remains distinct from normal cleanup: a timed-out
+container is not proven dead at that deadline; exact-owned terminal cleanup and
+external VM destruction evidence remain required. Existing auth/anonymous-volume
+handling is unchanged and is not newly certified by this repair.
