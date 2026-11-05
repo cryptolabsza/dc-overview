@@ -83,3 +83,14 @@ central_telemetry_monitoring_policy:
   publication_gate: current_root_capsule_required
   production_acceptance: pending
   held_claims: [production_deployment, notification_delivery, unrelated_fleet_acceptance]
+
+gpu_alert_quality_20261104:
+  owner_instruction: Approve and deploy to both sights
+  approved_sites: [LTX, Charlotte]
+  scope_authority: requirements.md#gpu-alert-quality--approved-4-november-2026
+  traceability: traceability-matrix.md#gpu-alert-quality-mapping
+  publication: owner_authorized_normal_release_subject_to_current_gates
+  deployment: owner_authorized_native_path_subject_to_official_artifacts
+  runtime_acceptance: pending
+  external_test_notifications: no_new_sends
+  preserve: [credentials, recipients, customer_workloads, other_services, monitoring_intent]

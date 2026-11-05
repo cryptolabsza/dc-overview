@@ -1,0 +1,9 @@
+{
+  "passed": true,
+  "mirrors": 5,
+  "allowed_changed_fields": [
+    "target-panel.description",
+    "target-panel.targets[].expr",
+    "target-panel.fieldConfig.defaults.mappings"
+  ]
+}

@@ -1,3 +1,4 @@
+# TRACEWEAVER: file-role=gpu-alert-behavior; req=REQ-GPUALERT-002; trace=TRACE-GPUALERT-002; ver=VER-GPUALERT-002
 # Concise notification templates for DC Overview-managed alerts.
 apiVersion: 1
 
@@ -6,8 +7,11 @@ templates:
     name: dc-overview-notifications
     template: |
       {{ define "cryptolabs.telegram.message" }}
-      {{ with .Alerts.Firing }}🔴 FIRING
+      {{ with .Alerts.Firing }}
       {{ range . }}
+      {{ if eq .Labels.alert_category "gpu_collection" }}🟠 {{ .Annotations.summary }}
+      {{ .Annotations.description }}
+      {{ else }}🔴 FIRING
       {{ if eq .Labels.alert_category "vast_listing" }}Vast UNLISTED — {{ .Annotations.summary }}
       {{ else }}
       {{ .Annotations.summary }}
@@ -15,8 +19,14 @@ templates:
       {{ end }}
       {{ end }}
       {{ end }}
-      {{ with .Alerts.Resolved }}🟢 RESOLVED
+      {{ end }}
+      {{ with .Alerts.Resolved }}
       {{ range . }}
+      {{ if eq .Labels.alert_category "gpu_collection" }}
+      {{ if .Annotations.grafana_state_reason }}🟠 GPU monitoring changed ({{ .Annotations.grafana_state_reason }}) — {{ .Annotations.summary }}
+      {{ else }}🟢 {{ .Annotations.recovery_summary }}
+      {{ end }}
+      {{ else }}🟢 RESOLVED
       {{ if eq .Labels.alert_category "vast_listing" }}
       {{ if .Annotations.grafana_state_reason }}Vast listing monitoring changed ({{ .Annotations.grafana_state_reason }}) — {{ .Annotations.summary }}
       {{ else }}Vast LISTED — {{ .Annotations.summary }}
@@ -24,6 +34,7 @@ templates:
       {{ else }}
       {{ .Annotations.summary }}
       {{ .Annotations.description }}
+      {{ end }}
       {{ end }}
       {{ end }}
       {{ end }}

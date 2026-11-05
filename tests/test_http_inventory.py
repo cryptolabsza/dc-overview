@@ -82,10 +82,10 @@ def test_policy_metrics_follow_desired_channels_and_inventory_lifecycle(app, cli
                 if sample.name == 'dc_overview_telemetry_monitoring_enabled'}
 
     assert policy() == {
-        ('master', 'filesystem'): 1, ('master', 'gpu'): 1,
-        ('dcgm-only', 'filesystem'): 0, ('dcgm-only', 'gpu'): 1,
-        ('disabled', 'filesystem'): 0, ('disabled', 'gpu'): 0,
-        ('both-gpu', 'filesystem'): 1, ('both-gpu', 'gpu'): 1,
+        ('master', 'filesystem'): 1, ('master', 'gpu'): 1, ('master', 'dc_exporter'): 1,
+        ('dcgm-only', 'filesystem'): 0, ('dcgm-only', 'gpu'): 1, ('dcgm-only', 'dc_exporter'): 0,
+        ('disabled', 'filesystem'): 0, ('disabled', 'gpu'): 0, ('disabled', 'dc_exporter'): 0,
+        ('both-gpu', 'filesystem'): 1, ('both-gpu', 'gpu'): 1, ('both-gpu', 'dc_exporter'): 1,
     }
     # Unknown installation is not enough for discovery, but still remains policy 1.
     assert client.get('/api/prometheus/discovery').json == []
@@ -96,9 +96,9 @@ def test_policy_metrics_follow_desired_channels_and_inventory_lifecycle(app, cli
     db.session.delete(servers[1])
     db.session.commit()
     assert policy() == {
-        ('master-renamed', 'filesystem'): 1, ('master-renamed', 'gpu'): 1,
-        ('renamed', 'filesystem'): 1, ('renamed', 'gpu'): 1,
-        ('both-gpu', 'filesystem'): 1, ('both-gpu', 'gpu'): 1,
+        ('master-renamed', 'filesystem'): 1, ('master-renamed', 'gpu'): 1, ('master-renamed', 'dc_exporter'): 1,
+        ('renamed', 'filesystem'): 1, ('renamed', 'gpu'): 1, ('renamed', 'dc_exporter'): 1,
+        ('both-gpu', 'filesystem'): 1, ('both-gpu', 'gpu'): 1, ('both-gpu', 'dc_exporter'): 1,
     }
     assert {t['labels']['exporter'] for t in client.get('/api/prometheus/discovery').json} == {'node', 'dc'}
 

@@ -1,3 +1,4 @@
+# TRACEWEAVER: file-role=gpu-alert-behavior; req=REQ-GPUALERT-002; trace=TRACE-GPUALERT-002; ver=VER-GPUALERT-002
 # DC Overview fleet GPU health alerts.
 # Rendered by dc_overview.grafana_alerts; placeholders are replaced at install time.
 apiVersion: 1
@@ -8,6 +9,59 @@ groups:
     folder: Infrastructure Alerts
     interval: 30s
     rules:
+      - uid: fleet-gpu-collector-unavailable
+        title: Fleet GPU telemetry unavailable
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: __DC_OVERVIEW_COLLECTOR_EXPRESSION__
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        keepFiringFor: 2m
+        annotations:
+          summary: '{{ $labels.instance }} · GPU telemetry unavailable'
+          description: 'Check dc-exporter collection.'
+          recovery_summary: '{{ $labels.instance }} · GPU telemetry restored'
+        labels:
+          alert_category: gpu_collection
+          severity: warning
+        isPaused: false
+
       - uid: fleet-gpu-hardware-failure
         title: Fleet GPU hardware failure detected
         condition: C

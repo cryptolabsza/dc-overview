@@ -70,6 +70,16 @@ def test_panel_layout_datasource_and_existing_configuration(filename):
     for previous in restored["panels"]:
         if previous["gridPos"]["y"] >= 56:
             previous["gridPos"]["y"] -= 8
+    # REQ-GPUALERT-003 changes only panel35 state text/expressions/mappings.
+    # Restore those exact pre-change fields before the original whole-dashboard
+    # preservation digest; every other field retains its previous protection.
+    state_baseline = json.loads((ROOT / "tests/fixtures/gpu-state-pre-collector.json").read_text())[filename]
+    state_panel = next(p for p in restored["panels"] if p["id"] == 35)
+    state_panel["description"] = state_baseline["description"]
+    state_panel["fieldConfig"]["defaults"]["mappings"] = state_baseline["mappings"]
+    assert len(state_panel["targets"]) == len(state_baseline["expressions"])
+    for target, expression in zip(state_panel["targets"], state_baseline["expressions"], strict=True):
+        target["expr"] = expression
     assert digest(restored) == BASELINE[filename], "unapproved previous panel/root change"
     assert current["gridPos"] == {"x": 0, "y": 48, "w": 24, "h": 8}
     assert current["type"] == "table"
