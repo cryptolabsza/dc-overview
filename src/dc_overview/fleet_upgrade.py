@@ -343,6 +343,8 @@ def _scoped_updater_directory(proxy):
         mounts = [m for m in proxy['Mounts'] if m.get('Destination') == '/data/auth' and m.get('RW') is True]
         if len(mounts) != 1 or mounts[0].get('Type') not in ('bind', 'volume'):
             raise ValueError()
+        if any(m.get('Destination', '').startswith('/data/auth/') for m in proxy['Mounts']):
+            raise ValueError()
         source = Path(mounts[0]['Source'])
         if not source.is_absolute() or not source.is_dir():
             raise ValueError()
@@ -381,16 +383,21 @@ def _scoped_idle(directory):
         path = directory / (job_id + '.json')
         _scoped_private(path)
         job = _json(path.read_bytes())
-        if (job.get('id') != job_id or job.get('state') not in ('completed', 'failed', 'blocked')
-                or any(r.get('state') == 'recovery_required' for r in job.get('results', {}).values())):
+        if job.get('id') != job_id or job.get('state') not in ('completed', 'failed', 'blocked'):
             raise RuntimeError('updater active/recovery work must finish before scoped selection')
+        from cryptolabs_proxy.updates import service_recovery_dependency, UpdateEngine
+        try:
+            service_recovery_dependency(directory, job, UpdateEngine(), require_capability=False)
+        except Exception:
+            raise RuntimeError('native_service_recovery_required') from None
 
 
 @contextmanager
-def _scoped_updater_guard(directory):
+def _scoped_updater_guard(directory, *, predicate=None):
     """Hold the same inodes/order as dispatch and worker execution; fail busy."""
     import fcntl
-    _scoped_private(directory, directory=True)
+    directory_before = _scoped_private(directory, directory=True)
+    predicate = _scoped_idle if predicate is None else predicate
     descriptors = []
     try:
         for name in ('dispatch.lock', 'operation.lock'):
@@ -406,16 +413,120 @@ def _scoped_updater_guard(directory):
             except BlockingIOError:
                 raise RuntimeError('updater is busy; retry scoped selection after it finishes') from None
         def check():
+            current_directory = _scoped_private(directory, directory=True)
+            if (current_directory.st_dev, current_directory.st_ino) != (directory_before.st_dev, directory_before.st_ino):
+                raise RuntimeError('updater store changed during scoped selection')
             for path, descriptor, before in descriptors:
                 actual = _scoped_private(path)
                 if (before.st_dev, before.st_ino) != (actual.st_dev, actual.st_ino):
                     raise RuntimeError('updater lock changed during scoped selection')
-            _scoped_idle(directory)
+            predicate(directory)
         check()
         yield check
     finally:
         for path, descriptor, before in reversed(descriptors):
             os.close(descriptor)
+
+
+def _require_recovery_root():
+    import platform
+    if os.geteuid() != 0 or platform.system() != 'Linux':
+        raise RuntimeError('service reconciliation requires local Linux root')
+
+
+@contextmanager
+def _recovery_time_limit():
+    """The fixed local CLI gets one hard wall-clock budget including IO."""
+    import signal
+    previous = signal.getsignal(signal.SIGALRM)
+    remaining = signal.getitimer(signal.ITIMER_REAL)
+    if remaining != (0.0, 0.0):
+        raise RuntimeError('native_service_recovery_required')
+    def expired(signum, frame):
+        raise TimeoutError('native_service_recovery_required')
+    signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(signal.ITIMER_REAL, 120)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+# TRACEWEAVER: entrypoint=reconcile_service; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001; ver=VER-FLEETUPDATE-001
+def reconcile_service(config, service, job_id):
+    """Bounded fixed host orchestration; never supplied observations or paths."""
+    with _recovery_time_limit():
+        return _reconcile_service(config, service, job_id)
+
+
+def _reconcile_service(config, service, job_id):
+    """Record exact original restoration before selecting/adopting a new proxy."""
+    from cryptolabs_proxy import update_recovery as recovery
+    from cryptolabs_proxy import updates
+    _require_recovery_root()
+    recovery.require(service == 'ipmi-monitor' and recovery._pattern(job_id, '[0-9a-f]{32}'))
+    recovery.require(updates.get_capabilities().get('native_service_recovery') == 1)
+    lifecycle_path = config.config_dir / '.lifecycle-config.lock'
+    lifecycle_before = _scoped_private(lifecycle_path)
+    # This host entrypoint deliberately uses the installed observer and does not
+    # ask the old serving proxy to advertise code it cannot yet contain.
+    proxy = _scoped_inspect('cryptolabs-proxy')
+    recovery.require(recovery._pattern(proxy.get('Id'), '[0-9a-f]{64}') and
+                     proxy.get('State', {}).get('Running') is True)
+    directory = _scoped_updater_directory(proxy)
+    started = time.monotonic()
+    with config.lifecycle_lock():
+        lifecycle_current = _scoped_private(lifecycle_path)
+        recovery.require((lifecycle_current.st_dev, lifecycle_current.st_ino) ==
+                         (lifecycle_before.st_dev, lifecycle_before.st_ino))
+        with recovery.open_existing_directory(directory, root=True) as fd:
+            initial = os.fstat(fd)
+            def predicate(path):
+                lifecycle_current = _scoped_private(lifecycle_path)
+                recovery.require((lifecycle_current.st_dev, lifecycle_current.st_ino) ==
+                                 (lifecycle_before.st_dev, lifecycle_before.st_ino))
+                recovery.require(time.monotonic() - started <= 120)
+                recovery.require(not os.path.lexists(path / 'controller-adoption.json'))
+                current = _scoped_inspect('cryptolabs-proxy')
+                recovery.require(current['Id'] == proxy['Id'] and current['Image'] == proxy['Image'] and
+                                 current.get('State', {}).get('Running') is True and
+                                 _scoped_updater_directory(current) == directory)
+                actual = os.stat(directory, follow_symlinks=False)
+                recovery.require((actual.st_dev, actual.st_ino) == (initial.st_dev, initial.st_ino))
+            with _scoped_updater_guard(directory, predicate=predicate) as check:
+                job_raw, active_raw = recovery.load_bound_job(fd, job_id)
+                job = recovery.validate_job(job_raw, job_id)
+                engine = updates.UpdateEngine()
+                observation = updates.observe_original(engine, job)
+                baseline = recovery.discover_baseline(job, engine.inspect('ipmi-monitor'), observation.continuity,
+                                                      deadline=started + 120)
+                name = 'service-recovery-' + job_id + '.json'
+                try:
+                    existing = recovery.read_private(fd, name)
+                except FileNotFoundError:
+                    existing = None
+                if existing is None:
+                    receipt = dict(schema_version=1, kind='native-service-original-restored', service=service,
+                        job_id=job_id, job_sha256=recovery.sha256(job_raw), active_sha256=recovery.sha256(active_raw),
+                        selection_id=job['selection_id'], selection_sha256=job['selection_sha256'],
+                        manifest_sha256=job['manifest_sha256'], original_container_id=observation.container_id,
+                        original_image_id=observation.image_id, helper_name=job['helper'],
+                        baseline_receipt_sha256=baseline, continuity=observation.continuity,
+                        outcome='original_restored', verified_at=recovery.datetime.now(recovery.timezone.utc).isoformat().replace('+00:00', 'Z'))
+                else:
+                    receipt = recovery.validate_original_restored(job_raw, existing, observation)
+                    recovery.require(receipt['baseline_receipt_sha256'] == baseline and
+                                     receipt['active_sha256'] == recovery.sha256(active_raw))
+                # Final observation and raw/custody CAS immediately before the
+                # sole durable publication. No status, job or marker writes.
+                final_observation = updates.observe_original(engine, job)
+                recovery.validate_original_restored(job_raw, recovery.encoded(receipt), final_observation)
+                check()
+                recovery.require(recovery.load_bound_job(fd, job_id) == (job_raw, active_raw))
+                recovery.publish_original_restored(fd, receipt)
+    return {'job_id': job_id, 'service': service, 'outcome': 'original_restored',
+            'resolution_available': True, 'reason': 'original_restoration_verified'}
 
 
 def _scoped_proxy(config, proxy_id=None):
