@@ -1,0 +1,15 @@
+[Unit]
+Description=Advance opted-in verified stable selections without installation
+Requires=dc-overview-release-broker.socket
+After=dc-overview-release-broker.socket
+ConditionPathExists=/etc/dc-overview/releases/broker-policy.json
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=@RELEASE_CLI@ release policy-refresh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true

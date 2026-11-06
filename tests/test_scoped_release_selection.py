@@ -1,3 +1,5 @@
+# TRACEWEAVER: file-role=release-verification; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001; ver=VER-FLEETUPDATE-001
+# TRACEWEAVER: verifies=VER-FLEETUPDATE-001; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001
 """Synthetic selected hosts; real publication/CAS, no live Docker mutations."""
 import copy
 import hashlib
@@ -479,3 +481,119 @@ def test_adopted_reference_publication_failure_rolls_back_and_retries(selected_h
     assert not (host.store.root/'.lifecycle-publication.json').exists()
     monkeypatch.setattr(host.config, 'persist_lifecycle', original)
     assert select(host, adopt_existing_selection=True)['reference_adopted'] is True
+
+
+@pytest.fixture
+def unresolved_service(selected_host, monkeypatch):
+    from cryptolabs_proxy import updates, update_recovery as recovery, release_selection
+    host=selected_host
+    (host.config.config_dir/'.lifecycle-config.lock').touch(mode=0o600)
+    snapshot=release_selection.validate(host.previous.selection_raw,host.previous.manifest.raw)
+    job_id='1'*32
+    job={'id':job_id,'helper':'cryptolabs-update-'+job_id,'service':'ipmi-monitor','branch':'main',
+         'action':'update','state':'failed','success':False,'created_at':2000,
+         'results':{'ipmi-monitor':{'state':'recovery_required','success':False}},
+         'sources':{'ipmi-monitor':{'container_id':'2'*64,'image_id':'sha256:'+'3'*64}},
+         'selection_id':snapshot['selection_id'],'selection_sha256':snapshot['selection_sha256'],
+         'manifest_sha256':snapshot['manifest_sha256'],'selection_snapshot':snapshot,
+         'targets':release_selection.targets(snapshot,'linux/amd64')}
+    updates.write_job(host.jobs,job);updates._write_json(host.jobs/'active.json',{'id':job_id})
+    continuity={k:'4'*64 for k in recovery.HASH_KEYS}
+    continuity.update(projection='ipmi-original-continuity-v1',database_device=1,database_inode=2,
+                      saved_identity_field_count=5,stored_key_digest_matches=True,sync_enabled=False)
+    observation=recovery.OriginalObservation('2'*64,'sha256:'+'3'*64,True,True,continuity)
+    class Engine:
+        def inspect(self,name):return {'Id':'2'*64,'Image':'sha256:'+'3'*64}
+    monkeypatch.setattr(updates,'UpdateEngine',Engine)
+    monkeypatch.setattr(updates,'observe_original',lambda *a:observation)
+    monkeypatch.setattr(recovery,'discover_baseline',lambda *a,**kw:'5'*64)
+    # Keep actual filesystem locks/bytes/CAS. Only root ancestry and platform
+    # admission are adapted for the unprivileged macOS fixture.
+    original_open=recovery.open_existing_directory
+    monkeypatch.setattr(recovery,'open_existing_directory',lambda path,**kw:original_open(path))
+    monkeypatch.setattr(upgrade,'_require_recovery_root',lambda:None,raising=False)
+    return host,job,observation
+
+
+def test_host_reconcile_before_record_cli_writes_only_receipt_and_selector_revalidates(unresolved_service,monkeypatch):
+    from cryptolabs_proxy import updates
+    host,job,observation=unresolved_service
+    # No installed/current CLI observation is needed during reconciliation.
+    monkeypatch.setattr(upgrade,'verify_running_cli',lambda *a:pytest.fail('record-cli before reconcile'))
+    before={p.name:p.read_bytes() for p in host.jobs.iterdir()}
+    result=upgrade.reconcile_service(host.config,'ipmi-monitor',job['id'])
+    assert result=={'job_id':job['id'],'service':'ipmi-monitor','outcome':'original_restored',
+                   'resolution_available':True,'reason':'original_restoration_verified'}
+    assert {p.name:p.read_bytes() for p in host.jobs.iterdir() if p.name in before}==before
+    assert {p.name for p in host.jobs.iterdir()}-before.keys()=={'service-recovery-'+job['id']+'.json'}
+    saved=(host.jobs/('service-recovery-'+job['id']+'.json')).read_bytes()
+    assert upgrade.reconcile_service(host.config,'ipmi-monitor',job['id'])==result
+    assert (host.jobs/('service-recovery-'+job['id']+'.json')).read_bytes()==saved
+    # Receipt allows only the idle predicate; selector still runs its normal CAS.
+    assert select(host)['state']=='pending-deployment'
+    from dataclasses import replace
+    monkeypatch.setattr(updates,'observe_original',lambda *a:replace(observation,healthy=False))
+    with pytest.raises((RuntimeError,ValueError)):
+        upgrade._scoped_idle(host.jobs)
+
+
+@pytest.mark.parametrize('drift',['raw','helper','lock','busy'])
+def test_host_reconcile_late_drift_and_real_flock_hold_without_receipt(unresolved_service,monkeypatch,drift):
+    from cryptolabs_proxy import updates, update_recovery as recovery
+    host,job,observation=unresolved_service
+    import fcntl
+    held=None
+    if drift=='busy':
+        held=os.open(host.jobs/'operation.lock',os.O_RDWR);fcntl.flock(held,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    original=updates.observe_original;calls=[]
+    def observe(*a):
+        calls.append(True)
+        if len(calls)==2:
+            if drift=='raw':(host.jobs/(job['id']+'.json')).write_bytes((host.jobs/(job['id']+'.json')).read_bytes()+b' ')
+            if drift=='lock':
+                (host.jobs/'operation.lock').unlink();(host.jobs/'operation.lock').touch(mode=0o600)
+            if drift=='helper':recovery.hold()
+        return original(*a)
+    monkeypatch.setattr(updates,'observe_original',observe)
+    try:
+        with pytest.raises((RuntimeError,ValueError)):
+            upgrade.reconcile_service(host.config,'ipmi-monitor',job['id'])
+    finally:
+        if held is not None:os.close(held)
+    assert not (host.jobs/('service-recovery-'+job['id']+'.json')).exists()
+
+
+def test_fixed_reconcile_command_rejects_widened_arguments(selected_host,monkeypatch):
+    from click.testing import CliRunner
+    from dc_overview.cli import main
+    monkeypatch.setattr(FleetConfig,'load',lambda *a:selected_host.config)
+    monkeypatch.setattr(upgrade,'reconcile_service',lambda config,service,job_id:{'service':service,'job_id':job_id,'outcome':'original_restored'})
+    result=CliRunner().invoke(main,['release','reconcile-service','--service','ipmi-monitor','--job','a'*32])
+    assert result.exit_code==0 and json.loads(result.output)['outcome']=='original_restored'
+    for extra in (['--force'],['--path','/tmp/anything'],['--service','grafana']):
+        assert CliRunner().invoke(main,['release','reconcile-service','--service','ipmi-monitor','--job','a'*32,*extra]).exit_code!=0
+
+
+@pytest.mark.parametrize('bad',['shadow','duplicate','remote'])
+def test_recovery_store_resolution_rejects_shadow_mounts_and_remote_engine(tmp_path,monkeypatch,bad):
+    import platform
+    monkeypatch.setattr(platform,'system',lambda:'Linux')
+    monkeypatch.delenv('DOCKER_HOST',raising=False);monkeypatch.delenv('DOCKER_CONTEXT',raising=False)
+    source=tmp_path/'auth';source.mkdir(mode=0o700)
+    proxy={'Mounts':[{'Type':'bind','Source':str(source),'Destination':'/data/auth','RW':True}]}
+    if bad=='shadow':proxy['Mounts'].append({'Type':'bind','Source':str(tmp_path),'Destination':'/data/auth/update-jobs','RW':True})
+    if bad=='duplicate':proxy['Mounts'].append(dict(proxy['Mounts'][0]))
+    endpoint='tcp://192.0.2.1:2375' if bad=='remote' else 'unix:///var/run/docker.sock'
+    monkeypatch.setattr(upgrade.subprocess,'run',lambda *a,**kw:SimpleNamespace(returncode=0,stdout=json.dumps(endpoint)))
+    with pytest.raises(RuntimeError):upgrade._scoped_updater_directory(proxy)
+
+
+def test_host_reconciliation_does_not_create_missing_lifecycle_lock(unresolved_service):
+    host,job,observation=unresolved_service
+    lock=host.config.config_dir/'.lifecycle-config.lock';lock.unlink()
+    before={str(p):p.read_bytes() for p in host.config.config_dir.rglob('*') if p.is_file()}
+    with pytest.raises((RuntimeError,ValueError,OSError)):
+        upgrade.reconcile_service(host.config,'ipmi-monitor',job['id'])
+    assert {str(p):p.read_bytes() for p in host.config.config_dir.rglob('*') if p.is_file()}==before
+    assert not lock.exists()
+    assert not (host.jobs/('service-recovery-'+job['id']+'.json')).exists()

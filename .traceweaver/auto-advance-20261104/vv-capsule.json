@@ -1,0 +1,148 @@
+{
+  "schema_version": "tw-vv-capsule/1",
+  "workflow_profile": "L3",
+  "work_item_id": "AUTOADVANCE-20261104",
+  "plan_ref": ".traceweaver/auto-advance-20261104/plan.md",
+  "high_risk_controls": {
+    "rollback": "Unpublishedlocalchangesreversible; policyjournalmustreconcileprior/newselectionandmode atomically; LTXactivationusesnativeexistingownerwithhealth/recovery andpreservationevidence. Nojournalclearingorcredentialreset.",
+    "owner_decision": "Exact userapproval owner-approval.json; same-majorverifiedstablefollow,manualinstallation;completeexistingacceptanceprerequisitesbeforeactivation."
+  },
+  "requirements": [
+    {
+      "req_id": "REQ-AUTOADVANCE-001",
+      "trace_id": "TRACE-AUTOADVANCE-001",
+      "ver_id": "VER-AUTOADVANCE-001",
+      "val_id": "VAL-AUTOADVANCE-001",
+      "verification_artifact": "tests/test_release_policy.py",
+      "red_evidence": ".traceweaver/auto-advance-20261104/red-integration.log",
+      "validation_artifact": ".traceweaver/auto-advance-20261104/validation.md",
+      "reviews": [
+        {
+          "gate": "tw-code-review / tw-doc-review",
+          "id": "AUTOADVANCE-VV-REVIEW",
+          "status": "passed",
+          "evidence_path": ".traceweaver/auto-advance-20261104/review-definition.json"
+        }
+      ]
+    },
+    {
+      "req_id": "REQ-AUTOADVANCE-002",
+      "trace_id": "TRACE-AUTOADVANCE-002",
+      "ver_id": "VER-AUTOADVANCE-002",
+      "val_id": "VAL-AUTOADVANCE-002",
+      "verification_artifact": "tests/test_release_policy.py",
+      "red_evidence": ".traceweaver/auto-advance-20261104/red-integration.log",
+      "validation_artifact": ".traceweaver/auto-advance-20261104/validation.md",
+      "reviews": [
+        {
+          "gate": "tw-code-review / tw-doc-review",
+          "id": "AUTOADVANCE-VV-REVIEW",
+          "status": "passed",
+          "evidence_path": ".traceweaver/auto-advance-20261104/review-definition.json"
+        }
+      ]
+    },
+    {
+      "req_id": "REQ-AUTOADVANCE-003",
+      "trace_id": "TRACE-AUTOADVANCE-003",
+      "ver_id": "VER-AUTOADVANCE-003",
+      "val_id": "VAL-AUTOADVANCE-003",
+      "verification_artifact": "tests/test_release_policy.py",
+      "red_evidence": ".traceweaver/auto-advance-20261104/red-integration.log",
+      "validation_artifact": ".traceweaver/auto-advance-20261104/validation.md",
+      "reviews": [
+        {
+          "gate": "tw-code-review / tw-doc-review",
+          "id": "AUTOADVANCE-VV-REVIEW",
+          "status": "passed",
+          "evidence_path": ".traceweaver/auto-advance-20261104/review-definition.json"
+        }
+      ]
+    },
+    {
+      "req_id": "REQ-AUTOADVANCE-004",
+      "trace_id": "TRACE-AUTOADVANCE-004",
+      "ver_id": "VER-AUTOADVANCE-004",
+      "val_id": "VAL-AUTOADVANCE-004",
+      "verification_artifact": "tests/test_release_policy.py",
+      "red_evidence": ".traceweaver/auto-advance-20261104/red-integration.log",
+      "validation_artifact": ".traceweaver/auto-advance-20261104/validation.md",
+      "reviews": [
+        {
+          "gate": "tw-code-review / tw-doc-review",
+          "id": "AUTOADVANCE-VV-REVIEW",
+          "status": "passed",
+          "evidence_path": ".traceweaver/auto-advance-20261104/review-definition.json"
+        }
+      ]
+    },
+    {
+      "req_id": "REQ-AUTOADVANCE-005",
+      "trace_id": "TRACE-AUTOADVANCE-005",
+      "ver_id": "VER-AUTOADVANCE-005",
+      "val_id": "VAL-AUTOADVANCE-005",
+      "verification_artifact": "tests/test_release_policy.py",
+      "red_evidence": ".traceweaver/auto-advance-20261104/red-integration.log",
+      "validation_artifact": ".traceweaver/auto-advance-20261104/validation.md",
+      "reviews": [
+        {
+          "gate": "tw-code-review / tw-doc-review",
+          "id": "AUTOADVANCE-VV-REVIEW",
+          "status": "passed",
+          "evidence_path": ".traceweaver/auto-advance-20261104/review-definition.json"
+        }
+      ]
+    },
+    {
+      "req_id": "REQ-AUTOADVANCE-006",
+      "trace_id": "TRACE-AUTOADVANCE-006",
+      "ver_id": "VER-AUTOADVANCE-006",
+      "val_id": "VAL-AUTOADVANCE-006",
+      "verification_artifact": "tests/test_release_policy.py",
+      "red_evidence": ".traceweaver/auto-advance-20261104/red-integration.log",
+      "validation_artifact": ".traceweaver/auto-advance-20261104/validation.md",
+      "reviews": [
+        {
+          "gate": "tw-code-review / tw-doc-review",
+          "id": "AUTOADVANCE-VV-REVIEW",
+          "status": "passed",
+          "evidence_path": ".traceweaver/auto-advance-20261104/review-definition.json"
+        }
+      ]
+    },
+    {
+      "req_id": "REQ-AUTOADVANCE-007",
+      "trace_id": "TRACE-AUTOADVANCE-007",
+      "ver_id": "VER-AUTOADVANCE-007",
+      "val_id": "VAL-AUTOADVANCE-007",
+      "verification_artifact": "tests/test_release_policy.py",
+      "red_evidence": ".traceweaver/auto-advance-20261104/red-integration.log",
+      "validation_artifact": ".traceweaver/auto-advance-20261104/validation.md",
+      "reviews": [
+        {
+          "gate": "tw-code-review / tw-doc-review",
+          "id": "AUTOADVANCE-VV-REVIEW",
+          "status": "passed",
+          "evidence_path": ".traceweaver/auto-advance-20261104/review-definition.json"
+        }
+      ]
+    },
+    {
+      "req_id": "REQ-AUTOADVANCE-008",
+      "trace_id": "TRACE-AUTOADVANCE-008",
+      "ver_id": "VER-AUTOADVANCE-008",
+      "val_id": "VAL-AUTOADVANCE-008",
+      "verification_artifact": "tests/test_release_policy.py",
+      "red_evidence": ".traceweaver/auto-advance-20261104/red-integration.log",
+      "validation_artifact": ".traceweaver/auto-advance-20261104/validation.md",
+      "reviews": [
+        {
+          "gate": "tw-code-review / tw-doc-review",
+          "id": "AUTOADVANCE-VV-REVIEW",
+          "status": "passed",
+          "evidence_path": ".traceweaver/auto-advance-20261104/review-definition.json"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "method": "Both Python3.12 AST without comments/locations; trace-comment changes after wheel build",
+  "matched": true,
+  "initial_attempt": "cross-version Python3.14/3.12 AST hashes incomparable; rerun with matching Python3.12",
+  "guest": {
+    "cryptolabs_proxy/auth.py": "c40e04b318910ce1a2c1eedfac710d1f8c5ce60959da43f5316979229a21b42d",
+    "cryptolabs_proxy/release_client.py": "66dd68c121586470256923237436033d60e308e7c60f84ad6141d42c4bf63fe7",
+    "dc_overview/cli.py": "3255b052cac6e7dd165189fc95f5357c92a32854254c4ea392b24122c303f04c",
+    "dc_overview/fleet_upgrade.py": "5f696be2b9c06780b76e8c617485857752d171f025f27425ef292089997894dc",
+    "dc_overview/release_broker.py": "afb854ac3640f6dcc528cf5aa8fce8f19eacc0916f0fecc7bfa2ceff8000cc1e",
+    "dc_overview/release_policy.py": "b72cf1d61337b9dbcf2cb9bb0ecb9c95659efde0d1074e1ede22d730392c86ee"
+  },
+  "local": {
+    "cryptolabs_proxy/auth.py": "c40e04b318910ce1a2c1eedfac710d1f8c5ce60959da43f5316979229a21b42d",
+    "cryptolabs_proxy/release_client.py": "66dd68c121586470256923237436033d60e308e7c60f84ad6141d42c4bf63fe7",
+    "dc_overview/cli.py": "3255b052cac6e7dd165189fc95f5357c92a32854254c4ea392b24122c303f04c",
+    "dc_overview/fleet_upgrade.py": "5f696be2b9c06780b76e8c617485857752d171f025f27425ef292089997894dc",
+    "dc_overview/release_broker.py": "afb854ac3640f6dcc528cf5aa8fce8f19eacc0916f0fecc7bfa2ceff8000cc1e",
+    "dc_overview/release_policy.py": "b72cf1d61337b9dbcf2cb9bb0ecb9c95659efde0d1074e1ede22d730392c86ee"
+  }
+}

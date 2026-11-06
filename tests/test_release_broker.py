@@ -4,8 +4,12 @@
 """Exercise strict requests and durable operation replay against real selection store."""
 
 import copy
+import importlib.util
 import json
+import sys
 import uuid
+from contextlib import nullcontext
+from pathlib import Path
 
 import pytest
 from test_release_candidates import admitted as _admitted
@@ -198,6 +202,174 @@ def test_durable_lost_response_and_terminal_replay(product):
             assert (
                 current.selection["components"][name] == host.previous.selection["components"][name]
             )
+
+
+def native_observation_module():
+    path = Path(__file__).resolve().parents[1] / "scripts/verify_fleet_release_native.py"
+    spec = importlib.util.spec_from_file_location("native_broker_observation", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_handled_owner_failure_retains_correlated_coordinate_without_changing_product(product, monkeypatch, tmp_path):
+    """Actual producer RED: the handled save succeeds but loses its error coordinate."""
+    native = native_observation_module()
+    host, service, owner, _ = product
+    schedule = []
+    service.schedule = lambda *args: schedule.append(args)
+    accepted = apply(product, preview(product))
+    method_calls = []
+    for name in ("capabilities", "identity", "status", "submit"):
+        original_method = getattr(owner, name)
+        def observed_method(*args, _name=name, _method=original_method, **kwargs):
+            method_calls.append(_name)
+            return _method(*args, **kwargs)
+        monkeypatch.setattr(owner, name, observed_method)
+    identity = accepted["operation_id"]
+    path = service.root / "operations" / (identity + ".json")
+    prepared = path.read_bytes()
+    fixture = tmp_path / "diagnostic-fixture"
+    fixture.mkdir(mode=0o700)
+    monkeypatch.setattr(native, "ROOT", fixture)
+    guest = native.NativeQA(type("Args", (), {"evidence_dir": tmp_path / "evidence"})())
+    guest.layout = "bind"
+    original_write = broker.private_write
+    results = []
+    for observed in (False, True):
+        path.write_bytes(prepared)
+        owner.mapping.clear()
+        owner.calls.clear()
+        method_calls.clear()
+        # Reuse the real existing lost-response boundary, including its secret text.
+        owner.fail_response = True
+        if observed and hasattr(guest, "reset_owner_observation"):
+            guest.reset_owner_observation()
+        observer = getattr(native, "observe_broker_owner_failures", None)
+        # Baseline must reach the real caught save, rather than fail on a missing API.
+        context = observer(broker, path.parent, (("broker-operation", service.run_operation.__func__.__code__),)) if observed and observer else nullcontext()
+        with context:
+            outcome = service.run_operation(identity)
+        results.append((path.read_bytes(), outcome, list(schedule), list(owner.calls), list(method_calls)))
+        assert broker.private_write is original_write
+    assert results[0] == results[1]
+    retained = json.loads(results[1][0])
+    assert retained["state"] == "recovery-required" and retained["phase"] == "owner"
+    assert retained["reason"] == "Owner operation interrupted; reconcile retained operation before retry"
+    assert len(schedule) == 1 and owner.calls == [identity]
+    diagnostic = fixture / "broker-owner-observation.json"
+    assert diagnostic.is_file(), "real handled owner failure saved only generic reason; correlated coordinate is missing"
+    raw = diagnostic.read_bytes()
+    assert len(raw) <= 4096 and b"lost reply after durable updater submit" not in raw
+    value = json.loads(raw)
+    assert set(value) == {"schema_version", "operation_id", "failure"}
+    assert value["schema_version"] == 1 and value["operation_id"] == identity
+    failure = value["failure"]
+    assert set(failure) == {"code_label", "source_line", "error_kind"}
+    assert failure["code_label"] == "broker-operation" and failure["error_kind"] == "os-error"
+    code = service.run_operation.__func__.__code__
+    assert type(failure["source_line"]) is int
+    assert failure["source_line"] in {line for _, _, line in code.co_lines() if line is not None}
+    assert guest.read_owner_observation(identity) == failure
+
+
+@pytest.mark.parametrize("original_fails", [False, True])
+def test_owner_observer_preserves_original_write_objects_return_exception_and_binding(product, monkeypatch, tmp_path, original_fails):
+    native = native_observation_module()
+    _, service, _, _ = product
+    accepted = apply(product, preview(product))
+    path = service.root / "operations" / (accepted["operation_id"] + ".json")
+    value = json.loads(path.read_bytes())
+    before = path.read_bytes()
+    original = broker.private_write
+    sentinel, failure = object(), OSError("PRIVATE_ORIGINAL_WRITE")
+    calls = []
+    def tracked(*args, **kwargs):
+        calls.append((args, kwargs))
+        if original_fails:
+            raise failure
+        original(*args, **kwargs)
+        return sentinel
+    monkeypatch.setattr(broker, "private_write", tracked)
+    diagnostic_calls = []
+    def diagnostic_failure(*args):
+        diagnostic_calls.append(args)
+        raise RuntimeError("PRIVATE_DIAGNOSTIC")
+    monkeypatch.setattr(native, "write_owner_observation", diagnostic_failure)
+    with native.observe_broker_owner_failures(broker, path.parent, (("broker-operation", service.run_operation.__func__.__code__),)):
+        if original_fails:
+            with pytest.raises(OSError) as caught:
+                broker.private_write(path, value)
+            assert caught.value is failure
+        else:
+            assert broker.private_write(path, value) is sentinel
+    assert broker.private_write is tracked
+    assert len(calls) == 1 and calls[0][0][0] is path and calls[0][0][1] is value
+    assert calls[0][1] == {} and path.read_bytes() == before
+    assert diagnostic_calls == [], "outside-handler writes cannot be attributed to an operation failure"
+
+
+@pytest.mark.parametrize("original_save_fails", [False, True])
+def test_real_handled_save_survives_diagnostic_failure(product, monkeypatch, tmp_path, original_save_fails):
+    native = native_observation_module()
+    fixture = tmp_path / "observer-fixture"
+    fixture.mkdir(mode=0o700)
+    monkeypatch.setattr(native, "ROOT", fixture)
+    slot = fixture / "broker-owner-observation.json"
+    slot.touch(mode=0o600)
+    _, service, owner, _ = product
+    scheduled = []
+    service.schedule = lambda *args: scheduled.append(args)
+    identity = apply(product, preview(product))["operation_id"]
+    path = service.root / "operations" / (identity + ".json")
+    owner.fail_response = True
+    original = broker.private_write
+    sentinel = PermissionError("PRIVATE_ORIGINAL_HANDLED_SAVE")
+    original_calls, caller_arguments, prior = [], [], []
+    def eligible(args):
+        return (args[0] == path and args[1].get("reason") ==
+                "Owner operation interrupted; reconcile retained operation before retry")
+    def original_boundary(*args, **kwargs):
+        if eligible(args):
+            original_calls.append((args, kwargs, sys.exception()))
+            prior.append(path.read_bytes())
+            if original_save_fails:
+                raise sentinel
+        return original(*args, **kwargs)
+    monkeypatch.setattr(broker, "private_write", original_boundary)
+    diagnostic_calls = []
+    def broken(*args):
+        diagnostic_calls.append(args)
+        raise OSError("PRIVATE_DIAGNOSTIC_IO")
+    monkeypatch.setattr(native, "write_owner_observation", broken)
+    with native.observe_broker_owner_failures(broker, path.parent, (("broker-operation", service.run_operation.__func__.__code__),)):
+        installed_wrapper = broker.private_write
+        def caller_boundary(*args, **kwargs):
+            if eligible(args):
+                caller_arguments.append((args, kwargs))
+            return installed_wrapper(*args, **kwargs)
+        monkeypatch.setattr(broker, "private_write", caller_boundary)
+        if original_save_fails:
+            with pytest.raises(PermissionError) as caught:
+                service.run_operation(identity)
+            assert caught.value is sentinel
+        else:
+            assert service.run_operation(identity) is None
+    assert broker.private_write is original_boundary
+    assert len(original_calls) == len(caller_arguments) == 1
+    args, kwargs, active_owner_error = original_calls[0]
+    assert isinstance(active_owner_error, OSError) and active_owner_error is not sentinel
+    assert str(active_owner_error) == "lost reply after durable updater submit"
+    assert args[0] is caller_arguments[0][0][0] and args[1] is caller_arguments[0][0][1]
+    assert kwargs == caller_arguments[0][1] == {}
+    assert len(diagnostic_calls) == (0 if original_save_fails else 1)
+    assert slot.read_bytes() == b""
+    if original_save_fails:
+        assert path.read_bytes() == prior[0]
+    else:
+        assert json.loads(path.read_bytes())["reason"] == "Owner operation interrupted; reconcile retained operation before retry"
+    assert len(scheduled) == 1
+    assert owner.calls == [identity]
 
 
 def test_selection_cas_and_id_conflict(product):

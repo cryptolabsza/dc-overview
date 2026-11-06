@@ -1,0 +1,156 @@
+FFFF..                                                                   [100%]
+=================================== FAILURES ===================================
+______ test_policy_refresh_revalidates_admission_at_native_precommit[ltx] ______
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10b482cc0>, <test_release_broker.Owner object at 0x10b3f7470>)
+admitted = {'times': {'issued_at': '2026-11-04T16:54:49.555038+00:00', 'expires_at': '2026-11-04T16:56:59.555038+00:00'}, 'produc...6524a39e7fdbf60671ceee163092ef364a73c8aa68ba5ba02b', 'verify': <function admitted.<locals>.verify at 0x10b4447c0>, ...}
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10b481ee0>
+
+    def test_policy_refresh_revalidates_admission_at_native_precommit(policy_product,admitted,monkeypatch):
+        import dc_overview.release_policy as policy
+        from dc_overview import fleet_upgrade
+        host,service,owner=policy_product
+        set_mode(service,'follow-stable');before=snapshot(host,service)
+        service.discovery=lambda:[admitted_version(admitted,'1.5.0')]
+        original=fleet_upgrade.select_release_components;verified=[]
+        def expire_at_precommit(*args,**kwargs):
+            check=kwargs.get('precommit_check')
+            assert callable(check), 'publication must carry a freshness and policy-intent check'
+            def expired(*args,**kwargs):
+                verified.append(True);raise ValueError('admission expired before publication')
+            with monkeypatch.context() as m:
+                m.setattr(policy,'verify_candidate',expired)
+                return original(*args,**kwargs)
+        monkeypatch.setattr(fleet_upgrade,'select_release_components',expire_at_precommit)
+>       with pytest.raises(ValueError): service.dispatch('policy-refresh',expected(service),actor=ACTOR)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_release_policy.py:390: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/dc_overview/release_broker.py:539: in dispatch
+    return PolicyManager(self).dispatch(action, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_policy.py:236: in dispatch
+    self._publish(current, state, state, changes, {n: {"origin": "baseline", "enabled": True} for n in changes})
+src/dc_overview/release_policy.py:257: in _publish
+    select_release_components(self.broker.config, path, tuple(changes), platform=current.platform,
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = (FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=ComponentConfig(dc_o...nneszietsman/pytest-10201/test_policy_refresh_revalidate0/config/releases/broker/policy-candidate.json'), ('grafana',))
+kwargs = {'platform': 'linux/amd64', 'expected_selection_id': 'policy-11a4f6b2bc5e41eab86eaa57a36bd8a0', 'expected_selection_sh...ef29144784a78497195b40c7494f87bc5d9cdd9ea3ba5ce9187a5a80', 'operation_id': '4b4813d3-b72a-4a77-adb5-3df17f6b141a', ...}
+
+    def expire_at_precommit(*args,**kwargs):
+        check=kwargs.get('precommit_check')
+>       assert callable(check), 'publication must carry a freshness and policy-intent check'
+E       AssertionError: publication must carry a freshness and policy-intent check
+E       assert False
+E        +  where False = callable(None)
+
+tests/test_release_policy.py:383: AssertionError
+___ test_policy_refresh_revalidates_admission_at_native_precommit[charlotte] ___
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10b4d7f50>, <test_release_broker.Owner object at 0x10b4d6120>)
+admitted = {'times': {'issued_at': '2026-11-04T16:54:49.618309+00:00', 'expires_at': '2026-11-04T16:56:59.618309+00:00'}, 'produc...f98c0d5a333aaca9d3dd8efcbadc904684bfad8f771ed23bee', 'verify': <function admitted.<locals>.verify at 0x10b522f20>, ...}
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10b44fa70>
+
+    def test_policy_refresh_revalidates_admission_at_native_precommit(policy_product,admitted,monkeypatch):
+        import dc_overview.release_policy as policy
+        from dc_overview import fleet_upgrade
+        host,service,owner=policy_product
+        set_mode(service,'follow-stable');before=snapshot(host,service)
+        service.discovery=lambda:[admitted_version(admitted,'1.5.0')]
+        original=fleet_upgrade.select_release_components;verified=[]
+        def expire_at_precommit(*args,**kwargs):
+            check=kwargs.get('precommit_check')
+            assert callable(check), 'publication must carry a freshness and policy-intent check'
+            def expired(*args,**kwargs):
+                verified.append(True);raise ValueError('admission expired before publication')
+            with monkeypatch.context() as m:
+                m.setattr(policy,'verify_candidate',expired)
+                return original(*args,**kwargs)
+        monkeypatch.setattr(fleet_upgrade,'select_release_components',expire_at_precommit)
+>       with pytest.raises(ValueError): service.dispatch('policy-refresh',expected(service),actor=ACTOR)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_release_policy.py:390: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/dc_overview/release_broker.py:539: in dispatch
+    return PolicyManager(self).dispatch(action, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dc_overview/release_policy.py:236: in dispatch
+    self._publish(current, state, state, changes, {n: {"origin": "baseline", "enabled": True} for n in changes})
+src/dc_overview/release_policy.py:257: in _publish
+    select_release_components(self.broker.config, path, tuple(changes), platform=current.platform,
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+args = (FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=ComponentConfig(dc_o...nneszietsman/pytest-10201/test_policy_refresh_revalidate1/config/releases/broker/policy-candidate.json'), ('grafana',))
+kwargs = {'platform': 'linux/amd64', 'expected_selection_id': 'policy-cc147656b7134980948ed822dde2f2ab', 'expected_selection_sh...563c7f1458cf71babbb354278a08564822ae0cef590d76bb1cf0e70d', 'operation_id': '4ce6c4f5-def2-493a-8a9d-b6e008e70c0b', ...}
+
+    def expire_at_precommit(*args,**kwargs):
+        check=kwargs.get('precommit_check')
+>       assert callable(check), 'publication must carry a freshness and policy-intent check'
+E       AssertionError: publication must carry a freshness and policy-intent check
+E       assert False
+E        +  where False = callable(None)
+
+tests/test_release_policy.py:383: AssertionError
+______ test_unfinished_policy_publication_blocks_other_release_paths[ltx] ______
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10b4f0710>, <test_release_broker.Owner object at 0x10b4f0530>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10b4f3d10>
+
+    def test_unfinished_policy_publication_blocks_other_release_paths(policy_product,monkeypatch):
+        import dc_overview.release_policy as policy
+        from dc_overview import fleet_upgrade
+        from dc_overview.release_broker import BrokerError
+        host,service,owner=policy_product;write=policy.private_write
+        def fail(path,value):
+            if path.name=='policy-state.json':raise OSError('interrupted policy write')
+            return write(path,value)
+        with monkeypatch.context() as m:
+            m.setattr(policy,'private_write',fail)
+            with pytest.raises(OSError):set_mode(service,'follow-stable')
+        before=host.store.load().selection_raw
+        with pytest.raises(BrokerError) as error:
+            service.dispatch('preview',{'candidate_ids':['fixture'],'components':['grafana'],
+                'operation_kind':'services-update',**expected(service)},actor=ACTOR)
+>       assert error.value.code=='recovery-required'
+E       AssertionError: assert 'unavailable' == 'recovery-required'
+E         
+E         - recovery-required
+E         + unavailable
+
+tests/test_release_policy.py:409: AssertionError
+___ test_unfinished_policy_publication_blocks_other_release_paths[charlotte] ___
+
+policy_product = (namespace(config=FleetConfig(site_name='DC Overview', fleet_admin_user='admin', fleet_admin_pass=None, components=Com...), <dc_overview.release_broker.ReleaseBroker object at 0x10b58abd0>, <test_release_broker.Owner object at 0x10b58a030>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10b4f2d80>
+
+    def test_unfinished_policy_publication_blocks_other_release_paths(policy_product,monkeypatch):
+        import dc_overview.release_policy as policy
+        from dc_overview import fleet_upgrade
+        from dc_overview.release_broker import BrokerError
+        host,service,owner=policy_product;write=policy.private_write
+        def fail(path,value):
+            if path.name=='policy-state.json':raise OSError('interrupted policy write')
+            return write(path,value)
+        with monkeypatch.context() as m:
+            m.setattr(policy,'private_write',fail)
+            with pytest.raises(OSError):set_mode(service,'follow-stable')
+        before=host.store.load().selection_raw
+        with pytest.raises(BrokerError) as error:
+            service.dispatch('preview',{'candidate_ids':['fixture'],'components':['grafana'],
+                'operation_kind':'services-update',**expected(service)},actor=ACTOR)
+>       assert error.value.code=='recovery-required'
+E       AssertionError: assert 'unavailable' == 'recovery-required'
+E         
+E         - recovery-required
+E         + unavailable
+
+tests/test_release_policy.py:409: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_release_policy.py::test_policy_refresh_revalidates_admission_at_native_precommit[ltx]
+FAILED tests/test_release_policy.py::test_policy_refresh_revalidates_admission_at_native_precommit[charlotte]
+FAILED tests/test_release_policy.py::test_unfinished_policy_publication_blocks_other_release_paths[ltx]
+FAILED tests/test_release_policy.py::test_unfinished_policy_publication_blocks_other_release_paths[charlotte]
+4 failed, 2 passed, 79 deselected in 0.58s

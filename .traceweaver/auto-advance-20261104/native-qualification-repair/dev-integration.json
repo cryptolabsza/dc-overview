@@ -1,0 +1,47 @@
+{
+  "parents": [
+    "488e404c50e6abb6fb7b1e34f05f6d45a5278b75",
+    "91061265708e6c387dfb9bb883ed471052868b78"
+  ],
+  "automatic_merge_tree": "eeb4cac983ac22f27c2ca8097ff3eba9f1a67ce5",
+  "manual_files": {
+    ".traceweaver/intent-contract.yml": {
+      "conflicts_resolved": 1,
+      "both_approved_blocks_preserved": true,
+      "sha256": "c597d5c3306c6ed03efba9798760f1401808f52e30c794bbceed80c92ced5cc1"
+    },
+    "requirements.md": {
+      "conflicts_resolved": 1,
+      "both_approved_blocks_preserved": true,
+      "sha256": "031352dd4c2033d081ca56c01e7ad54ecc03118d3601c2d0b1cc49441d28cb09"
+    },
+    "traceability-matrix.md": {
+      "conflicts_resolved": 1,
+      "both_approved_blocks_preserved": true,
+      "sha256": "1c6ddf388810015579bf6ef06866e9a3d4a7df7d09111ed0dfc50f4cfadd6bf8"
+    }
+  },
+  "authority_semantics": "union of both approved append-only sections; all original YAML values from both parents equal; no new requirements",
+  "doc_review": {
+    "reviewer": "button_correctness_review",
+    "findings": [],
+    "result": "passed",
+    "facts": "All original parent lines/order preserved; no new nonempty authority lines; strict YAML duplicate-free, every parent key-value identical; holds retained"
+  },
+  "unconflicted_incoming_files": "all34 exactly equal approved dev9106126 bytes",
+  "application_guarded_files": "unchanged from reviewed source pair",
+  "verification": {
+    "native_route": "12passed",
+    "policy_regression": "293passed",
+    "full_regression": "2125passed;11blocked by sandbox loopback permissions; eightPrometheuscases replayed with permitted loopback and passed; threeunchangedUIcases remain localenvironmentheld",
+    "new_application_behavior": false
+  },
+  "scope": "local integration of already approved dev; not remote PR merge or release",
+  "held": [
+    "native runtime",
+    "three unchanged local UI cases blocked before browser startup",
+    "recovery prerequisite",
+    "signed catalog publisher",
+    "deployment"
+  ]
+}

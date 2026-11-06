@@ -1,0 +1,10 @@
+{
+  "pyproject.toml": "49ca02f1f3a894f44a1ef1c61d2a0c978bf6161a4df763a936e980b8721a9365",
+  "src/dc_overview/cli.py": "63501cf00a6cb238d8f386b16f8f2393342344c5c69493cbf6fcb37a20e9276e",
+  "src/dc_overview/fleet_upgrade.py": "a2d9cf730de5b0d68b1071d4329dd9e4b2af1bf285f1857b5d6abd52f205674e",
+  "src/dc_overview/release_broker.py": "5916872d5ec87a2e9b69529c2c8a16f9a871667d9ff0ae27a0f1691fcaa296b7",
+  "src/dc_overview/release_policy.py": "0061e5a66b4f5495fe7bc83e8426b085983a1c42c12bb25cfdf853c33dc06b7b",
+  "src/dc_overview/templates/systemd/dc-overview-release-refresh.service": "b21ecf63d9ab5ce9a39ed84aeedb706a8064a38485bb22f85c3bdfbc0ed9dd2e",
+  "src/dc_overview/templates/systemd/dc-overview-release-refresh.timer": "1bfcb7323a7e29f240c923e6e9d2f75f41717e2fd0ee385e4232d0fd34dfd3ca",
+  "tests/test_release_policy.py": "250a769e20d831a42f730ec790c0225207504221664ec3349ecf17ffd19e821b"
+}

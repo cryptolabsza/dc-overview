@@ -23,6 +23,17 @@ Canonical reviewed authority and frozen profile: ../artifacts/ipmi-readiness-202
 | TRACE-FLEETUPDATE-001 | REQ-FLEETUPDATE-001 | `.github/tests/test_fleet_native_route.py` | VER-FLEETUPDATE-001 | VAL-FLEETUPDATE-001 | approved |
 | TRACE-FLEETUPDATE-001 | REQ-FLEETUPDATE-001 | `scripts/verify_fleet_release_native.py` | VER-FLEETUPDATE-001 | VAL-FLEETUPDATE-001 | v3 source pin corrected; automatic native recheck pending |
 | TRACE-FLEETUPDATE-001 | REQ-FLEETUPDATE-001 | `docs/fleet-release-native-qa.md` | VER-FLEETUPDATE-001 | VAL-FLEETUPDATE-001 | approved |
+| TRACE-FLEETUPDATE-001 | REQ-FLEETUPDATE-001 | `tests/test_scoped_release_selection.py` | VER-FLEETUPDATE-001 | VAL-FLEETUPDATE-001 | Approved recovery source scope; actual native/site acceptance held |
+| TRACE-FLEETUPDATE-001 | REQ-FLEETUPDATE-001 | `docs/native-service-recovery.md` | VER-FLEETUPDATE-001 | VAL-FLEETUPDATE-001 | Approved recovery operations documentation |
+| TRACE-FLEETUPDATE-001 | REQ-FLEETUPDATE-001 | `scripts/fixtures/legacy-selected-state-protection.py` | VER-FLEETUPDATE-001 | VAL-FLEETUPDATE-001 | approved source authority |
+
+The synthetic native fixture helper row projects only the approved source scope
+under amendment `159af842…` and the root-reviewed native test integration GO.
+Local15-check verification and independent frozen-body reviews are retained in
+`../artifacts/ipmi-readiness-20261026/fleet-ui-20261102/execution/native-fixture/repair2/`.
+Actual native execution, collector proof, public admission, customer/site
+acceptance, external VM destruction and publication remain held; the source
+authority status does not certify those outcomes.
 
 ## Unsupported format evidence
 
@@ -38,6 +49,16 @@ The root-reviewed native preflight repair is limited to the `release_candidates.
 
 | Artifact Path | Requirement | Trace | Verification | Anchor Type | Role |
 | --- | --- | --- | --- | --- | --- |
+| src/dc_overview/release_policy.py | REQ-AUTOADVANCE-003 | TRACE-AUTOADVANCE-003 | VER-AUTOADVANCE-003 | file-role | stable-release-policy |
+| tests/test_release_policy.py | REQ-AUTOADVANCE-008 | TRACE-AUTOADVANCE-008 | VER-AUTOADVANCE-008 | file-role | policy-regression |
+| tests/test_release_policy.py | REQ-AUTOADVANCE-008 | TRACE-AUTOADVANCE-008 | VER-AUTOADVANCE-008 | verifies | policy-regression |
+| src/dc_overview/release_policy.py | REQ-AUTOADVANCE-002 | TRACE-AUTOADVANCE-002 | VER-AUTOADVANCE-002 | entrypoint | policy-entrypoint |
+| src/dc_overview/release_policy.py | REQ-AUTOADVANCE-004 | TRACE-AUTOADVANCE-004 | VER-AUTOADVANCE-004 | entrypoint | policy-entrypoint |
+| src/dc_overview/release_broker.py | REQ-AUTOADVANCE-005 | TRACE-AUTOADVANCE-005 | VER-AUTOADVANCE-005 | entrypoint | policy-entrypoint |
+| src/dc_overview/cli.py | REQ-AUTOADVANCE-004 | TRACE-AUTOADVANCE-004 | VER-AUTOADVANCE-004 | entrypoint | policy-entrypoint |
+
+| Artifact Path | Requirement | Trace | Verification | Anchor Type | Role |
+| --- | --- | --- | --- | --- | --- | --- |
 | src/dc_overview/cli.py | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | file-role | release-owner |
 | src/dc_overview/cli.py | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | entrypoint | release-owner |
 | src/dc_overview/fleet_upgrade.py | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | file-role | release-owner |
@@ -61,6 +82,19 @@ The root-reviewed native preflight repair is limited to the `release_candidates.
 | .github/workflows/fleet-release-native-qa.yml | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | file-role | native-route-workflow |
 | docs/fleet-release-native-qa.md | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | file-role | native-qa-documentation |
 | docs/fleet-suite-authority.md | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | file-role | release-operations-documentation |
+| tests/test_scoped_release_selection.py | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | verifies | release-verification |
+| docs/native-service-recovery.md | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | file-role | recovery-operations-documentation |
+| scripts/fixtures/legacy-selected-state-protection.py | REQ-FLEETUPDATE-001 | TRACE-FLEETUPDATE-001 | VER-FLEETUPDATE-001 | verifies | native-verification |
+
+
+## Recovery amendment source evidence (2 November 2026)
+
+Authority is the exact approved amendment `159af842…` and frozen contract
+`91b873c5…` linked from requirements.md. Focused RED/GREEN and candidate
+hashes are retained at `../artifacts/ipmi-readiness-20261026/fleet-ui-20261102/execution/build/manifest.json`.
+Shared pre-code V&V is `../artifacts/ipmi-readiness-20261026/fleet-ui-20261102/execution/go/recovery-vv-root-reviewed.json`.
+Native installed-wheel bootstrap, source publication, production reconciliation,
+site continuity, signed admission and UI acceptance remain held.
 
 ## Central telemetry monitoring policy mapping
 
@@ -94,6 +128,37 @@ review metadata, not a substitute for fresh CI on the published head.
 | tests/test_selected_worker_enrollment.py | REQ-MON-001 | TRACE-MON-001 | VER-MON-001 | verifies | selected-enrollment-intent-contract |
 | tests/test_http_inventory.py | REQ-MON-002 | TRACE-MON-002 | VER-MON-002 | verifies | policy-metric-regression |
 | tests/test_http_inventory.py | REQ-MON-003 | TRACE-MON-003 | VER-MON-003 | verifies | application-scrape-regression |
+
+## Approved auto-advance work-item mapping
+
+| Trace | Requirement | Implementation | Verification | Validation | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| TRACE-AUTOADVANCE-001 | REQ-AUTOADVANCE-001 | approved plan step1-5; file anchors added as implemented | VER-AUTOADVANCE-001 | VAL-AUTOADVANCE-001 | owner-approved / verification pending |
+| TRACE-AUTOADVANCE-002 | REQ-AUTOADVANCE-002 | approved plan step1-5; file anchors added as implemented | VER-AUTOADVANCE-002 | VAL-AUTOADVANCE-002 | owner-approved / verification pending |
+| TRACE-AUTOADVANCE-003 | REQ-AUTOADVANCE-003 | approved plan step1-5; file anchors added as implemented | VER-AUTOADVANCE-003 | VAL-AUTOADVANCE-003 | owner-approved / verification pending |
+| TRACE-AUTOADVANCE-004 | REQ-AUTOADVANCE-004 | approved plan step1-5; file anchors added as implemented | VER-AUTOADVANCE-004 | VAL-AUTOADVANCE-004 | owner-approved / verification pending |
+| TRACE-AUTOADVANCE-005 | REQ-AUTOADVANCE-005 | approved plan step1-5; file anchors added as implemented | VER-AUTOADVANCE-005 | VAL-AUTOADVANCE-005 | owner-approved / verification pending |
+| TRACE-AUTOADVANCE-006 | REQ-AUTOADVANCE-006 | approved plan step1-5; file anchors added as implemented | VER-AUTOADVANCE-006 | VAL-AUTOADVANCE-006 | owner-approved / verification pending |
+| TRACE-AUTOADVANCE-007 | REQ-AUTOADVANCE-007 | approved plan step1-5; file anchors added as implemented | VER-AUTOADVANCE-007 | VAL-AUTOADVANCE-007 | owner-approved / verification pending |
+| TRACE-AUTOADVANCE-008 | REQ-AUTOADVANCE-008 | approved plan step1-5; file anchors added as implemented | VER-AUTOADVANCE-008 | VAL-AUTOADVANCE-008 | owner-approved / verification pending |
+
+## Traceability Matrix
+
+| Implementation | Requirement | Trace | Verification | Validation | Status |
+| --- | --- | --- | --- | --- | --- |
+| src/dc_overview/release_policy.py | REQ-AUTOADVANCE-002 | TRACE-AUTOADVANCE-002 | VER-AUTOADVANCE-002 | VAL-AUTOADVANCE-002 | owner-approved |
+| src/dc_overview/release_broker.py | REQ-AUTOADVANCE-002 | TRACE-AUTOADVANCE-002 | VER-AUTOADVANCE-002 | VAL-AUTOADVANCE-002 | owner-approved |
+| src/dc_overview/fleet_upgrade.py | REQ-AUTOADVANCE-002 | TRACE-AUTOADVANCE-002 | VER-AUTOADVANCE-002 | VAL-AUTOADVANCE-002 | owner-approved |
+| src/dc_overview/cli.py | REQ-AUTOADVANCE-002 | TRACE-AUTOADVANCE-002 | VER-AUTOADVANCE-002 | VAL-AUTOADVANCE-002 | owner-approved |
+| src/dc_overview/release_policy.py | REQ-AUTOADVANCE-003 | TRACE-AUTOADVANCE-003 | VER-AUTOADVANCE-003 | VAL-AUTOADVANCE-003 | owner-approved |
+| src/dc_overview/release_policy.py | REQ-AUTOADVANCE-004 | TRACE-AUTOADVANCE-004 | VER-AUTOADVANCE-004 | VAL-AUTOADVANCE-004 | owner-approved |
+| src/dc_overview/cli.py | REQ-AUTOADVANCE-004 | TRACE-AUTOADVANCE-004 | VER-AUTOADVANCE-004 | VAL-AUTOADVANCE-004 | owner-approved |
+| src/dc_overview/templates/systemd/dc-overview-release-refresh.service | REQ-AUTOADVANCE-004 | TRACE-AUTOADVANCE-004 | VER-AUTOADVANCE-004 | VAL-AUTOADVANCE-004 | owner-approved |
+| src/dc_overview/templates/systemd/dc-overview-release-refresh.timer | REQ-AUTOADVANCE-004 | TRACE-AUTOADVANCE-004 | VER-AUTOADVANCE-004 | VAL-AUTOADVANCE-004 | owner-approved |
+| src/dc_overview/release_policy.py | REQ-AUTOADVANCE-005 | TRACE-AUTOADVANCE-005 | VER-AUTOADVANCE-005 | VAL-AUTOADVANCE-005 | owner-approved |
+| src/dc_overview/release_broker.py | REQ-AUTOADVANCE-005 | TRACE-AUTOADVANCE-005 | VER-AUTOADVANCE-005 | VAL-AUTOADVANCE-005 | owner-approved |
+| src/dc_overview/fleet_upgrade.py | REQ-AUTOADVANCE-005 | TRACE-AUTOADVANCE-005 | VER-AUTOADVANCE-005 | VAL-AUTOADVANCE-005 | owner-approved |
+| tests/test_release_policy.py | REQ-AUTOADVANCE-008 | TRACE-AUTOADVANCE-008 | VER-AUTOADVANCE-008 | VAL-AUTOADVANCE-008 | owner-approved |
 
 ## GPU alert quality mapping
 

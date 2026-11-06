@@ -1,0 +1,25 @@
+{
+  "revision": 1,
+  "level": "L3",
+  "reason": "root-owned release policy, authenticated write API, scheduled selections, external artifact trust and deployment",
+  "review_scopes": [
+    "correctness/concurrency/recovery",
+    "security/API/auth/trust"
+  ],
+  "review_repair_caps": "initial reviews plus at most two targeted repair reviews per changed scope; unresolved findings hold publication",
+  "controls": [
+    "TDD",
+    "strict candidate trust",
+    "native Linux concurrency/crash/timer tests",
+    "browser admin controls",
+    "normal CI publication",
+    "native LTX deployment preservation"
+  ],
+  "subagent_builders": false,
+  "models": "current inherited model; review perspectives only if native review workflow dispatched",
+  "frozen_for_build": true,
+  "estimate_delivery_minutes": 240,
+  "estimate_process_target_minutes": 45,
+  "estimate_process_ceiling_minutes": 120,
+  "profile_hash": "3ac80e3c2632f12a44fa3e984bb69840579edca0e0bfb492fb635321c9f28a83"
+}

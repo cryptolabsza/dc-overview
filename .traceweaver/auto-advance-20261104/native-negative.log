@@ -1,0 +1,1 @@
+{"scope": "disposable Linux fixture; no production key or catalog", "cases": [{"case": "bad-real-signature-no-partial-persistence", "result": "passed"}, {"case": "real-SO_PEERCRED-rejects-UID65534-claiming-root", "result": "passed", "restored_socket_mode": "0600"}]}

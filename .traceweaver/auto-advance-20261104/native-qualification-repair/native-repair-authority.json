@@ -1,0 +1,27 @@
+{
+  "utc": "2026-11-05T06:44:56.669950+00:00",
+  "decision": "Proceed with qualification-reference repair only",
+  "user_instruction": "ok we need to fix this or bypasss it for this upgrade or refersh the mirror",
+  "approved_plan_sha256": "94b783d925834004cd3f111dd2437f8ae531850f0184aaa29c52f89f84267795",
+  "requirements": [
+    "REQ-AUTOADVANCE-008"
+  ],
+  "trace": "TRACE-AUTOADVANCE-008",
+  "verification": "VER-AUTOADVANCE-008",
+  "scope": [
+    ".github/tests/test_fleet_native_route.py",
+    ".github/workflows/fleet-release-native-qa.yml",
+    "scripts/verify_fleet_release_native.py"
+  ],
+  "red_evidence": "native-route-red.log: two assertion failures on old Proxy pin",
+  "must_not_change": [
+    "runtime application code",
+    "existing frozen guard entries or source/wheel identity rejection",
+    "runner privileges/trust boundaries",
+    "recovery continuity guard",
+    "catalog/signing trust",
+    "existing native/deployment journals"
+  ],
+  "claim_limit": "Passing source preflight does not establish native feature acceptance or close PR34 recovery/publisher prerequisites",
+  "publication": "separate reviewed route; no automatic source publication from debug"
+}

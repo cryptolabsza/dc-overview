@@ -1,0 +1,16 @@
+{
+  "scope": "real Chrome on actual candidate page; synthetic API fixture; no LTX operation",
+  "result": "passed",
+  "steps": [
+    "default pinned",
+    "select Follow stable",
+    "Check Updates selects synthetic1.4.1 without changing installed1.4.0",
+    "reload retains mode and pending target",
+    "repin returns installed1.4.0",
+    "next check stays pinned"
+  ],
+  "requests": 4,
+  "install_requests": 0,
+  "pending_screenshot": "follow-stable-pending.jpg",
+  "repin_screenshot": "repinned.jpg"
+}
