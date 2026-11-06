@@ -195,6 +195,153 @@ class FleetNativeRouteTest(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
+    def test_fixture_broker_execstart_uses_layout_selected_interpreter(self):
+        """Execute the actual drop-in statements; no Engine or systemd calls."""
+        tree = ast.parse(SCRIPT.read_text())
+        klass = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'NativeQA')
+        fixture = next(n for n in klass.body if isinstance(n, ast.FunctionDef) and n.name == 'fixture')
+        start = next(i for i, n in enumerate(fixture.body) if isinstance(n, ast.Assign)
+                     and any(isinstance(t, ast.Name) and t.id == 'dropin' for t in n.targets))
+        statements = fixture.body[start:start + 2]
+        for layout in ('named-volume', 'bind'):
+            with self.subTest(layout=layout), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                qa = SimpleNamespace(recovery=SimpleNamespace(host_env=root / 'legacy-host-venv'))
+                writes = []
+                namespace = {'Path': Path, 'SERVICE': 'synthetic-broker.service', 'sys': sys,
+                             'self': qa, 'layout': layout, 'write': lambda *args: writes.append(args)}
+                exec(compile(ast.Module(body=statements, type_ignores=[]), str(SCRIPT), 'exec'), namespace)
+                self.assertEqual(len(writes), 1)
+                expected = str(qa.recovery.host_env / 'bin/python') if layout == 'named-volume' else sys.executable
+                self.assertEqual(writes[0][1], (
+                    '[Service]\nExecStart=\nExecStart=' + expected +
+                    ' /opt/fleet-native-qa/verify_fleet_release_native.py --broker-child\n').encode())
+                self.assertEqual(writes[0][2], 0o644)
+
+    def test_selected_host_proof_uses_real_installed_layout_and_provenance_guard(self):
+        """Real isolated Python prefix/full code/metadata, with no system services."""
+        import shutil
+        tree = ast.parse(SCRIPT.read_text())
+        klass = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'LegacyRecoveryFixture')
+        method = next(n for n in klass.body if isinstance(n, ast.FunctionDef) and n.name == 'install_compatible_host')
+        proof = next((n for n in method.body if isinstance(n, ast.Assign)
+                      and any(isinstance(t, ast.Name) and t.id == 'installed_layout_proof' for t in n.targets)), None)
+        self.assertIsNotNone(proof, 'native fixture must qualify the actual selected interpreter and wheel provenance')
+        source = ast.literal_eval(proof.value)
+        with private_owner_temp(self.native_module()) as directory:
+            root = Path(directory).resolve()
+            prefix = root / 'legacy-host-venv'
+            subprocess.run([sys.executable, '-m', 'venv', '--without-pip', '--system-site-packages', str(prefix)],
+                           check=True, capture_output=True, timeout=30)
+            python = prefix / 'bin/python'
+            site = Path(subprocess.run([str(python), '-I', '-c', 'import sysconfig; print(sysconfig.get_path("purelib"))'],
+                                      check=True, capture_output=True, text=True, timeout=10).stdout.strip())
+            # Keep dependencies available without shadowing this prefix's product.
+            dependency_sites = [p for p in sys.path if p.endswith('site-packages') and Path(p).is_dir()]
+            (site / 'test-dependencies.pth').write_text('\n'.join(dependency_sites) + '\n')
+            package = site / 'dc_overview'
+            package.mkdir()
+            # Minimal installed package shell avoids importing CLI dependencies
+            # absent from the route-unit job. The complete selector module and
+            # every source/hash/provenance predicate remain the original code.
+            # The native proof still imports the actual complete wheel package.
+            (package / '__init__.py').write_text('__version__ = "1.6.4"\n')
+            shutil.copyfile(ROOT / 'src/dc_overview/fleet_upgrade.py', package / 'fleet_upgrade.py')
+            distribution = site / 'dc_overview-1.6.4.dist-info'
+            distribution.mkdir()
+            (distribution / 'METADATA').write_text('Metadata-Version: 2.4\nName: dc-overview\nVersion: 1.6.4\n')
+            target = {'release': '1.6.4', 'url': 'https://github.com/cryptolabsza/dc-overview/releases/download/native-fixture/selected.whl',
+                      'sha256': 'a' * 64}
+            provenance = distribution / 'direct_url.json'
+            provenance.write_text(json.dumps({'url': target['url'], 'archive_info': {'hashes': {'sha256': target['sha256']}}}))
+            argv = [str(python), '-I', '-c', source, str(prefix), str(root), str(SCRIPT), json.dumps(target)]
+            passed = subprocess.run(argv, capture_output=True, text=True, timeout=20)
+            self.assertEqual(passed.returncode, 0, passed.stderr)
+            self.assertEqual(json.loads(passed.stdout), {'interpreter': 'compatible-host-venv', 'selector_source': True,
+                                                       'cli_provenance': True})
+            provenance.write_text(json.dumps({'url': 'file:///synthetic/original-local.whl',
+                                             'archive_info': {'hashes': {'sha256': target['sha256']}}}))
+            refused = subprocess.run(argv, capture_output=True, text=True, timeout=20)
+            self.assertNotEqual(refused.returncode, 0, 'same version/hash cannot bypass the real HTTPS URL predicate')
+            self.assertIn('requires_cli_upgrade:', refused.stderr)
+            self.assertEqual(refused.stdout, '')
+
+    def test_selector_failure_stage_is_a_closed_non_authorizing_witness(self):
+        module = self.native_module()
+        value = module.selector_failure_details(RuntimeError('PRIVATE'), (), {}, module.time.monotonic() + 1)
+        self.assertEqual(value.get('source_stage'), 'failure-sample')
+        self.assertTrue(module.selector_details_valid(value))
+        for stage in ('unknown', 'broker-source', 'selector-discovery', 'proxy-discovery', 'selector-required', 'failure-sample'):
+            self.assertTrue(module.selector_details_valid({**value, 'source_stage': stage}))
+        for stage in ('PRIVATE/path', '', 1, True, None):
+            self.assertFalse(module.selector_details_valid({**value, 'source_stage': stage}))
+        self.assertEqual(value['qualification'], 'innermost-unknown')
+        self.assertEqual(value['frames'], [])
+        self.assertNotIn('PRIVATE', json.dumps(value))
+
+    def test_actual_broker_observer_emits_attempted_source_stage_without_guard_bypass(self):
+        module = self.native_module()
+        with private_owner_temp(module) as directory:
+            root = Path(directory).resolve()
+            prefix = root / 'legacy-host-venv'
+            source = prefix / 'dc_overview/release_broker.py'
+            source.parent.mkdir(parents=True)
+            frozen = (ROOT / 'src/dc_overview/release_broker.py').read_bytes()
+            identity = '00000000-0000-4000-8000-000000000001'
+            actor = {'kind': 'host-peer', 'uid': 0}
+            request = {'candidate_ids': ['synthetic-candidate'], 'components': ['ipmi-monitor'],
+                       'expected_selection_id': 'synthetic-selected', 'expected_selection_sha256': 'a' * 64,
+                       'operation_kind': 'services-update'}
+            canonical = lambda v: json.dumps(v, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
+            manifest = canonical({'components': {}})
+            preview = {'preview_id': '00000000-0000-4000-8000-000000000002', 'actor': actor, 'request': request,
+                       'manifest': base64.b64encode(manifest).decode(), 'selection_sha256': 'b' * 64,
+                       'selection_id': 'synthetic-next', 'manifest_sha256': module.digest(manifest), 'generation': 1,
+                       'owner_plan': None, 'owner_declaration': None, 'public_sha256': 'c' * 64,
+                       'owner_identity': {'updater_directory': str(root / 'named-volume/jobs'), 'device': 1, 'inode': 2,
+                                          'proxy_config_dir': str(root / 'proxy'), 'declaration_path': str(root / 'declaration')},
+                       'policy_sha256': 'd' * 64, 'channel': 'main'}
+            apply = {'operation_id': identity, 'preview_id': preview['preview_id'],
+                     'preview_sha256': module.digest(canonical(preview)),
+                     'expected_selection_id': request['expected_selection_id'],
+                     'expected_selection_sha256': request['expected_selection_sha256']}
+            record = {**preview, **apply, 'request_fingerprint': module.digest(canonical({'params': apply, 'actor': actor})),
+                      'state': 'selecting', 'phase': 'selection', 'components': ['ipmi-monitor'],
+                      'operation_kind': 'services-update'}
+            self.assertEqual(module.selector_operation(record, identity), {'components': {}})
+            for changed, expected in ((True, 'broker-source'), (False, 'selector-required')):
+                with self.subTest(changed=changed):
+                    source.write_bytes(frozen + (b'\n' if changed else b''))
+                    saved = []
+                    broker = types.ModuleType('synthetic_broker_boundary')
+                    broker.__file__ = str(source)
+                    broker.private_write = lambda *args, **kwargs: 'original-write-result'
+                    namespace = {}
+                    # A synthetic exception at the fixed observer coordinate;
+                    # neither a real broker guard nor historical cause proof.
+                    code = '\n' * 892 + ('def fail(broker, path, record):\n'
+                        '    try:\n'
+                        '        raise RuntimeError("PRIVATE")\n'
+                        '    except RuntimeError:\n'
+                        '        return broker.private_write(path, record)\n')
+                    exec(compile(code, '<synthetic-observer-boundary>', 'exec'), namespace)
+                    boundary = namespace['fail']
+                    with patch.object(module.sys, 'prefix', str(prefix)), patch.object(module, 'ROOT', root), \
+                         patch.dict(sys.modules, {'dc_overview.fleet_upgrade': None, 'cryptolabs_proxy.updates': None}), \
+                         patch.object(module, 'write_owner_observation', side_effect=lambda *args: saved.append(args)):
+                        original = broker.private_write
+                        with module.observe_broker_owner_failures(broker, root / 'operations', (('broker-operation', boundary.__code__),)):
+                            self.assertEqual(boundary(broker, root / 'operations' / (identity + '.json'), record), 'original-write-result')
+                        self.assertIs(broker.private_write, original)
+                    self.assertEqual(len(saved), 1)
+                    detail = saved[0][1]['selector']
+                    self.assertEqual(detail.get('source_stage'), expected)
+                    self.assertEqual(detail['qualification'], 'source-refused')
+                    self.assertEqual(detail['frames'], [])
+                    self.assertTrue(all(detail[k] is None for k in ('module_version_match', 'distribution_version_match', 'url_match', 'hash_match')))
+                    self.assertTrue(module.observation_failure_valid(saved[0][1]))
+                    self.assertNotIn('PRIVATE', json.dumps(saved))
+
     def test_synthetic_seed_generated_volume_reaches_helper_filesystem_guard(self):
         module = self.native_module()
         helper_path = ROOT / "scripts/fixtures/legacy-selected-state-protection.py"
@@ -1045,6 +1192,21 @@ class FleetNativeRouteTest(unittest.TestCase):
             selected_manifest = {"components": {"dc-overview-cli": {"owner": "host-cli", "release": version,
                 "artifacts": {"any": {"kind": "wheel", "url": target["url"], "sha256": target["sha256"]}}}}}
             with patch.dict(sys.modules, {"dc_overview": installed_package, "dc_overview.fleet_upgrade": installed_module}), patch.object(sys, "path", [str(site)]), patch.object(sys, "prefix", str(prefix)), patch.object(module, "ROOT", root):
+                # The predicate-only fixture below cannot prove the observer's
+                # required selector role. Qualify the complete unchanged module
+                # first, without calling its selector, guards or owner APIs.
+                full_module = types.ModuleType("dc_overview.fleet_upgrade")
+                full_module.__file__ = str(installed_upgrade)
+                full_module.__package__ = "dc_overview"
+                full_code = compile(upgrade_source, str(installed_upgrade), "exec")
+                exec(full_code, vars(full_module))
+                original_selector = full_module.select_release_components.__code__
+                with patch.dict(sys.modules, {"dc_overview.fleet_upgrade": full_module}):
+                    full_codes = module.naturally_loaded_selector_codes(module.time.monotonic() + 1)
+                required = [code for label, code in full_codes if label == "dc-scoped-selector"]
+                self.assertEqual(len(required), 1, "full frozen source must qualify exactly one original selector")
+                self.assertIs(required[0], original_selector)
+                self.assertEqual(installed_upgrade.read_text(), upgrade_source)
                 deadline = module.time.monotonic() + 1
                 codes = module.naturally_loaded_selector_codes(deadline)
                 self.assertEqual(codes, (("dc-running-cli", original_predicate.__code__),))

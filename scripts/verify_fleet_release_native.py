@@ -1442,7 +1442,7 @@ def naturally_loaded_selector_codes(deadline):
 
 def selector_failure_details(error, codes, manifest, deadline):
     """One post-failure sample, never a replay or atomic guard-operand claim."""
-    result = {'qualification': 'innermost-unknown', 'frames': [], 'actual_interpreter': 'unknown',
+    result = {'qualification': 'innermost-unknown', 'source_stage': 'failure-sample', 'frames': [], 'actual_interpreter': 'unknown',
               'expected_interpreter': 'compatible-host-venv', 'module_version_match': None,
               'distribution_version_match': None, 'url_match': None, 'hash_match': None}
     frame = error.__traceback__
@@ -1535,8 +1535,12 @@ def observation_failure_valid(value):
 
 def selector_details_valid(value):
     if type(value) is not dict or set(value) != {
-            'qualification', 'frames', 'actual_interpreter', 'expected_interpreter',
+            'qualification', 'source_stage', 'frames', 'actual_interpreter', 'expected_interpreter',
             'module_version_match', 'distribution_version_match', 'url_match', 'hash_match'}:
+        return False
+    if (type(value['source_stage']) is not str or value['source_stage'] not in (
+            'unknown', 'broker-source', 'selector-discovery', 'proxy-discovery',
+            'selector-required', 'failure-sample')):
         return False
     if (type(value['qualification']) is not str or value['qualification'] not in (
             'qualified', 'innermost-unknown', 'source-refused', 'schema-refused', 'identity-refused',
@@ -1680,7 +1684,7 @@ def observe_broker_owner_failures(broker_module, operation_root, code_objects):
                     selector_call = False
                 if selector_call:
                     selector_operation_id = identity
-                    details = {'qualification': 'unknown', 'frames': [], 'actual_interpreter': 'unknown',
+                    details = {'qualification': 'unknown', 'source_stage': 'unknown', 'frames': [], 'actual_interpreter': 'unknown',
                                'expected_interpreter': 'compatible-host-venv', 'module_version_match': None,
                                'distribution_version_match': None, 'url_match': None, 'hash_match': None}
                     failure = {'code_label': None, 'source_line': None, 'error_kind': 'unknown'}
@@ -1693,21 +1697,26 @@ def observe_broker_owner_failures(broker_module, operation_root, code_objects):
                             raise ObservationRefused('identity-refused')
                         # The producer namespace is pinned too; selector discovery
                         # never calls/imports product functions or reads frame locals.
+                        details['source_stage'] = 'broker-source'
                         path = Path(vars(broker_module).get('__file__', ''))
                         if (not path.is_relative_to(Path(sys.prefix))
                                 or digest(selector_read_bytes(path, 1048576, deadline))
                                 != FROZEN_PRODUCT_HASHES['dc']['src/dc_overview/release_broker.py']):
                             raise ObservationRefused('source-refused')
+                        details['source_stage'] = 'selector-discovery'
                         selector_codes = naturally_loaded_selector_codes(deadline)
                         if proxy_codes is None:
+                            details['source_stage'] = 'proxy-discovery'
                             proxy_codes = naturally_loaded_proxy_codes()
                         observation_deadline(deadline)
                         qualified = codes + (proxy_codes or ()) + selector_codes
                         if len(qualified) > 32:
                             raise ObservationRefused('overflow')
+                        details['source_stage'] = 'selector-required'
                         if not any(role == 'dc-scoped-selector' for role, code in selector_codes):
                             raise ObservationRefused('source-refused')
                         failure = broker_failure_metadata(error, qualified)
+                        details['source_stage'] = 'failure-sample'
                         details = selector_failure_details(error, qualified, manifest, deadline)
                         observation_deadline(deadline)
                     except Exception as refused:
@@ -2004,6 +2013,32 @@ class LegacyRecoveryFixture:
         # Full import checks the actual proxy __init__/setup/Jinja2 dependency closure.
         run(self.host_env / 'bin/python', '-I', '-c',
             'import dc_overview, cryptolabs_proxy; from dc_overview.fleet_upgrade import reconcile_service')
+        installed_layout_proof = '''\
+import importlib.util, json, sys, sysconfig
+from pathlib import Path
+import dc_overview
+from dc_overview.fleet_upgrade import verify_running_cli, select_release_components
+prefix, native_root, verifier, target = sys.argv[1:]
+assert Path(sys.prefix) == Path(prefix)
+site = Path(sysconfig.get_path('purelib', scheme='posix_prefix', vars={'base': sys.prefix, 'platbase': sys.prefix}))
+assert site.is_relative_to(Path(prefix))
+assert Path(dc_overview.__file__) == site / 'dc_overview/__init__.py'
+spec = importlib.util.spec_from_file_location('selected_host_native_proof', verifier)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+module.ROOT = Path(native_root)
+codes = module.naturally_loaded_selector_codes(module.time.monotonic() + 1)
+selectors = [code for role, code in codes if role == 'dc-scoped-selector']
+assert len(selectors) == 1 and selectors[0] is select_release_components.__code__
+assert verify_running_cli(json.loads(target))['state'] == 'verified'
+print(json.dumps({'interpreter': 'compatible-host-venv', 'selector_source': True, 'cli_provenance': True}))
+'''
+        selected_cli = {'release': self.current['dc-overview'][1], 'url': self.urls['dc-overview'],
+                        'sha256': self.current['dc-overview'][2]}
+        proof = json.loads(run(self.host_env / 'bin/python', '-I', '-c', installed_layout_proof,
+                              self.host_env, ROOT, Path(__file__), json.dumps(selected_cli), timeout=30).stdout)
+        assert proof == {'interpreter': 'compatible-host-venv', 'selector_source': True, 'cli_provenance': True}
+        self.qa.record('selected-host-installed-layout', result='passed', **proof)
         link = Path('/usr/local/bin/dc-overview')
         assert link.is_symlink() and link.resolve() == Path(sys.executable).parent / 'dc-overview'
         link.unlink()
@@ -3410,7 +3445,7 @@ class NativeQA:
             dropin,
             (
                 "[Service]\nExecStart=\nExecStart="
-                + sys.executable
+                + str(self.recovery.host_env / 'bin/python' if layout == 'named-volume' else sys.executable)
                 + " /opt/fleet-native-qa/verify_fleet_release_native.py --broker-child\n"
             ).encode(),
             0o644,

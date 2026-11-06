@@ -679,3 +679,23 @@ external VM, disk, active-record and runner absence for all four allocations.
 Terminal absence cannot repair missing launch lineage. Inconclusive collection
 stops the sequence; no release, customer or fleet-readiness claim follows from
 this diagnostic source change.
+
+### Selected host environment in the named-volume fixture
+
+After installing the selected compatible wheels over the fixture's HTTPS mirror,
+the native verifier starts an isolated interpreter from `legacy-host-venv` and
+checks its actual prefix and purelib path. It qualifies the complete, unchanged
+installed selector against the frozen source hash and calls the original
+`verify_running_cli` URL/hash predicate. This proof reports only the interpreter
+role and two success booleans; it does not change distribution metadata. The
+named-volume broker's systemd drop-in then uses that same interpreter. The bind
+layout keeps the original native interpreter. Matching versions or hashes alone
+never substitute for matching the selected wheel's HTTPS URL.
+
+Selector failure packets also contain `source_stage`, a closed label for the
+last attempted diagnostic check: `unknown`, `broker-source`,
+`selector-discovery`, `proxy-discovery`, `selector-required` or `failure-sample`.
+This label does not identify the failed product guard or authorize a retry.
+Source or custody refusal retains unknown guard details and null comparisons.
+The original deadlines, byte bounds, exception behavior and cleanup gates stay
+in force. Earlier native attempts remain failed or unknown as recorded.
