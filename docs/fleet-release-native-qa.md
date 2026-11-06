@@ -582,3 +582,100 @@ command/verification deadline remains distinct from normal cleanup: a timed-out
 container is not proven dead at that deadline; exact-owned terminal cleanup and
 external VM destruction evidence remain required. Existing auth/anonymous-volume
 handling is unchanged and is not newly certified by this repair.
+
+## Bounded selector observation — owner-approved 5 November 2026
+
+Owner choice B (`e35a413f…` packet, `5fb2e27b…` approval) permits one new
+selector-observation source candidate and at most two diagnosed corrections in
+the verifier, existing route tests and this note. The original synthetic
+initializer candidate and both of its corrections remain spent. The canonical
+DC ledger now has cap eight, six consumed, two remaining and zero manual runs.
+Ordinal seven is exactly one qualified selector diagnostic from a normal
+exact-head PR synchronize, attempt one. Ordinal eight is only a conditional
+actual-cause repair proof: it requires a proven current cause, a genuinely
+remaining functional item, a concrete reviewed repair, predicate RED/GREEN,
+two fresh independent reviews, exact root GO and complete prior cleanup. It
+cannot become a second diagnostic or blind retry. The separate functional cap
+three/spent one/remaining two and all G2 allowances are unchanged.
+
+The existing `private_write` observation hook executes the original writer
+once with identical argument objects, observes only after successful
+persistence while the original handled exception is available, returns the
+same result, and restores the original binding on exit. It never replaces the
+selector, changes an interpreter or calls an owner/selector API to collect
+evidence. The first selector exception at the pinned broker callsite is the
+only selector context collected. Original operation state, exception and exit
+outcomes remain authoritative when collection fails.
+
+Original source hashes and exact loaded code objects qualify a separate
+13-role table, keeping the original 19-role literal byte-identical. The total
+ceiling is 32 code objects, 32 traversed traceback frames and 16 exported
+`{role,line}` entries. Decorated and nested roles bind only their reviewed
+original code constants. Discovery inspects already loaded modules under the
+current child prefix; it does not import or execute product functions. An
+unmapped innermost frame remains UNKNOWN; a recognized outer frame is never
+promoted to a selector cause. The old eight DC product files, all frozen Proxy
+files and the 27 protected literal assignments are unchanged.
+
+The operation producer is versionless. Projection now validates the exact
+`_preview`/`_apply`/`save` field inventory, strict types, UUID, preview/request
+fingerprints, selection identities and bounded manifest hash, without adding
+`schema_version` to product records. Duplicate JSON keys, unknown fields,
+boolean integers, foreign correlations and custody drift refuse the projection.
+The parent reads its fixed private operation record at most once, with a
+1 MiB bound, and compares it to its captured apply body, preview, expected
+selection/manifest and known native administrator username. A closed
+`operation_qualification` explains refusal; existing projected fields retain
+their shape. Only initial absence beneath verified unchanged parents is ABSENT.
+
+The sudo parent qualifies the producer against only the current wheel's fixed
+`/opt/fleet-native-qa/venv/lib/python3.12/site-packages/dc_overview/release_broker.py`.
+Its interpreter prefix and POSIX purelib must match that exact native Python 3.12
+venv; the source must retain its admitted frozen SHA and the same descriptor
+custody checks. The unchanged workflow installs and root-owns this wheel before
+launch. The runner-owned `--dc-source` checkout is not a custody source for this
+projection. Prefix/path/hash drift refuses source qualification; unsafe installed
+file custody refuses the read, with no alternate path or checkout fallback.
+
+The actor subject is derived inside the server from a private authentication
+secret and is not independently present in parent memory. Fingerprint
+recomputation using the strictly validated stored actor is producer/custody-bound
+correlation. It is neither an independent subject-origin measurement nor a
+cryptographic authentication claim. No authentication secret, account state or
+frame local is read, and no actor identity is exported.
+
+For a qualified original selector failure, the current broker child reads only
+its fixed `dc_overview-1.6.4.dist-info/METADATA` and `direct_url.json`, each at
+most 65,536 bytes plus one overflow sentinel. The basename is bound to retained
+admitted wheel inventory; the next exact candidate wheel must independently
+retain that inventory before native GO. There is no directory scan or fallback
+distribution search. Module paths and both metadata files must match the current child's exact
+`sysconfig` POSIX purelib location beneath that admitted Linux prefix; another directory
+under the prefix is refused too. The observer compares the same module version,
+distribution version, URL and hash used by `verify_running_cli`, in memory,
+without replaying that predicate. It exports only booleans/null and the closed
+actual/expected interpreter roles. Paths, URLs, hashes, metadata, exception
+text, locals, actor data and new device/inode values are never exported.
+
+Descriptor ownership, regular-file type, safe ancestry, link count, mode and
+before/after path/descriptor identities bound every new read. A monotonic
+one-second budget is checked before/after reads and projection; expiration
+refuses the observation. This does not interrupt a kernel-stalled filesystem
+call. No signal, background collector, delay or retry is added. One closed
+failure packet stays within the existing retained private inode and 4,096-byte
+bound. Metadata is a post-failure sample, not atomic observation of the original
+predicate operands; attribution beyond a qualified guard still needs accepted
+source/local proof and no unresolved drift.
+
+Portable regressions execute the exact pinned producer expressions and original
+CLI predicate with real temporary distribution metadata. They retain the real
+predicate refusal and matching-metadata success control, while existing broker
+tests protect original handled-save behavior. They do not identify native-six's
+historical inner guard, which remains UNKNOWN, or establish native acceptance.
+The 60-second initializer and 90-second mapping wait are unchanged. Root must
+bind actual run/attempt/job/runner/UUID and live source/image custody at launch,
+observe normal Docker/Python/Pages siblings, and retain internal cleanup plus
+external VM, disk, active-record and runner absence for all four allocations.
+Terminal absence cannot repair missing launch lineage. Inconclusive collection
+stops the sequence; no release, customer or fleet-readiness claim follows from
+this diagnostic source change.

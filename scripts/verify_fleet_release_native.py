@@ -3,6 +3,7 @@
 """One sequential, guest-only integration proof. This is never a production installer."""
 
 import argparse
+import base64
 import contextlib
 import selectors
 import threading
@@ -20,6 +21,7 @@ import socket
 import stat
 import subprocess
 import sys
+import sysconfig
 import time
 import tomllib
 import types
@@ -926,6 +928,23 @@ BROKER_CODE_LABELS = (
     "proxy-submit-job", "proxy-submit-locked", "proxy-helper-request", "proxy-write-json",
     "proxy-installed-selection", "proxy-selection-plan", "proxy-require-selected-updater",
 )
+# Separate from the 27 preserved baseline literals. These 13 original code
+# objects plus the existing 19 roles form the closed 32-object ceiling.
+SELECTOR_CODE_SPECS = (
+    ('dc-scoped-selector', 'dc_overview.fleet_upgrade', ('select_release_components',)),
+    ('dc-running-cli', 'dc_overview.fleet_upgrade', ('verify_running_cli',)),
+    ('dc-release-store', 'dc_overview.fleet_upgrade', ('release_store',)),
+    ('dc-scoped-proxy', 'dc_overview.fleet_upgrade', ('_scoped_proxy',)),
+    ('dc-updater-directory', 'dc_overview.fleet_upgrade', ('_scoped_updater_directory',)),
+    ('dc-updater-guard', 'dc_overview.fleet_upgrade', ('_scoped_updater_guard',)),
+    ('dc-updater-idle', 'dc_overview.fleet_upgrade', ('_scoped_updater_guard', 'check')),
+    ('dc-selector-precommit', 'dc_overview.fleet_upgrade', ('select_release_components', 'precommit')),
+    ('catalog-root', 'dc_overview.release_catalog', ('_require_root',)),
+    ('catalog-manifest', 'dc_overview.release_catalog', ('Manifest', 'from_bytes')),
+    ('catalog-store-load', 'dc_overview.release_catalog', ('ReleaseStore', 'load')),
+    ('catalog-recover-publication', 'dc_overview.release_catalog', ('ReleaseStore', 'recover_publication')),
+    ('proxy-recovery-require', 'cryptolabs_proxy.update_recovery', ('require',)),
+)
 ERROR_KINDS = (
     "assertion-error", "file-not-found", "permission-error", "os-error", "runtime-error", "unknown",
 )
@@ -994,14 +1013,27 @@ def process_identity(pid):
 def broker_failure_metadata(error, code_objects):
     result = {"code_label": None, "source_line": None, "error_kind": "unknown"}
     frame = error.__traceback__
+    selector_seen = False
+    terminal_known = False
+    count = 0
     while frame is not None:
+        count += 1
+        if count > 32:
+            return {"code_label": None, "source_line": None, "error_kind": "unknown"}
+        terminal_known = False
         for label, code in code_objects:
-            if label in BROKER_CODE_LABELS and frame.tb_frame.f_code is code:
+            if (label in BROKER_CODE_LABELS or label in {item[0] for item in SELECTOR_CODE_SPECS}) and frame.tb_frame.f_code is code:
+                terminal_known = True
+                selector_seen |= label in {item[0] for item in SELECTOR_CODE_SPECS}
                 metadata = fixture_failure_metadata(error, fixture_code=code)
                 if metadata["fixture_line"] is not None:
                     result = {"code_label": label, "source_line": metadata["fixture_line"],
                               "error_kind": metadata["fixture_error_kind"]}
         frame = frame.tb_next
+    if selector_seen and not terminal_known:
+        # The last recognized outer frame is not the cause of an unknown inner
+        # failure. Legacy owner-only coordinates retain their original shape.
+        return {"code_label": None, "source_line": None, "error_kind": "unknown"}
     return result
 
 
@@ -1103,7 +1135,10 @@ def inspect_owner_mounts_bounded():
 
 
 def observation_uuid(value):
-    return type(value) is str and str(uuid.UUID(value)) == value
+    try:
+        return type(value) is str and str(uuid.UUID(value)) == value
+    except ValueError:
+        return False
 
 
 def observation_directories(path, *, private=True):
@@ -1137,6 +1172,27 @@ class ObservationAbsent(FileNotFoundError):
     """Initial open found no file under the same verified parent directories."""
 
 
+class ObservationRefused(ValueError):
+    """Closed diagnostic reason; no inspected text becomes an error message."""
+
+
+def observation_json(raw):
+    def pairs(values):
+        result = {}
+        for key, value in values:
+            if key in result:
+                raise ValueError()
+            result[key] = value
+        return result
+    return json.loads(raw, object_pairs_hook=pairs,
+                      parse_constant=lambda value: (_ for _ in ()).throw(ValueError()))
+
+
+def observation_deadline(deadline):
+    if time.monotonic() >= deadline:
+        raise ObservationRefused('deadline')
+
+
 def observation_read(path, limit, *, identity=None):
     """At most limit+1 returned bytes; reject replacement rather than infer absence."""
     path = Path(path)
@@ -1151,9 +1207,11 @@ def observation_read(path, limit, *, identity=None):
         info = os.fstat(descriptor)
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
                 or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1
-                or info.st_size > limit or (identity is not None and trust_identity(info) != identity)
+                or (identity is not None and trust_identity(info) != identity)
                 or trust_identity(path.lstat()) != trust_identity(info)):
-            raise ValueError()
+            raise ObservationRefused('custody-refused')
+        if info.st_size > limit:
+            raise ObservationRefused('overflow')
         raw = bytearray()
         while len(raw) <= limit:
             chunk = os.read(descriptor, min(65536, limit + 1 - len(raw)))
@@ -1161,11 +1219,16 @@ def observation_read(path, limit, *, identity=None):
             if not chunk or len(raw) > limit:
                 break
         after = os.fstat(descriptor)
-        if (len(raw) > limit or trust_identity(path.lstat()) != trust_identity(info)
+        if len(raw) > limit:
+            raise ObservationRefused('overflow')
+        if (trust_identity(path.lstat()) != trust_identity(info)
                 or trust_metadata(after) != trust_metadata(info) or after.st_size != info.st_size
                 or observation_directories(path.parent) != parents):
-            raise ValueError()
-        return json.loads(raw)
+            raise ObservationRefused('custody-refused')
+        try:
+            return observation_json(raw)
+        except (ValueError, UnicodeError, RecursionError):
+            raise ObservationRefused('parse-refused') from None
     except FileNotFoundError:
         # Once opened, a lost pathname or ancestor is a custody race, not absence.
         raise ValueError() from None
@@ -1173,14 +1236,325 @@ def observation_read(path, limit, *, identity=None):
         os.close(descriptor)
 
 
+def selector_operation(record, operation_id):
+    """Pinned versionless _preview/_apply/save shape; never call the producer."""
+    required = {'preview_id', 'actor', 'request', 'manifest', 'selection_sha256', 'selection_id',
+                'manifest_sha256', 'generation', 'owner_plan', 'owner_declaration', 'public_sha256',
+                'owner_identity', 'policy_sha256', 'channel', 'preview_sha256', 'operation_id',
+                'expected_selection_id', 'expected_selection_sha256', 'request_fingerprint',
+                'state', 'components', 'operation_kind', 'phase'}
+    optional = {'reason', 'job_id', 'observed_selection_id', 'observed_selection_sha256'}
+    if type(record) is not dict or not required <= set(record) or set(record) - required - optional:
+        raise ObservationRefused('schema-refused')
+    identifier = lambda value, maximum=80: type(value) is str and re.fullmatch(
+        r'[A-Za-z0-9][A-Za-z0-9_.-]{0,' + str(maximum - 1) + '}', value) is not None
+    checksum = lambda value: type(value) is str and re.fullmatch('[0-9a-f]{64}', value) is not None
+    if record['operation_id'] != operation_id or not observation_uuid(record['operation_id']):
+        raise ObservationRefused('identity-refused')
+    if not observation_uuid(record['preview_id']):
+        raise ObservationRefused('schema-refused')
+    for key in ('preview_sha256', 'selection_sha256', 'manifest_sha256', 'public_sha256',
+                'policy_sha256', 'expected_selection_sha256', 'request_fingerprint'):
+        if not checksum(record[key]):
+            raise ObservationRefused('schema-refused')
+    if not all(identifier(record[key]) for key in ('selection_id', 'expected_selection_id')):
+        raise ObservationRefused('schema-refused')
+    if (type(record['generation']) is not int or record['generation'] < 0
+            or type(record['channel']) is not str or record['channel'] not in ('main', 'dev')
+            or type(record['state']) is not str or record['state'] not in (
+                'prepared', 'selecting', 'pending-submit', 'updating', 'adopting', 'recovery-required',
+                'selection-conflict', 'completed', 'failed-restored')
+            or type(record['phase']) is not str or record['phase'] not in ('selection', 'owner')):
+        raise ObservationRefused('schema-refused')
+    actor = record['actor']
+    if type(actor) is not dict:
+        raise ObservationRefused('schema-refused')
+    if actor.get('kind') == 'fleet-admin':
+        if set(actor) != {'kind', 'username', 'subject'} or any(
+                type(actor[k]) is not str or not 1 <= len(actor[k]) <= 128
+                or any(ord(c) < 32 for c in actor[k]) for k in ('username', 'subject')):
+            raise ObservationRefused('schema-refused')
+    elif actor.get('kind') == 'host-peer':
+        if set(actor) != {'kind', 'uid'} or type(actor['uid']) is not int or actor['uid'] < 0:
+            raise ObservationRefused('schema-refused')
+    else:
+        raise ObservationRefused('schema-refused')
+    request = record['request']
+    if type(request) is not dict or set(request) != {
+            'candidate_ids', 'components', 'expected_selection_id', 'expected_selection_sha256', 'operation_kind'}:
+        raise ObservationRefused('schema-refused')
+    components = ('cryptolabs-proxy', 'dc-overview', 'ipmi-monitor', 'prometheus', 'grafana',
+                  'vastai-exporter', 'runpod-exporter', 'vast-price-manager', 'dc-overview-cli',
+                  'node-exporter', 'dc-watchdog-agent')
+    for key in ('candidate_ids', 'components'):
+        values = request[key]
+        if (type(values) is not list or not 1 <= len(values) <= 32
+                or any(not identifier(v, 128) for v in values) or len(set(values)) != len(values)
+                or (key == 'components' and any(v not in components for v in values))):
+            raise ObservationRefused('schema-refused')
+    if (type(record['components']) is not list or record['components'] != request['components']
+            or type(record['operation_kind']) is not str or record['operation_kind'] not in ('services-update', 'proxy-adopt')
+            or request['operation_kind'] != record['operation_kind']
+            or any(request[key] != record[key] for key in ('expected_selection_id', 'expected_selection_sha256'))):
+        raise ObservationRefused('identity-refused')
+    owner = record['owner_identity']
+    if (type(owner) is not dict or set(owner) != {
+            'updater_directory', 'device', 'inode', 'proxy_config_dir', 'declaration_path'}
+            or any(type(owner[k]) is not int or owner[k] < 0 for k in ('device', 'inode'))
+            or any(type(owner[k]) is not str or not 1 <= len(owner[k]) <= 4096
+                   or not Path(owner[k]).is_absolute() or '..' in Path(owner[k]).parts
+                   for k in ('updater_directory', 'proxy_config_dir', 'declaration_path'))):
+        raise ObservationRefused('schema-refused')
+    if any(record[k] is not None and type(record[k]) is not dict for k in ('owner_plan', 'owner_declaration')):
+        raise ObservationRefused('schema-refused')
+    if record['operation_kind'] == 'services-update' and any(record[k] is not None for k in ('owner_plan', 'owner_declaration')):
+        raise ObservationRefused('schema-refused')
+    if 'reason' in record and (type(record['reason']) is not str or len(record['reason']) > 65536):
+        raise ObservationRefused('schema-refused')
+    if 'job_id' in record and (type(record['job_id']) is not str or not re.fullmatch('[0-9a-f]{32}', record['job_id'])):
+        raise ObservationRefused('schema-refused')
+    if ('observed_selection_id' in record) != ('observed_selection_sha256' in record):
+        raise ObservationRefused('schema-refused')
+    if 'observed_selection_id' in record and (not identifier(record['observed_selection_id']) or not checksum(record['observed_selection_sha256'])):
+        raise ObservationRefused('schema-refused')
+    # This is producer/custody-bound correlation, not an independent measurement
+    # of the server's secret-derived actor subject. Never read its auth secret.
+    canonical = lambda value: json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
+    if len(canonical(record)) > 1048576:
+        raise ObservationRefused('overflow')
+    apply = {key: record[key] for key in ('operation_id', 'preview_id', 'preview_sha256',
+                                         'expected_selection_id', 'expected_selection_sha256')}
+    if digest(canonical({'params': apply, 'actor': actor})) != record['request_fingerprint']:
+        raise ObservationRefused('identity-refused')
+    preview = {key: record[key] for key in ('preview_id', 'actor', 'request', 'manifest', 'selection_sha256',
+               'selection_id', 'manifest_sha256', 'generation', 'owner_plan', 'owner_declaration',
+               'public_sha256', 'owner_identity', 'policy_sha256', 'channel')}
+    if len(canonical(preview)) > 900000:
+        raise ObservationRefused('overflow')
+    if digest(canonical(preview)) != record['preview_sha256']:
+        raise ObservationRefused('identity-refused')
+    if type(record['manifest']) is not str or len(record['manifest']) > 1200000:
+        raise ObservationRefused('overflow')
+    try:
+        raw = base64.b64decode(record['manifest'], validate=True)
+    except (ValueError, UnicodeError, RecursionError):
+        raise ObservationRefused('schema-refused') from None
+    if len(raw) > 900000:
+        raise ObservationRefused('overflow')
+    if digest(raw) != record['manifest_sha256']:
+        raise ObservationRefused('identity-refused')
+    try:
+        manifest = observation_json(raw)
+    except (ValueError, UnicodeError, RecursionError):
+        raise ObservationRefused('parse-refused') from None
+    if type(manifest) is not dict or type(manifest.get('components')) is not dict:
+        raise ObservationRefused('schema-refused')
+    return manifest
+
+
+def selector_read_bytes(path, limit, deadline):
+    """Read one fixed installed source/metadata file, with descriptor custody."""
+    observation_deadline(deadline)
+    path = Path(path)
+    try:
+        parents = observation_directories(path.parent, private=False)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except (OSError, ValueError):
+        raise ObservationRefused('custody-refused') from None
+    try:
+        before = os.fstat(fd)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid not in (0, os.geteuid())
+                or before.st_mode & 0o022 or before.st_nlink != 1
+                or trust_identity(path.lstat()) != trust_identity(before)):
+            raise ObservationRefused('custody-refused')
+        if before.st_size > limit:
+            raise ObservationRefused('overflow')
+        raw = bytearray()
+        while len(raw) <= limit:
+            observation_deadline(deadline)
+            chunk = os.read(fd, min(65536, limit + 1 - len(raw)))
+            raw.extend(chunk)
+            if not chunk or len(raw) > limit:
+                break
+        after = os.fstat(fd)
+        observation_deadline(deadline)
+        if len(raw) > limit:
+            raise ObservationRefused('overflow')
+        if (trust_metadata(after) != trust_metadata(before) or after.st_size != before.st_size
+                or trust_identity(path.lstat()) != trust_identity(before)
+                or observation_directories(path.parent, private=False) != parents):
+            raise ObservationRefused('custody-refused')
+        return bytes(raw)
+    finally:
+        os.close(fd)
+
+
+def naturally_loaded_selector_codes(deadline):
+    """No import/discovery calls: bind only reviewed, naturally loaded code."""
+    result, sources = [], {}
+    site = Path(sysconfig.get_path('purelib', scheme='posix_prefix',
+                                  vars={'base': sys.prefix, 'platbase': sys.prefix}))
+    if not site.is_relative_to(Path(sys.prefix)):
+        raise ObservationRefused('source-refused')
+    for label, module_name, ancestry in SELECTOR_CODE_SPECS:
+        module = sys.modules.get(module_name)
+        if type(module) is not types.ModuleType:
+            continue
+        if module_name not in sources:
+            role = 'proxy' if module_name.startswith('cryptolabs_proxy.') else 'dc'
+            relative = 'src/' + module_name.replace('.', '/') + '.py'
+            path = Path(vars(module).get('__file__', ''))
+            if path != site / (module_name.replace('.', '/') + '.py'):
+                continue
+            raw = selector_read_bytes(path, 1048576, deadline)
+            if digest(raw) != FROZEN_PRODUCT_HASHES[role][relative]:
+                continue
+            sources[module_name] = compile(raw, str(path), 'exec')
+        expected = sources[module_name]
+        actual = module
+        parent_code = None
+        for index, name in enumerate(ancestry):
+            choices = [c for c in expected.co_consts if type(c) is types.CodeType and c.co_name == name]
+            if len(choices) != 1:
+                actual = None
+                break
+            expected = choices[0]
+            if parent_code is not None:
+                choices = [c for c in parent_code.co_consts if type(c) is types.CodeType and c.co_name == name]
+                actual = choices[0] if len(choices) == 1 else None
+            else:
+                actual = vars(actual).get(name) if type(actual) in (types.ModuleType, type) else None
+                if type(actual) is classmethod:
+                    actual = actual.__func__
+                if type(actual) is types.FunctionType and name == '_scoped_updater_guard':
+                    actual = vars(actual).get('__wrapped__')
+                if type(actual) is types.FunctionType:
+                    actual = actual.__code__
+            if type(actual) is types.CodeType:
+                parent_code = actual
+            elif index == len(ancestry) - 1:
+                actual = None
+        observation_deadline(deadline)
+        if type(actual) is types.CodeType and helper_code_matches(actual, expected):
+            result.append((label, actual))
+    return tuple(result)
+
+
+def selector_failure_details(error, codes, manifest, deadline):
+    """One post-failure sample, never a replay or atomic guard-operand claim."""
+    result = {'qualification': 'innermost-unknown', 'frames': [], 'actual_interpreter': 'unknown',
+              'expected_interpreter': 'compatible-host-venv', 'module_version_match': None,
+              'distribution_version_match': None, 'url_match': None, 'hash_match': None}
+    frame = error.__traceback__
+    count, inner_known = 0, False
+    while frame is not None:
+        observation_deadline(deadline)
+        count += 1
+        if count > 32:
+            result['qualification'] = 'overflow'
+            return result
+        matches = [(role, code) for role, code in codes if frame.tb_frame.f_code is code]
+        inner_known = len(matches) == 1
+        if inner_known:
+            if len(result['frames']) == 16:
+                result['qualification'] = 'overflow'
+                return result
+            result['frames'].append({'role': matches[0][0], 'line': frame.tb_lineno})
+        frame = frame.tb_next
+    if inner_known:
+        result['qualification'] = 'qualified'
+    else:
+        return result
+    prefix = Path(sys.prefix)
+    if prefix == Path('/opt/fleet-native-qa/venv'):
+        result['actual_interpreter'] = 'original-native-venv'
+    elif prefix == ROOT / 'legacy-host-venv':
+        result['actual_interpreter'] = 'compatible-host-venv'
+    else:
+        result['qualification'] = 'source-refused'
+        return result
+    target = manifest['components'].get('dc-overview-cli')
+    if (type(target) is not dict or set(target) != {'owner', 'release', 'artifacts'}
+            or target['owner'] != 'host-cli' or type(target['release']) is not str
+            or not 1 <= len(target['release']) <= 128 or type(target['artifacts']) is not dict
+            or set(target['artifacts']) != {'any'} or type(target['artifacts']['any']) is not dict):
+        return result
+    selected = target['artifacts']['any']
+    if (set(selected) != {'kind', 'url', 'sha256'} or selected['kind'] != 'wheel'
+            or type(selected['url']) is not str or not 1 <= len(selected['url']) <= 4096
+            or type(selected['sha256']) is not str or not re.fullmatch('[0-9a-f]{64}', selected['sha256'])):
+        return result
+    package = sys.modules.get('dc_overview')
+    if type(package) is not types.ModuleType:
+        result['qualification'] = 'source-refused'
+        return result
+    package_path = Path(vars(package).get('__file__', ''))
+    site = Path(sysconfig.get_path('purelib', scheme='posix_prefix',
+                                  vars={'base': sys.prefix, 'platbase': sys.prefix}))
+    if not site.is_relative_to(prefix) or package_path != site / 'dc_overview/__init__.py':
+        result['qualification'] = 'source-refused'
+        return result
+    # Exactly this admitted basename; no distribution scan or directory listing.
+    distribution = package_path.parent.parent / 'dc_overview-1.6.4.dist-info'
+    metadata = selector_read_bytes(distribution / 'METADATA', 65536, deadline)
+    provenance = selector_read_bytes(distribution / 'direct_url.json', 65536, deadline)
+    from email.parser import BytesParser
+    installed = BytesParser().parsebytes(metadata)
+    try:
+        value = observation_json(provenance)
+    except (ValueError, UnicodeError, RecursionError):
+        raise ObservationRefused('parse-refused') from None
+    if (installed.get_all('Name') != ['dc-overview'] or len(installed.get_all('Version', [])) != 1
+            or type(value) is not dict):
+        result['qualification'] = 'schema-refused'
+        return result
+    version = vars(package).get('__version__')
+    result['module_version_match'] = version == target['release'] if type(version) is str else None
+    result['distribution_version_match'] = installed['Version'] == target['release']
+    result['url_match'] = value.get('url') == selected['url']
+    archive = value.get('archive_info', {})
+    hashes = archive.get('hashes', {}) if type(archive) is dict else None
+    result['hash_match'] = hashes.get('sha256') == selected['sha256'] if type(hashes) is dict else None
+    observation_deadline(deadline)
+    return result
+
+
 def observation_failure_valid(value):
-    if (type(value) is not dict or set(value) != {'code_label', 'source_line', 'error_kind'}
+    if (type(value) is not dict or set(value) not in (
+            {'code_label', 'source_line', 'error_kind'}, {'code_label', 'source_line', 'error_kind', 'selector'})
             or type(value['error_kind']) is not str or value['error_kind'] not in ERROR_KINDS):
         return False
+    if 'selector' in value and not selector_details_valid(value['selector']):
+        return False
     if value['code_label'] is None:
-        return value == {'code_label': None, 'source_line': None, 'error_kind': 'unknown'}
-    return (type(value['code_label']) is str and value['code_label'] in BROKER_CODE_LABELS
+        return value['source_line'] is None and value['error_kind'] == 'unknown'
+    return (type(value['code_label']) is str and value['code_label'] in (
+                *BROKER_CODE_LABELS, *(item[0] for item in SELECTOR_CODE_SPECS))
             and type(value['source_line']) is int and 1 <= value['source_line'] <= 1000000)
+
+
+def selector_details_valid(value):
+    if type(value) is not dict or set(value) != {
+            'qualification', 'frames', 'actual_interpreter', 'expected_interpreter',
+            'module_version_match', 'distribution_version_match', 'url_match', 'hash_match'}:
+        return False
+    if (type(value['qualification']) is not str or value['qualification'] not in (
+            'qualified', 'innermost-unknown', 'source-refused', 'schema-refused', 'identity-refused',
+            'custody-refused', 'parse-refused', 'overflow', 'deadline', 'unknown')
+            or type(value['frames']) is not list or len(value['frames']) > 16):
+        return False
+    for frame in value['frames']:
+        if (type(frame) is not dict or set(frame) != {'role', 'line'}
+                or type(frame['role']) is not str or frame['role'] not in (
+                    *BROKER_CODE_LABELS, *(item[0] for item in SELECTOR_CODE_SPECS))
+                or type(frame['line']) is not int or not 1 <= frame['line'] <= 1000000):
+            return False
+    if any(value[k] is not None and type(value[k]) is not bool for k in (
+            'module_version_match', 'distribution_version_match', 'url_match', 'hash_match')):
+        return False
+    return (type(value['actual_interpreter']) is str and value['actual_interpreter'] in (
+                'original-native-venv', 'compatible-host-venv', 'unknown')
+            and type(value['expected_interpreter']) is str and value['expected_interpreter'] == 'compatible-host-venv')
 
 
 _owner_observation_lock = threading.Lock()
@@ -1267,8 +1641,9 @@ def observe_broker_owner_failures(broker_module, operation_root, code_objects):
     original = broker_module.private_write
     codes = tuple(code_objects)
     proxy_codes = None
+    selector_operation_id = None
     def observed(*args, **kwargs):
-        nonlocal proxy_codes
+        nonlocal proxy_codes, selector_operation_id
         result = original(*args, **kwargs)
         # Nothing diagnostic executes before a successful original write.
         try:
@@ -1280,12 +1655,73 @@ def observe_broker_owner_failures(broker_module, operation_root, code_objects):
             if path != Path(operation_root) / (identity + '.json') or not observation_uuid(identity):
                 return result
             frame = error.__traceback__
-            eligible = False
+            eligible = selector_call = False
+            frame_count = 0
             while frame is not None:
+                frame_count += 1
+                if frame_count > 32:
+                    return result
                 if any(label == 'broker-operation' and frame.tb_frame.f_code is code for label, code in codes):
                     eligible = True
+                    selector_call |= frame.tb_lineno == 895
                 frame = frame.tb_next
             if eligible:
+                if selector_operation_id is not None:
+                    return result  # One selector exception context/operation, no retry.
+                # The other admitted layout retains its existing owner observer;
+                # it cannot acquire the named-volume selector diagnostic purpose.
+                persisted = args[1] if len(args) > 1 and type(args[1]) is dict else {}
+                owner_identity = persisted.get('owner_identity')
+                if (type(owner_identity) is dict
+                        and type(owner_identity.get('updater_directory')) is str
+                        and owner_identity['updater_directory'] == str(ROOT / 'bind/auth/update-jobs')):
+                    selector_call = False
+                if type(persisted.get('operation_kind')) is str and persisted['operation_kind'] != 'services-update':
+                    selector_call = False
+                if selector_call:
+                    selector_operation_id = identity
+                    details = {'qualification': 'unknown', 'frames': [], 'actual_interpreter': 'unknown',
+                               'expected_interpreter': 'compatible-host-venv', 'module_version_match': None,
+                               'distribution_version_match': None, 'url_match': None, 'hash_match': None}
+                    failure = {'code_label': None, 'source_line': None, 'error_kind': 'unknown'}
+                    try:
+                        deadline = time.monotonic() + 1
+                        if len(args) < 2 or type(args[1]) is not dict:
+                            raise ObservationRefused('schema-refused')
+                        manifest = selector_operation(args[1], identity)
+                        if args[1]['operation_kind'] != 'services-update':
+                            raise ObservationRefused('identity-refused')
+                        # The producer namespace is pinned too; selector discovery
+                        # never calls/imports product functions or reads frame locals.
+                        path = Path(vars(broker_module).get('__file__', ''))
+                        if (not path.is_relative_to(Path(sys.prefix))
+                                or digest(selector_read_bytes(path, 1048576, deadline))
+                                != FROZEN_PRODUCT_HASHES['dc']['src/dc_overview/release_broker.py']):
+                            raise ObservationRefused('source-refused')
+                        selector_codes = naturally_loaded_selector_codes(deadline)
+                        if proxy_codes is None:
+                            proxy_codes = naturally_loaded_proxy_codes()
+                        observation_deadline(deadline)
+                        qualified = codes + (proxy_codes or ()) + selector_codes
+                        if len(qualified) > 32:
+                            raise ObservationRefused('overflow')
+                        if not any(role == 'dc-scoped-selector' for role, code in selector_codes):
+                            raise ObservationRefused('source-refused')
+                        failure = broker_failure_metadata(error, qualified)
+                        details = selector_failure_details(error, qualified, manifest, deadline)
+                        observation_deadline(deadline)
+                    except Exception as refused:
+                        reason = refused.args[0] if type(refused) is ObservationRefused and refused.args else 'unknown'
+                        details['qualification'] = reason if type(reason) is str and reason in (
+                            'source-refused', 'schema-refused', 'identity-refused', 'custody-refused',
+                            'parse-refused', 'overflow', 'deadline') else 'unknown'
+                        # Keep no partly sampled comparisons after a failed read.
+                        for key in ('module_version_match', 'distribution_version_match', 'url_match', 'hash_match'):
+                            details[key] = None
+                    if details['qualification'] != 'qualified':
+                        failure = {'code_label': None, 'source_line': None, 'error_kind': 'unknown'}
+                    write_owner_observation(identity, {**failure, 'selector': details})
+                    return result
                 if proxy_codes is None:
                     found = naturally_loaded_proxy_codes()
                     if found:
@@ -1902,6 +2338,7 @@ class NativeQA:
                   'fixture_mapping': dict(unknown), 'current_mapping': dict(unknown),
                   'owner_store': {'observation': 'unknown', 'mount_type': 'unknown',
                                   'auth_equal': None, 'jobs_equal': None}, 'failure': None}
+        result['operation_qualification'] = 'unknown'
         try:
             if not observation_uuid(operation_id):
                 return result
@@ -1910,12 +2347,16 @@ class NativeQA:
 
         try:
             result['failure'] = self.read_owner_observation(operation_id)
+            if (type(result['failure']) is dict and 'selector' in result['failure']
+                    and self.layout != 'named-volume'):
+                result['failure'] = None
         except Exception:
             pass
 
         def project(directory, operation=False):
             value = dict(result['operation'] if operation else unknown)
             try:
+                deadline = time.monotonic() + 1 if operation else None
                 observation_directories(directory)
                 try:
                     record = observation_read(directory / (operation_id + '.json'), 1048576)
@@ -1923,11 +2364,41 @@ class NativeQA:
                     # Absence only follows a trusted, still present parent lookup.
                     observation_directories(directory)
                     value['observation'] = 'absent'
+                    if operation:
+                        observation_deadline(deadline)
+                        result['operation_qualification'] = 'absent-after-trusted-parent'
                     return value
                 if type(record) is not dict or record.get('operation_id') != operation_id:
+                    if operation:
+                        result['operation_qualification'] = 'identity-refused'
                     return value
-                if operation and (type(record.get('schema_version')) is not int or record['schema_version'] != 1):
-                    return value
+                if operation:
+                    observation_deadline(deadline)
+                    # The sudo parent cannot trust runner-owned checkout ancestry.
+                    # Use only the current wheel installed by this native route.
+                    prefix = Path('/opt/fleet-native-qa/venv')
+                    site = prefix / 'lib/python3.12/site-packages'
+                    if (Path(sys.prefix) != prefix
+                            or Path(sysconfig.get_path('purelib', scheme='posix_prefix',
+                                vars={'base': sys.prefix, 'platbase': sys.prefix})) != site):
+                        raise ObservationRefused('source-refused')
+                    source = site / 'dc_overview/release_broker.py'
+                    if digest(selector_read_bytes(source, 1048576, deadline)) != FROZEN_PRODUCT_HASHES['dc']['src/dc_overview/release_broker.py']:
+                        raise ObservationRefused('source-refused')
+                    selector_operation(record, operation_id)
+                    expected = getattr(self, 'owner_mapping_expected', None)
+                    if expected is not None:
+                        if (any(record.get(k) != v for k, v in expected['apply'].items())
+                                or record['request'] != expected['request']
+                                or any(record.get(k) != expected['preview'].get(k) for k in (
+                                    'preview_id', 'preview_sha256', 'selection_id', 'selection_sha256', 'manifest_sha256'))
+                                or record['actor'].get('kind') != 'fleet-admin'
+                                or record['actor'].get('username') != 'native-admin'):
+                            raise ObservationRefused('identity-refused')
+                    elif self.layout == 'named-volume':
+                        raise ObservationRefused('identity-refused')
+                    observation_deadline(deadline)
+                    result['operation_qualification'] = 'valid'
                 value['observation'] = 'present'
                 job = record.get('job_id')
                 value['job_id_present'] = (False if 'job_id' not in record else
@@ -1947,8 +2418,15 @@ class NativeQA:
                     }
                     reason = record.get('reason')
                     value['reason_category'] = reasons.get(reason, 'unknown') if type(reason) is str else 'unknown'
+                    observation_deadline(deadline)
                 return value
-            except Exception:
+            except Exception as refused:
+                if operation:
+                    reason = refused.args[0] if type(refused) is ObservationRefused and refused.args else 'custody-refused'
+                    result['operation_qualification'] = reason if type(reason) is str and reason in (
+                        'identity-refused', 'schema-refused', 'source-refused', 'parse-refused',
+                        'custody-refused', 'overflow', 'deadline') else 'unknown'
+                    return dict(result['operation'])
                 return value
 
         try:
@@ -3347,6 +3825,9 @@ class NativeQA:
         write(POLICY, self.policy)
         params, p = self.preview("ipmi-new")
         identity, body = self.apply(params, p, lose_reply=True)
+        # Captured request/preview identities are independent of the later file
+        # read. The stored actor subject/fingerprint remain producer/custody-bound.
+        self.owner_mapping_expected = {'apply': dict(body), 'request': dict(params), 'preview': dict(p)}
         mapping = self.jobs / "operations" / (identity + ".json")
         try:
             wait(mapping.exists, timeout=90, message="actual owner mapping was not created")

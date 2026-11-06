@@ -3,6 +3,7 @@
 """Bounded security contract for the explicit native QA route; no guest execution."""
 
 import ast
+import base64
 import importlib.util
 import hashlib
 import json
@@ -939,6 +940,180 @@ class FleetNativeRouteTest(unittest.TestCase):
                                            "scoped_select_inner_diagnostic": module.inner_unknown()})
                 self.assertNotIn(private, json.dumps(metadata))
 
+        # Exercise the exact installed-wheel predicate, rather than a replacement
+        # selector or mocked distribution. This portable source test cannot
+        # establish which interpreter/guard failed in a historical native run.
+        import importlib.metadata
+        upgrade_path = ROOT / "src/dc_overview/fleet_upgrade.py"
+        upgrade_source = upgrade_path.read_text()
+        self.assertEqual(hashlib.sha256(upgrade_source.encode()).hexdigest(),
+                         "c5a462957d94aae2fcc28634d046460c7bc7107b67369979cedc2dddfda0b48d")
+        node = next(n for n in ast.parse(upgrade_source).body
+                    if isinstance(n, ast.FunctionDef) and n.name == "verify_running_cli")
+        self.assertEqual(hashlib.sha256(ast.get_source_segment(upgrade_source, node).encode()).hexdigest(),
+                         "c830c355e09f81bdbf28f34286116558eebf752d51aab45bdeeaf80d16b5c344")
+        init_source = (ROOT / "src/dc_overview/__init__.py").read_text()
+        version = next(ast.literal_eval(n.value) for n in ast.parse(init_source).body
+                       if isinstance(n, ast.Assign)
+                       and any(isinstance(t, ast.Name) and t.id == "__version__" for t in n.targets))
+        package_name = "_fleet_selector_predicate_fixture"
+        package = types.ModuleType(package_name)
+        package.__version__ = version
+        namespace = {"__name__": package_name + ".fleet_upgrade", "__package__": package_name, "json": json}
+        exec(compile(ast.Module(body=[node], type_ignores=[]), str(upgrade_path), "exec"), namespace)
+        predicate = namespace["verify_running_cli"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package.__path__ = [str(root)]
+            distribution = root / ("dc_overview-" + version + ".dist-info")
+            distribution.mkdir()
+            metadata_path = distribution / "METADATA"
+            provenance_path = distribution / "direct_url.json"
+            metadata_path.write_text("Metadata-Version: 2.4\nName: dc-overview\nVersion: " + version + "\n")
+            target = {"release": version, "url": "https://example.invalid/PRIVATE_SELECTED_WHEEL.whl",
+                      "sha256": "a" * 64}
+            provenance = {"url": target["url"], "archive_info": {"hashes": {"sha256": target["sha256"]}}}
+            with patch.dict(sys.modules, {package_name: package}), patch.object(sys, "path", [str(root)]):
+                provenance_path.write_text(json.dumps(provenance))
+                installed = importlib.metadata.distribution("dc-overview")
+                self.assertEqual(installed.version, version)
+                self.assertEqual(json.loads(installed.read_text("direct_url.json")), provenance)
+                expected = target["url"] + "#sha256=" + target["sha256"]
+                self.assertEqual(predicate(target), {"success": True, "state": "verified", "owner": "host-cli",
+                                                    "desired": expected, "observed": expected})
+                provenance_path.write_text(json.dumps({"url": "https://example.invalid/PRIVATE_OTHER_WHEEL.whl",
+                                                       "archive_info": {"hashes": {"sha256": "b" * 64}}}))
+                before = {p: p.read_bytes() for p in (metadata_path, provenance_path)}
+                try:
+                    predicate(target)
+                except RuntimeError as error:
+                    original_kind, original_args = type(error), error.args
+                    trace = error.__traceback__
+                    observed = module.broker_failure_metadata(error, (("dc-running-cli", predicate.__code__),))
+                    self.assertIs(type(error), original_kind)
+                    self.assertEqual(error.args, original_args)
+                    self.assertIs(error.__traceback__, trace)
+                    line = None
+                    while trace is not None:
+                        if trace.tb_frame.f_code is predicate.__code__:
+                            line = trace.tb_lineno
+                        trace = trace.tb_next
+                    self.assertEqual(line, 141, "the real original provenance refusal must be exercised")
+                    self.assertTrue(str(error).startswith("requires_cli_upgrade:"))
+                else:
+                    self.fail("version equality must not bypass original URL/hash provenance checks")
+                self.assertEqual({p: p.read_bytes() for p in before}, before)
+                self.assertEqual(upgrade_path.read_text(), upgrade_source)
+                for private in ("PRIVATE", str(root), target["url"], target["sha256"]):
+                    self.assertNotIn(private, json.dumps(observed))
+                self.assertEqual(observed["code_label"], "dc-running-cli",
+                                 "the original selector predicate is currently lost behind its outer broker frame")
+                self.assertEqual(observed["source_line"], line)
+                self.assertEqual(observed["error_kind"], "runtime-error")
+
+        # Exercise the same bounded reader/loaded-code qualifier in a private
+        # installed-layout fixture. Only exact original function bodies are
+        # compiled; no immutable Proxy code or product module is imported.
+        module.sysconfig.get_config_vars()  # Load stdlib build data before restricting metadata discovery.
+        with private_owner_temp(module) as directory:
+            root = Path(directory)
+            prefix = root / "legacy-host-venv"
+            site = prefix / ("lib/python" + str(sys.version_info.major) + "." + str(sys.version_info.minor)) / "site-packages"
+            package_path = site / "dc_overview"
+            package_path.mkdir(parents=True, mode=0o700)
+            init_path = package_path / "__init__.py"
+            init_path.write_text(init_source)
+            installed_upgrade = package_path / "fleet_upgrade.py"
+            installed_upgrade.write_text(upgrade_source)
+            installed_package = types.ModuleType("dc_overview")
+            installed_package.__file__ = str(init_path)
+            installed_package.__version__ = version
+            installed_module = types.ModuleType("dc_overview.fleet_upgrade")
+            installed_module.__file__ = str(installed_upgrade)
+            installed_module.__package__ = "dc_overview"
+            installed_module.json = json
+            imports = [n for n in ast.parse(upgrade_source).body if isinstance(n, (ast.Import, ast.ImportFrom))]
+            exec(compile(ast.Module(body=[*imports, node], type_ignores=[]), str(installed_upgrade), "exec"), vars(installed_module))
+            original_predicate = installed_module.verify_running_cli
+            distribution = site / ("dc_overview-" + version + ".dist-info")
+            distribution.mkdir(mode=0o700)
+            metadata_path = distribution / "METADATA"
+            provenance_path = distribution / "direct_url.json"
+            metadata_path.write_text("Metadata-Version: 2.4\nName: dc-overview\nVersion: " + version + "\n")
+            provenance_path.write_text(json.dumps({"url": "https://example.invalid/PRIVATE_OTHER_WHEEL.whl",
+                                                 "archive_info": {"hashes": {"sha256": "b" * 64}}}))
+            selected_manifest = {"components": {"dc-overview-cli": {"owner": "host-cli", "release": version,
+                "artifacts": {"any": {"kind": "wheel", "url": target["url"], "sha256": target["sha256"]}}}}}
+            with patch.dict(sys.modules, {"dc_overview": installed_package, "dc_overview.fleet_upgrade": installed_module}), patch.object(sys, "path", [str(site)]), patch.object(sys, "prefix", str(prefix)), patch.object(module, "ROOT", root):
+                deadline = module.time.monotonic() + 1
+                codes = module.naturally_loaded_selector_codes(deadline)
+                self.assertEqual(codes, (("dc-running-cli", original_predicate.__code__),))
+                before = {p: p.read_bytes() for p in (metadata_path, provenance_path, installed_upgrade)}
+                try:
+                    original_predicate(target)
+                except RuntimeError as error:
+                    with owner_file_read_audit(module, {metadata_path: 65536, provenance_path: 65536}) as reads:
+                        detail = module.selector_failure_details(error, codes, selected_manifest, module.time.monotonic() + 1)
+                    self.assertEqual([item["path"] for item in reads], [metadata_path, provenance_path])
+                    self.assertEqual(detail["frames"], [{"role": "dc-running-cli", "line": 141}])
+                    self.assertEqual(detail["qualification"], "qualified")
+                    self.assertEqual(detail["actual_interpreter"], "compatible-host-venv")
+                    self.assertEqual([detail[k] for k in ("module_version_match", "distribution_version_match", "url_match", "hash_match")], [True, True, False, False])
+                    self.assertTrue(module.selector_details_valid(detail))
+                    self.assertNotIn("PRIVATE", json.dumps(detail))
+                    self.assertNotIn(str(root), json.dumps(detail))
+                    self.assertLessEqual(len(module.encoded(detail)), 4096)
+                    with self.assertRaises(module.ObservationRefused):
+                        module.selector_failure_details(error, codes, selected_manifest, module.time.monotonic() - 1)
+                    installed_module.__file__ = str(prefix / "foreign/dc_overview/fleet_upgrade.py")
+                    self.assertEqual(module.naturally_loaded_selector_codes(module.time.monotonic() + 1), ())
+                    installed_module.__file__ = str(installed_upgrade)
+                    installed_package.__file__ = str(prefix / "foreign/dc_overview/__init__.py")
+                    self.assertEqual(module.selector_failure_details(error, codes, selected_manifest,
+                        module.time.monotonic() + 1)["qualification"], "source-refused")
+                    installed_package.__file__ = str(init_path)
+                    # A source-identical filename/name does not qualify foreign code.
+                    installed_module.verify_running_cli = foreign
+                    self.assertEqual(module.naturally_loaded_selector_codes(module.time.monotonic() + 1), ())
+                    installed_module.verify_running_cli = original_predicate
+                    installed_upgrade.write_text(upgrade_source + "\n")
+                    self.assertEqual(module.naturally_loaded_selector_codes(module.time.monotonic() + 1), ())
+                    installed_upgrade.write_text(upgrade_source)
+                    alias = distribution / "retained-metadata"
+                    metadata_path.rename(alias)
+                    metadata_path.symlink_to(alias)
+                    with self.assertRaises(module.ObservationRefused):
+                        module.selector_failure_details(error, codes, selected_manifest, module.time.monotonic() + 1)
+                    metadata_path.unlink(); alias.rename(metadata_path)
+                    provenance_path.write_bytes(b"x" * 65537)
+                    with self.assertRaises(module.ObservationRefused):
+                        module.selector_failure_details(error, codes, selected_manifest, module.time.monotonic() + 1)
+                    provenance_path.write_bytes(before[provenance_path])
+                else:
+                    self.fail("real provenance mismatch must retain its original predicate failure")
+                self.assertEqual({p: p.read_bytes() for p in before}, before)
+
+        # Actual frozen parser -> unmapped _json failure: retain context without
+        # promoting its recognized outer Manifest frame into the inner cause.
+        catalog_path = ROOT / "src/dc_overview/release_catalog.py"
+        self.assertEqual(hashlib.sha256(catalog_path.read_bytes()).hexdigest(),
+                         "21d4cf4731226c4ca9498cd4999bec1ec90bb9d3628faa615e13f20ccd9a29f6")
+        catalog = runpy.run_path(str(catalog_path))
+        parser_code = catalog["Manifest"].from_bytes.__func__.__code__
+        try:
+            catalog["Manifest"].from_bytes(b"PRIVATE_INVALID_JSON")
+        except ValueError as error:
+            codes = (("catalog-manifest", parser_code),)
+            self.assertEqual(module.broker_failure_metadata(error, codes),
+                             {"code_label": None, "source_line": None, "error_kind": "unknown"})
+            detail = module.selector_failure_details(error, codes, {}, module.time.monotonic() + 1)
+            self.assertEqual(detail["qualification"], "innermost-unknown")
+            self.assertTrue(detail["frames"])
+            self.assertIsNone(detail["url_match"])
+            self.assertNotIn("PRIVATE", json.dumps(detail))
+        else:
+            self.fail("the original strict parser must refuse malformed JSON")
+
     def test_scoped_select_closed_observation_and_transport(self):
         native = self.native_module()
         PRIVATE = "PRIVATE_SCOPED_ARGUMENT_PATH_OUTPUT"
@@ -1723,7 +1898,7 @@ class FleetNativeRouteTest(unittest.TestCase):
         release_broker = product_modules.get("dc_overview.release_broker")
         identity = "00000000-0000-4000-8000-000000000001"
         with private_owner_temp(module) as d:
-            root = Path(d)
+            root = Path(d).resolve()
             qa = module.NativeQA(SimpleNamespace(evidence_dir=root / "evidence"))
             qa.layout = "bind"
             qa.store = SimpleNamespace(root=root / "releases")
@@ -1735,9 +1910,91 @@ class FleetNativeRouteTest(unittest.TestCase):
             for directory in (qa.store.root, qa.store.root / "broker", operations, qa.data, qa.auth, qa.jobs, mapping):
                 directory.mkdir(mode=0o700, parents=True, exist_ok=True)
             path = operations / (identity + ".json")
-            operation = {"schema_version": 1, "operation_id": identity, "state": "recovery-required", "phase": "owner",
-                         "reason": "Owner operation interrupted; reconcile retained operation before retry",
-                         "manifest": "PRIVATE_MANIFEST", "request": {"private": "PRIVATE_REQUEST"}}
+            # Emit the record from the pinned producer expressions. Handwriting
+            # schema_version here hid the actual producer/observer mismatch.
+            broker_path = ROOT / "src/dc_overview/release_broker.py"
+            broker_source = broker_path.read_text()
+            self.assertEqual(hashlib.sha256(broker_source.encode()).hexdigest(),
+                             "137c990c00ba4d59ade7c8490b9fd9b574709f73c0d072466bbc41e253fbb33b")
+            broker_tree = ast.parse(broker_source)
+            canonical = lambda value: json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+            sha = lambda raw: hashlib.sha256(raw).hexdigest()
+            def producer_expression(function, target, checksum):
+                node = next(n for n in ast.walk(broker_tree)
+                            if isinstance(n, ast.FunctionDef) and n.name == function)
+                value = next(n.value for n in ast.walk(node) if isinstance(n, ast.Assign)
+                             and any(isinstance(t, ast.Name) and t.id == target for t in n.targets))
+                self.assertEqual(hashlib.sha256(ast.get_source_segment(broker_source, value).encode()).hexdigest(), checksum)
+                return compile(ast.Expression(body=value), str(broker_path), "eval")
+            preview_expression = producer_expression("_preview", "value",
+                "795e4f0aab87ef606559be825cb883a2a82d12aa268fc141c7e35fcbb6e8cc58")
+            operation_expression = producer_expression("_apply", "operation",
+                "b14b3da31a5afad812f29fd8a58d3e3a89ed4145b84e577b121afb6d04a6bc53")
+            # Model the unchanged native workflow at the OS boundary: sudo
+            # parent is root, checkout ancestry belongs to runner (1001), and
+            # the installed current wheel lives in the root-owned native venv.
+            checkout = root / "runner-checkout"
+            checkout_source = checkout / "src/dc_overview/release_broker.py"
+            checkout_source.parent.mkdir(parents=True)
+            checkout_source.write_text(broker_source)
+            qa.args.dc_source = checkout
+            native_prefix = Path("/opt/fleet-native-qa/venv")
+            native_site = native_prefix / "lib/python3.12/site-packages"
+            native_source = native_site / "dc_overview/release_broker.py"
+            installed_source = root / "installed-release-broker.py"
+            installed_source.write_text(broker_source)
+            original_lstat, fixture_open, original_fstat = Path.lstat, os.open, os.fstat
+            def root_info(info, *, runner=False, ancestor=False):
+                return SimpleNamespace(**{name: (1001 if runner else 0) if name == "st_uid" else
+                    (0o40755 if ancestor else info.st_mode) if name == "st_mode" else getattr(info, name)
+                    for name in ("st_uid", "st_gid", "st_mode", "st_dev", "st_ino", "st_nlink",
+                                 "st_size", "st_mtime_ns")})
+            def native_lstat(name, *args, **kwargs):
+                name = Path(name)
+                if name == native_source:
+                    return root_info(original_lstat(installed_source))
+                if name in native_source.parents and name != Path("/"):
+                    return root_info(original_lstat(root), ancestor=True)
+                return root_info(original_lstat(name, *args, **kwargs),
+                    runner=name == checkout or checkout in name.parents, ancestor=name in root.parents)
+            def native_open(name, *args, **kwargs):
+                return fixture_open(installed_source if Path(name) == native_source else name, *args, **kwargs)
+            def native_purelib(name, *args, **kwargs):
+                self.assertEqual((name, args, kwargs), ("purelib", (), {"scheme": "posix_prefix",
+                    "vars": {"base": str(native_prefix), "platbase": str(native_prefix)}}))
+                return str(native_site)
+            public = root / "fleet-config.yaml"
+            public.write_bytes(b"site_name: PRIVATE_SYNTHETIC_SITE\n")
+            actor = {"kind": "host-peer", "uid": 0}
+            params = {"candidate_ids": ["PRIVATE_candidate"], "components": ["ipmi-monitor"],
+                      "expected_selection_id": "PRIVATE_selected", "expected_selection_sha256": "a" * 64,
+                      "operation_kind": "services-update"}
+            manifest_raw = canonical({"schema_version": 1, "baseline_id": "PRIVATE_proposed", "selection_contract": 1,
+                "components": {"dc-overview-cli": {"owner": "host-cli", "release": "1.6.4",
+                    "artifacts": {"any": {"kind": "wheel", "url": "https://example.invalid/PRIVATE.whl", "sha256": "b" * 64}}},
+                    "ipmi-monitor": {"owner": "proxy-updater", "release": "1.3.2",
+                    "artifacts": {"linux/amd64": {"kind": "oci", "reference": module.IPMI_NEW}}}}})
+            owner_identity = {"updater_directory": str(qa.jobs), "device": 1, "inode": 2,
+                              "proxy_config_dir": str(root / "proxy"), "declaration_path": str(root / "declaration")}
+            namespace = {"self": SimpleNamespace(config=SimpleNamespace(config_dir=root), policy={"writes_enabled": True},
+                            owner=SimpleNamespace(identity=lambda: owner_identity)),
+                         "preview_id": "00000000-0000-4000-8000-000000000003", "actor": actor, "params": params,
+                         "manifest": SimpleNamespace(raw=manifest_raw, sha256=sha(manifest_raw)),
+                         "proposed": SimpleNamespace(selection_sha256="c" * 64), "selection": {"selection_id": "PRIVATE_proposed"},
+                         "candidates": [SimpleNamespace(index={"generation": 1})], "owner_plan": None, "owner_declaration": None,
+                         "entries": {"ipmi-monitor": {"channel": "main"}}, "canonical": canonical, "sha": sha, "base64": base64}
+            preview = eval(preview_expression, namespace)
+            preview["preview_sha256"] = sha(canonical(preview))
+            apply_params = {"operation_id": identity, "preview_id": preview["preview_id"],
+                            "preview_sha256": preview["preview_sha256"], "expected_selection_id": params["expected_selection_id"],
+                            "expected_selection_sha256": params["expected_selection_sha256"]}
+            operation = eval(operation_expression, {"preview": preview, "params": apply_params,
+                                                    "fingerprint": sha(canonical({"params": apply_params, "actor": actor}))})
+            self.assertNotIn("schema_version", operation)
+            self.assertEqual(operation["state"], "prepared")
+            self.assertEqual(operation["phase"], "selection")
+            operation.update(state="recovery-required", phase="owner",
+                             reason="Owner operation interrupted; reconcile retained operation before retry")
             path.write_bytes(module.encoded(operation)); path.chmod(0o600)
             mapped = mapping / (identity + ".json")
             mapped.write_bytes(module.encoded({"operation_id": identity, "job_id": "f" * 32})); mapped.chmod(0o600)
@@ -1749,12 +2006,26 @@ class FleetNativeRouteTest(unittest.TestCase):
                 return inspected
             forbidden = AssertionError("passive projection called a functional API")
             with ExitStack() as guards, patch.object(module, "inspect_owner_mounts_bounded", side_effect=fixed_inspect), patch.object(module, "run", side_effect=forbidden), patch.object(module, "docker", side_effect=forbidden), patch.object(module, "inspect", side_effect=forbidden), patch.object(qa, "status", side_effect=forbidden):
+                guards.enter_context(patch.object(module.os, "geteuid", return_value=0))
+                guards.enter_context(patch.object(module.platform, "system", return_value="Linux"))
+                guards.enter_context(patch.object(module.sys, "prefix", str(native_prefix)))
+                guards.enter_context(patch.object(module.sysconfig, "get_path", side_effect=native_purelib))
+                guards.enter_context(patch.object(Path, "lstat", native_lstat))
+                guards.enter_context(patch.object(module.os, "open", side_effect=native_open))
+                guards.enter_context(patch.object(module.os, "fstat", side_effect=lambda fd: root_info(original_fstat(fd))))
+                with self.assertRaises(module.ObservationRefused) as refused:
+                    module.selector_read_bytes(checkout_source, 1048576, module.time.monotonic() + 1)
+                self.assertEqual(refused.exception.args, ("custody-refused",))
+                self.assertEqual(module.selector_read_bytes(native_source, 1048576, module.time.monotonic() + 1), broker_source.encode())
                 if release_broker is not None:
                     guards.enter_context(patch.multiple(release_broker.InstalledOwner, **{name: unittest.mock.Mock(side_effect=forbidden) for name in ("capabilities", "identity", "submit", "status", "recover", "adopt")}))
                     guards.enter_context(patch.object(release_broker.ReleaseBroker, "dispatch", side_effect=forbidden))
                     guards.enter_context(patch.object(release_broker.ReleaseBroker, "run_operation", side_effect=forbidden))
                 before = {p: p.read_bytes() for p in (path, mapped)}
-                value = qa.owner_mapping_observation(identity)
+                with owner_file_read_audit(module, {native_source: 1048576}) as source_reads:
+                    value = qa.owner_mapping_observation(identity)
+                self.assertEqual([item["path"] for item in source_reads], [native_source])
+                self.assertEqual(value["operation_qualification"], "valid")
                 self.assertEqual(value["operation"], {"observation": "present", "state": "recovery-required", "phase": "owner", "reason_category": "owner-interrupted", "job_id_present": False})
                 self.assertEqual(value["fixture_mapping"], {"observation": "present", "job_id_present": True})
                 self.assertEqual(value["current_mapping"], value["fixture_mapping"])
@@ -1766,6 +2037,32 @@ class FleetNativeRouteTest(unittest.TestCase):
                 for private in (b"PRIVATE", str(root).encode(), b"f" * 32):
                     self.assertNotIn(private, raw)
                 self.assertEqual({p: p.read_bytes() for p in before}, before)
+                # Exact prefix/purelib and frozen bytes are compulsory. A
+                # readable checkout never supplies fallback after a refusal.
+                for prefix in ("/usr", str(root / "other-venv")):
+                    with self.subTest(prefix=prefix), patch.object(module.sys, "prefix", prefix):
+                        rejected = qa.owner_mapping_observation(identity)
+                    self.assertEqual(rejected["operation_qualification"], "source-refused")
+                    self.assertEqual(rejected["operation"]["observation"], "unknown")
+                with patch.object(module.sysconfig, "get_path", return_value=str(native_prefix / "foreign")):
+                    self.assertEqual(qa.owner_mapping_observation(identity)["operation_qualification"], "source-refused")
+                installed_source.write_text(broker_source + "\n")
+                self.assertEqual(qa.owner_mapping_observation(identity)["operation_qualification"], "source-refused")
+                installed_source.write_text(broker_source)
+                for mode in (0o666, 0o644):
+                    installed_source.chmod(mode)
+                    self.assertEqual(qa.owner_mapping_observation(identity)["operation_qualification"],
+                                     "custody-refused" if mode == 0o666 else "valid")
+                source_alias = root / "installed-source-alias"
+                os.link(installed_source, source_alias)
+                self.assertEqual(qa.owner_mapping_observation(identity)["operation_qualification"], "custody-refused")
+                source_alias.unlink()
+                installed_source.rename(source_alias)
+                installed_source.symlink_to(source_alias)
+                self.assertEqual(qa.owner_mapping_observation(identity)["operation_qualification"], "custody-refused")
+                installed_source.unlink(); source_alias.rename(installed_source)
+                self.assertEqual(checkout_source.read_text(), broker_source)
+                self.assertEqual(qa.owner_mapping_observation(identity)["operation_qualification"], "valid")
                 for target, field, valid in ((path, "operation", module.encoded(operation)), (mapped, "fixture_mapping", mapped.read_bytes())):
                     for overflow, grows in ((False, False), (True, False), (True, True)):
                         content = valid.ljust(1048576 + int(overflow and not grows), b" ")
@@ -1783,7 +2080,12 @@ class FleetNativeRouteTest(unittest.TestCase):
                         target.write_bytes(valid)
                 mapped.unlink()
                 self.assertEqual(qa.owner_mapping_observation(identity)["fixture_mapping"]["observation"], "absent")
-                for content in (b"{", b"x" * 1048577, module.encoded({**operation, "operation_id": "00000000-0000-4000-8000-000000000002"})):
+                duplicate = module.encoded(operation).rstrip()[:-1] + b',"state":"recovery-required"}'
+                for content in (b"{", b"x" * 1048577, duplicate,
+                                module.encoded({**operation, "operation_id": "00000000-0000-4000-8000-000000000002"}),
+                                module.encoded({**operation, "generation": True}),
+                                module.encoded({**operation, "PRIVATE_UNKNOWN_FIELD": "PRIVATE"}),
+                                module.encoded({k: v for k, v in operation.items() if k != "manifest_sha256"})):
                     path.write_bytes(content)
                     self.assertEqual(qa.owner_mapping_observation(identity)["operation"]["observation"], "unknown")
                     self.assertEqual(path.read_bytes(), content)
