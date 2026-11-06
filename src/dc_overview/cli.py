@@ -76,6 +76,21 @@ def release():
     """Manage explicit release selections independently of deployment."""
 
 
+@release.command('reconcile-service')
+@click.option('--service', required=True, type=click.Choice(['ipmi-monitor']))
+@click.option('--job', 'job_id', required=True)
+# TRACEWEAVER: entrypoint=release_reconcile_service; req=REQ-FLEETUPDATE-001; trace=TRACE-FLEETUPDATE-001; ver=VER-FLEETUPDATE-001
+def release_reconcile_service(service, job_id):
+    """Verify an exact failed native job's restored original; no lifecycle change."""
+    import json
+    from .fleet_upgrade import reconcile_service
+    try:
+        result = reconcile_service(FleetConfig.load(DOCKER_CONFIG_DIR), service, job_id)
+    except Exception:
+        raise click.ClickException('native_service_recovery_required') from None
+    click.echo(json.dumps(result, sort_keys=True))
+
+
 @release.command('select')
 @click.option('--release-manifest', required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option('--component', 'components', multiple=True, required=True, help='Explicit installed proxy-updater component; repeat for each target.')

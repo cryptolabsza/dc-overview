@@ -48,6 +48,18 @@ jobs:
           mkdir -p "$RUNNER_TEMP/fleet-native-wheels" "$RUNNER_TEMP/fleet-native-evidence"
           python -m build dc --wheel --outdir "$RUNNER_TEMP/fleet-native-wheels"
           python -m build proxy --wheel --outdir "$RUNNER_TEMP/fleet-native-wheels"
+          mkdir -p "$RUNNER_TEMP/fleet-native-legacy-wheels"
+          curl --disable --fail --silent --show-error --location --connect-timeout 10 --max-time 120 --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            'https://github.com/cryptolabsza/dc-overview/releases/download/v1.8.0/dc_overview-1.8.0-py3-none-any.whl' \
+            --output "$RUNNER_TEMP/fleet-native-legacy-wheels/dc_overview-1.8.0-py3-none-any.whl"
+          curl --disable --fail --silent --show-error --location --connect-timeout 10 --max-time 120 --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            'https://github.com/cryptolabsza/cryptolabs-proxy/releases/download/v1.5.4/cryptolabs_proxy-1.5.4-py3-none-any.whl' \
+            --output "$RUNNER_TEMP/fleet-native-legacy-wheels/cryptolabs_proxy-1.5.4-py3-none-any.whl"
+          (cd "$RUNNER_TEMP/fleet-native-legacy-wheels" && sha256sum --check <<'LEGACY_SHA256'
+          72fcf2fde1d765cdfebfd2e4071261e3ff28d202f7ffb1975340e9d362969304  dc_overview-1.8.0-py3-none-any.whl
+          5e64f0ae59d38ebcf4885d8aa60822bc3187d5a63f9abb8bdd11927d1ffd2b47  cryptolabs_proxy-1.5.4-py3-none-any.whl
+          LEGACY_SHA256
+          )
           sudo -n install -d -m 0755 -o "$(id -u)" -g "$(id -g)" /opt/fleet-native-qa
           python -m venv /opt/fleet-native-qa/venv
           /opt/fleet-native-qa/venv/bin/pip install "$RUNNER_TEMP"/fleet-native-wheels/*.whl
@@ -64,6 +76,8 @@ jobs:
               --dc-source "$GITHUB_WORKSPACE/dc" --dc-sha "$DC_SOURCE_SHA" \
               --proxy-source "$GITHUB_WORKSPACE/proxy" --proxy-sha "$PROXY_SOURCE_SHA" \
               --wheel-dir "$RUNNER_TEMP/fleet-native-wheels" \
+              --legacy-wheel-dir "$RUNNER_TEMP/fleet-native-legacy-wheels" \
+              --protection-helper "$GITHUB_WORKSPACE/dc/scripts/fixtures/legacy-selected-state-protection.py" \
               --evidence-dir "$RUNNER_TEMP/fleet-native-evidence"
         env:
           DC_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
