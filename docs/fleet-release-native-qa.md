@@ -699,3 +699,32 @@ This label does not identify the failed product guard or authorize a retry.
 Source or custody refusal retains unknown guard details and null comparisons.
 The original deadlines, byte bounds, exception behavior and cleanup gates stay
 in force. Earlier native attempts remain failed or unknown as recorded.
+
+### Named-volume proxy adoption failure observation
+
+The proxy adoption check opts into one diagnostic if its existing `finish`
+call fails. The original status call records only a closed branch, success
+boolean and owner state in memory. Socket errors still follow the original
+wait loop and 420-second deadline. The diagnostic never polls again, reapplies
+an operation or changes accepted terminal states. Collector and evidence-write
+failures leave the original exception and traceback intact.
+
+After failure, the parent reads its fixed installed broker source and its own
+retained operation, then the existing private child observation slot. Source,
+custody, request, preview, operation fingerprint and manifest checks must pass
+before state, phase, closed reason and plan comparisons are reported. The
+public preview does not expose the declaration; that comparison remains null
+unless the retained preview was independently supplied to the portable test.
+No plan, declaration, path, digest, actor, exception text or frame local is
+exported. The same one-second, 1 MiB input and 4 KiB output bounds apply.
+
+The child has a separate ten-role adoption code set, retaining the original
+thirteen selector roles and 32-object ceiling. It uses naturally loaded code
+qualified against the exact installed source; it neither imports nor calls
+product code for discovery. Only a recognized innermost original frame can
+identify an adoption guard. Refusal or an unknown inner frame retains unknown
+attribution. The wrapper runs after the original successful operation save and
+uses one adoption exception context. Portable tests execute the unchanged
+adoption guard through the actual wrapper, private slot and parent projection.
+These checks establish diagnostic behavior; native-eight's historical cause
+remains unknown until a new qualified native result exists.

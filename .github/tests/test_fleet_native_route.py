@@ -195,6 +195,224 @@ class FleetNativeRouteTest(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
+    def test_proxy_adoption_finish_retains_original_failure_without_replay(self):
+        """Execute the real adoption prefix and finish/status failure path."""
+        module = self.native_module()
+        tree = ast.parse(SCRIPT.read_text())
+        klass = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'NativeQA')
+        method = next(n for n in klass.body if isinstance(n, ast.FunctionDef) and n.name == 'proxy_adopt')
+        stop = next(i for i, n in enumerate(method.body) if isinstance(n, ast.Assign)
+                    and any(isinstance(t, ast.Name) and t.id == 'final' for t in n.targets))
+        prefix = compile(ast.Module(body=method.body[1:stop + 1], type_ignores=[]), str(SCRIPT), 'exec')
+        identity = '00000000-0000-4000-8000-000000000011'
+        params, preview, body = {'operation_kind': 'proxy-adopt'}, {'disconnect_expected': True}, {'operation_id': identity}
+        for layout, reply, expected_branch in (
+                ('named-volume', {'ok': True, 'result': {'state': 'recovery-required'}}, 'terminal-state'),
+                ('named-volume', {'ok': False, 'error': {'status': 503, 'message': 'PRIVATE'}}, 'status-rejected'),
+                ('bind', {'ok': True, 'result': {'state': 'recovery-required'}}, None)):
+            with self.subTest(layout=layout, branch=expected_branch), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                qa = module.NativeQA(SimpleNamespace(evidence_dir=root / 'evidence'))
+                qa.layout, qa.auth = layout, root
+                (root / 'users.json').write_bytes(b'PRIVATE')
+                qa.preview = unittest.mock.Mock(return_value=(params, preview))
+                qa.apply = unittest.mock.Mock(return_value=(identity, body))
+                qa.proxy_adoption_observation = unittest.mock.Mock(return_value={'qualification': 'unknown'})
+                qa.record = unittest.mock.Mock()
+                with patch.object(module, 'raw_request', return_value=reply) as request:
+                    try:
+                        exec(prefix, {'self': qa, 'inspect': lambda name: {'Id': 'a' * 64}, 'digest': module.digest})
+                    except RuntimeError as error:
+                        original = error
+                    else:
+                        self.fail('original failing owner operation was accepted')
+                self.assertEqual(str(original), 'owner operation held: recovery-required' if reply['ok'] else 'installed status unavailable')
+                self.assertEqual(request.call_args_list, [unittest.mock.call('status', {'operation_id': identity})])
+                qa.apply.assert_called_once_with(params, preview)
+                if expected_branch is None:
+                    qa.record.assert_not_called()
+                    qa.proxy_adoption_observation.assert_not_called()
+                    continue
+                self.assertEqual(qa.record.call_count, 1, 'the named-volume failure currently loses its original branch')
+                self.assertEqual(qa.record.call_args.args, ('proxy-adoption-observation',))
+                packet = qa.record.call_args.kwargs
+                self.assertEqual(packet['finish_branch'], expected_branch)
+                self.assertEqual(packet['status_ok'], reply['ok'])
+                self.assertEqual(packet['owner_state'], 'recovery-required' if reply['ok'] else 'unknown')
+                self.assertEqual(packet['error_kind'], 'runtime-error')
+                self.assertEqual(qa.proxy_adoption_observation.call_count, 1)
+                self.assertNotIn('PRIVATE', json.dumps(packet))
+
+    def test_proxy_adoption_collector_failure_keeps_exception_identity_and_trace(self):
+        module = self.native_module()
+        for failed_boundary in ('projection', 'record'):
+            with self.subTest(failed_boundary=failed_boundary), tempfile.TemporaryDirectory() as directory:
+                qa = module.NativeQA(SimpleNamespace(evidence_dir=Path(directory)))
+                qa.layout = 'named-volume'
+                original = RuntimeError('PRIVATE_ORIGINAL')
+                qa.status = unittest.mock.Mock(side_effect=original)
+                captured = []
+                def project(*args):
+                    self.assertIs(sys.exception(), original)
+                    captured.append(original.__traceback__)
+                    if failed_boundary == 'projection':
+                        raise RuntimeError('PRIVATE_COLLECTOR')
+                    return {'qualification': 'unknown'}
+                qa.proxy_adoption_observation = unittest.mock.Mock(side_effect=project)
+                qa.record = unittest.mock.Mock(side_effect=RuntimeError('PRIVATE_RECORD') if failed_boundary == 'record' else None)
+                # The opt-in is part of the bounded verifier, never product API.
+                try:
+                    qa.finish('00000000-0000-4000-8000-000000000011', adoption_expected={})
+                except TypeError:
+                    self.fail('finish must support the source-scoped adoption diagnostic without changing its failure')
+                except RuntimeError as caught:
+                    self.assertIs(caught, original)
+                    self.assertIs(caught.__traceback__.tb_next, captured[0],
+                                  'explicit raise(error) would add a duplicate finish traceback frame')
+                else:
+                    self.fail('original exception must escape')
+                self.assertEqual(qa.status.call_count, 1)
+                self.assertEqual(qa.proxy_adoption_observation.call_count, 1)
+
+    def test_proxy_adoption_original_wait_deadline_is_observed_without_retry(self):
+        module = self.native_module()
+        with tempfile.TemporaryDirectory() as directory:
+            qa = module.NativeQA(SimpleNamespace(evidence_dir=Path(directory)))
+            qa.layout = 'named-volume'
+            qa.status = unittest.mock.Mock(return_value={'state': 'adopting'})
+            qa.proxy_adoption_observation = unittest.mock.Mock(return_value={'qualification': 'unknown'})
+            qa.record = unittest.mock.Mock()
+            original = RuntimeError('actual owner operation did not finish')
+            def timed_out(predicate, **kwargs):
+                self.assertEqual(kwargs, {'timeout': 420, 'message': 'actual owner operation did not finish'})
+                self.assertIsNone(predicate())
+                raise original
+            with patch.object(module, 'wait', side_effect=timed_out) as waiting:
+                try:
+                    qa.finish('00000000-0000-4000-8000-000000000011', adoption_expected={})
+                except TypeError:
+                    self.fail('missing bounded adoption diagnostic')
+                except RuntimeError as caught:
+                    self.assertIs(caught, original)
+                else:
+                    self.fail('original deadline failure must escape')
+            waiting.assert_called_once()
+            qa.status.assert_called_once()
+            qa.proxy_adoption_observation.assert_called_once()
+            self.assertEqual(qa.record.call_args.kwargs['finish_branch'], 'waiting')
+            self.assertEqual(qa.record.call_args.kwargs['owner_state'], 'adopting')
+
+    def test_proxy_adoption_transport_keeps_original_wait_retry_and_deadline(self):
+        module = self.native_module()
+        with tempfile.TemporaryDirectory() as directory:
+            qa = module.NativeQA(SimpleNamespace(evidence_dir=Path(directory)))
+            qa.layout = 'named-volume'
+            qa.proxy_adoption_observation = unittest.mock.Mock(return_value={'qualification': 'unknown'})
+            qa.record = unittest.mock.Mock()
+            # Original wait deliberately absorbs OSError and eventually emits
+            # its own deadline error. Advance only its clock; keep that code.
+            with patch.object(module, 'raw_request', side_effect=OSError('PRIVATE_TRANSPORT')) as request, \
+                 patch.object(module.time, 'monotonic', side_effect=[0.0, 0.0, 421.0]), \
+                 patch.object(module.time, 'sleep'):
+                try:
+                    qa.finish('00000000-0000-4000-8000-000000000011', adoption_expected={})
+                except TypeError:
+                    self.fail('missing bounded adoption diagnostic')
+                except RuntimeError as caught:
+                    self.assertEqual(str(caught), 'actual owner operation did not finish')
+                else:
+                    self.fail('original wait must exhaust its 420-second deadline')
+            request.assert_called_once_with('status', {'operation_id': '00000000-0000-4000-8000-000000000011'})
+            qa.proxy_adoption_observation.assert_called_once()
+            packet = qa.record.call_args.kwargs
+            self.assertEqual(packet['finish_branch'], 'status-call')
+            self.assertEqual(packet['status_error_kind'], 'os-error')
+            self.assertEqual(packet['error_kind'], 'runtime-error')
+            self.assertIsNone(packet['status_ok'])
+            self.assertNotIn('PRIVATE', json.dumps(packet))
+
+    def test_proxy_adoption_malformed_status_keeps_original_exception(self):
+        module = self.native_module()
+        with tempfile.TemporaryDirectory() as directory:
+            qa = module.NativeQA(SimpleNamespace(evidence_dir=Path(directory)))
+            qa.layout = 'named-volume'
+            qa.proxy_adoption_observation = unittest.mock.Mock(return_value={'qualification': 'unknown'})
+            qa.record = unittest.mock.Mock()
+            for value in ([], None, 7, 'PRIVATE'):
+                with self.subTest(value_type=type(value).__name__):
+                    # The original final predicate indexes the response. Retain
+                    # its precise exception and args even when it is malformed.
+                    try:
+                        value['state']
+                    except TypeError as original:
+                        expected_args = original.args
+                    qa.status = unittest.mock.Mock(return_value=value)
+                    qa.proxy_adoption_observation.reset_mock(); qa.record.reset_mock()
+                    with self.assertRaises(TypeError) as caught:
+                        qa.finish('00000000-0000-4000-8000-000000000011', adoption_expected={})
+                    self.assertEqual(caught.exception.args, expected_args)
+                    qa.status.assert_called_once()
+                    qa.proxy_adoption_observation.assert_called_once()
+                    qa.record.assert_called_once()
+                    self.assertEqual(qa.record.call_args.kwargs['owner_state'], 'unknown')
+                    self.assertNotIn('PRIVATE', json.dumps(qa.record.call_args.kwargs))
+
+    def test_proxy_adoption_diagnostic_uses_closed_original_source_roles(self):
+        module = self.native_module()
+        self.assertTrue(hasattr(module, 'ADOPTION_CODE_SPECS'), 'adoption guards need a separate bounded original-code lane')
+        specs = module.ADOPTION_CODE_SPECS
+        self.assertLessEqual(len(specs) + len(module.BROKER_CODE_LABELS), 32)
+        self.assertEqual(len(module.SELECTOR_CODE_SPECS), 13, 'do not borrow or replace selector roles')
+        self.assertTrue(any(path == 'dc_overview.release_broker' and ancestry == ('InstalledOwner', 'adopt')
+                            for _, path, ancestry in specs))
+        self.assertTrue(any(path == 'cryptolabs_proxy.standard_adoption' and ancestry == ('StandardAdoption', 'adopt')
+                            for _, path, ancestry in specs))
+        module.sysconfig.get_config_vars()
+        with private_owner_temp(module) as directory:
+            prefix = Path(directory).resolve() / 'legacy-host-venv'
+            site = prefix / ('lib/python' + str(sys.version_info.major) + '.' + str(sys.version_info.minor)) / 'site-packages'
+            installed = {}
+            for _, name, ancestry in specs:
+                if name not in installed:
+                    role = 'dc' if name.startswith('dc_overview.') else 'proxy'
+                    original = (ROOT if role == 'dc' else ROOT.parent / 'proxy') / 'src' / (name.replace('.', '/') + '.py')
+                    raw = original.read_bytes()
+                    self.assertEqual(module.digest(raw), module.FROZEN_PRODUCT_HASHES[role]['src/' + name.replace('.', '/') + '.py'])
+                    path = site / (name.replace('.', '/') + '.py')
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(raw)
+                    loaded = types.ModuleType(name)
+                    loaded.__file__ = str(path)
+                    installed[name] = (loaded, compile(raw, str(path), 'exec'), path)
+                loaded, expected, _ = installed[name]
+                owner = loaded
+                for item in ancestry[:-1]:
+                    expected = next(code for code in expected.co_consts if type(code) is types.CodeType and code.co_name == item)
+                    if not hasattr(owner, item):
+                        setattr(owner, item, type(item, (), {}))
+                    owner = getattr(owner, item)
+                code = next(code for code in expected.co_consts if type(code) is types.CodeType and code.co_name == ancestry[-1])
+                setattr(owner, ancestry[-1], types.FunctionType(code, {}))
+            modules = {name: item[0] for name, item in installed.items()}
+            with patch.dict(sys.modules, modules), patch.object(module.sys, 'prefix', str(prefix)):
+                codes = module.naturally_loaded_adoption_codes(module.time.monotonic() + 1)
+                self.assertEqual({label for label, _ in codes}, {label for label, _, _ in specs})
+                original = installed['dc_overview.release_broker'][0].InstalledOwner.adopt
+                self.assertTrue(any(code is original.__code__ for _, code in codes))
+                def foreign(*args):
+                    raise RuntimeError('PRIVATE')
+                installed['dc_overview.release_broker'][0].InstalledOwner.adopt = foreign
+                refused = module.naturally_loaded_adoption_codes(module.time.monotonic() + 1)
+                self.assertFalse(any(label == next(label for label, name, ancestry in specs
+                                                  if name == 'dc_overview.release_broker' and ancestry == ('InstalledOwner', 'adopt'))
+                                     for label, _ in refused))
+                installed['dc_overview.release_broker'][0].InstalledOwner.adopt = original
+                path = installed['dc_overview.release_broker'][2]
+                path.write_bytes(path.read_bytes() + b'\n')
+                refused = module.naturally_loaded_adoption_codes(module.time.monotonic() + 1)
+                self.assertFalse(any(label in {label for label, name, _ in specs if name == 'dc_overview.release_broker'}
+                                     for label, _ in refused))
+
     def test_fixture_broker_execstart_uses_layout_selected_interpreter(self):
         """Execute the actual drop-in statements; no Engine or systemd calls."""
         tree = ast.parse(SCRIPT.read_text())
@@ -2201,6 +2419,110 @@ class FleetNativeRouteTest(unittest.TestCase):
                 self.assertEqual({p: p.read_bytes() for p in before}, before)
                 # Exact prefix/purelib and frozen bytes are compulsory. A
                 # readable checkout never supplies fallback after a refusal.
+                self.assertTrue(hasattr(qa, 'proxy_adoption_observation'),
+                                'proxy adoption needs a bounded read of its actual retained operation')
+                adopt_id = '00000000-0000-4000-8000-000000000005'
+                adopt_request = {**params, 'operation_kind': 'proxy-adopt', 'components': ['cryptolabs-proxy']}
+                adopt_preview = {k: v for k, v in preview.items() if k != 'preview_sha256'}
+                adopt_preview.update(request=adopt_request, owner_plan={'plan_id': 'e' * 64},
+                                     owner_declaration={'canonical_json_base64': 'e30=', 'sha256': 'f' * 64},
+                                     owner_identity={**owner_identity, 'updater_directory': str(root / 'named-volume/auth/update-jobs')})
+                adopt_preview['preview_sha256'] = sha(canonical(adopt_preview))
+                adopt_apply = {**apply_params, 'operation_id': adopt_id,
+                               'preview_sha256': adopt_preview['preview_sha256']}
+                adoption = eval(operation_expression, {'preview': adopt_preview, 'params': adopt_apply,
+                    'fingerprint': sha(canonical({'params': adopt_apply, 'actor': actor}))})
+                adoption.update(state='recovery-required', phase='owner',
+                                reason='Proxy source or declaration changed after preview')
+                adopt_path = operations / (adopt_id + '.json')
+                adopt_path.write_bytes(module.encoded(adoption)); adopt_path.chmod(0o600)
+                expected = {'apply': adopt_apply, 'request': adopt_request, 'preview': adopt_preview}
+                saved_layout = qa.layout
+                qa.layout = 'named-volume'
+                source_before, operation_before = installed_source.read_bytes(), adopt_path.read_bytes()
+                with owner_file_read_audit(module, {native_source: 1048576, adopt_path: 1048576}) as reads:
+                    observation = qa.proxy_adoption_observation(adopt_id, expected)
+                self.assertEqual([item['path'] for item in reads], [native_source, adopt_path])
+                self.assertEqual(observation['qualification'], 'valid')
+                self.assertEqual(observation['operation_state'], 'recovery-required')
+                self.assertEqual(observation['operation_phase'], 'owner')
+                self.assertEqual(observation['reason_category'], 'proxy-preview-plan-changed')
+                self.assertIs(observation['owner_plan_matches_preview'], True)
+                self.assertIs(observation['owner_declaration_matches_preview'], True)
+                self.assertIsNone(observation['failure'])
+                for private in ('PRIVATE', str(root), 'e' * 64, 'f' * 64):
+                    self.assertNotIn(private, json.dumps(observation))
+                self.assertLessEqual(len(module.encoded(observation)), 4096)
+                # Execute the unchanged InstalledOwner.adopt plan-conflict
+                # guard, then the actual child wrapper/private slot/parent
+                # projection. Only the passive plan and persistence boundary
+                # are substituted; no product mutation or qualification guard.
+                loaded = types.ModuleType('dc_overview.release_broker')
+                loaded.__file__ = str(native_source)
+                owner_code = next(code for code in compile(broker_source, str(native_source), 'exec').co_consts
+                                  if type(code) is types.CodeType and code.co_name == 'InstalledOwner')
+                adopt_code = next(code for code in owner_code.co_consts
+                                  if type(code) is types.CodeType and code.co_name == 'adopt')
+                error_node = next(node for node in broker_tree.body if isinstance(node, ast.ClassDef) and node.name == 'BrokerError')
+                error_namespace = {}
+                exec(compile(ast.Module(body=[error_node], type_ignores=[]), str(native_source), 'exec'), error_namespace)
+                loaded.InstalledOwner = type('InstalledOwner', (), {})
+                loaded.InstalledOwner.adopt = types.FunctionType(adopt_code, error_namespace)
+                passive_plan = unittest.mock.Mock(return_value={'plan_id': 'different'})
+                loaded.InstalledOwner.adoption = lambda self: (SimpleNamespace(plan=passive_plan), {})
+                loaded.private_write = unittest.mock.Mock()
+                def actual_guard(owner, broker, target, value):
+                    try:
+                        owner.adopt(value['owner_plan'])
+                    except Exception:
+                        broker.private_write(target, value)
+                        raise
+                adopt_node = next(node for node in ast.walk(broker_tree)
+                                  if isinstance(node, ast.FunctionDef) and node.name == 'adopt')
+                guard_line = next(node.lineno for node in ast.walk(adopt_node) if isinstance(node, ast.Raise))
+                role = next(label for label, name, ancestry in module.ADOPTION_CODE_SPECS
+                            if name == 'dc_overview.release_broker' and ancestry == ('InstalledOwner', 'adopt'))
+                with patch.object(module, 'ROOT', root), patch.dict(sys.modules, {
+                        'dc_overview.release_broker': loaded, 'cryptolabs_proxy.standard_adoption': None,
+                        'cryptolabs_proxy.update_recovery': None}):
+                    qa.reset_owner_observation()
+                    for changed in (False, True):
+                        with self.subTest(adoption_source_changed=changed):
+                            installed_source.write_bytes(source_before + (b'\n' if changed else b''))
+                            passive_plan.reset_mock(); loaded.private_write.reset_mock()
+                            with module.observe_broker_owner_failures(loaded, operations, (('broker-operation', actual_guard.__code__),)):
+                                with self.assertRaises(error_namespace['BrokerError']):
+                                    actual_guard(loaded.InstalledOwner(), loaded, adopt_path, adoption)
+                            passive_plan.assert_called_once_with({})
+                            loaded.private_write.assert_called_once_with(adopt_path, adoption)
+                            child = qa.read_owner_observation(adopt_id)
+                            self.assertIsInstance(child, dict, 'the actual adoption lane must persist a source-qualified packet')
+                            if changed:
+                                self.assertEqual(child['adoption']['qualification'], 'source-refused')
+                                self.assertIsNone(child['code_label'])
+                                continue
+                            self.assertEqual(child['adoption']['qualification'], 'qualified')
+                            self.assertEqual(child['code_label'], role)
+                            self.assertEqual(child['source_line'], guard_line)
+                            self.assertEqual(child['adoption']['frames'][-1], {'role': role, 'line': guard_line})
+                            observed = qa.proxy_adoption_observation(adopt_id, expected)
+                            self.assertEqual(observed['failure'], child)
+                            self.assertNotIn('PRIVATE', json.dumps(observed))
+                            self.assertNotIn(str(root), json.dumps(observed))
+                    installed_source.write_bytes(source_before)
+                foreign_expected = {**expected, 'request': {**adopt_request, 'components': ['ipmi-monitor']}}
+                self.assertEqual(qa.proxy_adoption_observation(adopt_id, foreign_expected)['qualification'], 'identity-refused')
+                installed_source.write_bytes(source_before + b'\n')
+                self.assertEqual(qa.proxy_adoption_observation(adopt_id, expected)['qualification'], 'source-refused')
+                installed_source.write_bytes(source_before)
+                adopt_path.write_bytes(b'x' * 1048577)
+                self.assertEqual(qa.proxy_adoption_observation(adopt_id, expected)['qualification'], 'overflow')
+                adopt_path.write_bytes(operation_before)
+                with patch.object(module.time, 'monotonic', side_effect=[100.0, 102.0]):
+                    self.assertEqual(qa.proxy_adoption_observation(adopt_id, expected)['qualification'], 'deadline')
+                self.assertEqual(adopt_path.read_bytes(), operation_before)
+                self.assertEqual(installed_source.read_bytes(), source_before)
+                qa.layout = saved_layout
                 for prefix in ("/usr", str(root / "other-venv")):
                     with self.subTest(prefix=prefix), patch.object(module.sys, "prefix", prefix):
                         rejected = qa.owner_mapping_observation(identity)

@@ -945,9 +945,29 @@ SELECTOR_CODE_SPECS = (
     ('catalog-recover-publication', 'dc_overview.release_catalog', ('ReleaseStore', 'recover_publication')),
     ('proxy-recovery-require', 'cryptolabs_proxy.update_recovery', ('require',)),
 )
+# A separate lane: never combine these with the 13 selector roles. Together
+# with the existing 19 broker/owner roles this stays below the 32-object cap.
+ADOPTION_CODE_SPECS = (
+    ('adoption-owner', 'dc_overview.release_broker', ('InstalledOwner', 'adopt')),
+    ('adoption-settings', 'dc_overview.release_broker', ('InstalledOwner', 'adoption')),
+    ('adoption-owner-recover', 'dc_overview.release_broker', ('InstalledOwner', 'recover')),
+    ('adoption-operation', 'dc_overview.release_broker', ('ReleaseBroker', 'run_operation')),
+    ('adoption-fresh', 'dc_overview.release_broker', ('ReleaseBroker', '_fresh')),
+    ('adoption-plan', 'cryptolabs_proxy.standard_adoption', ('StandardAdoption', 'plan')),
+    ('adoption-apply', 'cryptolabs_proxy.standard_adoption', ('StandardAdoption', 'adopt')),
+    ('adoption-recover', 'cryptolabs_proxy.standard_adoption', ('StandardAdoption', 'recover_adoption')),
+    ('adoption-declaration', 'cryptolabs_proxy.standard_adoption', ('_declaration',)),
+    ('adoption-require', 'cryptolabs_proxy.update_recovery', ('require',)),
+)
 ERROR_KINDS = (
     "assertion-error", "file-not-found", "permission-error", "os-error", "runtime-error", "unknown",
 )
+
+
+def _diagnostic_error_kind(error):
+    return {AssertionError: 'assertion-error', FileNotFoundError: 'file-not-found',
+            PermissionError: 'permission-error', OSError: 'os-error',
+            RuntimeError: 'runtime-error'}.get(type(error), 'unknown')
 SERVICE_ENUMS = {
     "ActiveState": ("active", "reloading", "inactive", "failed", "activating", "deactivating", "maintenance", "refreshing"),
     "SubState": ("dead", "condition", "start-pre", "start", "start-post", "running", "exited", "reload", "reload-signal", "reload-notify", "stop", "stop-watchdog", "stop-sigterm", "stop-sigkill", "stop-post", "final-watchdog", "final-sigterm", "final-sigkill", "failed", "auto-restart", "auto-restart-queued", "cleaning"),
@@ -1022,9 +1042,9 @@ def broker_failure_metadata(error, code_objects):
             return {"code_label": None, "source_line": None, "error_kind": "unknown"}
         terminal_known = False
         for label, code in code_objects:
-            if (label in BROKER_CODE_LABELS or label in {item[0] for item in SELECTOR_CODE_SPECS}) and frame.tb_frame.f_code is code:
+            if (label in BROKER_CODE_LABELS or label in {item[0] for item in (*SELECTOR_CODE_SPECS, *ADOPTION_CODE_SPECS)}) and frame.tb_frame.f_code is code:
                 terminal_known = True
-                selector_seen |= label in {item[0] for item in SELECTOR_CODE_SPECS}
+                selector_seen |= label in {item[0] for item in (*SELECTOR_CODE_SPECS, *ADOPTION_CODE_SPECS)}
                 metadata = fixture_failure_metadata(error, fixture_code=code)
                 if metadata["fixture_line"] is not None:
                     result = {"code_label": label, "source_line": metadata["fixture_line"],
@@ -1390,13 +1410,21 @@ def selector_read_bytes(path, limit, deadline):
 
 
 def naturally_loaded_selector_codes(deadline):
+    return _naturally_loaded_codes(deadline, SELECTOR_CODE_SPECS)
+
+
+def naturally_loaded_adoption_codes(deadline):
+    return _naturally_loaded_codes(deadline, ADOPTION_CODE_SPECS)
+
+
+def _naturally_loaded_codes(deadline, specs):
     """No import/discovery calls: bind only reviewed, naturally loaded code."""
     result, sources = [], {}
     site = Path(sysconfig.get_path('purelib', scheme='posix_prefix',
                                   vars={'base': sys.prefix, 'platbase': sys.prefix}))
     if not site.is_relative_to(Path(sys.prefix)):
         raise ObservationRefused('source-refused')
-    for label, module_name, ancestry in SELECTOR_CODE_SPECS:
+    for label, module_name, ancestry in specs:
         module = sys.modules.get(module_name)
         if type(module) is not types.ModuleType:
             continue
@@ -1521,16 +1549,64 @@ def selector_failure_details(error, codes, manifest, deadline):
 
 def observation_failure_valid(value):
     if (type(value) is not dict or set(value) not in (
-            {'code_label', 'source_line', 'error_kind'}, {'code_label', 'source_line', 'error_kind', 'selector'})
+            {'code_label', 'source_line', 'error_kind'}, {'code_label', 'source_line', 'error_kind', 'selector'},
+            {'code_label', 'source_line', 'error_kind', 'adoption'})
             or type(value['error_kind']) is not str or value['error_kind'] not in ERROR_KINDS):
         return False
     if 'selector' in value and not selector_details_valid(value['selector']):
         return False
+    if 'adoption' in value:
+        detail = value['adoption']
+        if not adoption_details_valid(detail):
+            return False
+        if detail['qualification'] == 'qualified':
+            if (not detail['frames'] or value['code_label'] != detail['frames'][-1]['role']
+                    or value['source_line'] != detail['frames'][-1]['line']):
+                return False
+        elif value['code_label'] is not None or value['source_line'] is not None or value['error_kind'] != 'unknown':
+            return False
     if value['code_label'] is None:
         return value['source_line'] is None and value['error_kind'] == 'unknown'
     return (type(value['code_label']) is str and value['code_label'] in (
-                *BROKER_CODE_LABELS, *(item[0] for item in SELECTOR_CODE_SPECS))
+                *BROKER_CODE_LABELS, *(item[0] for item in SELECTOR_CODE_SPECS),
+                *(item[0] for item in ADOPTION_CODE_SPECS if 'adoption' in value))
             and type(value['source_line']) is int and 1 <= value['source_line'] <= 1000000)
+
+
+def adoption_details_valid(value):
+    if (type(value) is not dict or set(value) != {'qualification', 'source_stage', 'frames'}
+            or type(value['qualification']) is not str or value['qualification'] not in (
+                'qualified', 'innermost-unknown', 'source-refused', 'schema-refused', 'identity-refused',
+                'custody-refused', 'parse-refused', 'overflow', 'deadline', 'unknown')
+            or type(value['source_stage']) is not str or value['source_stage'] not in (
+                'unknown', 'operation', 'broker-source', 'adoption-discovery', 'failure-sample')
+            or type(value['frames']) is not list or len(value['frames']) > 16):
+        return False
+    roles = {item[0] for item in ADOPTION_CODE_SPECS}
+    return all(type(frame) is dict and set(frame) == {'role', 'line'}
+               and type(frame['role']) is str and frame['role'] in roles
+               and type(frame['line']) is int and 1 <= frame['line'] <= 1000000
+               for frame in value['frames'])
+
+
+def adoption_failure_details(error, codes, deadline):
+    result = {'qualification': 'innermost-unknown', 'source_stage': 'failure-sample', 'frames': []}
+    frame, count, inner_known = error.__traceback__, 0, False
+    while frame is not None:
+        observation_deadline(deadline)
+        count += 1
+        if count > 32:
+            return {**result, 'qualification': 'overflow', 'frames': []}
+        matches = [role for role, code in codes if frame.tb_frame.f_code is code]
+        inner_known = len(matches) == 1
+        if inner_known:
+            if len(result['frames']) == 16:
+                return {**result, 'qualification': 'overflow', 'frames': []}
+            result['frames'].append({'role': matches[0], 'line': frame.tb_lineno})
+        frame = frame.tb_next
+    if inner_known:
+        result['qualification'] = 'qualified'
+    return result
 
 
 def selector_details_valid(value):
@@ -1646,8 +1722,9 @@ def observe_broker_owner_failures(broker_module, operation_root, code_objects):
     codes = tuple(code_objects)
     proxy_codes = None
     selector_operation_id = None
+    adoption_operation_id = None
     def observed(*args, **kwargs):
-        nonlocal proxy_codes, selector_operation_id
+        nonlocal proxy_codes, selector_operation_id, adoption_operation_id
         result = original(*args, **kwargs)
         # Nothing diagnostic executes before a successful original write.
         try:
@@ -1670,12 +1747,47 @@ def observe_broker_owner_failures(broker_module, operation_root, code_objects):
                     selector_call |= frame.tb_lineno == 895
                 frame = frame.tb_next
             if eligible:
-                if selector_operation_id is not None:
-                    return result  # One selector exception context/operation, no retry.
                 # The other admitted layout retains its existing owner observer;
                 # it cannot acquire the named-volume selector diagnostic purpose.
                 persisted = args[1] if len(args) > 1 and type(args[1]) is dict else {}
                 owner_identity = persisted.get('owner_identity')
+                adoption_call = (persisted.get('operation_kind') == 'proxy-adopt'
+                    and type(owner_identity) is dict
+                    and type(owner_identity.get('updater_directory')) is str
+                    and owner_identity['updater_directory'] != str(ROOT / 'bind/auth/update-jobs'))
+                if adoption_call:
+                    if adoption_operation_id is not None:
+                        return result
+                    adoption_operation_id = identity
+                    details = {'qualification': 'unknown', 'source_stage': 'operation', 'frames': []}
+                    failure = {'code_label': None, 'source_line': None, 'error_kind': 'unknown'}
+                    try:
+                        deadline = time.monotonic() + 1
+                        selector_operation(persisted, identity)
+                        details['source_stage'] = 'broker-source'
+                        path = Path(vars(broker_module).get('__file__', ''))
+                        if (not path.is_relative_to(Path(sys.prefix))
+                                or digest(selector_read_bytes(path, 1048576, deadline))
+                                != FROZEN_PRODUCT_HASHES['dc']['src/dc_overview/release_broker.py']):
+                            raise ObservationRefused('source-refused')
+                        details['source_stage'] = 'adoption-discovery'
+                        adoption_codes = naturally_loaded_adoption_codes(deadline)
+                        if len(codes) + len(adoption_codes) > 32:
+                            raise ObservationRefused('overflow')
+                        details = adoption_failure_details(error, adoption_codes, deadline)
+                        if details['qualification'] == 'qualified':
+                            failure = broker_failure_metadata(error, adoption_codes)
+                        observation_deadline(deadline)
+                    except Exception as refused:
+                        reason = refused.args[0] if type(refused) is ObservationRefused and refused.args else 'unknown'
+                        details = {**details, 'qualification': reason if type(reason) is str and reason in (
+                            'source-refused', 'schema-refused', 'identity-refused', 'custody-refused',
+                            'parse-refused', 'overflow', 'deadline') else 'unknown', 'frames': []}
+                        failure = {'code_label': None, 'source_line': None, 'error_kind': 'unknown'}
+                    write_owner_observation(identity, {**failure, 'adoption': details})
+                    return result
+                if selector_operation_id is not None:
+                    return result  # One selector exception context/operation, no retry.
                 if (type(owner_identity) is dict
                         and type(owner_identity.get('updater_directory')) is str
                         and owner_identity['updater_directory'] == str(ROOT / 'bind/auth/update-jobs')):
@@ -2366,6 +2478,64 @@ class NativeQA:
         except Exception:
             pass
         return None
+
+    def proxy_adoption_observation(self, operation_id, expected):
+        """One fixed operation and private child record, without owner calls."""
+        unknown = {'qualification': 'unknown', 'operation_state': 'unknown',
+                   'operation_phase': 'unknown', 'reason_category': 'unknown',
+                   'owner_plan_matches_preview': None, 'owner_declaration_matches_preview': None,
+                   'failure': None}
+        try:
+            deadline = time.monotonic() + 1
+            observation_deadline(deadline)
+            if self.layout != 'named-volume' or not observation_uuid(operation_id):
+                raise ObservationRefused('identity-refused')
+            prefix = Path('/opt/fleet-native-qa/venv')
+            site = prefix / 'lib/python3.12/site-packages'
+            if (Path(sys.prefix) != prefix
+                    or Path(sysconfig.get_path('purelib', scheme='posix_prefix',
+                        vars={'base': sys.prefix, 'platbase': sys.prefix})) != site):
+                raise ObservationRefused('source-refused')
+            if digest(selector_read_bytes(site / 'dc_overview/release_broker.py', 1048576, deadline)) != FROZEN_PRODUCT_HASHES['dc']['src/dc_overview/release_broker.py']:
+                raise ObservationRefused('source-refused')
+            record = observation_read(self.store.root / 'broker/operations' / (operation_id + '.json'), 1048576)
+            observation_deadline(deadline)
+            selector_operation(record, operation_id)
+            if (type(expected) is not dict or set(expected) != {'apply', 'request', 'preview'}
+                    or any(type(expected[k]) is not dict for k in expected)
+                    or record['operation_kind'] != 'proxy-adopt'
+                    or record['request'] != expected['request']
+                    or any(record.get(k) != v for k, v in expected['apply'].items())
+                    or any(record.get(k) != expected['preview'].get(k) for k in (
+                        'preview_id', 'preview_sha256', 'selection_id', 'selection_sha256', 'manifest_sha256'))
+                    or (record['actor'] != expected['preview']['actor'] if 'actor' in expected['preview'] else
+                        record['actor'].get('kind') != 'fleet-admin' or record['actor'].get('username') != 'native-admin')):
+                raise ObservationRefused('identity-refused')
+            result = {**unknown, 'qualification': 'valid', 'operation_state': record['state'],
+                      'operation_phase': record['phase'],
+                      'owner_plan_matches_preview': record['owner_plan'] == expected['preview'].get('owner_plan'),
+                      'owner_declaration_matches_preview': (record['owner_declaration'] == expected['preview']['owner_declaration']
+                                                           if 'owner_declaration' in expected['preview'] else None)}
+            reasons = {
+                'Proxy source or declaration changed after preview': 'proxy-preview-plan-changed',
+                'Owner operation interrupted; reconcile retained operation before retry': 'owner-interrupted',
+                'Installed owner recovery verification required': 'owner-recovery-required',
+                'Selected release changed before owner dispatch': 'selection-conflict',
+                'Resulting selection differs from preview': 'selection-conflict',
+            }
+            result['reason_category'] = reasons.get(record.get('reason'), 'unknown')
+            failure = self.read_owner_observation(operation_id)
+            if type(failure) is dict and 'adoption' in failure:
+                result['failure'] = failure
+            observation_deadline(deadline)
+            if len(encoded(result)) > 4096:
+                raise ObservationRefused('overflow')
+            return result
+        except Exception as refused:
+            reason = refused.args[0] if type(refused) is ObservationRefused and refused.args else 'unknown'
+            return {**unknown, 'qualification': reason if type(reason) is str and reason in (
+                'source-refused', 'schema-refused', 'identity-refused', 'custody-refused',
+                'parse-refused', 'overflow', 'deadline') else 'unknown'}
 
     def owner_mapping_observation(self, operation_id):
         unknown = {'observation': 'unknown', 'job_id_present': None}
@@ -3794,25 +3964,65 @@ class NativeQA:
 
     def status(self, identity):
         value = raw_request("status", {"operation_id": identity})
+        observed = getattr(self, '_adoption_finish_observation', None)
+        if type(observed) is dict:
+            observed['status_ok'] = value.get('ok') if type(value.get('ok')) is bool else None
+            if not value.get('ok'):
+                observed['finish_branch'] = 'status-rejected'
         if not value.get("ok"):
             raise RuntimeError("installed status unavailable")
         return value["result"]
 
-    def finish(self, identity, states=("completed",)):
+    def finish(self, identity, states=("completed",), *, adoption_expected=None):
+        observed = None
+        previous = getattr(self, '_adoption_finish_observation', None)
+        if adoption_expected is not None and self.layout == 'named-volume':
+            observed = {'finish_branch': 'waiting', 'status_ok': None, 'owner_state': 'unknown',
+                        'status_error_kind': 'unknown'}
+            self._adoption_finish_observation = observed
         def final():
-            value = self.status(identity)
+            if observed is not None:
+                observed.update(finish_branch='status-call', status_ok=None, status_error_kind='unknown', owner_state='unknown')
+            try:
+                value = self.status(identity)
+            except Exception as error:
+                if observed is not None:
+                    observed['status_error_kind'] = _diagnostic_error_kind(error)
+                raise
+            if observed is not None:
+                state = value.get('state') if type(value) is dict else None
+                observed['owner_state'] = state if type(state) is str and state in (
+                    'prepared', 'selecting', 'pending-submit', 'updating', 'adopting',
+                    'completed', 'failed-restored', 'recovery-required', 'selection-conflict') else 'unknown'
+                observed['finish_branch'] = 'waiting'
             if value["state"] in (
                 "completed",
                 "failed-restored",
                 "recovery-required",
                 "selection-conflict",
             ):
+                if observed is not None:
+                    observed['finish_branch'] = 'terminal-state'
                 if value["state"] not in states:
                     raise RuntimeError("owner operation held: " + value["state"])
                 return value
             return None
 
-        return wait(final, timeout=420, message="actual owner operation did not finish")
+        try:
+            return wait(final, timeout=420, message="actual owner operation did not finish")
+        except Exception as error:
+            if observed is not None:
+                try:
+                    projection = self.proxy_adoption_observation(identity, adoption_expected)
+                    packet = {**observed, 'error_kind': _diagnostic_error_kind(error), 'operation': projection}
+                    if len(encoded(packet)) <= 4096:
+                        self.record('proxy-adoption-observation', **packet)
+                except Exception:
+                    pass
+            raise
+        finally:
+            if observed is not None:
+                self._adoption_finish_observation = previous
 
     def wait_mapped_worker(self, mapped):
         job_id = mapped["job_id"]
@@ -3959,8 +4169,9 @@ class NativeQA:
         users = digest((self.auth / "users.json").read_bytes())
         params, p = self.preview("proxy-b")
         assert p["disconnect_expected"] is True
-        identity, _ = self.apply(params, p)
-        final = self.finish(identity)
+        identity, body = self.apply(params, p)
+        final = self.finish(identity, adoption_expected={'apply': body, 'request': params, 'preview': p}
+                            if self.layout == 'named-volume' else None)
         assert final["state"] == "completed"
         after = inspect("cryptolabs-proxy")
         assert (
