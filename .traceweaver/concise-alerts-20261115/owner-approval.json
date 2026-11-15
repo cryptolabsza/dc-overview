@@ -1,0 +1,32 @@
+{
+  "work_item": "CONCISE-ALERTS-20261115",
+  "recorded_at": "2026-11-15T10:13:03.665881+00:00",
+  "owner_instructions": [
+    "Yes. Also look at other allrets and make them also concise",
+    "It can print the note",
+    "Ok deploy to the two sites"
+  ],
+  "approved_sites": [
+    "LTX",
+    "Charlotte"
+  ],
+  "approved_components": [
+    "dc-overview",
+    "runpod-exporter"
+  ],
+  "source_authority": "Owner-approved notification plan and explicit actual-note extension; current publication/deployment request.",
+  "dev_baseline": "91061265708e6c387dfb9bb883ed471052868b78",
+  "main_baseline": "67594940a46fa821913730ca9753e239e439d5b0",
+  "release_version": "1.9.3",
+  "publication_route": "Commit bounded changes on dev; selective main-derived patch release through reviewed PR, protected CI and signed tag; official immutable images only.",
+  "boundaries": [
+    "No unrelated dev features",
+    "Preserve original dirty checkout",
+    "Preserve GPU collector warning/recovery semantics",
+    "Preserve credentials/recipients/disableResolveMessage",
+    "Preserve site component origin/enabled policies and seven unrelated roles",
+    "Native updater only; retain rollback",
+    "No synthetic notifications, provider/listing/workload writes or reboot"
+  ],
+  "claims": "Source verification passed; publication and deployment pending. Historical closed rollout authority is not reused."
+}

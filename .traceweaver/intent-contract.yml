@@ -77,3 +77,16 @@ gpu_alert_quality_20261104:
   runtime_acceptance: pending
   external_test_notifications: no_new_sends
   preserve: [credentials, recipients, customer_workloads, other_services, monitoring_intent]
+
+concise_alert_notifications_20261115:
+  work_item: CONCISE-ALERTS-20261115
+  authority: .traceweaver/concise-alerts-20261115/owner-approval.json
+  requirements: [REQ-CONCISE-001, REQ-CONCISE-002, REQ-CONCISE-003]
+  traces: [TRACE-CONCISE-001, TRACE-CONCISE-002, TRACE-CONCISE-003]
+  approved_sites: [LTX, Charlotte]
+  approved_components: [dc-overview, runpod-exporter]
+  publication: owner_authorized_bounded_patch_subject_to_current_gates
+  deployment: owner_authorized_native_path_subject_to_official_artifacts
+  production_acceptance: pending
+  external_test_notifications: no_new_sends
+  preserve: [credentials, recipients, component_policies, customer_workloads, other_services, rollback]

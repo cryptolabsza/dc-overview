@@ -226,6 +226,10 @@ def build_alert_rules(
                 "RunPod host dashboard for the message. This observes accessible API note fields; it does "
                 "not reproduce permission-restricted dashboard warning fields."
             ),
+            note_expression=(
+                f"{machine_metric('runpod_machine_note_info')} "
+                f"or on(account,machine_id,hostname) (0 * {known})"
+            ),
         ),
         _rule(
             uid=uid("machine-maintenance-mode"),
@@ -345,8 +349,9 @@ def _rule(
     labels: dict[str, str],
     summary: str,
     description: str,
+    note_expression: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    rule = {
         "uid": uid,
         "title": title,
         "folderUID": folder_uid,
@@ -401,3 +406,15 @@ def _rule(
             },
         ],
     }
+    if note_expression is not None:
+        source = rule["data"][0]
+        rule["data"].append({
+            **source,
+            "refId": "D",
+            "model": {**source["model"], "expr": note_expression, "refId": "D"},
+        })
+        rule["annotations"].update({
+            "runpod_note": "{{ with $values.D }}{{ with .Labels.note }}{{ . }}{{ end }}{{ end }}",
+            "runpod_maintenance_note": "{{ with $values.D }}{{ with .Labels.maintenance_note }}{{ . }}{{ end }}{{ end }}",
+        })
+    return rule

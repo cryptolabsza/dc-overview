@@ -106,3 +106,8 @@ Owner instruction: “Approve and deploy to both sights”, approving the prior 
 
 - REQ-GPUALERT-002: Host-level sustained collector coverage and truthful recovery; additive dc_exporter source intent preserves aggregate GPU policy and legacy scrapes.
 - REQ-GPUALERT-003: Synthetic DRIVER-ERROR dashboard values show telemetry unavailable while real fault/passthrough states remain visible.
+
+
+## Concise alert notifications — approved 15 November 2026
+
+See [.traceweaver/concise-alerts-20261115/requirements.md](.traceweaver/concise-alerts-20261115/requirements.md) for owner-approved REQ-CONCISE-001, REQ-CONCISE-002 and REQ-CONCISE-003. Publication and two-site deployment are authorized subject to verified artifacts, tests, review and preservation checks. This scope does not change unrelated held work.
