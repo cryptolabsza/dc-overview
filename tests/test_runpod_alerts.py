@@ -109,3 +109,45 @@ def test_machine_annotations_use_hostname_machine_id_account_fallback_without_si
     assert all("$labels.account" in summary for summary in machine_summaries)
     assert all("RunPod machine" in summary for summary in machine_summaries)
     assert all("Charlotte" not in summary and "CCC9" not in summary for summary in machine_summaries)
+
+
+def test_only_provider_note_rule_adds_account_scoped_annotation_query():
+    rules = rules_by_uid(account='tenant"\\\naccount')
+    rule = rules["runpod-machine-provider-note"]
+    queries = {query["refId"]: query for query in rule["data"]}
+    assert set(queries) == {"A", "C", "D"}
+    metadata = queries["D"]
+    assert metadata["datasourceUid"] == "prometheus-main"
+    assert metadata["relativeTimeRange"] == queries["A"]["relativeTimeRange"]
+    assert metadata["model"] == {
+        **queries["A"]["model"], "refId": "D",
+        "expr": 'runpod_machine_note_info{account="tenant\\"\\\\\\naccount"} '
+        'or on(account,machine_id,hostname) (0 * runpod_machine_health_known{account="tenant\\"\\\\\\naccount"})',
+    }
+    assert metadata["model"]["instant"] is True
+    assert metadata["model"]["range"] is False
+    assert rule["annotations"]["runpod_note"] == '{{ with $values.D }}{{ with .Labels.note }}{{ . }}{{ end }}{{ end }}'
+    assert rule["annotations"]["runpod_maintenance_note"] == '{{ with $values.D }}{{ with .Labels.maintenance_note }}{{ . }}{{ end }}{{ end }}'
+    for other_rule in rules.values():
+        if other_rule is not rule:
+            assert {query["refId"] for query in other_rule["data"]} == {"A", "C"}
+            assert "runpod_note" not in other_rule["annotations"]
+
+
+def test_provider_note_metadata_is_not_part_of_alert_condition_or_identity():
+    rule = rules_by_uid()["runpod-machine-provider-note"]
+    queries = {query["refId"]: query for query in rule["data"]}
+    assert rule["condition"] == "C"
+    assert rule["uid"] == "runpod-machine-provider-note"
+    assert rule["labels"] == {"account": "RunpodCCC", "severity": "warning", "alert_category": "runpod_provider"}
+    assert expression(rule) == (
+        '(runpod_machine_api_note_present{account="RunpodCCC"} + '
+        'runpod_machine_maintenance_note_present{account="RunpodCCC"}) '
+        'and on(account,machine_id,hostname) (runpod_machine_health_known{account="RunpodCCC"} == 1)'
+    )
+    assert queries["C"]["model"]["expression"] == "A"
+    assert queries["C"]["model"]["conditions"][0]["evaluator"] == {"params": [0.5], "type": "gt"}
+    assert "runpod_machine_note_info" not in expression(rule)
+    assert "note" not in rule["labels"] and "maintenance_note" not in rule["labels"]
+    assert rule["for"] == "0s"
+    assert rule["noDataState"] == rule["execErrState"] == "KeepLast"

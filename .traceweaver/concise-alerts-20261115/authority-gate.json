@@ -1,0 +1,18 @@
+{
+  "decision": "Proceed",
+  "authority": ".traceweaver/concise-alerts-20261115/owner-approval.json",
+  "requirements": [
+    "REQ-CONCISE-001",
+    "REQ-CONCISE-002",
+    "REQ-CONCISE-003"
+  ],
+  "traceability": "traceability-matrix.md#concise-alert-notification-mapping",
+  "allowed_scope": "bounded notification/note code and tests; scoped authority/evidence; main-only patch version preparation; official publication/native two-site adoption",
+  "verification": "PASS: focused181, isolated real Grafana pipeline, packaging artifact check, and complete suite with corrected local-network rerun",
+  "review": "code-review.json independent PASS",
+  "held_claims": [
+    "production_deployment",
+    "external_notification_delivery",
+    "unrelated_dev_feature_acceptance"
+  ]
+}
