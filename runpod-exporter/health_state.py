@@ -23,6 +23,12 @@ def escape_label(value):
     return str(value).replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
 
 
+def normalize_note(value):
+    """Keep provider text readable and bounded in state and metric labels."""
+    text = " ".join(value.split())
+    return text if len(text) <= 512 else text[:511] + "…"
+
+
 def timestamp(value):
     if not isinstance(value, str) or not value:
         return None
@@ -42,6 +48,7 @@ def new_machine(hostname):
         "last_success": 0, "note_present": None, "network_outage_note": None,
         "maintenance_note_present": None, "maintenance_mode": None, "last_sync": None,
         "last_sync_known": False, "telemetry": None, "telemetry_known": False,
+        "note": "", "maintenance_note": "",
     }
 
 
@@ -90,7 +97,11 @@ class HealthState:
                         if key not in record or key == "hostname":
                             continue
                         value = record[key]
-                        if key in ("last_success", "last_sync", "telemetry"):
+                        if key in ("note", "maintenance_note"):
+                            if not isinstance(value, str):
+                                raise ValueError("invalid saved provider note")
+                            value = normalize_note(value)
+                        elif key in ("last_success", "last_sync", "telemetry"):
                             if value is not None and (
                                 type(value) not in (int, float) or not math.isfinite(value) or value < 0
                             ):
@@ -200,6 +211,8 @@ class HealthState:
                 network_outage_note="network outage" in note.casefold(),
                 maintenance_note_present=bool((machine["maintenanceNote"] or "").strip()),
                 maintenance_mode=machine["maintenanceMode"],
+                note=normalize_note(note),
+                maintenance_note=normalize_note(machine["maintenanceNote"] or ""),
             )
             last_sync = timestamp(machine["lastSyncAt"])
             telemetry = machine["latestTelemetry"]
@@ -226,6 +239,7 @@ class HealthState:
             "runpod_machine_health_last_success_timestamp_seconds": "Unix time this machine last appeared in a committed valid inventory",
             "runpod_machine_present": "Whether this machine appeared in the latest committed account inventory",
             "runpod_machine_health_listed": "Last committed explicit API listed boolean",
+            "runpod_machine_note_info": "Last committed provider note and maintenance note text, normalized and limited to 512 characters each",
             "runpod_machine_api_note_present": "Whether the last valid API note contained non-whitespace text",
             "runpod_machine_network_outage_note": "Whether the last valid API note explicitly contained network outage",
             "runpod_machine_maintenance_note_present": "Whether the last valid API maintenance note contained text",
@@ -260,6 +274,9 @@ class HealthState:
                 lines.append(f"runpod_api_{metric}{{{label}}} {account[field]}")
             for machine_id, machine in sorted(account["machines"].items()):
                 labels = label + ',machine_id="' + escape_label(machine_id) + '",hostname="' + escape_label(machine["hostname"]) + '"'
+                if machine["known"]:
+                    note_labels = labels + ',note="' + escape_label(machine["note"]) + '",maintenance_note="' + escape_label(machine["maintenance_note"]) + '"'
+                    lines.append(f"runpod_machine_note_info{{{note_labels}}} 1")
                 for suffix, field in fields.items():
                     value = machine[field]
                     if value is None:

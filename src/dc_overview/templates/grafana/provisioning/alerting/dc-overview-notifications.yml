@@ -1,41 +1,57 @@
 # TRACEWEAVER: file-role=gpu-alert-behavior; req=REQ-GPUALERT-002; trace=TRACE-GPUALERT-002; ver=VER-GPUALERT-002
 # Concise notification templates for DC Overview-managed alerts.
+# Dynamic text is HTML-escaped for Grafana's default Telegram parse mode (HTML).
 apiVersion: 1
 
 templates:
   - orgId: 1
     name: dc-overview-notifications
     template: |
-      {{ define "cryptolabs.telegram.message" }}
-      {{ with .Alerts.Firing }}
-      {{ range . }}
-      {{ if eq .Labels.alert_category "gpu_collection" }}🟠 {{ .Annotations.summary }}
-      {{ .Annotations.description }}
-      {{ else }}🔴 FIRING
-      {{ if eq .Labels.alert_category "vast_listing" }}Vast UNLISTED — {{ .Annotations.summary }}
-      {{ else }}
-      {{ .Annotations.summary }}
-      {{ .Annotations.description }}
-      {{ end }}
-      {{ end }}
-      {{ end }}
-      {{ end }}
-      {{ with .Alerts.Resolved }}
-      {{ range . }}
-      {{ if eq .Labels.alert_category "gpu_collection" }}
-      {{ if .Annotations.grafana_state_reason }}🟠 GPU monitoring changed ({{ .Annotations.grafana_state_reason }}) — {{ .Annotations.summary }}
-      {{ else }}🟢 {{ .Annotations.recovery_summary }}
-      {{ end }}
-      {{ else }}🟢 RESOLVED
-      {{ if eq .Labels.alert_category "vast_listing" }}
-      {{ if .Annotations.grafana_state_reason }}Vast listing monitoring changed ({{ .Annotations.grafana_state_reason }}) — {{ .Annotations.summary }}
-      {{ else }}Vast LISTED — {{ .Annotations.summary }}
-      {{ end }}
-      {{ else }}
-      {{ .Annotations.summary }}
-      {{ .Annotations.description }}
-      {{ end }}
-      {{ end }}
-      {{ end }}
-      {{ end }}
-      {{ end }}
+      {{ define "cryptolabs.telegram.identity" -}}
+      {{- if .Labels.hostname }}{{ .Labels.hostname | html }}
+      {{- else if .Labels.machine_id }}machine {{ .Labels.machine_id | html }}
+      {{- else if .Labels.account }}account {{ .Labels.account | html }}
+      {{- else }}RunPod machine{{ end -}}
+      {{- end }}
+      {{ define "cryptolabs.telegram.summary" -}}
+      {{- if .Annotations.summary -}}
+        {{- .Annotations.summary | html -}}
+        {{- if and (eq .Labels.alert_type "disk") .Labels.mountpoint }} ({{ .Labels.mountpoint | html }})
+        {{- else if and (ne .Labels.alert_category "gpu_health") .Labels.gpu }} (GPU {{ .Labels.gpu | html }})
+        {{- else if and (or (eq .Labels.alert_category "runpod_telemetry") (eq .Labels.alert_category "runpod_provider")) .Labels.account (not .Labels.hostname) (not .Labels.machine_id) }} (account {{ .Labels.account | html }})
+        {{- end -}}
+      {{- else -}}
+        {{- or .Labels.alertname "Alert" | html -}}
+        {{- if or .Labels.hostname .Labels.machine_id .Labels.account }} — {{ template "cryptolabs.telegram.identity" . }}
+        {{- else if .Labels.instance }} — {{ .Labels.instance | html }}{{ end -}}
+      {{- end -}}
+      {{- end }}
+      {{ define "cryptolabs.telegram.detail" -}}
+      {{- if eq .Labels.alertname "RunPod machine provider note" -}}
+        {{- template "cryptolabs.telegram.identity" . }} — {{ if .Annotations.runpod_note }}RunPod note: {{ .Annotations.runpod_note | html }}{{ if .Annotations.runpod_maintenance_note }}; maintenance note: {{ .Annotations.runpod_maintenance_note | html }}{{ end }}
+        {{- else if .Annotations.runpod_maintenance_note }}RunPod maintenance note: {{ .Annotations.runpod_maintenance_note | html }}
+        {{- else }}RunPod machine/maintenance note present{{ end -}}
+      {{- else -}}
+        {{- template "cryptolabs.telegram.summary" . -}}
+      {{- end -}}
+      {{- end }}
+      {{ define "cryptolabs.telegram.message" }}{{- $separator := "" -}}
+      {{- range .Alerts.Firing -}}
+        {{- $separator }}{{ if eq .Labels.alert_category "gpu_collection" }}🟠 {{ template "cryptolabs.telegram.summary" . }}
+        {{- else }}🔴 {{ if eq .Labels.alert_category "vast_listing" }}Vast UNLISTED — {{ template "cryptolabs.telegram.summary" . }}
+        {{- else if eq .Labels.alert_category "runpod_listing" }}{{ template "cryptolabs.telegram.identity" . }} — RunPod unlisted
+        {{- else }}{{ template "cryptolabs.telegram.detail" . }}{{ end }}{{ end -}}
+        {{- $separator = "\n" -}}
+      {{- end -}}
+      {{- range .Alerts.Resolved -}}
+        {{- $separator }}{{ if eq .Labels.alert_category "gpu_collection" -}}
+          {{- if .Annotations.grafana_state_reason }}🟠 GPU monitoring changed ({{ .Annotations.grafana_state_reason | html }}) — {{ template "cryptolabs.telegram.summary" . }}
+          {{- else }}🟢 {{ .Annotations.recovery_summary | html }}{{ end -}}
+        {{- else }}🟢 {{ if .Annotations.grafana_state_reason -}}
+          {{- if eq .Labels.alert_category "vast_listing" }}Vast listing monitoring changed{{ else }}Monitoring changed{{ end }} ({{ .Annotations.grafana_state_reason | html }}) — {{ template "cryptolabs.telegram.summary" . }}
+        {{- else if eq .Labels.alert_category "vast_listing" }}Vast LISTED — {{ template "cryptolabs.telegram.summary" . }}
+        {{- else if eq .Labels.alert_category "runpod_listing" }}{{ template "cryptolabs.telegram.identity" . }} — RunPod listed again
+        {{- else }}Cleared — {{ template "cryptolabs.telegram.detail" . }}{{ end }}{{ end -}}
+        {{- $separator = "\n" -}}
+      {{- end -}}
+      {{- end }}

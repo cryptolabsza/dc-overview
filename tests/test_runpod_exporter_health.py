@@ -137,3 +137,22 @@ def test_failed_health_state_reset_rejects_account_removal_without_mutation(expo
 
     assert result["status"] == 503
     assert [client.account_name for client in collector.clients] == ["tenant"]
+
+
+def test_collected_note_uses_confirmed_provider_fields_only(exporter_module, tmp_path):
+    collector = exporter_module.MetricsCollector([], health_state_path=tmp_path / "state.json")
+    response = health_response()
+    response["myself"]["machines"][0].update(note=" Network\n outage ", maintenanceNote="Planned reboot")
+    client = FakeClient("account", RuntimeError("income payload secret"), response)
+    collector.clients = [client]
+    collector.cache_ttl = 0
+    metric = (
+        'runpod_machine_note_info{account="account",machine_id="machine-1",hostname="actual provider host",'
+        'note="Network outage",maintenance_note="Planned reboot"} 1'
+    )
+    assert metric in collector.collect()
+
+    client.health = RuntimeError("health payload secret")
+    metrics = collector.collect()
+    assert metric in metrics
+    assert "payload secret" not in metrics

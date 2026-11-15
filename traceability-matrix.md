@@ -41,3 +41,12 @@ review metadata, not a substitute for fresh CI on the published head.
 | REQ-GPUALERT-003 | TRACE-GPUALERT-003 | VER-GPUALERT-003 | VAL-GPUALERT-003 | src/dc_overview/dashboards/DC_Exporter_Details.json; src/dc_overview/dashboards/DC_Overview.json; dashboards/DC_Exporter_Details.json; dashboards/DC_Overview.json; server/grafana/dashboards/dc-overview.json; tests/test_gpu_collector_dashboard.py | Approved scope; local verification only; deployment held |
 
 Vast panel35 uses the same approved REQ-GPUALERT-003 behavior: `src/dc_overview/dashboards/Vast_Dashboard.json`, `dashboards/Vast_Dashboard.json`, both server Vast mirrors, `tests/test_gpu_collector_dashboard.py`, `tests/fixtures/gpu-state-pre-collector.json`, and the existing whole-dashboard preservation test in `tests/test_vast_occupancy_dashboard.py`. The original occupancy digest constants remain unchanged; only the three approved panel35 fields are restored to their captured baseline before that guard. Independent mechanical review is `.traceweaver/gpu-alerts-20261104/vast-state-review.md`.
+
+
+## Concise alert notification mapping
+
+| Requirement | Trace | Verification | Code / evidence | Validation |
+| --- | --- | --- | --- | --- |
+| REQ-CONCISE-001 | TRACE-CONCISE-001 | VER-CONCISE-001 | notification template; tests/test_grafana_notification_templates.py and existing GPU collector/provisioning tests | One-line rendering preserves real alert meaning and identity |
+| REQ-CONCISE-002 | TRACE-CONCISE-002 | VER-CONCISE-002 | runpod-exporter/health_state.py; runpod-exporter/grafana_alerts.py; three RunPod test modules; source-verification.json isolated Grafana proof | Actual note matching, stable alert identity and explicit clear confirmed in isolated engine |
+| REQ-CONCISE-003 | TRACE-CONCISE-003 | VER-CONCISE-003 | owner-approval.json; official publisher and native site rollout receipts to be linked on acceptance | Production acceptance pending; no external delivery claim |
