@@ -364,7 +364,7 @@ class TestGrafanaAlertInstallation:
         assert "🔴" in content
         assert "🟢" in content
         assert ".Annotations.summary" in content
-        assert ".Annotations.description" in content
+        assert ".Annotations.description" not in content
         assert ".Alerts.Firing" in content
         assert ".Alerts.Resolved" in content
         assert '.Status "firing"' not in content
